@@ -1,4 +1,4 @@
-ONYX : The Offline Desktop Agent
+# ONYX: The Offline Desktop Agent
 
 > **"It's not just a chatbot. It's an Operating System Overlay."**
 
