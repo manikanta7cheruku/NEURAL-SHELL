@@ -1,0 +1,9 @@
+requests
+colorama
+SpeechRecognition
+pyaudio
+setuptools
+faster-whisper
+AppOpener
+pyautogui
+pyttsx3
