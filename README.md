@@ -1,4 +1,4 @@
-# ONYX: The Offline Desktop Agent
+ONYX : The Offline Desktop Agent
 
 > **"It's not just a chatbot. It's an Operating System Overlay."**
 
@@ -31,26 +31,30 @@ Inspired by the personality of TARS (Interstellar) and the utility of JARVIS.
 
 ## Installation
 
-1.  **Clone the Repo**
+1.  **Clone the Repository**
     ```bash
-    git clone https://github.com/YourUsername/Onyx-Desktop-AI.git
-    cd Onyx-Desktop-AI
+    git clone https://github.com/YourUsername/NEURAL-SHELL.git
+    cd NeuralShell
     ```
 
-2.  **Install Dependencies**
+2.  **Initialize the Environment**
+    Open a command terminal in this folder and run:
     ```bash
     python -m venv venv
     .\venv\Scripts\activate
     pip install -r requirements.txt
     ```
 
-3.  **Install the Brain**
-    Download [Ollama](https://ollama.com/) and run:
+3.  **Install the Brain (Ollama)**
+    1. Download and install [Ollama for Windows](https://ollama.com/).
+    2. Open a new terminal and run:
     ```bash
     ollama run llama3
     ```
+    *(This will download the 4.7GB model weights to your local machine).*
 
-4.  **Run ONYX**
+4.  **Run Neural-Shell**
+    You can simply double-click the **`Run_NeuralShell.bat`** file, or run via terminal:
     ```bash
     python main.py
     ```
