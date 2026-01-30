@@ -1,0 +1,22 @@
+{
+    "identity": {
+        "name": "Seven",
+        "wake_words": ["seven", "hey seven", "wake up"],
+        "stop_words": ["stop", "shut up", "pause"]
+    },
+        "brain": {
+        "model_name": "llama3", 
+        "temperature": 0.3,
+        "max_history": 10
+    },
+    "gui": {
+        "opacity": 0.8,
+        "bg_color": "#000000",
+        "text_color": "#00FF00",
+        "font_size": 12
+    },
+    "paths": {
+        "screenshot_folder": "./screenshots",
+        "log_file": "./chat_log.txt"
+    }
+}

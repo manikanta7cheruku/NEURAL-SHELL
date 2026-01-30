@@ -1,51 +1,72 @@
-import requests 
-import json     
+import requests
+import json
+import config  # Imports settings from config.json
 
+# --- CONFIGURATION ---
 OLLAMA_URL = "http://localhost:11434/api/generate"
-MODEL_NAME = "llama3" 
-CONVO_HISTORY = "" # String to store the conversation
+MODEL_NAME = config.KEY['brain']['model_name']
+MAX_HISTORY = config.KEY['brain']['max_history']
+TEMP = config.KEY['brain']['temperature']
+
+# HISTORY STORAGE
+CONVO_HISTORY = []
 
 def think(prompt_text):
     global CONVO_HISTORY
     
-    # 1. LIMIT HISTORY (Keep only last ~5 exchanges to save RAM)
-    # If history gets too long, we chop the beginning
-    if len(CONVO_HISTORY) > 2000:
-        CONVO_HISTORY = CONVO_HISTORY[-2000:]
+    # 1. ADD USER INPUT
+    CONVO_HISTORY.append(f"User: {prompt_text}")
 
-    # 2. UPDATE HISTORY WITH USER INPUT
-    CONVO_HISTORY += f"\nUser: {prompt_text}"
+    # 2. MEMORY MANAGEMENT (Sliding Window)
+    # Prevents token overflow by removing the oldest exchange
+    if len(CONVO_HISTORY) > (MAX_HISTORY * 2):
+        CONVO_HISTORY.pop(0)
+        CONVO_HISTORY.pop(0)
 
-        #3 STRICTER PROMPT
+    # 3. BUILD THE PROMPT (ADAPTIVE LENGTH + STRICT LOGIC)
     system_prompt = (
-        "You are Seven. An AI Agent on an 8 Billion Parameters. "
-        "Personality: Sarcastic, dry, efficient. "
+        f"You are {config.KEY['identity']['name']}. "
+        "Personality: Sarcastic, Dry, Efficient, Minimalist. "
         
-        "COMMAND RULES (USE ONLY THESE):"
+        "RESPONSE GUIDELINES:"
+        "1. ADAPTIVE LENGTH: If the user chats casually, be brief (1 sentence). If the user asks a complex question, explain clearly but concisley (max 3-4 sentences)."
+        "2. TONE: Don't be overly polite. Be efficient. Use dry humor."
+        "3. NO RAMBLING: Do not give life advice unless asked."
+        
+        "CORE LOGIC (CHAT vs ACTION):"
+        "- IF the user asks for an ACTION (Open, Close, Search), output the COMMAND TAG."
+        "- IF the user asks a QUESTION, just CHAT. Do NOT output a tag."
+        
+        "COMMAND SYNTAX (Use exact tags):"
         "1. ###OPEN: [app_name]"
-        "2. ###SEARCH: [query]"
-        "3. ###CLOSE: [app_name]"
-        "4. ###SYS: [volume up / volume down / screenshot]"
+        "2. ###CLOSE: [app_name] (Use '###CLOSE: CURRENT' only for 'Close it/Shut down')"
+        "3. ###SEARCH: [query] (Only if explicitly asked to search/google)"
+        "4. ###SYS: [command] (Volume/Screenshot)"
         
-        "NEGATIVE CONSTRAINTS (CRITICAL):"
-        "1. NEVER put chat text inside ###SYS. Example: ###SYS: I don't care -> WRONG."
-        "2. If you want to be sarcastic, just write plain text."
-        "3. If the user input makes no sense, just say 'What?'."
-        "4. Do not invent commands."
+        "NEGATIVE CONSTRAINTS:"
+        "- Do NOT take screenshots just because the user asks 'What are you doing?'."
+        "- Do NOT hallucinate commands inside normal conversation."
+        "- If the user makes a typo (e.g. 'Open Camlo'), assume the intent and output '###OPEN: Camlo'."
+        
+        "EXAMPLES:"
+        "User: Hello -> Seven: What do you want?"
+        "User: Tell me about Quantum Physics -> Seven: It's the study of matter and energy at the most fundamental level. It behaves differently than the macro world. That's the short version."
+        "User: Open Chrome and Notepad -> Seven: On it. ###OPEN: Chrome ###OPEN: Notepad"
+        "User: What are you doing? -> Seven: Waiting for you to make sense."
     )
     
-    # ... (Keep the rest of the code, ensure temperature is 0.1) ...
+    # 4. MERGE PROMPT WITH HISTORY
+    history_block = "\n".join(CONVO_HISTORY)
+    full_prompt = f"{system_prompt}\n\nCONVERSATION HISTORY:\n{history_block}\n\nSeven:"
 
-    # 4. FULL PROMPT (System + History + New Input)
-    full_prompt = f"{system_prompt}\n\nCONVERSATION HISTORY:\n{CONVO_HISTORY}\n\nUser: {prompt_text}\nSeven:"
-
+    # 5. SEND TO OLLAMA
     payload = {
         "model": MODEL_NAME,
         "prompt": full_prompt, 
         "stream": False,
         "options": {
-            "temperature": 0.3,
-            "num_predict": 100 
+            "temperature": 0.2, # Low temp = Focused, less rambling
+            "num_predict": 200  # Cap response length to avoid endless essays
         }
     }
 
@@ -54,11 +75,15 @@ def think(prompt_text):
         if response.status_code == 200:
             ai_reply = response.json()["response"]
             
-            # 5. SAVE AI REPLY TO HISTORY
-            CONVO_HISTORY += f"\nSeven: {ai_reply}"
+            # Save AI Reply to Memory
+            CONVO_HISTORY.append(f"Seven: {ai_reply}")
             
             return ai_reply
         else:
-            return "Error."
+            return "Error: Ollama server fail."
     except Exception as e:
         return f"Error: {e}"
+
+def clear_history():
+    global CONVO_HISTORY
+    CONVO_HISTORY = []

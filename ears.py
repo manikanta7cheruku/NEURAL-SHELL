@@ -2,34 +2,44 @@ import speech_recognition as sr
 from faster_whisper import WhisperModel
 import os
 
-# UPGRADE: Switching to 'medium.en'. 
-# It is 2x smarter than 'small.en' but requires ~1.5GB VRAM. 
-# Your RTX 5050 (8GB) can handle this easily.
-MODEL_SIZE = "medium.en" 
+# CONFIGURATION
+# Keep 'small.en' for speed, or 'medium.en' for accuracy.
+MODEL_SIZE = "small.en" 
 
 print(f"Loading Whisper Model ({MODEL_SIZE})...")
+# device="cuda" means USE YOUR GPU. compute_type="float16" is standard for GPU.
 audio_model = WhisperModel(MODEL_SIZE, device="cuda", compute_type="float16")
 
 def listen():
     recognizer = sr.Recognizer()
     
     with sr.Microphone() as source:
-        # TWEAK: Hardcode sensitivity. 
-        # If it misses your voice, LOWER this number (e.g. 300).
-        # If it hears breathing/static, RAISE this number (e.g. 500 or 800).
-        recognizer.dynamic_energy_threshold = False
-        recognizer.energy_threshold = 400 
+        # 1. DYNAMIC CALIBRATION (The Fix for Noisy Rooms)
+        # Instead of a hardcoded number, we ask Python to listen to the room first.
+        # It sets the "Floor" (background noise level).
+        recognizer.adjust_for_ambient_noise(source, duration=0.5)
+        
+        # 2. ENABLE DYNAMIC ADJUSTMENT
+        # True = Automatically raise sensitivity in loud rooms.
+        recognizer.dynamic_energy_threshold = True
+        
+        # 3. SETTINGS FOR CROWDS
+        # pause_threshold: How long silence must be to consider the sentence "done".
+        # In noise, we want this shorter so he stops listening faster.
+        recognizer.pause_threshold = 0.6 
         
         try:
-            print("🎧 Listening...")
-            # phrase_time_limit=None allows you to speak longer sentences
-            audio = recognizer.listen(source, timeout=None, phrase_time_limit=None)
+            # We don't print "Listening" inside the function anymore to avoid spam
+            # The Main loop handles the UI updates.
             
+            # Listen
+            audio = recognizer.listen(source, timeout=None, phrase_time_limit=8)
+            
+            # Save to temporary file
             with open("temp_audio.wav", "wb") as f:
                 f.write(audio.get_wav_data())
             
-            # TRANSCRIBE
-            # We add a generic prompt to keep it focused on English conversation
+            # Transcribe
             segments, info = audio_model.transcribe("temp_audio.wav", beam_size=5)
             
             full_text = ""
@@ -38,31 +48,30 @@ def listen():
             
             clean_text = full_text.strip()
             
-            # --- THE HALLUCINATION FILTER ---
-            # If it hears the YouTube Ghost, we kill it.
-            forbidden_phrases = [
-                "Thanks for watching",
-                "subscribe",
-                "video",
-                "Amara.org" 
+            # --- HALLUCINATION FILTERS ---
+            # In noisy rooms, Whisper might try to interpret noise as words.
+            forbidden = [
+                "Thanks for watching", "subscribe", "video", 
+                "Amara.org", "Caption", "subtitle"
             ]
             
-            for phrase in forbidden_phrases:
+            if len(clean_text) < 2: return ""
+            
+            for phrase in forbidden:
                 if phrase.lower() in clean_text.lower():
-                    return "" # Return silence instead of garbage
-
-            if len(clean_text) < 2: 
-                return ""
+                    return ""
                 
             return clean_text
 
         except sr.WaitTimeoutError:
             return "" 
         except Exception as e:
+            # print(f"Ear Error: {e}") # Uncomment only for debugging
             return ""
 
+# --- UNIT TEST ---
 if __name__ == "__main__":
-    print("Testing Ears (Medium Model)...")
+    print("Testing Ears in Noise...")
     while True:
         text = listen()
         if text:
