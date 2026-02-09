@@ -9,6 +9,9 @@
         "temperature": 0.3,
         "max_history": 10
     },
+    "vision": {
+        "model_name": "llava"
+    },
     "gui": {
         "opacity": 0.8,
         "bg_color": "#000000",

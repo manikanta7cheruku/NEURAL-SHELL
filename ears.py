@@ -1,78 +1,68 @@
 import speech_recognition as sr
 from faster_whisper import WhisperModel
 import os
+import colorama
+from colorama import Fore
 
-# CONFIGURATION
-# Keep 'small.en' for speed, or 'medium.en' for accuracy.
-MODEL_SIZE = "small.en" 
+colorama.init(autoreset=True)
 
-print(f"Loading Whisper Model ({MODEL_SIZE})...")
-# device="cuda" means USE YOUR GPU. compute_type="float16" is standard for GPU.
+MODEL_SIZE = "medium.en" 
+print(Fore.CYAN + f"[EARS] Loading Whisper Model ({MODEL_SIZE})...")
 audio_model = WhisperModel(MODEL_SIZE, device="cuda", compute_type="float16")
 
 def listen():
     recognizer = sr.Recognizer()
     
     with sr.Microphone() as source:
-        # 1. DYNAMIC CALIBRATION (The Fix for Noisy Rooms)
-        # Instead of a hardcoded number, we ask Python to listen to the room first.
-        # It sets the "Floor" (background noise level).
-        recognizer.adjust_for_ambient_noise(source, duration=0.5)
-        
-        # 2. ENABLE DYNAMIC ADJUSTMENT
-        # True = Automatically raise sensitivity in loud rooms.
+        recognizer.adjust_for_ambient_noise(source, duration=0.3)
         recognizer.dynamic_energy_threshold = True
-        
-        # 3. SETTINGS FOR CROWDS
-        # pause_threshold: How long silence must be to consider the sentence "done".
-        # In noise, we want this shorter so he stops listening faster.
         recognizer.pause_threshold = 0.6 
         
         try:
-            # We don't print "Listening" inside the function anymore to avoid spam
-            # The Main loop handles the UI updates.
-            
-            # Listen
             audio = recognizer.listen(source, timeout=None, phrase_time_limit=8)
+            with open("temp_audio.wav", "wb") as f: f.write(audio.get_wav_data())
             
-            # Save to temporary file
-            with open("temp_audio.wav", "wb") as f:
-                f.write(audio.get_wav_data())
-            
-            # Transcribe
             segments, info = audio_model.transcribe("temp_audio.wav", beam_size=5)
+            full_text = "".join([s.text for s in segments]).strip()
             
-            full_text = ""
-            for segment in segments:
-                full_text += segment.text
+            # --- AGGRESSIVE SILENCE FILTER ---
+            clean = full_text.lower().strip().replace(".", "").replace("!", "").replace(",", "")
             
-            clean_text = full_text.strip()
+            # 1. Ignore very short noise
+            if len(clean) < 2: return None
             
-            # --- HALLUCINATION FILTERS ---
-            # In noisy rooms, Whisper might try to interpret noise as words.
-            forbidden = [
-                "Thanks for watching", "subscribe", "video", 
-                "Amara.org", "Caption", "subtitle"
+            # 2. Ignore specific silence hallucinations (Exact Match)
+            ghosts = [
+                "thank you", "thanks", "you", "bye", "okay", "alright",
+                "thank you very much", "thanks for watching", "watching",
+                "i", "so", "and", "the", "video", "subtitles", "caption"
             ]
             
-            if len(clean_text) < 2: return ""
+            if clean in ghosts: 
+                return None
             
-            for phrase in forbidden:
-                if phrase.lower() in clean_text.lower():
-                    return ""
-                
-            return clean_text
+            # 3. Ignore YouTube Outros (Substring Match)
+            forbidden = ["subscribe", "amara.org", "caption", "copyright", "all rights reserved"]
+            for p in forbidden:
+                if p in clean: return None
 
-        except sr.WaitTimeoutError:
-            return "" 
-        except Exception as e:
-            # print(f"Ear Error: {e}") # Uncomment only for debugging
-            return ""
+            # --- AUTOCORRECT ---
+            corrections = {
+                "semen": "Seven", "savin": "Seven", "sibin": "Seven", 
+                "simon": "Seven", "siman": "Seven", "heaven": "Seven", 
+                "siwen": "Seven", "so when": "Seven", "servant": "Seven",
+                "sir'en": "Seven", "siren": "Seven", "sevan": "Seven",
+                "i7": "Hi Seven", "i 7": "Hi Seven", 
+                "fight explorer": "File Explorer",
+                "five explorer": "File Explorer",
+                "aye": "Hi", "alo": "Hello"
+            }
+            
+            for wrong, right in corrections.items():
+                if wrong in clean:
+                    full_text = full_text.lower().replace(wrong, right)
+                    break 
 
-# --- UNIT TEST ---
-if __name__ == "__main__":
-    print("Testing Ears in Noise...")
-    while True:
-        text = listen()
-        if text:
-            print(f"You said: {text}")
+            return full_text.capitalize()
+
+        except: return None

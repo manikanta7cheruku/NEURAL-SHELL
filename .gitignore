@@ -13,3 +13,8 @@ screenshot_*.png
 
 # Ignore VS Code settings
 .vscode/
+
+debug_vision.png
+
+# Memory
+memory.json

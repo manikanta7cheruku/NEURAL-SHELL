@@ -4,116 +4,120 @@ import pyautogui
 import datetime
 import psutil
 from AppOpener import open as app_opener
+import subprocess
+from colorama import Fore
 
-# VERSION 1.5: HANDS (EXECUTION ENGINE)
+# PROTECTED SYSTEM APPS
+# Prevents accidentally killing the OS
+SAFE_APPS = ["system", "registry", "service", "nvidia", "antivirus", "explorer"]
 
 def close_app(app_name):
-    # 1. Handle "Close Current" (Alt+F4)
-    if app_name == "CURRENT":
-        print(f"🔧 HANDS: Closing active window (Alt+F4)...")
+    clean_name = app_name.lower().strip()
+    print(Fore.CYAN + f"🔧 HANDS: Closing '{clean_name}'...")
+
+    # 1. SPECIAL CASE: ACTIVE WINDOW
+    if clean_name in ["current", "this", "it", "active window"]:
         pyautogui.hotkey('alt', 'f4')
         return True
 
-    # 2. Handle Specific App Kill
-    print(f"🔧 HANDS: Attempting to kill process -> {app_name}")
+    # 2. SPECIAL CASE: CONTROL PANEL
+    # Must use Title matching so we don't close File Explorer by mistake
+    if "control panel" in clean_name:
+        print("   -> Closing Control Panel window...")
+        subprocess.Popen('powershell -command "(New-Object -ComObject Shell.Application).Windows() | Where-Object { $_.LocationName -match \'Control Panel\' } | ForEach-Object { $_.quit() }"', shell=True)
+        return True
+
+    # 3. SPECIAL CASE: EXPLORER (Generic Folders)
+    if "explorer" in clean_name or "file" in clean_name:
+        subprocess.Popen(['powershell', '-command', "(New-Object -ComObject Shell.Application).Windows() | foreach-object { $_.quit() }"])
+        return True
+
+    # 4. SPECIAL CASE: CAMERA (Force Kill)
+    if "camera" in clean_name:
+        subprocess.Popen("taskkill /im WindowsCamera.exe /f", shell=True)
+        return True
     
-    # --- PROCESS MAPPING DICTIONARY ---
-    # Left Side: What Brain sends (from User)
-    # Right Side: What Windows Task Manager calls it
-    process_mapping = {
-        # Browsers
-        "google chrome": "chrome",
-        "chrome": "chrome",
-        "firefox": "firefox",
-        "edge": "msedge",
-        "brave": "brave",
-        
-        # System Apps
-        "file explorer": "explorer", # WARNING: This restarts the Taskbar
-        "files": "explorer",
-        "notepad": "notepad",
-        "calculator": "calculator",
-        "settings": "SystemSettings",
-        "task manager": "Taskmgr",
-        
-        # Media / Chat
-        "discord": "discord",
-        "spotify": "spotify",
-        "vlc": "vlc",
-        
-        # Camera (UWP Apps are tricky, adding common variants)
-        "camera": "WindowsCamera",
-        "windows camera": "WindowsCamera",
-    }
-    
-    # Normalize input
-    clean_name = app_name.lower().strip()
-    
-    # Get the system name (Default to the cleaned name if not in map)
-    target_process = process_mapping.get(clean_name, clean_name)
-    
-    killed_any = False
-    
-    # SCAN PROCESSES
+     # 5. TASK MANAGER FIX
+    if "task manager" in clean_name:
+        subprocess.Popen("taskkill /im Taskmgr.exe /f", shell=True)
+        return True
+
+    # 6. UNIVERSAL PROCESS KILLER
+    # Scans all running processes to find a match
+    killed = False
     for proc in psutil.process_iter(['pid', 'name']):
         try:
-            # Check if target is part of the process name
-            # e.g. "chrome" is inside "chrome.exe"
-            proc_name = proc.info['name'].lower()
-            
-            if target_process in proc_name:
-                print(f"🔧 HANDS: Killing PID {proc.info['pid']} ({proc_name})")
-                proc.kill()
-                killed_any = True
-                
-        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-            pass
-
-    if killed_any:
-        print(f"🔧 HANDS: Successfully closed {app_name}.")
-        return True
-    else:
-        print(f"🔧 HANDS: Could not find process '{target_process}'. Falling back to Alt+F4...")
-        # FALLBACK: If we can't find the specific background app,
-        # we try Alt+F4. This handles cases where the user is looking AT the app
-        # but we got the name wrong.
-        pyautogui.hotkey('alt', 'f4')
-        return False
+            p_name = proc.info['name'].lower()
+            if clean_name in p_name:
+                if any(safe in p_name for safe in SAFE_APPS): continue
+                proc.terminate()
+                killed = True
+        except: pass
+    
+    if not killed:
+        print(Fore.RED + f"❌ HANDS: Could not find process for '{clean_name}'")
+        
+    return killed
 
 def open_app(app_name):
-    print(f"🔧 HANDS: Opening {app_name}...")
+    clean_name = app_name.lower().strip()
+    # Remove AI junk words
+    clean_name = clean_name.replace("activated", "").replace("!", "").strip()
+    
+    print(Fore.CYAN + f"🔧 HANDS: Opening '{clean_name}'...")
+
     try:
-        # match_closest=True helps with typos
-        app_opener(app_name, match_closest=True, throw_error=True)
+        # --- 1. WINDOWS NATIVE APPS (Manual Override) ---
+        # These apps are hidden from the standard registry, so we force them.
+        
+        if "camera" in clean_name:
+            os.system("start microsoft.windows.camera:")
+            return True
+        
+        if "control panel" in clean_name:
+            os.system("control")
+            return True
+            
+        if "settings" in clean_name:
+            os.system("start ms-settings:")
+            return True
+            
+        if "calculator" in clean_name:
+            os.system("calc")
+            return True
+            
+        if "notepad" in clean_name:
+            os.startfile("notepad")
+            return True
+            
+        if "explorer" in clean_name:
+            os.startfile("explorer")
+            return True
+            
+        if "whatsapp" in clean_name:
+            os.system("start whatsapp:")
+            return True
+
+        # --- 2. UNIVERSAL APP OPENER (The Fallback) ---
+        # This searches for Firefox, Chrome, Games, Spotify, etc.
+        app_opener(clean_name, match_closest=True, throw_error=True)
         return True
-    except:
-        print(f"❌ HANDS: Failed to open {app_name}")
+        
+    except Exception as e:
+        print(Fore.RED + f"❌ HANDS: Failed to open '{clean_name}'. Error: {e}")
         return False
 
 def search_web(query):
-    print(f"🔧 HANDS: Searching {query}...")
-    url = f"https://www.google.com/search?q={query}"
-    webbrowser.open(url)
+    print(f"🔧 HANDS: Searching Web for '{query}'...")
+    webbrowser.open(f"https://www.google.com/search?q={query}")
     return True
 
 def system_control(command):
-    print(f"🔧 HANDS: Received System Command -> {command}")
-    
-    command = command.lower()
-    
-    if "volume up" in command:
-        pyautogui.press("volumeup", presses=5)
-    elif "volume down" in command:
-        pyautogui.press("volumedown", presses=5)
-    elif "mute" in command:
-        pyautogui.press("volumemute")
-    elif "screenshot" in command:
-        timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        if not os.path.exists("screenshots"):
-            os.makedirs("screenshots")
-        pyautogui.screenshot(f"screenshots/screenshot_{timestamp}.png")
-    else:
-        print(f"❌ HANDS: Invalid Command '{command}' ignored.")
-        return False
-        
+    cmd = command.lower()
+    if "volume up" in cmd: pyautogui.press("volumeup", presses=5)
+    elif "volume down" in cmd: pyautogui.press("volumedown", presses=5)
+    elif "mute" in cmd: pyautogui.press("volumemute")
+    elif "screenshot" in cmd:
+        if not os.path.exists("screenshots"): os.makedirs("screenshots")
+        pyautogui.screenshot(f"screenshots/snap_{datetime.datetime.now().strftime('%H%M%S')}.png")
     return True

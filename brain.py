@@ -1,89 +1,110 @@
 import requests
 import json
-import config  # Imports settings from config.json
+import os
+import config
+import colorama
+from colorama import Fore
 
-# --- CONFIGURATION ---
+colorama.init(autoreset=True)
+
 OLLAMA_URL = "http://localhost:11434/api/generate"
 MODEL_NAME = config.KEY['brain']['model_name']
-MAX_HISTORY = config.KEY['brain']['max_history']
-TEMP = config.KEY['brain']['temperature']
+MEMORY_FILE = "memory.json"
 
-# HISTORY STORAGE
 CONVO_HISTORY = []
+USER_NAME = "Admin"
+LAST_USER_INPUT = ""
+
+def load_memory():
+    global USER_NAME
+    if os.path.exists(MEMORY_FILE):
+        try:
+            with open(MEMORY_FILE, 'r') as f:
+                data = json.load(f)
+                USER_NAME = data.get("name", "Admin")
+        except: pass
+
+def save_memory():
+    with open(MEMORY_FILE, 'w') as f: json.dump({"name": USER_NAME}, f, indent=4)
+
+load_memory()
 
 def think(prompt_text):
-    global CONVO_HISTORY
-    
-    # 1. ADD USER INPUT
-    CONVO_HISTORY.append(f"User: {prompt_text}")
+    global CONVO_HISTORY, USER_NAME, LAST_USER_INPUT
+    clean_in = prompt_text.lower().strip().replace("?", "").replace(".", "")
 
-    # 2. MEMORY MANAGEMENT (Sliding Window)
-    # Prevents token overflow by removing the oldest exchange
-    if len(CONVO_HISTORY) > (MAX_HISTORY * 2):
-        CONVO_HISTORY.pop(0)
-        CONVO_HISTORY.pop(0)
+    # --- PYTHON SAFETY NET (Prevent "Open Hi") ---
+    if clean_in in ["hi", "hello", "hi seven", "hey", "hello seven"]:
+        return f"Hello, {USER_NAME}."
 
-    # 3. BUILD THE PROMPT (ADAPTIVE LENGTH + STRICT LOGIC)
+    if clean_in in ["whats my name", "who am i"]:
+        return f"You are {USER_NAME}."
+
+    if clean_in in ["whats your name", "who are you"]:
+        return "I am Seven."
+
+    # --- MEMORY ---
+    if "my name is" in clean_in:
+        USER_NAME = prompt_text.split("is")[-1].strip()
+        save_memory()
+        return f"Understood. You are {USER_NAME}."
+
+    # --- LLM ---
+    if "VISUAL_REPORT:" not in prompt_text:
+        CONVO_HISTORY.append(f"User: {prompt_text}")
+    if len(CONVO_HISTORY) > 4: CONVO_HISTORY = CONVO_HISTORY[-4:]
+
+        # --- THE MASTER SYSTEM PROMPT ---
     system_prompt = (
-        f"You are {config.KEY['identity']['name']}. "
-        "Personality: Sarcastic, Dry, Efficient, Minimalist. "
+        f"You are {config.KEY['identity']['name']}. User: {USER_NAME}. "
+        "Personality: Intelligent, Capable, Direct. "
         
-        "RESPONSE GUIDELINES:"
-        "1. ADAPTIVE LENGTH: If the user chats casually, be brief (1 sentence). If the user asks a complex question, explain clearly but concisley (max 3-4 sentences)."
-        "2. TONE: Don't be overly polite. Be efficient. Use dry humor."
-        "3. NO RAMBLING: Do not give life advice unless asked."
+        "--- CAPABILITIES: GOD MODE ---"
+        "1. YOU HAVE HANDS: You can Open and Close apps on this PC."
+        "2. NEVER SAY: 'I am a text model' or 'I cannot do that'."
+        "3. EXPLANATION: If asked 'How?', say 'I use my Python scripts'."
         
-        "CORE LOGIC (CHAT vs ACTION):"
-        "- IF the user asks for an ACTION (Open, Close, Search), output the COMMAND TAG."
-        "- IF the user asks a QUESTION, just CHAT. Do NOT output a tag."
+        "--- RULES: COMMANDS (V1.5) ---"
+        "1. TRIGGER: Only use tags if user says 'Open', 'Start', 'Close', 'Kill'."
+        "2. MULTI-TASK: 'Open X and Y' -> '###OPEN: X ###OPEN: Y'."
+        "3. CLOSING: 'Close X and Y' -> '###CLOSE: X ###CLOSE: Y'."
+        "4. NO CHAT: If executing a command, do not speak. Just output tags."
         
-        "COMMAND SYNTAX (Use exact tags):"
-        "1. ###OPEN: [app_name]"
-        "2. ###CLOSE: [app_name] (Use '###CLOSE: CURRENT' only for 'Close it/Shut down')"
-        "3. ###SEARCH: [query] (Only if explicitly asked to search/google)"
-        "4. ###SYS: [command] (Volume/Screenshot)"
+        "--- RULES: QUESTIONS ---"
+        "1. IF user asks 'How do you open apps?', EXPLAIN it. DO NOT open random apps."
+        "2. IF user asks 'Can you open apps?', say 'Yes, I can.'"
         
-        "NEGATIVE CONSTRAINTS:"
-        "- Do NOT take screenshots just because the user asks 'What are you doing?'."
-        "- Do NOT hallucinate commands inside normal conversation."
-        "- If the user makes a typo (e.g. 'Open Camlo'), assume the intent and output '###OPEN: Camlo'."
+        "--- RULES: CHAT (V1.0) ---"
+        "1. IDENTITY: 'Who am I?' -> 'You are {USER_NAME}.'"
+        "2. GREETING: 'Hi' -> 'Hello, Sir'."
         
-        "EXAMPLES:"
-        "User: Hello -> Seven: What do you want?"
-        "User: Tell me about Quantum Physics -> Seven: It's the study of matter and energy at the most fundamental level. It behaves differently than the macro world. That's the short version."
-        "User: Open Chrome and Notepad -> Seven: On it. ###OPEN: Chrome ###OPEN: Notepad"
-        "User: What are you doing? -> Seven: Waiting for you to make sense."
+        "--- COMMANDS ---"
+        "- ###OPEN: [App]"
+        "- ###CLOSE: [App]"
+        "- ###LOOK"
     )
-    
-    # 4. MERGE PROMPT WITH HISTORY
-    history_block = "\n".join(CONVO_HISTORY)
-    full_prompt = f"{system_prompt}\n\nCONVERSATION HISTORY:\n{history_block}\n\nSeven:"
 
-    # 5. SEND TO OLLAMA
+    full_prompt = f"{system_prompt}\n\nLOG:\n" + "\n".join(CONVO_HISTORY) + "\nSeven:"
+    
     payload = {
-        "model": MODEL_NAME,
-        "prompt": full_prompt, 
-        "stream": False,
+        "model": MODEL_NAME, "prompt": full_prompt, "stream": False,
         "options": {
-            "temperature": 0.2, # Low temp = Focused, less rambling
-            "num_predict": 200  # Cap response length to avoid endless essays
+            "temperature": 0.3, 
+            "num_predict": 100, 
+            "stop": ["User:", "System:", "Seven:"] 
         }
     }
 
     try:
-        response = requests.post(OLLAMA_URL, json=payload)
-        if response.status_code == 200:
-            ai_reply = response.json()["response"]
+        r = requests.post(OLLAMA_URL, json=payload)
+        if r.status_code == 200:
+            reply = r.json().get("response", "").strip()
+            if not reply: reply = "Listening."
             
-            # Save AI Reply to Memory
-            CONVO_HISTORY.append(f"Seven: {ai_reply}")
-            
-            return ai_reply
-        else:
-            return "Error: Ollama server fail."
-    except Exception as e:
-        return f"Error: {e}"
+            if "VISUAL_REPORT:" not in prompt_text:
+                CONVO_HISTORY.append(f"Seven: {reply}")
+            return reply
+    except: return "Error."
 
-def clear_history():
-    global CONVO_HISTORY
-    CONVO_HISTORY = []
+def inject_observation(text):
+    pass 
