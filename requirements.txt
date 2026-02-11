@@ -1,9 +1,34 @@
+# requests
+# colorama
+# SpeechRecognition
+# pyaudio
+# setuptools
+# faster-whisper
+# AppOpener
+# pyautogui
+# pyttsx3
+
+# =============================================================================
+# PROJECT SEVEN - Dependencies
+# Version: 1.1 (Memory Update)
+# =============================================================================
+
+# --- V1.0: Core System ---
 requests
 colorama
 SpeechRecognition
 pyaudio
 setuptools
+psutil
+
+# --- V1.0: Voice ---
+pyttsx3
 faster-whisper
+
+# --- V1.5: App Control ---
 AppOpener
 pyautogui
-pyttsx3
+
+# --- V1.1: Memory System (NEW) ---
+chromadb==0.5.23
+sentence-transformers==3.3.1

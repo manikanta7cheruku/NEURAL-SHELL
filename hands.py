@@ -37,9 +37,9 @@ def close_app(app_name):
         subprocess.Popen("taskkill /im WindowsCamera.exe /f", shell=True)
         return True
     
-     # 5. TASK MANAGER FIX
+     # 5. TASK MANAGER FIX (needs admin rights)
     if "task manager" in clean_name:
-        subprocess.Popen("taskkill /im Taskmgr.exe /f", shell=True)
+        subprocess.Popen("powershell -Command \"Start-Process taskkill -ArgumentList '/im Taskmgr.exe /f' -Verb RunAs\"", shell=True)
         return True
 
     # 6. UNIVERSAL PROCESS KILLER

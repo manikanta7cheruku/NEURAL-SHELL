@@ -18,3 +18,6 @@ debug_vision.png
 
 # Memory
 memory.json
+
+# V1.1: Personal memory database (contains user conversations — private)
+seven_data/
