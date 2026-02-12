@@ -1,6 +1,6 @@
 """
 =============================================================================
-PROJECT SEVEN - test_chat.py (V1.1 - Developer Console)
+PROJECT SEVEN - test_chat.py (V1.6 - Developer Console)
 =============================================================================
 """
 
@@ -10,16 +10,25 @@ import re
 import colorama
 from colorama import Fore
 from memory import seven_memory
+from memory.command_log import command_log
+from memory.mood import mood_engine
 
 colorama.init(autoreset=True)
 
 print(Fore.CYAN + "=" * 60)
-print(Fore.CYAN + "  SEVEN TEXT DEBUGGER (V1.1 - MEMORY ACTIVE)")
+print(Fore.CYAN + "  SEVEN TEXT DEBUGGER (V1.1.1 - MOOD + COMMAND LOG)")
 print(Fore.CYAN + "=" * 60)
 print(Fore.WHITE + "  Commands: /memory | /facts | /convos | /stats")
+print(Fore.WHITE + "  Commands: /logs | /logs N | /mood")
 print(Fore.WHITE + "  Commands: /add fact [text] | /delete fact [n]")
-print(Fore.WHITE + "  Commands: /delete convo [n] | /clear all | quit")
+print(Fore.WHITE + "  Commands: /delete convo [n]")
+print(Fore.WHITE + "  Commands: /clear all | /clear logs | /clear mood | quit")
 print(Fore.CYAN + "=" * 60)
+
+# Show mood on startup
+mood_status = mood_engine.get_status()
+print(Fore.MAGENTA + f"  Mood: {mood_status['mood_value']:.2f} ({mood_status['label']})")
+print()
 
 
 def show_facts():
@@ -68,12 +77,83 @@ def show_all_memory():
 
 def show_stats():
     stats = seven_memory.get_stats()
+    cmd_stats = command_log.get_stats()
+    m_status = mood_engine.get_status()
+
     print(Fore.CYAN + f"\n  {'='*50}")
-    print(Fore.CYAN + f"  MEMORY STATISTICS")
-    print(Fore.CYAN + f"  Conversations: {stats['total_conversations']}")
-    print(Fore.CYAN + f"  Facts:         {stats['total_facts']}")
-    print(Fore.CYAN + f"  Storage:       {stats['storage_path']}")
+    print(Fore.CYAN + f"  SYSTEM STATISTICS (V1.1.1)")
     print(Fore.CYAN + f"  {'='*50}")
+    print(Fore.CYAN + f"  Conversations:     {stats['total_conversations']}")
+    print(Fore.CYAN + f"  Facts:             {stats['total_facts']}")
+    print(Fore.CYAN + f"  Storage:           {stats['storage_path']}")
+    print(Fore.CYAN + f"  {'─'*50}")
+    print(Fore.CYAN + f"  Commands executed: {cmd_stats['total']}")
+    print(Fore.CYAN + f"  Opens:             {cmd_stats['opens']}")
+    print(Fore.CYAN + f"  Closes:            {cmd_stats['closes']}")
+    print(Fore.CYAN + f"  Success rate:      {cmd_stats['success_rate']}")
+    print(Fore.CYAN + f"  {'─'*50}")
+    print(Fore.MAGENTA + f"  Current mood:      {m_status['mood_value']:.2f} ({m_status['label']})")
+    print(Fore.MAGENTA + f"  Interactions:      {m_status['interaction_count']}")
+    print(Fore.CYAN + f"  {'='*50}")
+
+
+def show_logs(count=10):
+    """Show recent command logs."""
+    print(Fore.CYAN + f"\n  {'='*50}")
+    print(Fore.CYAN + f"  COMMAND LOGS (Last {count})")
+    print(Fore.CYAN + f"  {'='*50}")
+
+    recent = command_log.get_recent(count)
+    if not recent:
+        print(Fore.YELLOW + "  No commands logged yet.")
+        print(Fore.CYAN + f"  {'='*50}")
+        return
+
+    for entry in recent:
+        ts = entry["timestamp"][11:]  # Just time portion
+        action = entry["action"]
+        target = entry["target"]
+        status = "✅" if entry["success"] else "❌"
+        detail = entry.get("detail", "")
+        print(Fore.CYAN + f"  [{ts}] {status} {action} {target}  {detail}")
+
+    # Summary
+    stats = command_log.get_stats()
+    print(Fore.CYAN + f"  {'─'*50}")
+    print(Fore.CYAN + f"  Total: {stats['total']} | Opens: {stats['opens']} | Closes: {stats['closes']} | Rate: {stats['success_rate']}")
+
+    most_used = command_log.get_most_used(3)
+    if most_used:
+        apps = ", ".join([f"{app}({c})" for app, c in most_used])
+        print(Fore.CYAN + f"  Most used: {apps}")
+    print(Fore.CYAN + f"  {'='*50}")
+
+
+def show_mood():
+    """Show current mood state with visual bar."""
+    status = mood_engine.get_status()
+    mood_val = status["mood_value"]
+
+    print(Fore.MAGENTA + f"\n  {'='*50}")
+    print(Fore.MAGENTA + f"  MOOD ENGINE")
+    print(Fore.MAGENTA + f"  {'='*50}")
+
+    # Visual mood bar
+    bar_pos = int((mood_val + 1) * 15)  # Map -1..1 to 0..30
+    bar = list("──────────────────────────────")
+    if 0 <= bar_pos < 30:
+        bar[bar_pos] = "●"
+    bar_str = "".join(bar)
+    print(Fore.MAGENTA + f"  Frustrated [{bar_str}] Excited")
+    print(Fore.MAGENTA + f"  Value: {mood_val:.3f} | Label: {status['label']}")
+    print(Fore.MAGENTA + f"  Interactions: {status['interaction_count']}")
+
+    if status["recent_changes"]:
+        print(Fore.MAGENTA + f"\n  Recent mood shifts:")
+        for change in status["recent_changes"]:
+            direction = "↑" if change["delta"] > 0 else "↓"
+            print(Fore.WHITE + f"    {direction} {change['delta']:+.3f} → {change['new_mood']:.3f} ({change['label']}) — \"{change['text']}\"")
+    print(Fore.MAGENTA + f"  {'='*50}")
 
 
 def delete_fact(index):
@@ -129,7 +209,9 @@ def clear_all_memory():
     if confirm == "DELETE EVERYTHING":
         seven_memory.clear_all()
         brain.reset_session()
-        print(Fore.GREEN + "  ✅ All memories cleared. Clean slate.")
+        command_log.clear()
+        mood_engine.reset()
+        print(Fore.GREEN + "  ✅ All memories, logs, and mood cleared. Clean slate.")
     else:
         print(Fore.WHITE + "  Cancelled.")
 
@@ -165,6 +247,30 @@ while True:
         show_stats()
         continue
 
+    # --- V1.6: NEW COMMANDS ---
+    if cmd == "/logs" or cmd.startswith("/logs "):
+        parts = cmd.split()
+        count = 10
+        if len(parts) > 1 and parts[1].isdigit():
+            count = int(parts[1])
+        show_logs(count)
+        continue
+
+    if cmd == "/mood":
+        show_mood()
+        continue
+
+    if cmd == "/clear logs":
+        command_log.clear()
+        print(Fore.GREEN + "  ✅ Command logs cleared.")
+        continue
+
+    if cmd == "/clear mood":
+        mood_engine.reset()
+        print(Fore.GREEN + "  ✅ Mood reset to neutral.")
+        continue
+    # --- END V1.6 NEW COMMANDS ---
+
     if cmd.startswith("/add fact "):
         fact_text = user_input[10:].strip()
         add_manual_fact(fact_text)
@@ -194,6 +300,10 @@ while True:
     print(Fore.MAGENTA + "Seven is thinking...")
     response = brain.think(user_input)
     print(Fore.GREEN + f"SEVEN: {response}")
+
+    # Show mood inline after each response
+    m_status = mood_engine.get_status()
+    print(Fore.MAGENTA + f"  [mood: {m_status['mood_value']:.2f} ({m_status['label']})]")
 
     # --- STORE CONVERSATION IN MEMORY ---
     should_store = True

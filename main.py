@@ -2,6 +2,7 @@
 =============================================================================
 PROJECT SEVEN - main.py (The Controller)
 Version: 1.1 (Memory Integration)
+Version: 1.1.1 (Memory + Mood + Command Logging)
 
 CHANGES FROM V1.5:
     1. NEW: Memory system initialized on startup
@@ -11,7 +12,7 @@ CHANGES FROM V1.5:
     
 ARCHITECTURE:
     GUI Thread (tkinter) ←→ Logic Thread (seven_logic)
-        └→ ears.listen() → brain.think() → mouth.speak()
+        └→ ears.listen() → brain.think() → mouth.speak()    
                               ↑                ↓
                          memory.search()   memory.store()
 =============================================================================
@@ -33,7 +34,9 @@ from colorama import Fore
 import config
 
 # V1.1: Import the memory system
-from memory import seven_memory
+from memory.core import seven_memory
+from memory.mood import mood_engine
+from memory.command_log import command_log
 
 colorama.init(autoreset=True)
 
@@ -67,6 +70,12 @@ def seven_logic():
     stats = seven_memory.get_stats()
     print(Fore.GREEN + f"[SYSTEM] Memory loaded: {stats['total_conversations']} conversations, "
                         f"{stats['total_facts']} facts stored.")
+    
+    # startup display
+    mood_status = mood_engine.get_status()
+    print(Fore.MAGENTA + f"[SYSTEM] Mood: {mood_status['mood_value']:.2f} ({mood_status['label']})")
+    cmd_stats = command_log.get_stats()
+    print(Fore.CYAN + f"[SYSTEM] Commands logged: {cmd_stats['total']} (success rate: {cmd_stats['success_rate']})")
 
     # Initial Greeting
     print(Fore.GREEN + "[SYSTEM] Initializing Seven...")

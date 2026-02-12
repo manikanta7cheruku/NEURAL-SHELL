@@ -21,6 +21,8 @@ import config
 import colorama
 from colorama import Fore
 from memory import seven_memory
+from memory.mood import mood_engine
+from memory.core import seven_memory
 
 colorama.init(autoreset=True)
 
@@ -175,14 +177,12 @@ def think(prompt_text):
     #     seven_memory.extract_and_store_facts(prompt_text)
     #     return "Noted. I'll remember that."
 
+    
     # =========================================================================
-    # LAYER 4: CLASSIFY INPUT TYPE
+    # LAYER 4: MOOD ANALYSIS (NEW IN V1.1.1)
     # =========================================================================
-    # Command = user's FIRST word is a command verb.
-    # "Open Chrome" → command. "Can you open Chrome?" → NOT command.
-
-    # first_word = words[0] if words else ""
-    # is_command = first_word in ["open", "close", "start", "kill", "launch"]
+    mood_engine.analyze_input(prompt_text)
+    mood_modifier = mood_engine.get_mood_prompt_modifier()
 
     # =========================================================================
     # LAYER 5: MEMORY SEARCH (Questions/Chat only — not commands)
@@ -239,6 +239,7 @@ def think(prompt_text):
     system_prompt = (
         f"You are {config.KEY['identity']['name']}, created by {USER_NAME}. User: {USER_NAME}. "
         "You talk like Jarvis from Iron Man. Smart, warm, human. NOT a robot. "
+        f"{mood_modifier} "
 
         "RULES: "
         "1. Keep responses to 1-2 sentences max. "
