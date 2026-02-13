@@ -3,6 +3,7 @@
 PROJECT SEVEN - main.py (The Controller)
 Version: 1.1 (Memory Integration)
 Version: 1.1.1 (Memory + Mood + Command Logging)
+Version: 1.1.2 (Memory + Mood + Command Logging + Polish)
 
 CHANGES FROM V1.5:
     1. NEW: Memory system initialized on startup
@@ -34,7 +35,7 @@ from colorama import Fore
 import config
 
 # V1.1: Import the memory system
-from memory.core import seven_memory
+from memory import seven_memory
 from memory.mood import mood_engine
 from memory.command_log import command_log
 
@@ -79,7 +80,7 @@ def seven_logic():
 
     # Initial Greeting
     print(Fore.GREEN + "[SYSTEM] Initializing Seven...")
-    mouth.speak(f"{config.KEY['identity']['name']} Online.")
+    mouth.speak(f"{config.KEY['identity']['name']} V1.1.2 Online.")
     app_ui.update_status("SYSTEM ONLINE", "#00ff00")
 
     # =========================================================================
@@ -176,6 +177,15 @@ def seven_logic():
             # Don't store if it's just a greeting response
             greeting_words = ["hi", "hello", "hey"]
             if user_input.lower().strip() in greeting_words:
+                should_store = False
+            
+            # Don't store identity responses (they pollute memory)
+            identity_phrases = ["i am seven", "you can call me seven",
+                                "still seven", "you just asked",
+                                "you've asked me this", "you haven't told me that",
+                                f"you are {brain.USER_NAME.lower()}"]
+            response_lower = response.lower()
+            if any(phrase in response_lower for phrase in identity_phrases):
                 should_store = False
             
             if should_store:

@@ -16,13 +16,14 @@ from memory.mood import mood_engine
 colorama.init(autoreset=True)
 
 print(Fore.CYAN + "=" * 60)
-print(Fore.CYAN + "  SEVEN TEXT DEBUGGER (V1.1.1 - MOOD + COMMAND LOG)")
+print(Fore.CYAN + "  SEVEN TEXT DEBUGGER (V1.1.2 - POLISH + HARDENING)")
 print(Fore.CYAN + "=" * 60)
 print(Fore.WHITE + "  Commands: /memory | /facts | /convos | /stats")
 print(Fore.WHITE + "  Commands: /logs | /logs N | /mood")
 print(Fore.WHITE + "  Commands: /add fact [text] | /delete fact [n]")
 print(Fore.WHITE + "  Commands: /delete convo [n]")
 print(Fore.WHITE + "  Commands: /clear all | /clear logs | /clear mood | quit")
+print(Fore.WHITE + "  Commands: /help (show all commands)")
 print(Fore.CYAN + "=" * 60)
 
 # Show mood on startup
@@ -81,7 +82,7 @@ def show_stats():
     m_status = mood_engine.get_status()
 
     print(Fore.CYAN + f"\n  {'='*50}")
-    print(Fore.CYAN + f"  SYSTEM STATISTICS (V1.1.1)")
+    print(Fore.CYAN + f"  SYSTEM STATISTICS (V1.1.2)")
     print(Fore.CYAN + f"  {'='*50}")
     print(Fore.CYAN + f"  Conversations:     {stats['total_conversations']}")
     print(Fore.CYAN + f"  Facts:             {stats['total_facts']}")
@@ -247,7 +248,27 @@ while True:
         show_stats()
         continue
 
-    # --- V1.6: NEW COMMANDS ---
+     # --- V1.6: NEW COMMANDS ---
+    if cmd == "/help":
+        print(Fore.CYAN + f"\n  {'='*50}")
+        print(Fore.CYAN + f"  SEVEN DEVELOPER CONSOLE — COMMANDS")
+        print(Fore.CYAN + f"  {'='*50}")
+        print(Fore.WHITE + "  /memory          Show all memories (facts + conversations)")
+        print(Fore.WHITE + "  /facts           Show stored facts only")
+        print(Fore.WHITE + "  /convos          Show stored conversations only")
+        print(Fore.WHITE + "  /stats           Show system statistics")
+        print(Fore.WHITE + "  /logs            Show last 10 command logs")
+        print(Fore.WHITE + "  /logs N          Show last N command logs")
+        print(Fore.WHITE + "  /mood            Show current mood state")
+        print(Fore.WHITE + "  /add fact [text]  Manually add a fact")
+        print(Fore.WHITE + "  /delete fact N   Delete fact by index")
+        print(Fore.WHITE + "  /delete convo N  Delete conversation by index")
+        print(Fore.WHITE + "  /clear all       Delete everything (memory + logs + mood)")
+        print(Fore.WHITE + "  /clear logs      Clear command logs only")
+        print(Fore.WHITE + "  /clear mood      Reset mood to neutral")
+        print(Fore.WHITE + "  quit / exit      Exit the console")
+        print(Fore.CYAN + f"  {'='*50}")
+        continue
     if cmd == "/logs" or cmd.startswith("/logs "):
         parts = cmd.split()
         count = 10
@@ -305,7 +326,8 @@ while True:
     m_status = mood_engine.get_status()
     print(Fore.MAGENTA + f"  [mood: {m_status['mood_value']:.2f} ({m_status['label']})]")
 
-    # --- STORE CONVERSATION IN MEMORY ---
+
+        # --- STORE CONVERSATION IN MEMORY ---
     should_store = True
     if response.strip().startswith("###"):
         should_store = False
@@ -315,6 +337,14 @@ while True:
         should_store = False
     cmd_words = ["open", "close", "start", "kill", "launch"]
     if any(w in user_input.lower() for w in cmd_words):
+        should_store = False
+    # Don't store identity responses (they pollute memory with duplicates)
+    identity_phrases = ["i am seven", "you are mani", "you are mk", "you are admin",
+                        "you can call me seven", f"you are {brain.USER_NAME.lower()}",
+                        "still seven", "you just asked", "you've asked me this",
+                        "you haven't told me that"]
+    response_lower = response.lower()
+    if any(phrase in response_lower for phrase in identity_phrases):
         should_store = False
 
     if should_store:

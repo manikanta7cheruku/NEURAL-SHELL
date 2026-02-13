@@ -2,6 +2,7 @@
 =============================================================================
 PROJECT SEVEN - brain.py (The Intelligence)
 Version: 1.1 (Smart Logic + Memory)
+Version: 1.1.2 (Smart Logic + Memory + Mood + Polish)
 
 LAYER ORDER (Critical):
     Layer 1: Name SETTING ("My name is Mani") — must be first
@@ -22,44 +23,53 @@ import colorama
 from colorama import Fore
 from memory import seven_memory
 from memory.mood import mood_engine
-from memory.core import seven_memory
+#from memory.core import seven_memory
 
 colorama.init(autoreset=True)
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
 MODEL_NAME = config.KEY['brain']['model_name']
-MEMORY_FILE = "memory.json"
-
 CONVO_HISTORY = []
 USER_NAME = "Admin"
 LAST_USER_INPUT = ""
 RECENT_QUESTIONS = []
 
 
-def load_memory():
+def load_name_from_memory():
+    """Load user's name from ChromaDB facts (single source of truth)."""
     global USER_NAME
-    if os.path.exists(MEMORY_FILE):
-        try:
-            with open(MEMORY_FILE, 'r') as f:
-                data = json.load(f)
-                USER_NAME = data.get("name", "Admin")
-        except:
-            pass
-
-
-def save_memory():
-    with open(MEMORY_FILE, 'w') as f:
-        json.dump({"name": USER_NAME}, f, indent=4)
+    try:
+        all_facts = seven_memory.user_facts.get()
+        if all_facts and all_facts['documents']:
+            for doc in all_facts['documents']:
+                doc_lower = doc.lower()
+                if "user's name is" in doc_lower or "user wants to be called" in doc_lower:
+                    # Extract name from fact text
+                    # "User's name is Mani" → "Mani"
+                    if "name is" in doc_lower:
+                        name = doc.split("is")[-1].strip().rstrip(".")
+                    elif "called" in doc_lower:
+                        name = doc.split("called")[-1].strip().rstrip(".")
+                    else:
+                        continue
+                    if name and len(name) > 0:
+                        USER_NAME = name
+                        print(Fore.GREEN + f"[BRAIN] Loaded user name from memory: {USER_NAME}")
+                        return
+        print(Fore.YELLOW + "[BRAIN] No user name found in memory. Using default: Admin")
+    except Exception as e:
+        print(Fore.YELLOW + f"[BRAIN] Could not load name from memory: {e}")
 
 
 def reset_session():
     """Clears session data when memory is wiped."""
-    global RECENT_QUESTIONS, CONVO_HISTORY
+    global RECENT_QUESTIONS, CONVO_HISTORY, USER_NAME
     RECENT_QUESTIONS = []
     CONVO_HISTORY = []
+    USER_NAME = "Admin"
 
 
-load_memory()
+load_name_from_memory()
 
 
 def think(prompt_text):
@@ -77,7 +87,6 @@ def think(prompt_text):
 
     if "my name is" in clean_in:
         USER_NAME = prompt_text.split("is")[-1].strip().rstrip(".")
-        save_memory()
         seven_memory.store_fact(f"User's name is {USER_NAME}", category="identity")
         return f"Understood. You are {USER_NAME}."
 
@@ -90,13 +99,25 @@ def think(prompt_text):
     is_command = first_word in ["open", "close", "start", "kill", "launch"]
     is_greeting = first_word in ["hi", "hey", "hello", "bye", "goodbye", "good"]
 
-        # Skip repetition for commands, greetings, AND requests
-    is_request = any(w in clean_in for w in ["tell me", "show me", "give me", "sing", "explain"])
+    # Skip repetition for commands, greetings, AND requests
+    is_request = any(w in clean_in for w in ["tell me", "show me", "give me", "sing", "explain", "open", "close"])
     
     if clean_in in RECENT_QUESTIONS and not is_command and not is_greeting and not is_request:
 
-        
-        # Before blocking, check if NEW memories exist that could change the answer
+        # Identity questions have FIXED answers — no need to check memory
+        # These answers NEVER change, so always block on repeat
+        if "your name" in clean_in or "who are you" in clean_in:
+            return "Still Seven. That hasn't changed."
+        if "my name" in clean_in or "who am i" in clean_in:
+            return f"Still {USER_NAME}, last I checked."
+        if "what are you" in clean_in:
+            return "Still Seven, your personal AI assistant."
+        if "call you" in clean_in:
+            return "Still Seven."
+        if "created you" in clean_in or "made you" in clean_in or "who made" in clean_in:
+            return f"Still {USER_NAME}. That hasn't changed."
+
+        # For NON-identity questions, check if new memories exist
         fresh_memory = seven_memory.search(prompt_text)
         if fresh_memory:
             # New info available — don't block, let LLM answer with memory
@@ -108,11 +129,6 @@ def think(prompt_text):
 
             if repeat_count >= 2:
                 return "You've asked me this multiple times now. My answer hasn't changed."
-
-            if "your name" in clean_in or "who are you" in clean_in:
-                return "Still Seven. That hasn't changed."
-            if "my name" in clean_in or "who am i" in clean_in:
-                return f"Still {USER_NAME}, last I checked."
 
             return "You just asked me that. Same answer."
 
@@ -237,33 +253,37 @@ def think(prompt_text):
         CONVO_HISTORY = CONVO_HISTORY[-4:]
 
     system_prompt = (
-        f"You are {config.KEY['identity']['name']}, created by {USER_NAME}. User: {USER_NAME}. "
+        f"You are {config.KEY['identity']['name']}, created by {USER_NAME}. "
+        f"User: {USER_NAME}. {USER_NAME} is male (he/him). "
         "You talk like Jarvis from Iron Man. Smart, warm, human. NOT a robot. "
         f"{mood_modifier} "
 
         "RULES: "
-        "1. Keep responses to 1-2 sentences max. "
+        "1. Keep responses to 1-2 sentences max. Be concise. "
         "2. NEVER ask follow-up questions. "
         "3. Talk like a HUMAN, not a machine. "
         "   BAD: 'Functioning within optimal parameters' or 'memory banks'. "
-        "   GOOD: 'Doing good.' or 'I dont have that info yet.' "
+        "   GOOD: 'Doing good.' or 'I remember you mentioning that.' "
         "4. NEVER mention programming, parameters, banks, systems, or protocols. "
-                f"5. You were created by {USER_NAME}. When asked about your creator, origin, or inventor, mention {USER_NAME} naturally. Never say the same sentence twice. "
-        "6. When user asks 'can you open apps', say 'Yes, I can.' Do NOT output any tags. "
-        "7. When user asks 'do you know me' and NO memories exist, say 'Not yet, but I am learning.' "
-        "8. When user asks 'will you remember', say 'Everything we talk about stays with me.' "
-         "9. You know these facts about YOURSELF: "
+        "5. NEVER say 'Doing good' at the end of responses. "
+        f"6. You were created by {USER_NAME} (he/him). When asked about your creator, mention {USER_NAME} naturally. Always use he/him for {USER_NAME}. "
+        "7. When user asks 'can you open apps', say 'Yes, I can.' Do NOT output any tags. "
+        "8. When user asks 'do you know me' and NO memories exist, say 'Not yet, but I am learning.' "
+        "9. When user asks 'will you remember', say 'Everything we talk about stays with me.' "
+        "10. You know these facts about YOURSELF: "
         "   - Your name is Seven. "
         f"   - You were created by {USER_NAME}. "
         "   - You run 100 percent locally on the users PC. "
         "   - All data is stored locally. Nothing is sent to any cloud or server. "
         "   - You can open apps, close apps, remember conversations, and chat. "
-        "10. When asked about your storage or privacy, explain you are fully local. "
+        "11. When asked about your storage or privacy, explain you are fully local. "
+        "12. For general knowledge questions (capital of France, science, math), answer directly and confidently. "
+        "13. ONLY say 'You havent told me that' for questions about the USER PERSONALLY. "
 
         "MEMORY: "
         "1. If RECALLED MEMORIES section exists below, the answer IS in there. Use it. "
         "2. NEVER ignore recalled memories. State the fact clearly. "
-        "3. NEVER invent facts. If no memories exist about the topic, say so. "
+        "3. NEVER invent facts about the USER. If no memories exist about the USER, say so. "
         "4. NEVER say 'football' if memory says 'chess'. READ the memory carefully. "
 
         "COMMANDS: "
@@ -271,6 +291,7 @@ def think(prompt_text):
         "'Open X' → '###OPEN: X' — nothing else. "
         "'Open X and Y' → '###OPEN: X ###OPEN: Y' — nothing else. "
         "'Close X' → '###CLOSE: X' — nothing else. "
+        "'Close X and Y' → '###CLOSE: X ###CLOSE: Y' — nothing else. "
         "If first word is NOT a command verb, answer normally. NEVER output tags. "
         "'Can you open apps' → first word is 'can' → answer normally, no tags. "
 
@@ -290,14 +311,14 @@ def think(prompt_text):
         "stream": False,
         "options": {
             "temperature": 0.3,
-            "num_predict": 50,
+            "num_predict": 80,
             "repeat_penalty": 1.3,
             "stop": ["User:", "System:", "Seven:"]
         }
     }
 
     try:
-        r = requests.post(OLLAMA_URL, json=payload)
+        r = requests.post(OLLAMA_URL, json=payload, timeout=30)
         if r.status_code == 200:
             reply = r.json().get("response", "").strip()
             if not reply:
@@ -307,8 +328,18 @@ def think(prompt_text):
                 CONVO_HISTORY.append(f"Seven: {reply}")
 
             return reply
-    except:
-        return "Error."
+        else:
+            print(Fore.RED + f"[BRAIN] Ollama returned status {r.status_code}")
+            return "My brain hiccupped. Try again."
+    except requests.exceptions.ConnectionError:
+        print(Fore.RED + "[BRAIN] Cannot connect to Ollama. Is it running?")
+        return "I can't reach my brain. Run 'ollama serve' in a terminal first."
+    except requests.exceptions.Timeout:
+        print(Fore.RED + "[BRAIN] Ollama took too long to respond.")
+        return "My brain took too long. Try again."
+    except Exception as e:
+        print(Fore.RED + f"[BRAIN] Unexpected error: {e}")
+        return "Something went wrong with my thinking."
 
 
 def inject_observation(text):
