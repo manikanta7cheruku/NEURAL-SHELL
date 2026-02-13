@@ -29,6 +29,17 @@ ARCHITECTURE:
 import os
 os.environ["ANONYMIZED_TELEMETRY"] = "False"
 
+# Suppress ChromaDB telemetry errors completely
+import logging
+logging.getLogger("chromadb.telemetry").setLevel(logging.CRITICAL)
+logging.getLogger("chromadb").setLevel(logging.WARNING)
+
+import chromadb.config
+try:
+    chromadb.config.Settings(anonymized_telemetry=False)
+except:
+    pass
+
 import chromadb
 from chromadb.utils import embedding_functions
 import datetime

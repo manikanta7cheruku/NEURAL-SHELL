@@ -3,6 +3,7 @@
 PROJECT SEVEN - brain.py (The Intelligence)
 Version: 1.1 (Smart Logic + Memory)
 Version: 1.1.2 (Smart Logic + Memory + Mood + Polish)
+Version: 1.2 (Smart Logic + Memory + Mood + Voice Identity)
 
 LAYER ORDER (Critical):
     Layer 1: Name SETTING ("My name is Mani") — must be first
@@ -29,7 +30,7 @@ colorama.init(autoreset=True)
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
 MODEL_NAME = config.KEY['brain']['model_name']
-CONVO_HISTORY = []
+CONVO_HISTORY = {}
 USER_NAME = "Admin"
 LAST_USER_INPUT = ""
 RECENT_QUESTIONS = []
@@ -65,15 +66,39 @@ def reset_session():
     """Clears session data when memory is wiped."""
     global RECENT_QUESTIONS, CONVO_HISTORY, USER_NAME
     RECENT_QUESTIONS = []
-    CONVO_HISTORY = []
+    CONVO_HISTORY = {}
     USER_NAME = "Admin"
 
 
 load_name_from_memory()
 
 
-def think(prompt_text):
+def think(prompt_text, speaker_id="default"):
     global CONVO_HISTORY, USER_NAME, LAST_USER_INPUT, RECENT_QUESTIONS
+
+    # If we know who's speaking, use their name
+    if speaker_id not in ("default", "unknown"):
+        # Try to find this speaker's real name from memory
+        speaker_name = speaker_id.title()  # Default: capitalize profile ID
+        try:
+            all_facts = seven_memory.user_facts.get(where={"user_id": speaker_id})
+            if all_facts and all_facts['documents']:
+                for doc in all_facts['documents']:
+                    doc_lower = doc.lower()
+                    if "name is" in doc_lower:
+                        found_name = doc.split("is")[-1].strip().rstrip(".")
+                        if found_name and len(found_name) > 0:
+                            speaker_name = found_name
+                            break
+                    elif "called" in doc_lower:
+                        found_name = doc.split("called")[-1].strip().rstrip(".")
+                        if found_name and len(found_name) > 0:
+                            speaker_name = found_name
+                            break
+        except:
+            pass
+    else:
+        speaker_name = USER_NAME
 
     clean_in = prompt_text.lower().strip()
     clean_in = clean_in.replace("?", "").replace(".", "").replace("!", "").replace("'", "").replace(",", "")
@@ -86,9 +111,15 @@ def think(prompt_text):
     # If we don't catch this first, "my name" triggers identity check instead.
 
     if "my name is" in clean_in:
-        USER_NAME = prompt_text.split("is")[-1].strip().rstrip(".")
-        seven_memory.store_fact(f"User's name is {USER_NAME}", category="identity")
-        return f"Understood. You are {USER_NAME}."
+        new_name = prompt_text.split("is")[-1].strip().rstrip(".")
+        if speaker_id != "default" and speaker_id != "unknown":
+            # Store name linked to this speaker's voice profile
+            seven_memory.store_fact(f"Speaker {speaker_id}'s name is {new_name}", category="identity", user_id=speaker_id)
+            speaker_name = new_name
+        else:
+            USER_NAME = new_name
+            seven_memory.store_fact(f"User's name is {USER_NAME}", category="identity")
+        return f"Understood. You are {new_name}."
 
        # =========================================================================
     # LAYER 2: REPETITION DETECTOR
@@ -109,7 +140,10 @@ def think(prompt_text):
         if "your name" in clean_in or "who are you" in clean_in:
             return "Still Seven. That hasn't changed."
         if "my name" in clean_in or "who am i" in clean_in:
-            return f"Still {USER_NAME}, last I checked."
+            if speaker_id not in ("default", "unknown") and speaker_name == speaker_id.title():
+                # Speaker never told their real name (speaker_name is just profile ID)
+                return "You haven't told me your name yet."
+            return f"Still {speaker_name}, last I checked."
         if "what are you" in clean_in:
             return "Still Seven, your personal AI assistant."
         if "call you" in clean_in:
@@ -118,7 +152,8 @@ def think(prompt_text):
             return f"Still {USER_NAME}. That hasn't changed."
 
         # For NON-identity questions, check if new memories exist
-        fresh_memory = seven_memory.search(prompt_text)
+        search_uid = speaker_id if speaker_id not in ("default", "unknown") else "mani"
+        fresh_memory = seven_memory.search(prompt_text, user_id=search_uid)
         if fresh_memory:
             # New info available — don't block, let LLM answer with memory
             memory_context = fresh_memory
@@ -210,7 +245,9 @@ def think(prompt_text):
     is_greeting = first_word in ["hi", "hey", "hello", "bye", "goodbye"]
 
     if "VISUAL_REPORT:" not in prompt_text and not is_command and not is_greeting:
-        memory_context = seven_memory.search(prompt_text)
+        search_uid = speaker_id if speaker_id not in ("default", "unknown") else "mani"
+        memory_context = seven_memory.search(prompt_text, user_id=search_uid)
+
         if memory_context:
             print(Fore.MAGENTA + "[MEMORY] Found relevant memories!")
             print(Fore.MAGENTA + memory_context)
@@ -240,39 +277,50 @@ def think(prompt_text):
     # =========================================================================
 
     if "VISUAL_REPORT:" not in prompt_text and not is_command and not is_greeting:
-        seven_memory.extract_and_store_facts(prompt_text)
+        search_uid = speaker_id if speaker_id not in ("default", "unknown") else "mani"
+        seven_memory.extract_and_store_facts(prompt_text, user_id=search_uid)
 
     # =========================================================================
     # LAYER 7: LLM INFERENCE
     # =========================================================================
 
     if "VISUAL_REPORT:" not in prompt_text:
-        CONVO_HISTORY.append(f"User: {prompt_text}")
+        if speaker_id not in CONVO_HISTORY:
+            CONVO_HISTORY[speaker_id] = []
+        CONVO_HISTORY[speaker_id].append(f"User: {prompt_text}")
 
-    if len(CONVO_HISTORY) > 4:
-        CONVO_HISTORY = CONVO_HISTORY[-4:]
+    if len(CONVO_HISTORY.get(speaker_id, [])) > 4:
+        CONVO_HISTORY[speaker_id] = CONVO_HISTORY[speaker_id][-4:]
 
     system_prompt = (
-        f"You are {config.KEY['identity']['name']}, created by {USER_NAME}. "
-        f"User: {USER_NAME}. {USER_NAME} is male (he/him). "
+        f"You are {config.KEY['identity']['name']}, created by {config.KEY['identity']['creator']}. "
+        f"You are currently talking to: {speaker_name}. "
         "You talk like Jarvis from Iron Man. Smart, warm, human. NOT a robot. "
         f"{mood_modifier} "
 
         "RULES: "
-        "1. Keep responses to 1-2 sentences max. Be concise. "
+        "1. Keep responses to 1-2 sentences MAXIMUM. Be extremely concise. "
+        "   If the answer is one word, say one word. "
+        "   'What is my name?' → 'Rahul.' NOT a paragraph about it. "
         "2. NEVER ask follow-up questions. "
         "3. Talk like a HUMAN, not a machine. "
         "   BAD: 'Functioning within optimal parameters' or 'memory banks'. "
         "   GOOD: 'Doing good.' or 'I remember you mentioning that.' "
         "4. NEVER mention programming, parameters, banks, systems, or protocols. "
         "5. NEVER say 'Doing good' at the end of responses. "
-        f"6. You were created by {USER_NAME} (he/him). When asked about your creator, mention {USER_NAME} naturally. Always use he/him for {USER_NAME}. "
+        f"6. Facts about your creator: "
+        f"   - Your creator is {config.KEY['identity']['creator']}. "
+        f"   - {config.KEY['identity']['creator']} is the person/team who designed and built you. "
+        f"   - You are Project Seven, built by {config.KEY['identity']['creator']}. "
+        f"   - When asked about your creator, answer naturally using these facts. "
+        f"   - Never say the exact same sentence twice about your creator. Vary your phrasing. "
+        f"   You are currently speaking with {speaker_name}. Use their name naturally. "
         "7. When user asks 'can you open apps', say 'Yes, I can.' Do NOT output any tags. "
         "8. When user asks 'do you know me' and NO memories exist, say 'Not yet, but I am learning.' "
         "9. When user asks 'will you remember', say 'Everything we talk about stays with me.' "
         "10. You know these facts about YOURSELF: "
         "   - Your name is Seven. "
-        f"   - You were created by {USER_NAME}. "
+        f"   - You were created by {config.KEY['identity']['creator']}. "
         "   - You run 100 percent locally on the users PC. "
         "   - All data is stored locally. Nothing is sent to any cloud or server. "
         "   - You can open apps, close apps, remember conversations, and chat. "
@@ -303,7 +351,8 @@ def think(prompt_text):
     if memory_context:
         full_prompt += memory_context + "\n\n"
 
-    full_prompt += "LOG:\n" + "\n".join(CONVO_HISTORY) + "\nSeven:"
+    speaker_history = CONVO_HISTORY.get(speaker_id, [])
+    full_prompt += "LOG:\n" + "\n".join(speaker_history) + "\nSeven:"
 
     payload = {
         "model": MODEL_NAME,
@@ -311,7 +360,7 @@ def think(prompt_text):
         "stream": False,
         "options": {
             "temperature": 0.3,
-            "num_predict": 80,
+            "num_predict": 60,
             "repeat_penalty": 1.3,
             "stop": ["User:", "System:", "Seven:"]
         }
@@ -325,7 +374,9 @@ def think(prompt_text):
                 reply = "Listening."
 
             if "VISUAL_REPORT:" not in prompt_text:
-                CONVO_HISTORY.append(f"Seven: {reply}")
+                if speaker_id not in CONVO_HISTORY:
+                    CONVO_HISTORY[speaker_id] = []
+                CONVO_HISTORY[speaker_id].append(f"Seven: {reply}")
 
             return reply
         else:

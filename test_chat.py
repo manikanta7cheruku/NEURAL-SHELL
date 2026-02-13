@@ -12,11 +12,14 @@ from colorama import Fore
 from memory import seven_memory
 from memory.command_log import command_log
 from memory.mood import mood_engine
+from ears.voice_id import get_enrolled_speakers, remove_speaker, is_voice_id_enabled
 
 colorama.init(autoreset=True)
+# V1.2: Simulated speaker for text mode
+active_speaker = "default"
 
 print(Fore.CYAN + "=" * 60)
-print(Fore.CYAN + "  SEVEN TEXT DEBUGGER (V1.1.2 - POLISH + HARDENING)")
+print(Fore.CYAN + "  SEVEN TEXT DEBUGGER (V1.2 - VOICE IDENTITY)")
 print(Fore.CYAN + "=" * 60)
 print(Fore.WHITE + "  Commands: /memory | /facts | /convos | /stats")
 print(Fore.WHITE + "  Commands: /logs | /logs N | /mood")
@@ -24,11 +27,20 @@ print(Fore.WHITE + "  Commands: /add fact [text] | /delete fact [n]")
 print(Fore.WHITE + "  Commands: /delete convo [n]")
 print(Fore.WHITE + "  Commands: /clear all | /clear logs | /clear mood | quit")
 print(Fore.WHITE + "  Commands: /help (show all commands)")
+print(Fore.WHITE + "  Commands: /speaker [name] | /speakers | /remove speaker [name]")
 print(Fore.CYAN + "=" * 60)
 
 # Show mood on startup
 mood_status = mood_engine.get_status()
 print(Fore.MAGENTA + f"  Mood: {mood_status['mood_value']:.2f} ({mood_status['label']})")
+
+# V1.2: Voice ID status
+if is_voice_id_enabled():
+    speakers = get_enrolled_speakers()
+    print(Fore.CYAN + f"  Voice ID: Active | Enrolled: {', '.join(speakers)}")
+else:
+    print(Fore.YELLOW + "  Voice ID: No speakers enrolled (voice mode only)")
+print(Fore.CYAN + f"  Active speaker: {active_speaker}")
 print()
 
 
@@ -82,7 +94,7 @@ def show_stats():
     m_status = mood_engine.get_status()
 
     print(Fore.CYAN + f"\n  {'='*50}")
-    print(Fore.CYAN + f"  SYSTEM STATISTICS (V1.1.2)")
+    print(Fore.CYAN + f"  SYSTEM STATISTICS (V1.2)")
     print(Fore.CYAN + f"  {'='*50}")
     print(Fore.CYAN + f"  Conversations:     {stats['total_conversations']}")
     print(Fore.CYAN + f"  Facts:             {stats['total_facts']}")
@@ -248,6 +260,59 @@ while True:
         show_stats()
         continue
 
+    #1.2
+
+    print(Fore.CYAN + f"  {'─'*50}")
+    enrolled = get_enrolled_speakers()
+    print(Fore.CYAN + f"  Enrolled speakers: {len(enrolled)}")
+    if enrolled:
+        print(Fore.CYAN + f"  Speakers: {', '.join(enrolled)}")
+    print(Fore.CYAN + f"  Active speaker:    {active_speaker}")
+
+
+    #Add /speaker, /speakers, /remove speaker commands
+    if cmd.startswith("/speaker ") and not cmd.startswith("/speakers"):
+        new_speaker = user_input[9:].strip().lower()
+        if new_speaker:
+            active_speaker = new_speaker
+            print(Fore.GREEN + f"  ✅ Active speaker set to: {active_speaker}")
+            print(Fore.WHITE + f"  (Memory will be stored/searched under '{active_speaker}')")
+        else:
+            print(Fore.RED + "  ❌ Usage: /speaker mani")
+        print()
+        continue
+
+    if cmd == "/speakers":
+        enrolled = get_enrolled_speakers()
+        print(Fore.CYAN + f"\n  {'='*50}")
+        print(Fore.CYAN + f"  ENROLLED SPEAKERS")
+        print(Fore.CYAN + f"  {'='*50}")
+        if enrolled:
+            for s in enrolled:
+                marker = " ← active" if s == active_speaker else ""
+                print(Fore.CYAN + f"  • {s}{marker}")
+        else:
+            print(Fore.YELLOW + "  No speakers enrolled yet.")
+            print(Fore.WHITE + "  Use voice mode (Run_Seven.bat) and say 'Enroll my voice'")
+        print(Fore.CYAN + f"  {'─'*50}")
+        print(Fore.WHITE + f"  Active speaker (text mode): {active_speaker}")
+        print(Fore.WHITE + f"  Use /speaker [name] to switch in text mode")
+        print(Fore.CYAN + f"  {'='*50}")
+        continue
+
+    if cmd.startswith("/remove speaker "):
+        name = cmd.split("/remove speaker ")[1].strip()
+        if name:
+            confirm = input(Fore.YELLOW + f"  Remove speaker '{name}'? (y/n): ").strip().lower()
+            if confirm == 'y':
+                remove_speaker(name)
+                print(Fore.GREEN + f"  ✅ Speaker '{name}' removed.")
+            else:
+                print(Fore.WHITE + "  Cancelled.")
+        else:
+            print(Fore.RED + "  ❌ Usage: /remove speaker mani")
+        continue
+
      # --- V1.6: NEW COMMANDS ---
     if cmd == "/help":
         print(Fore.CYAN + f"\n  {'='*50}")
@@ -266,6 +331,9 @@ while True:
         print(Fore.WHITE + "  /clear all       Delete everything (memory + logs + mood)")
         print(Fore.WHITE + "  /clear logs      Clear command logs only")
         print(Fore.WHITE + "  /clear mood      Reset mood to neutral")
+        print(Fore.WHITE + "  /speaker [name]  Switch active speaker profile (text mode)")
+        print(Fore.WHITE + "  /speakers        List enrolled speakers")
+        print(Fore.WHITE + "  /remove speaker  Remove a speaker's voice print")
         print(Fore.WHITE + "  quit / exit      Exit the console")
         print(Fore.CYAN + f"  {'='*50}")
         continue
@@ -319,12 +387,13 @@ while True:
 
     # --- NORMAL CHAT ---
     print(Fore.MAGENTA + "Seven is thinking...")
-    response = brain.think(user_input)
+    response = brain.think(user_input, speaker_id=active_speaker)
     print(Fore.GREEN + f"SEVEN: {response}")
 
     # Show mood inline after each response
     m_status = mood_engine.get_status()
-    print(Fore.MAGENTA + f"  [mood: {m_status['mood_value']:.2f} ({m_status['label']})]")
+    speaker_tag = f" | speaker: {active_speaker}" if active_speaker != "default" else ""
+    print(Fore.MAGENTA + f"  [mood: {m_status['mood_value']:.2f} ({m_status['label']}){speaker_tag}]")
 
 
         # --- STORE CONVERSATION IN MEMORY ---
@@ -351,7 +420,8 @@ while True:
         try:
             clean_response = re.sub(r'###\w+:\s*\S+', '', response).strip()
             if clean_response:
-                seven_memory.store_conversation(user_input, clean_response)
+                store_uid = active_speaker if active_speaker != "default" else "mani"
+                seven_memory.store_conversation(user_input, clean_response, user_id=store_uid)
         except Exception as e:
             print(Fore.RED + f"[MEMORY ERROR] {e}")
 

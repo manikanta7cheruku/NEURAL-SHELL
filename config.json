@@ -1,16 +1,22 @@
 {
     "identity": {
         "name": "Seven",
+        "creator": "MKC",
         "wake_words": ["seven", "hey seven", "wake up"],
         "stop_words": ["stop", "shut up", "pause"]
     },
-        "brain": {
-        "model_name": "llama3", 
+    "brain": {
+        "model_name": "llama3",
         "temperature": 0.3,
         "max_history": 10
     },
     "vision": {
         "model_name": "llava"
+    },
+    "voice_id": {
+        "enabled": true,
+        "similarity_threshold": 0.82,
+        "default_speaker": "mani"
     },
     "gui": {
         "opacity": 0.8,
@@ -20,6 +26,7 @@
     },
     "paths": {
         "screenshot_folder": "./screenshots",
-        "log_file": "./chat_log.txt"
+        "log_file": "./chat_log.txt",
+        "voice_prints": "./seven_data/voice_prints"
     }
 }

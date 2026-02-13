@@ -4,6 +4,7 @@ PROJECT SEVEN - main.py (The Controller)
 Version: 1.1 (Memory Integration)
 Version: 1.1.1 (Memory + Mood + Command Logging)
 Version: 1.1.2 (Memory + Mood + Command Logging + Polish)
+Version: 1.2 (Memory + Mood + Command Logging + Voice Identity)
 
 CHANGES FROM V1.5:
     1. NEW: Memory system initialized on startup
@@ -19,7 +20,8 @@ ARCHITECTURE:
 =============================================================================
 """
 
-import ears
+from ears import listen
+from ears.voice_id import identify_speaker, enroll_speaker, is_voice_id_enabled, get_enrolled_speakers
 import brain
 import hands
 import mouth
@@ -78,9 +80,16 @@ def seven_logic():
     cmd_stats = command_log.get_stats()
     print(Fore.CYAN + f"[SYSTEM] Commands logged: {cmd_stats['total']} (success rate: {cmd_stats['success_rate']})")
 
+        # V1.2: Voice ID status
+    if is_voice_id_enabled():
+        speakers = get_enrolled_speakers()
+        print(Fore.CYAN + f"[SYSTEM] Voice ID active. Enrolled speakers: {', '.join(speakers)}")
+    else:
+        print(Fore.YELLOW + "[SYSTEM] Voice ID inactive. No speakers enrolled. Say 'Enroll my voice' to start.")
+
     # Initial Greeting
     print(Fore.GREEN + "[SYSTEM] Initializing Seven...")
-    mouth.speak(f"{config.KEY['identity']['name']} V1.1.2 Online.")
+    mouth.speak(f"{config.KEY['identity']['name']} V1.2 Online.")
     app_ui.update_status("SYSTEM ONLINE", "#00ff00")
 
     # =========================================================================
@@ -95,12 +104,42 @@ def seven_logic():
                 app_ui.update_status("PAUSED (Say 'Wake Up')", "#555555")
 
             # --- 2. LISTEN INPUT ---
-            user_input = ears.listen()
+            user_input, audio_path = listen()
 
             if not user_input:
                 continue
 
             text_lower = user_input.lower()
+
+            # --- 2.5. VOICE IDENTIFICATION (V1.2) ---
+            speaker_id = "default"
+            if audio_path and is_voice_id_enabled():
+                speaker_id = identify_speaker(audio_path)
+                print(Fore.CYAN + f"[VOICE ID] Speaker: {speaker_id}")
+            
+            # --- 2.6. VOICE ENROLLMENT COMMAND ---
+            if "enroll my voice" in text_lower or "enroll voice" in text_lower:
+                # Ask for name
+                mouth.speak("What name should I save this voice as?")
+                app_ui.update_status("ENROLLING — Speak your name...", "#ff00ff")
+                name_input, name_audio = listen()
+                if name_input:
+                    enroll_name = name_input.strip().replace(".", "").replace("!", "")
+                    mouth.speak(f"Now say a few sentences so I can learn your voice, {enroll_name}.")
+                    app_ui.update_status(f"ENROLLING {enroll_name} — Keep talking...", "#ff00ff")
+                    # Record a longer sample for enrollment
+                    enroll_input, enroll_audio = listen()
+                    if enroll_audio:
+                        success = enroll_speaker(enroll_name, enroll_audio)
+                        if success:
+                            mouth.speak(f"Got it. I'll recognize your voice now, {enroll_name}.")
+                        else:
+                            mouth.speak("I couldn't capture your voice clearly. Try again.")
+                    else:
+                        mouth.speak("I didn't hear anything. Try again.")
+                else:
+                    mouth.speak("I didn't catch your name. Try again.")
+                continue
 
             # =================================================================
             # 3. TRIGGER WORD FILTERS
@@ -150,7 +189,7 @@ def seven_logic():
             #   2. Searches memory for relevant context
             #   3. Extracts facts from user input
             #   4. Sends enhanced prompt to LLM
-            response = brain.think(user_input)
+            response = brain.think(user_input, speaker_id=speaker_id)
 
             if not response:
                 response = "Processing error."
@@ -195,7 +234,10 @@ def seven_logic():
                     # Clean the response: remove command tags before storing
                     clean_response = re.sub(r'###\w+:\s*\S+', '', response).strip()
                     if clean_response:
-                        seven_memory.store_conversation(user_input, clean_response)
+                        if speaker_id != "default" and speaker_id != "unknown":
+                            seven_memory.store_conversation(user_input, clean_response, user_id=speaker_id)
+                        else:
+                            seven_memory.store_conversation(user_input, clean_response)
                 except Exception as e:
                     # Memory storage failure should NEVER crash Seven
                     print(Fore.RED + f"[MEMORY ERROR] Failed to store: {e}")
@@ -266,6 +308,12 @@ def seven_logic():
                         elif cmd_type == "SYS":
                             app_ui.update_status(f"SYSTEM: {app_to_run}", "#ffff00")
                             hands.system_control(app_to_run)
+            # Clean up temp audio file
+            if audio_path and os.path.exists(audio_path):
+                try:
+                    os.remove(audio_path)
+                except:
+                    pass
 
         except Exception as e:
             print(Fore.RED + f"CRITICAL ERROR in Main Loop: {e}")
