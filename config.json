@@ -34,5 +34,11 @@
     "words": ["stop", "seven", "hey seven", "shut up", "hold on", "wait", "pause"],
     "listen_during_speech": true,
     "interrupt_cooldown": 1.5
+    },
+    "web": {
+    "enabled": true,
+    "max_results": 3,
+    "news_max_results": 3,
+    "timeout": 10
     }
 }

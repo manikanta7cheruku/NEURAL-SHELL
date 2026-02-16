@@ -280,10 +280,42 @@ def think(prompt_text, speaker_id="default"):
             print(Fore.MAGENTA + memory_context)
 
             
-
+    # =========================================================================
+    # LAYER 5.5: WEB SEARCH (Live Knowledge — V1.4)
+    # =========================================================================
+    # Checks if the query needs live internet data.
+    # If yes, searches DuckDuckGo and injects results into LLM context.
+    # Runs AFTER memory search — memory takes priority over web.
+    
+    web_context = ""
+    web_searched = False
+    
+    if not is_command and not is_greeting and "VISUAL_REPORT:" not in prompt_text:
+        from web.classifier import needs_web_search
+        from web.core import web_search, web_news
+        
+        should_search, search_query = needs_web_search(prompt_text)
+        
+        if should_search and search_query:
+            print(Fore.CYAN + f"[BRAIN] Web search triggered for: '{search_query}'")
+            
+            # Check if it's a news query
+            news_words = ["news", "latest", "happened", "breaking", "update"]
+            is_news = any(w in clean_in for w in news_words)
+            
+            if is_news:
+                web_context = web_news(search_query)
+            else:
+                web_context = web_search(search_query)
+            
+            if web_context:
+                web_searched = True
+                print(Fore.GREEN + "[BRAIN] Web results injected into context.")
+            else:
+                print(Fore.YELLOW + "[BRAIN] Web search returned no results.")
 
     # =========================================================================
-    # LAYER 5.5: NO-MEMORY QUESTION HANDLER
+    # LAYER 6: NO-MEMORY QUESTION HANDLER
     # =========================================================================
     # Only catches questions about the USER PERSONALLY when no memories exist.
     # "What sport do I play?" → personal question → needs memory
@@ -300,7 +332,7 @@ def think(prompt_text, speaker_id="default"):
         return "You haven't told me that yet."
 
     # =========================================================================
-    # LAYER 6: FACT EXTRACTION (Meaningful input only — not commands)
+    # LAYER 7: FACT EXTRACTION (Meaningful input only — not commands)
     # =========================================================================
 
     if "VISUAL_REPORT:" not in prompt_text and not is_command and not is_greeting:
@@ -308,7 +340,7 @@ def think(prompt_text, speaker_id="default"):
         seven_memory.extract_and_store_facts(prompt_text, user_id=search_uid)
 
     # =========================================================================
-    # LAYER 7: LLM INFERENCE
+    # LAYER 8: LLM INFERENCE
     # =========================================================================
 
     if "VISUAL_REPORT:" not in prompt_text:
@@ -326,7 +358,9 @@ def think(prompt_text, speaker_id="default"):
         f"{mood_modifier} "
 
         "RULES: "
-        "1. Keep responses to 1-2 sentences MAXIMUM. Be extremely concise. "
+        "1. Keep responses to 1-2 sentences MAXIMUM. Be extremely concise. No exceptions. "
+        "   Even with web search results, summarize in ONE sentence. "
+        "   Example: 'Bitcoin is currently at $69,726 USD.' — DONE. No extra details. "
         "   If the answer is one word, say one word. "
         "   'What is my name?' → 'Rahul.' NOT a paragraph about it. "
         "2. NEVER ask follow-up questions. "
@@ -350,10 +384,23 @@ def think(prompt_text, speaker_id="default"):
         f"   - You were created by {config.KEY['identity']['creator']}. "
         "   - You run 100 percent locally on the users PC. "
         "   - All data is stored locally. Nothing is sent to any cloud or server. "
-        "   - You can open apps, close apps, remember conversations, and chat. "
+        # "   - You can open apps, close apps, remember conversations, search the web, and chat. "
+        # "   - When you search the web, you use DuckDuckGo. You can find live prices, weather, news, and more. "
+        #"   - When asked how you searched, explain: 'I searched DuckDuckGo for live data.' "
+        "   - You can open apps, close apps, remember conversations, search the web, and chat. "
+        "   - You have access to DuckDuckGo web search for live data (prices, weather, news, trending). "
+        "   - You know which of your capabilities you used to answer any question. "
         "11. When asked about your storage or privacy, explain you are fully local. "
         "12. For general knowledge questions (capital of France, science, math), answer directly and confidently. "
         "13. ONLY say 'You havent told me that' for questions about the USER PERSONALLY. "
+
+        "WEB SEARCH: "
+        "1. If WEB SEARCH RESULTS section exists below, use it to answer accurately. "
+        "2. Summarize web results naturally — do NOT list them as bullet points. "
+        "3. If WEB SEARCH RESULTS section exists AND has data, mention that you looked it up. Example: 'I looked it up — ...' "
+        "4. If NO web results section exists, NEVER say 'I looked it up'. Answer from your own knowledge and say 'I couldn't verify this online right now.' "
+        "5. If web results don't fully answer the question, say what you found. "
+        "6. NEVER make up real-time data like prices, scores, or weather. If you don't have live data, say 'I couldn't get live data right now.' "
 
         "MEMORY: "
         "1. If RECALLED MEMORIES section exists below, the answer IS in there. Use it. "
@@ -374,6 +421,9 @@ def think(prompt_text, speaker_id="default"):
     )
 
     full_prompt = system_prompt + "\n\n"
+
+    if web_context:
+        full_prompt += web_context + "\n\n"
 
     if memory_context:
         full_prompt += memory_context + "\n\n"
