@@ -5,6 +5,7 @@ Version: 1.1 (Memory Integration)
 Version: 1.1.1 (Memory + Mood + Command Logging)
 Version: 1.1.2 (Memory + Mood + Command Logging + Polish)
 Version: 1.2 (Memory + Mood + Command Logging + Voice Identity)
+Version: 1.3 (Interruption & Full Duplex)
 
 CHANGES FROM V1.5:
     1. NEW: Memory system initialized on startup
@@ -22,9 +23,12 @@ ARCHITECTURE:
 
 from ears import listen
 from ears.voice_id import identify_speaker, enroll_speaker, is_voice_id_enabled, get_enrolled_speakers
+from ears.core import listen_for_interrupt
 import brain
 import hands
 import mouth
+from mouth import interrupt as mouth_interrupt, is_speaking
+import random
 import brain_manager
 import gui
 import tkinter as tk
@@ -64,10 +68,79 @@ def seven_logic():
     # CONFIGURATION LOADING
     # =========================================================================
 
+    # =========================================================================
+    # V1.3: INTERRUPT CONFIGURATION
+    # =========================================================================
+    interrupt_config = config.KEY.get('interrupt', {})
+    INTERRUPT_ENABLED = interrupt_config.get('enabled', True)
+    INTERRUPT_WORDS = interrupt_config.get('words', ["stop", "seven", "hey seven"])
+    INTERRUPT_COOLDOWN = interrupt_config.get('interrupt_cooldown', 1.5)
+    last_interrupt_time = [0]
+
+    def speak_with_interrupt(text):
+        """
+        V1.3: Speak with interrupt detection.
+        Starts an interrupt listener thread while speaking.
+        Returns True if completed, False if interrupted.
+        """
+        if not INTERRUPT_ENABLED:
+            mouth.speak(text)
+            return True
+        
+        import time as _time
+        if _time.time() - last_interrupt_time[0] < INTERRUPT_COOLDOWN:
+            mouth.speak(text)
+            return True
+        
+        stop_listening = threading.Event()
+        was_interrupted = threading.Event()
+        
+        def on_interrupt():
+            was_interrupted.set()
+            mouth_interrupt()
+            last_interrupt_time[0] = _time.time()
+        
+        interrupt_thread = threading.Thread(
+            target=listen_for_interrupt,
+            args=(INTERRUPT_WORDS, on_interrupt, stop_listening),
+            daemon=True
+        )
+        interrupt_thread.start()
+        
+        completed = mouth.speak(text)
+        
+        stop_listening.set()
+        interrupt_thread.join(timeout=2)
+        
+        if was_interrupted.is_set():
+            print("[SYSTEM] ⚡ Speech was interrupted by user")
+            app_ui.update_status("INTERRUPTED", "#ffaa00")
+            interrupt_context["was_interrupted"] = True
+            interrupt_context["last_response"] = text
+            mouth.speak("Yeah?")
+            return False
+        
+        return True
+
+    # =========================================================================
+    # CONFIGURATION LOADING
+    # =========================================================================
+
     WAKE_WORDS = ["wake up", "seven", "hey seven", "listen", "online", "resume"]
     PAUSE_WORDS = ["not you", "hold it", "hold on", "just a moment", "wait",
                    "pause", "stop listening", "sleep", "silence"]
     KILL_WORDS = ["shut down", "shutdown", "kill system", "go to sleep", "terminate"]
+
+
+    # V1.3: Interrupt configuration
+    interrupt_config = config.KEY.get('interrupt', {})
+    INTERRUPT_ENABLED = interrupt_config.get('enabled', True)
+    INTERRUPT_WORDS = interrupt_config.get('words', ["stop", "seven", "hey seven"])
+    INTERRUPT_COOLDOWN = interrupt_config.get('interrupt_cooldown', 1.5)
+    last_interrupt_time = [0]  # list so nonlocal works in nested function
+
+    # V1.3: Interrupt context — what was Seven saying when interrupted
+    interrupt_context = {"last_response": None, "last_input": None, "was_interrupted": False}
 
     # --- V1.1: Show memory stats on startup ---
     stats = seven_memory.get_stats()
@@ -89,7 +162,7 @@ def seven_logic():
 
     # Initial Greeting
     print(Fore.GREEN + "[SYSTEM] Initializing Seven...")
-    mouth.speak(f"{config.KEY['identity']['name']} V1.2 Online.")
+    mouth.speak(f"{config.KEY['identity']['name']} V1.3 Online.")
     app_ui.update_status("SYSTEM ONLINE", "#00ff00")
 
     # =========================================================================
@@ -108,6 +181,37 @@ def seven_logic():
 
             if not user_input:
                 continue
+
+
+            # --- V1.3: INTERRUPT CONTEXT HANDLER ---
+            # --- V1.3: INTERRUPT CONTEXT HANDLER ---
+            if interrupt_context["was_interrupted"]:
+                resume_words = ["continue", "resume", "go on", "go ahead", "keep going", "carry on"]
+                
+                if any(w in text_lower for w in resume_words):
+                    old_response = interrupt_context["last_response"]
+                    old_input = interrupt_context["last_input"]
+                    interrupt_context["was_interrupted"] = False
+                    interrupt_context["last_response"] = None
+                    interrupt_context["last_input"] = None
+                    
+                    if old_response and old_input:
+                        # Send to brain with context so LLM continues naturally
+                        resume_prompt = f"I was interrupted while answering this: '{old_input}'. I had said: '{old_response}'. Now continue from where I left off naturally without repeating what was already said."
+                        response = brain.think(resume_prompt, speaker_id=speaker_id)
+                        if response:
+                            speak_with_interrupt(response)
+                        else:
+                            mouth.speak("Sorry, I lost my train of thought.")
+                    else:
+                        mouth.speak("Sorry, I lost my train of thought. Ask me again?")
+                    continue
+                else:
+                    interrupt_context["was_interrupted"] = False
+                    interrupt_context["last_response"] = None
+                    interrupt_context["last_input"] = None
+
+            # --- 2.5. VOICE IDENTIFICATION (V1.2) ---
 
             text_lower = user_input.lower()
 
@@ -252,8 +356,14 @@ def seven_logic():
                 speech_part = response.split("###")[0].strip()
 
             if speech_part:
-                mouth.speak(speech_part)
-                app_ui.update_status(speech_part, "#00ccff")
+                interrupt_context["last_input"] = user_input
+                completed = speak_with_interrupt(speech_part)
+                if completed:
+                    app_ui.update_status(speech_part, "#00ccff")
+                else:
+                    app_ui.update_status("⚡ INTERRUPTED", "#ffaa00")
+
+                    
 
             # STEP B: EXTRACT COMMANDS
             commands = re.findall(r"###(OPEN|CLOSE|SEARCH|SYS): (.*?)(?=###|$)", response)

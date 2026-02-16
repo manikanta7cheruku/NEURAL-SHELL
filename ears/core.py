@@ -15,6 +15,10 @@ from faster_whisper import WhisperModel
 import os
 import colorama
 from colorama import Fore
+# V1.3: Interrupt detection
+import threading
+import time
+import numpy as np
 
 colorama.init(autoreset=True)
 
@@ -92,6 +96,8 @@ def listen():
                 "un roll": "enroll",
             }
 
+            
+
             for wrong, right in corrections.items():
                 if wrong in clean:
                     full_text = full_text.lower().replace(wrong, right)
@@ -101,3 +107,71 @@ def listen():
 
         except:
             return None, None
+        
+
+def listen_for_interrupt(interrupt_words, on_interrupt_callback, stop_event):
+    """
+    V1.3: Lightweight listener that runs DURING speech.
+    Listens for short interrupt phrases and triggers callback.
+    """
+    recognizer = sr.Recognizer()
+    recognizer.energy_threshold = 300
+    recognizer.pause_threshold = 0.8
+    recognizer.non_speaking_duration = 0.5
+    
+    # Seven's own voice gets picked up as these — ignore them
+    self_voice_ghosts = [
+        "thank you", "thanks", "thanks for watching", "you",
+        "bye", "okay", "subtitles", "subscribe", "video",
+        "caption", "copyright", "amara"
+    ]
+    
+    while not stop_event.is_set():
+        try:
+            with sr.Microphone() as source:
+                try:
+                    audio = recognizer.listen(source, timeout=1.5, phrase_time_limit=2)
+                except sr.WaitTimeoutError:
+                    continue
+                
+                interrupt_audio_path = "temp_interrupt.wav"
+                with open(interrupt_audio_path, "wb") as f:
+                    f.write(audio.get_wav_data())
+                
+                segments, _ = audio_model.transcribe(
+                    interrupt_audio_path,
+                    beam_size=1,
+                    language="en"
+                )
+                text = "".join([s.text for s in segments]).strip().lower()
+                
+                try:
+                    os.remove(interrupt_audio_path)
+                except:
+                    pass
+                
+                if not text or len(text) < 2:
+                    continue
+                
+                clean = text.replace(".", "").replace("!", "").replace(",", "").strip()
+                
+                # Skip Seven's own voice being picked up
+                if clean in self_voice_ghosts:
+                    continue
+                
+                # Check against interrupt words
+                for word in interrupt_words:
+                    if word in clean:
+                        print(f"[EARS] ⚡ Interrupt detected: '{clean}' (matched: '{word}')")
+                        on_interrupt_callback()
+                        return
+                        
+        except Exception:
+            continue
+    
+    try:
+        if os.path.exists("temp_interrupt.wav"):
+            os.remove("temp_interrupt.wav")
+    except:
+        pass
+        

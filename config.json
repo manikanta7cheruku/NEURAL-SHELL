@@ -1,7 +1,7 @@
 {
     "identity": {
         "name": "Seven",
-        "creator": "MKC",
+        "creator": "Team Seven",
         "wake_words": ["seven", "hey seven", "wake up"],
         "stop_words": ["stop", "shut up", "pause"]
     },
@@ -28,5 +28,11 @@
         "screenshot_folder": "./screenshots",
         "log_file": "./chat_log.txt",
         "voice_prints": "./seven_data/voice_prints"
+    },
+    "interrupt": {
+    "enabled": true,
+    "words": ["stop", "seven", "hey seven", "shut up", "hold on", "wait", "pause"],
+    "listen_during_speech": true,
+    "interrupt_cooldown": 1.5
     }
 }

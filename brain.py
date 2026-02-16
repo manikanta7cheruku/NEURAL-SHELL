@@ -19,6 +19,7 @@ LAYER ORDER (Critical):
 import requests
 import json
 import os
+import random
 import config
 import colorama
 from colorama import Fore
@@ -33,7 +34,7 @@ MODEL_NAME = config.KEY['brain']['model_name']
 CONVO_HISTORY = {}
 USER_NAME = "Admin"
 LAST_USER_INPUT = ""
-RECENT_QUESTIONS = []
+RECENT_QUESTIONS = {}
 
 
 def load_name_from_memory():
@@ -65,7 +66,7 @@ def load_name_from_memory():
 def reset_session():
     """Clears session data when memory is wiped."""
     global RECENT_QUESTIONS, CONVO_HISTORY, USER_NAME
-    RECENT_QUESTIONS = []
+    RECENT_QUESTIONS = {}
     CONVO_HISTORY = {}
     USER_NAME = "Admin"
 
@@ -133,23 +134,45 @@ def think(prompt_text, speaker_id="default"):
     # Skip repetition for commands, greetings, AND requests
     is_request = any(w in clean_in for w in ["tell me", "show me", "give me", "sing", "explain", "open", "close"])
     
-    if clean_in in RECENT_QUESTIONS and not is_command and not is_greeting and not is_request:
+    speaker_questions = RECENT_QUESTIONS.get(speaker_id, [])
+    if clean_in in speaker_questions and not is_command and not is_greeting and not is_request:
 
         # Identity questions have FIXED answers — no need to check memory
         # These answers NEVER change, so always block on repeat
         if "your name" in clean_in or "who are you" in clean_in:
-            return "Still Seven. That hasn't changed."
+            import random
+            responses = [
+                "Seven. Same as before.",
+                "Still Seven.",
+                "I'm Seven. That hasn't changed.",
+                "Seven — same answer as last time.",
+            ]
+            return random.choice(responses)
         if "my name" in clean_in or "who am i" in clean_in:
             if speaker_id not in ("default", "unknown") and speaker_name == speaker_id.title():
-                # Speaker never told their real name (speaker_name is just profile ID)
                 return "You haven't told me your name yet."
-            return f"Still {speaker_name}, last I checked."
+            import random
+            responses = [
+                f"You're {speaker_name}.",
+                f"Still {speaker_name}.",
+                f"{speaker_name}, same as before.",
+                f"{speaker_name} — hasn't changed.",
+            ]
+            return random.choice(responses)
         if "what are you" in clean_in:
             return "Still Seven, your personal AI assistant."
         if "call you" in clean_in:
-            return "Still Seven."
+            return "Seven. Same as always."
         if "created you" in clean_in or "made you" in clean_in or "who made" in clean_in:
-            return f"Still {USER_NAME}. That hasn't changed."
+            creator = config.KEY['identity']['creator']
+            import random
+            responses = [
+                f"{creator}. Same answer.",
+                f"Still {creator}.",
+                f"{creator} built me. That hasn't changed.",
+                f"{creator} — my creator.",
+            ]
+            return random.choice(responses)
 
         # For NON-identity questions, check if new memories exist
         search_uid = speaker_id if speaker_id not in ("default", "unknown") else "mani"
@@ -160,7 +183,7 @@ def think(prompt_text, speaker_id="default"):
             print(Fore.MAGENTA + "[MEMORY] Found NEW memories for repeated question!")
             print(Fore.MAGENTA + memory_context)
         else:
-            repeat_count = RECENT_QUESTIONS.count(clean_in)
+            repeat_count = speaker_questions.count(clean_in)
 
             if repeat_count >= 2:
                 return "You've asked me this multiple times now. My answer hasn't changed."
@@ -168,9 +191,11 @@ def think(prompt_text, speaker_id="default"):
             return "You just asked me that. Same answer."
 
     if not is_command and not is_greeting:
-        RECENT_QUESTIONS.append(clean_in)
-        if len(RECENT_QUESTIONS) > 10:
-            RECENT_QUESTIONS.pop(0)
+        if speaker_id not in RECENT_QUESTIONS:
+            RECENT_QUESTIONS[speaker_id] = []
+        RECENT_QUESTIONS[speaker_id].append(clean_in)
+        if len(RECENT_QUESTIONS[speaker_id]) > 10:
+            RECENT_QUESTIONS[speaker_id].pop(0)
 
     # =========================================================================
     # LAYER 3: IDENTITY OVERRIDES (Smart Keyword Detection)
@@ -203,13 +228,15 @@ def think(prompt_text, speaker_id="default"):
             and "friend" not in clean_in
         )
         if is_direct:
-            return f"You are {USER_NAME}."
+            if speaker_id not in ("default", "unknown") and speaker_name == speaker_id.title():
+                return "You haven't told me your name yet."
+            return f"You are {speaker_name}."
         
     # --- FAREWELLS ---
     farewell_words = ["bye", "goodbye", "bye seven", "goodbye seven", "see you",
                       "see ya", "later", "good night", "goodnight"]
     if clean_in in farewell_words:
-        return "Later, Mani."
+        return f"Later, {speaker_name}."
 
     # --- WHAT ARE YOU ---
     if clean_in == "what are you":
