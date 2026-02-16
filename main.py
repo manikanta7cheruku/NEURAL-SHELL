@@ -297,6 +297,8 @@ def seven_logic():
 
             if not response:
                 response = "Processing error."
+            # V1.3: Track if speech completes (set later in speech block)
+            completed = True
 
             # =================================================================
             # V1.1: STORE CONVERSATION IN LONG-TERM MEMORY
@@ -337,6 +339,9 @@ def seven_logic():
                 try:
                     # Clean the response: remove command tags before storing
                     clean_response = re.sub(r'###\w+:\s*\S+', '', response).strip()
+                    # V1.3: Tag interrupted responses so Seven knows it was cut off
+                    if not completed and clean_response:
+                        clean_response = f"[INTERRUPTED] {clean_response}"
                     if clean_response:
                         if speaker_id != "default" and speaker_id != "unknown":
                             seven_memory.store_conversation(user_input, clean_response, user_id=speaker_id)
