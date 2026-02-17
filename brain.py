@@ -431,17 +431,34 @@ def think(prompt_text, speaker_id="default"):
     speaker_history = CONVO_HISTORY.get(speaker_id, [])
     full_prompt += "LOG:\n" + "\n".join(speaker_history) + "\nSeven:"
 
+    # V1.4: Smart response length based on question type
+    # Short answers: greetings, yes/no, prices, names
+    # Long answers: explanations, lists, stories, capabilities
+    long_triggers = ["tell me", "explain", "describe", "what can you", 
+                     "list", "how does", "how do", "why", "story",
+                     "detail", "everything", "all about", "continue",
+                     "go on", "more about"]
+    needs_long = any(t in clean_in for t in long_triggers)
+    
+    if needs_long:
+        response_length = 150
+    elif web_searched:
+        response_length = 80
+    else:
+        response_length = 60
+
     payload = {
         "model": MODEL_NAME,
         "prompt": full_prompt,
         "stream": False,
         "options": {
             "temperature": 0.3,
-            "num_predict": 60,
+            "num_predict": response_length,
             "repeat_penalty": 1.3,
             "stop": ["User:", "System:", "Seven:"]
         }
     }
+
 
     try:
         r = requests.post(OLLAMA_URL, json=payload, timeout=30)
