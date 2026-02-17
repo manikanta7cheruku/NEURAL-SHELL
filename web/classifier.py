@@ -23,7 +23,7 @@ LOGIC:
 TIME_SENSITIVE = [
     "today", "right now", "currently", "latest", "recent",
     "this week", "this month", "this year", "yesterday",
-    "tomorrow", "tonight", "update", "updated"
+    "tomorrow", "tonight"
 ]
 
 REALTIME_DATA = [
@@ -50,7 +50,11 @@ NO_SEARCH_TRIGGERS = [
     "my name", "your name", "who are you", "who am i",
     "remember", "you know", "i told you", "my favorite",
     "open", "close", "launch", "start", "kill",
-    "how are you", "thank you", "hello", "hi", "bye"
+    "how are you", "thank you", "hello", "hi", "bye",
+    "introduce yourself", "what can you do", "what you can do",
+    "tell me what you", "your capabilities", "what are you",
+    "you won't", "you wont", "can you", "do you",
+    "will you", "are you able"
 ]
 
 

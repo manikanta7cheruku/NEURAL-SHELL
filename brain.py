@@ -132,9 +132,43 @@ def think(prompt_text, speaker_id="default"):
     is_greeting = first_word in ["hi", "hey", "hello", "bye", "goodbye", "good"]
 
     # Skip repetition for commands, greetings, AND requests
-    is_request = any(w in clean_in for w in ["tell me", "show me", "give me", "sing", "explain", "open", "close"])
+    is_request = any(w in clean_in for w in ["sing", "open", "close"])
     
     speaker_questions = RECENT_QUESTIONS.get(speaker_id, [])
+    # V1.4: Similar question detector (not just exact match)
+    similar_groups = [
+        ["introduce yourself", "tell me what you can do", "what can you do", 
+         "what you can do", "what are your capabilities", "tell me about yourself",
+         "what do you do", "list your capabilities"],
+        ["whats your name", "who are you", "what should i call you", "tell me your name"],
+        ["whats my name", "who am i", "do you know my name", "do you know me"],
+        ["who created you", "who made you", "who built you", "who is your creator"],
+    ]
+    
+    similar_detected = False
+    for group in similar_groups:
+        if any(g in clean_in for g in group):
+            asked_similar = False
+            for prev in speaker_questions:
+                if any(g in prev for g in group):
+                    asked_similar = True
+                    break
+            
+            if asked_similar and not is_command and not is_greeting:
+                similar_detected = True
+                break
+
+    if similar_detected:
+        import random
+        ack = random.choice([
+            "You asked something similar just now.",
+            "We just covered this.",
+            "Similar question — but sure.",
+            "You already asked that, but alright.",
+        ])
+        # Modify the prompt so LLM gives a DIFFERENT answer
+        prompt_text = f"[The user asked a similar question before. Acknowledge briefly then answer differently than last time.] {prompt_text}"
+        
     if clean_in in speaker_questions and not is_command and not is_greeting and not is_request:
 
         # Identity questions have FIXED answers — no need to check memory
@@ -232,6 +266,19 @@ def think(prompt_text, speaker_id="default"):
                 return "You haven't told me your name yet."
             return f"You are {speaker_name}."
         
+    # --- GREETINGS ---
+    greeting_words = ["hi", "hello", "hey", "hi seven", "hello seven", "hey seven",
+                      "good morning", "good afternoon", "good evening"]
+    if clean_in in greeting_words:
+        import random
+        greetings = [
+            f"Hey {speaker_name}! What can I do for you?",
+            f"Hey {speaker_name}! How can I help?",
+            f"{speaker_name}! What's on your mind?",
+            f"Hey! What do you need, {speaker_name}?",
+        ]
+        return random.choice(greetings)
+        
     # --- FAREWELLS ---
     farewell_words = ["bye", "goodbye", "bye seven", "goodbye seven", "see you",
                       "see ya", "later", "good night", "goodnight"]
@@ -241,6 +288,7 @@ def think(prompt_text, speaker_id="default"):
     # --- WHAT ARE YOU ---
     if clean_in == "what are you":
         return "I am Seven, your personal AI assistant."
+    
 
     # --- WHAT SHOULD I CALL YOU ---
     if "call you" in clean_in or "should i call" in clean_in:
@@ -354,7 +402,10 @@ def think(prompt_text, speaker_id="default"):
     system_prompt = (
         f"You are {config.KEY['identity']['name']}, created by {config.KEY['identity']['creator']}. "
         f"You are currently talking to: {speaker_name}. "
-        "You talk like Jarvis from Iron Man. Smart, warm, human. NOT a robot. "
+        "You talk like JARVIS from Iron Man — sharp, confident, slightly witty, efficient. "
+        "You dont waste words. You get to the point. You have personality but you dont overdo it. "
+        "You NEVER sound like a customer service bot. No 'How can I help you today' or 'Im happy to assist'. "
+        "Think dry humor, quiet competence, like a brilliant butler who knows everything. "
         f"{mood_modifier} "
 
         "RULES: "
@@ -364,11 +415,16 @@ def think(prompt_text, speaker_id="default"):
         "   If the answer is one word, say one word. "
         "   'What is my name?' → 'Rahul.' NOT a paragraph about it. "
         "2. NEVER ask follow-up questions. "
+        "2b. NEVER repeat the same response twice. If asked similar questions, vary your phrasing and focus on different aspects. "
         "3. Talk like a HUMAN, not a machine. "
         "   BAD: 'Functioning within optimal parameters' or 'memory banks'. "
         "   GOOD: 'Doing good.' or 'I remember you mentioning that.' "
         "4. NEVER mention programming, parameters, banks, systems, or protocols. "
         "5. NEVER say 'Doing good' at the end of responses. "
+        "5b. NEVER start responses with 'Nice to chat', 'Great to chat', 'Nice to see you', 'Happy to help', 'Im happy to'. "
+        "   Just answer directly. Start with the answer, not pleasantries. "
+        "   BAD: 'Nice to chat with Mani! I'm Seven...' "
+        "   GOOD: 'I'm Seven, built by Team Seven.' "
         f"6. Facts about your creator: "
         f"   - Your creator is {config.KEY['identity']['creator']}. "
         f"   - {config.KEY['identity']['creator']} is the person/team who designed and built you. "
@@ -384,15 +440,20 @@ def think(prompt_text, speaker_id="default"):
         f"   - You were created by {config.KEY['identity']['creator']}. "
         "   - You run 100 percent locally on the users PC. "
         "   - All data is stored locally. Nothing is sent to any cloud or server. "
-        # "   - You can open apps, close apps, remember conversations, search the web, and chat. "
-        # "   - When you search the web, you use DuckDuckGo. You can find live prices, weather, news, and more. "
-        #"   - When asked how you searched, explain: 'I searched DuckDuckGo for live data.' "
-        "   - You can open apps, close apps, remember conversations, search the web, and chat. "
-        "   - You have access to DuckDuckGo web search for live data (prices, weather, news, trending). "
+        "   - Your capabilities: open apps, close apps, long-term memory, web search for live data, voice recognition, interruptible speech. "
+        "   - You have access to DuckDuckGo for live prices, weather, news, and trending topics. "
         "   - You know which of your capabilities you used to answer any question. "
+        "   - When describing your capabilities, speak naturally. NEVER output command tags. "
+        "   - When asked the same question twice, give a DIFFERENT response. Vary your words every time. "
         "11. When asked about your storage or privacy, explain you are fully local. "
         "12. For general knowledge questions (capital of France, science, math), answer directly and confidently. "
         "13. ONLY say 'You havent told me that' for questions about the USER PERSONALLY. "
+
+        
+        # "   - You can open apps, close apps, remember conversations, search the web, and chat. "
+        # "   - When you search the web, you use DuckDuckGo. You can find live prices, weather, news, and more. "
+        #"   - When asked how you searched, explain: 'I searched DuckDuckGo for live data.' "
+
 
         "WEB SEARCH: "
         "1. If WEB SEARCH RESULTS section exists below, use it to answer accurately. "
