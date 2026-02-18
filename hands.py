@@ -25,9 +25,55 @@ from memory.mood import mood_engine
 # Prevents accidentally killing the OS
 SAFE_APPS = ["system", "registry", "service", "nvidia", "antivirus", "explorer"]
 
+# APP ALIASES — common names mapped to actual app names
+APP_ALIASES = {
+    "browser": "chrome",
+    "web browser": "chrome",
+    "internet": "chrome",
+    "files": "explorer",
+    "file manager": "explorer",
+    "my computer": "explorer",
+    "this pc": "explorer",
+    "terminal": "cmd",
+    "command prompt": "cmd",
+    "powershell": "powershell",
+    "music": "spotify",
+    "player": "spotify",
+    "mail": "outlook",
+    "email": "outlook",
+    "word": "winword",
+    "excel": "excel",
+    "powerpoint": "powerpnt",
+    "paint": "mspaint",
+    "snip": "snippingtool",
+    "screenshot tool": "snippingtool",
+    "store": "ms-windows-store:",
+    "microsoft store": "ms-windows-store:",
+    "clock": "ms-clock:",
+    "alarm": "ms-clock:",
+    "maps": "bingmaps:",
+    "photos": "ms-photos:",
+    "recorder": "soundrecorder:",
+    "voice recorder": "soundrecorder:",
+}
+
 def close_app(app_name):
-    clean_name = app_name.lower().strip()
-    print(Fore.CYAN + f"🔧 HANDS: Closing '{clean_name}'...")
+    raw_name = app_name.strip()
+    
+    # V1.5: Check for ALL_ prefix
+    close_all = False
+    if raw_name.upper().startswith("ALL_"):
+        close_all = True
+        raw_name = raw_name[4:]
+    
+    clean_name = raw_name.lower().strip()
+    print(Fore.CYAN + f"🔧 HANDS: Closing '{clean_name}'" + (" (ALL instances)" if close_all else "") + "...")
+
+    # V1.5: Resolve aliases
+    if clean_name in APP_ALIASES:
+        resolved = APP_ALIASES[clean_name]
+        print(Fore.CYAN + f"   -> Alias '{clean_name}' → '{resolved}'")
+        clean_name = resolved
 
     # 1. SPECIAL CASE: ACTIVE WINDOW
     if clean_name in ["current", "this", "it", "active window"]:
@@ -47,8 +93,22 @@ def close_app(app_name):
 
     # 3. SPECIAL CASE: EXPLORER (Generic Folders)
     if "explorer" in clean_name or "file" in clean_name:
-        subprocess.Popen(['powershell', '-command', "(New-Object -ComObject Shell.Application).Windows() | foreach-object { $_.quit() }"])
-        command_log.log_command("CLOSE", "explorer", True, "PowerShell COM")
+        if close_all:
+            subprocess.Popen(['powershell', '-command', "(New-Object -ComObject Shell.Application).Windows() | foreach-object { $_.quit() }"])
+            print(Fore.GREEN + "   -> Closed ALL Explorer windows")
+            command_log.log_command("CLOSE", "explorer", True, "All windows closed")
+        else:
+            subprocess.Popen(['powershell', '-command', "(New-Object -ComObject Shell.Application).Windows() | Select-Object -Last 1 | foreach-object { $_.quit() }"])
+            print(Fore.GREEN + "   -> Closed 1 Explorer window")
+            command_log.log_command("CLOSE", "explorer", True, "1 window closed")
+        mood_engine.on_command_result(True)
+        return True
+    
+
+    # SPECIAL CASE: CALCULATOR
+    if "calculator" in clean_name or "calc" in clean_name:
+        subprocess.Popen("taskkill /im CalculatorApp.exe /f", shell=True)
+        command_log.log_command("CLOSE", "calculator", True, "Force kill")
         mood_engine.on_command_result(True)
         return True
 
@@ -65,33 +125,110 @@ def close_app(app_name):
         command_log.log_command("CLOSE", "task manager", True, "Admin kill")
         mood_engine.on_command_result(True)
         return True
+    
+    # 6. SPECIAL CASE: BROWSERS (Chrome, Firefox, Edge)
+    browsers = ["chrome", "firefox", "edge", "brave", "opera"]
+    
+    is_browser = any(b in clean_name for b in browsers)
+    
+    if is_browser:
+        if close_all:
+            # Find the actual process name
+            proc_names = {
+                "chrome": "chrome.exe",
+                "firefox": "firefox.exe", 
+                "edge": "msedge.exe",
+                "brave": "brave.exe",
+                "opera": "opera.exe",
+            }
+            for b, pname in proc_names.items():
+                if b in clean_name:
+                    subprocess.Popen(f"taskkill /im {pname} /f", shell=True)
+                    print(Fore.GREEN + f"   -> Force killed ALL {pname}")
+                    command_log.log_command("CLOSE", clean_name, True, f"All {pname} killed")
+                    break
+        else:
+            # Close just the current/frontmost window using Alt+F4
+            # First bring the browser to focus, then close it
+            import time
+            try:
+                subprocess.Popen(f'powershell -command "(New-Object -ComObject WScript.Shell).AppActivate(\'chrome\')"', shell=True)
+                time.sleep(0.3)
+                pyautogui.hotkey('alt', 'f4')
+                print(Fore.GREEN + f"   -> Closed frontmost {clean_name} window")
+                command_log.log_command("CLOSE", clean_name, True, "Alt+F4 frontmost window")
+            except Exception as e:
+                print(Fore.RED + f"   -> Failed: {e}")
+                command_log.log_command("CLOSE", clean_name, False, str(e))
+                mood_engine.on_command_result(False)
+                return False
+        mood_engine.on_command_result(True)
+        return True
 
-    # 6. UNIVERSAL PROCESS KILLER
-    # Scans all running processes to find a match
-    killed = False
-    for proc in psutil.process_iter(['pid', 'name']):
+    # 6. SMART PROCESS CLOSER
+    # Finds matching processes. Closes only ONE instance (most recent).
+    # User says "close all chrome" → closes all. Otherwise just one.
+
+    
+    matching_procs = []
+    for proc in psutil.process_iter(['pid', 'name', 'create_time']):
         try:
             p_name = proc.info['name'].lower()
             if clean_name in p_name:
-                if any(safe in p_name for safe in SAFE_APPS): continue
-                proc.terminate()
-                killed = True
-        except: pass
+                if any(safe in p_name for safe in SAFE_APPS):
+                    continue
+                matching_procs.append(proc)
+                print(Fore.CYAN + f"   -> Found: {proc.info['name']} (PID: {proc.info['pid']})")
+        except:
+            pass
     
-    if killed:
-        command_log.log_command("CLOSE", clean_name, True, "Process terminated")
-        mood_engine.on_command_result(True)
-    else:
+    if not matching_procs:
         print(Fore.RED + f"❌ HANDS: Could not find process for '{clean_name}'")
         command_log.log_command("CLOSE", clean_name, False, "Process not found")
         mood_engine.on_command_result(False)
-        
-    return killed
+        return False
+    
+    if close_all:
+        # Kill all instances
+        for proc in matching_procs:
+            try:
+                proc.terminate()
+            except:
+                pass
+        print(Fore.GREEN + f"   -> Closed ALL {len(matching_procs)} instances of '{clean_name}'")
+        command_log.log_command("CLOSE", clean_name, True, f"All {len(matching_procs)} terminated")
+        mood_engine.on_command_result(True)
+        return True
+    else:
+        # Kill only the MOST RECENT instance (highest create_time)
+        try:
+            matching_procs.sort(key=lambda p: p.info.get('create_time', 0), reverse=True)
+            newest = matching_procs[0]
+            newest.terminate()
+            remaining = len(matching_procs) - 1
+            if remaining > 0:
+                print(Fore.GREEN + f"   -> Closed 1 instance of '{clean_name}' ({remaining} still running)")
+            else:
+                print(Fore.GREEN + f"   -> Closed '{clean_name}'")
+            command_log.log_command("CLOSE", clean_name, True, f"1 terminated, {remaining} remaining")
+            mood_engine.on_command_result(True)
+            return True
+        except Exception as e:
+            print(Fore.RED + f"❌ HANDS: Failed to close '{clean_name}': {e}")
+            command_log.log_command("CLOSE", clean_name, False, str(e))
+            mood_engine.on_command_result(False)
+            return False
 
 def open_app(app_name):
     clean_name = app_name.lower().strip()
     # Remove AI junk words
     clean_name = clean_name.replace("activated", "").replace("!", "").strip()
+
+    # V1.5: Resolve aliases
+    if clean_name in APP_ALIASES:
+        resolved = APP_ALIASES[clean_name]
+        print(Fore.CYAN + f"   -> Alias '{clean_name}' → '{resolved}'")
+        clean_name = resolved
     
     print(Fore.CYAN + f"🔧 HANDS: Opening '{clean_name}'...")
 

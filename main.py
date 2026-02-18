@@ -413,10 +413,25 @@ def seven_logic():
 
                         if cmd_type == "OPEN":
                             app_ui.update_status(f"OPENING: {app_to_run}", "#00ff00")
-                            hands.open_app(app_to_run)
+                            success = hands.open_app(app_to_run)
+                            if not success:
+                                fail_responses = [
+                                    f"Can't find {app_to_run}. Check the name?",
+                                    f"{app_to_run} doesn't seem to exist on this machine.",
+                                    f"No luck with {app_to_run}. Is it installed?",
+                                    f"Couldn't find {app_to_run}. Try the exact name.",
+                                ]
+                                mouth.speak(random.choice(fail_responses))
                         elif cmd_type == "CLOSE":
                             app_ui.update_status(f"CLOSING: {app_to_run}", "#ff0000")
-                            hands.close_app(app_to_run)
+                            success = hands.close_app(app_to_run)
+                            if not success:
+                                fail_responses = [
+                                    f"{app_to_run} doesn't seem to be running.",
+                                    f"Can't find {app_to_run} in active processes.",
+                                    f"Nothing to close — {app_to_run} isn't open.",
+                                ]
+                                mouth.speak(random.choice(fail_responses))
                         elif cmd_type == "SEARCH":
                             app_ui.update_status(f"SEARCHING: {app_to_run}", "#0000ff")
                             hands.search_web(app_to_run)

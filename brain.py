@@ -132,7 +132,9 @@ def think(prompt_text, speaker_id="default"):
     is_greeting = first_word in ["hi", "hey", "hello", "bye", "goodbye", "good"]
 
     # Skip repetition for commands, greetings, AND requests
-    is_request = any(w in clean_in for w in ["sing", "open", "close"])
+    is_request = False
+    if first_word in ["sing", "open", "close"]:
+        is_request = True
     
     speaker_questions = RECENT_QUESTIONS.get(speaker_id, [])
     # V1.4: Similar question detector (not just exact match)
@@ -174,7 +176,7 @@ def think(prompt_text, speaker_id="default"):
         # Identity questions have FIXED answers — no need to check memory
         # These answers NEVER change, so always block on repeat
         if "your name" in clean_in or "who are you" in clean_in:
-            import random
+            
             responses = [
                 "Seven. Same as before.",
                 "Still Seven.",
@@ -185,7 +187,7 @@ def think(prompt_text, speaker_id="default"):
         if "my name" in clean_in or "who am i" in clean_in:
             if speaker_id not in ("default", "unknown") and speaker_name == speaker_id.title():
                 return "You haven't told me your name yet."
-            import random
+            
             responses = [
                 f"You're {speaker_name}.",
                 f"Still {speaker_name}.",
@@ -199,7 +201,7 @@ def think(prompt_text, speaker_id="default"):
             return "Seven. Same as always."
         if "created you" in clean_in or "made you" in clean_in or "who made" in clean_in:
             creator = config.KEY['identity']['creator']
-            import random
+            
             responses = [
                 f"{creator}. Same answer.",
                 f"Still {creator}.",
@@ -294,6 +296,17 @@ def think(prompt_text, speaker_id="default"):
     if "call you" in clean_in or "should i call" in clean_in:
         return "You can call me Seven."
     
+    # --- APP HISTORY ---
+    if ("what" in clean_in or "which" in clean_in) and ("app" in clean_in or "open" in clean_in) and ("today" in clean_in or "did i" in clean_in or "did you" in clean_in):
+        from memory.command_log import command_log
+        stats = command_log.get_stats()
+        recent = stats.get('recent', [])
+        if recent:
+            app_list = ", ".join([f"{r['action']} {r['target']}" for r in recent[:5]])
+            return f"Recent commands: {app_list}."
+        else:
+            return "No apps opened in this session yet."
+    
 
      # --- USER TEACHING A FACT (acknowledge it, don't parrot it back) ---
     # "I love cricket" should get "Nice, I'll remember that." not "You play cricket."
@@ -309,6 +322,76 @@ def think(prompt_text, speaker_id="default"):
     # =========================================================================
     mood_engine.analyze_input(prompt_text)
     mood_modifier = mood_engine.get_mood_prompt_modifier()
+
+    # =========================================================================
+    # LAYER 4.5: COMMAND DETECTION (Python-first, no LLM needed)
+    # =========================================================================
+    # If the first word is a command verb, generate tags directly in Python.
+    # This is FASTER and more RELIABLE than asking the LLM to generate tags.
+    
+    if first_word in ["open", "close", "start", "kill", "launch"]:
+        command_verb = first_word
+        remaining = clean_in
+        
+        for verb in ["open", "close", "start", "kill", "launch"]:
+            if remaining.startswith(verb):
+                remaining = remaining[len(verb):].strip()
+                break
+        
+        if command_verb in ["open", "start", "launch"]:
+            tag = "OPEN"
+        elif command_verb in ["close", "kill"]:
+            tag = "CLOSE"
+        else:
+            tag = "OPEN"
+        
+        # V1.5: Detect "all" modifier for close commands
+        close_all = False
+        if tag == "CLOSE" and remaining.startswith("all "):
+            close_all = True
+            remaining = remaining[4:].strip()
+        
+        if remaining:
+            apps = []
+            if " and " in remaining:
+                apps = [a.strip() for a in remaining.split(" and ") if a.strip()]
+            elif "," in remaining:
+                apps = [a.strip() for a in remaining.split(",") if a.strip()]
+            else:
+                apps = [remaining.strip()]
+            
+            if close_all:
+                tags = " ".join([f"###{tag}: ALL_{app}" for app in apps])
+            else:
+                tags = " ".join([f"###{tag}: {app}" for app in apps])
+            
+            import random as _rand
+            # Natural speech before command
+            app_list = ", ".join(apps)
+            import random as _rand
+            app_list = ", ".join(apps)
+            if tag == "OPEN":
+                speech = _rand.choice([
+                    f"Opening {app_list}.",
+                    f"On it. {app_list} coming up.",
+                    f"{app_list}, coming right up.",
+                    f"Launching {app_list}.",
+                ])
+            else:
+                if close_all:
+                    speech = _rand.choice([
+                        f"Closing all {app_list}.",
+                        f"Shutting down every {app_list}.",
+                        f"Killing all {app_list} instances.",
+                    ])
+                else:
+                    speech = _rand.choice([
+                        f"Closing {app_list}.",
+                        f"Shutting down {app_list}.",
+                        f"Done with {app_list}.",
+                    ])
+            return f"{speech} {tags}"
+    
 
     # =========================================================================
     # LAYER 5: MEMORY SEARCH (Questions/Chat only — not commands)
