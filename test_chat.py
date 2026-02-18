@@ -5,7 +5,7 @@ PROJECT SEVEN - test_chat.py (V1.6 - Developer Console)
 """
 
 import brain
-import hands
+import hands.core as core
 import re
 import colorama
 from colorama import Fore
@@ -19,7 +19,7 @@ colorama.init(autoreset=True)
 active_speaker = "default"
 
 print(Fore.CYAN + "=" * 60)
-print(Fore.CYAN + "  SEVEN TEXT DEBUGGER (V1.2 - VOICE IDENTITY)")
+print(Fore.CYAN + "  SEVEN TEXT DEBUGGER (V1.6 - WINDOW MASTERY)")
 print(Fore.CYAN + "=" * 60)
 print(Fore.WHITE + "  Commands: /memory | /facts | /convos | /stats")
 print(Fore.WHITE + "  Commands: /logs | /logs N | /mood")
@@ -28,6 +28,7 @@ print(Fore.WHITE + "  Commands: /delete convo [n]")
 print(Fore.WHITE + "  Commands: /clear all | /clear logs | /clear mood | quit")
 print(Fore.WHITE + "  Commands: /help (show all commands)")
 print(Fore.WHITE + "  Commands: /speaker [name] | /speakers | /remove speaker [name]")
+print(Fore.WHITE + "  Commands: /windows | /window [cmd]")
 print(Fore.CYAN + "=" * 60)
 
 # Show mood on startup
@@ -334,6 +335,8 @@ while True:
         print(Fore.WHITE + "  /speaker [name]  Switch active speaker profile (text mode)")
         print(Fore.WHITE + "  /speakers        List enrolled speakers")
         print(Fore.WHITE + "  /remove speaker  Remove a speaker's voice print")
+        print(Fore.WHITE + "  /windows         List all visible windows")
+        print(Fore.WHITE + "  /window [cmd]    Test window command (e.g., /window minimize chrome)")
         print(Fore.WHITE + "  quit / exit      Exit the console")
         print(Fore.CYAN + f"  {'='*50}")
         continue
@@ -385,6 +388,96 @@ while True:
         clear_all_memory()
         continue
 
+    if cmd == "/windows":
+        from hands.windows import get_window_list
+        windows = get_window_list()
+        print(Fore.CYAN + f"\n  {'='*50}")
+        print(Fore.CYAN + f"  VISIBLE WINDOWS ({len(windows)} total)")
+        print(Fore.CYAN + f"  {'='*50}")
+        for i, (hwnd, title) in enumerate(windows):
+            print(Fore.CYAN + f"  [{i}] {title}")
+            print(Fore.WHITE + f"       hwnd: {hwnd}")
+        print(Fore.CYAN + f"  {'='*50}")
+        continue
+
+    if cmd.startswith("/window "):
+        # Direct window command: /window minimize chrome
+        # /window snap chrome left
+        # /window layout split chrome,code
+        # /window focus notepad
+        # /window minimize_all
+        # /window show_desktop
+        window_cmd = cmd[8:].strip()
+        print(Fore.CYAN + f"  [WINDOW TEST] Command: {window_cmd}")
+        
+        # Parse into params dict
+        parts = window_cmd.split()
+        if not parts:
+            print(Fore.RED + "  ❌ Usage: /window minimize chrome")
+            print(Fore.WHITE + "  Actions: focus, minimize, maximize, restore, snap, center")
+            print(Fore.WHITE + "           minimize_all, show_desktop, layout")
+            print(Fore.WHITE + "  Examples:")
+            print(Fore.WHITE + "    /window focus chrome")
+            print(Fore.WHITE + "    /window snap chrome left")
+            print(Fore.WHITE + "    /window layout split chrome,code")
+            print(Fore.WHITE + "    /window minimize_all")
+            continue
+        
+        from hands.windows import manage_window
+        
+        action = parts[0]
+        params = {"action": action}
+        
+        # No-target commands
+        if action in ["minimize_all", "show_desktop"]:
+            pass
+        elif action == "layout":
+            if len(parts) >= 3:
+                params["mode"] = parts[1]
+                params["targets"] = parts[2]
+            else:
+                print(Fore.RED + "  ❌ Usage: /window layout split chrome,code")
+                continue
+        elif action == "snap":
+            if len(parts) >= 3:
+                params["target"] = parts[1]
+                params["position"] = parts[2]
+            elif len(parts) == 2:
+                params["target"] = parts[1]
+                params["position"] = "left"
+            else:
+                print(Fore.RED + "  ❌ Usage: /window snap chrome left")
+                continue
+        elif action == "move_monitor":
+            if len(parts) >= 3:
+                params["target"] = parts[1]
+                params["monitor"] = parts[2]
+            else:
+                print(Fore.RED + "  ❌ Usage: /window move_monitor chrome 1")
+                continue
+        elif action == "resize":
+            if len(parts) >= 4:
+                params["target"] = parts[1]
+                params["width"] = parts[2]
+                params["height"] = parts[3]
+            else:
+                print(Fore.RED + "  ❌ Usage: /window resize chrome 800 600")
+                continue
+        else:
+            # Simple: focus, minimize, maximize, restore, center
+            if len(parts) >= 2:
+                params["target"] = " ".join(parts[1:])
+            else:
+                print(Fore.RED + f"  ❌ Usage: /window {action} <target>")
+                continue
+        
+        success, msg = manage_window(params)
+        if success:
+            print(Fore.GREEN + f"  ✅ {msg}")
+        else:
+            print(Fore.RED + f"  ❌ {msg}")
+        continue
+
     # --- NORMAL CHAT ---
     print(Fore.MAGENTA + "Seven is thinking...")
     response = brain.think(user_input, speaker_id=active_speaker)
@@ -404,7 +497,10 @@ while True:
         should_store = False
     if user_input.lower().strip() in ["hi", "hello", "hey"]:
         should_store = False
-    cmd_words = ["open", "close", "start", "kill", "launch"]
+    cmd_words = ["open", "close", "start", "kill", "launch",
+                 "minimize", "maximize", "maximise", "restore", "snap",
+                 "switch to", "bring up", "focus", "center", "centre",
+                 "put", "show desktop", "hide all"]
     if any(w in user_input.lower() for w in cmd_words):
         should_store = False
     # Don't store identity responses (they pollute memory with duplicates)
@@ -425,6 +521,30 @@ while True:
         except Exception as e:
             print(Fore.RED + f"[MEMORY ERROR] {e}")
 
+
+
+    # --- EXECUTE WINDOW COMMANDS (V1.6) ---
+    window_cmds = re.findall(r"###WINDOW:\s*(.*?)(?=###|$)", response)
+    if window_cmds:
+        from hands.windows import manage_window
+        for param_str in window_cmds:
+            param_str = param_str.strip()
+            print(Fore.CYAN + f"  [WINDOW CMD] Params: {param_str}")
+            
+            # Parse key=value pairs
+            params = {}
+            for pair in param_str.split():
+                if "=" in pair:
+                    key, val = pair.split("=", 1)
+                    params[key.strip()] = val.strip()
+            
+            if params:
+                success, msg = manage_window(params)
+                if success:
+                    print(Fore.GREEN + f"  ✅ {msg}")
+                else:
+                    print(Fore.RED + f"  ❌ {msg}")
+
     # --- EXECUTE COMMANDS ---
     commands = re.findall(r"###(OPEN|CLOSE|SEARCH|SYS): (.*?)(?=###|$)", response)
 
@@ -442,8 +562,8 @@ while True:
             clean_arg = clean_arg.strip()
             print(Fore.BLUE + f"[HANDS ACTION] Executing: {cmd_type} -> {clean_arg}")
             if cmd_type == "OPEN":
-                hands.open_app(clean_arg)
+                core.open_app(clean_arg)
             elif cmd_type == "CLOSE":
-                hands.close_app(clean_arg)
+                core.close_app(clean_arg)
             elif cmd_type == "SEARCH":
-                hands.search_web(clean_arg)
+                core.search_web(clean_arg)

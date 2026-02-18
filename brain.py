@@ -73,6 +73,160 @@ def reset_session():
 
 load_name_from_memory()
 
+def _build_window_tag(clean_in, is_desktop_cmd, is_layout, put_pattern, is_switch, is_move_monitor):
+    """
+    V1.6: Parse natural language into WINDOW tag params.
+    Returns param string like 'action=snap target=chrome position=left'
+    or None if parsing fails.
+    """
+    words = clean_in.split()
+    
+    # --- DESKTOP COMMANDS (no target needed) ---
+    if is_desktop_cmd:
+        if "show desktop" in clean_in or "clear desktop" in clean_in:
+            return "action=show_desktop"
+        if "hide all" in clean_in or "minimize all" in clean_in or "minimize everything" in clean_in:
+            return "action=minimize_all"
+        if "show all" in clean_in or "restore all" in clean_in:
+            return "action=show_desktop"  # Toggle
+        return "action=show_desktop"
+    
+    # --- LAYOUT COMMANDS (multiple targets) ---
+    if is_layout:
+        # "put chrome and code side by side"
+        # "split screen chrome and notepad"
+        # "stack chrome and code"
+        # "quad chrome code notepad explorer"
+        
+        # Determine mode
+        if "stack" in clean_in:
+            mode = "stack"
+        elif "quad" in clean_in:
+            mode = "quad"
+        else:
+            mode = "split"
+        
+        # Extract app names — everything that's not a layout keyword
+        noise = ["put", "and", "side", "by", "split", "screen", "view",
+                 "stack", "quad", "tile", "arrange", "on", "the", "in",
+                 "with", "next", "to", "beside", "layout"]
+        apps = [w for w in words if w not in noise and len(w) > 1]
+        
+        if len(apps) >= 2:
+            targets = ",".join(apps)
+            return f"action=layout mode={mode} targets={targets}"
+        return None
+    
+    # --- PUT PATTERN: "put chrome on the left" ---
+    if put_pattern:
+        # Extract target: word(s) between "put" and "on"
+        after_put = clean_in.split("put ", 1)[1] if "put " in clean_in else ""
+        
+        if " on " in after_put:
+            target_part = after_put.split(" on ")[0].strip()
+            position_part = after_put.split(" on ")[1].strip()
+        else:
+            return None
+        
+        # Parse position
+        pos_map = {
+            "the left": "left", "left": "left", "left side": "left",
+            "the right": "right", "right": "right", "right side": "right",
+            "top left": "top-left", "the top left": "top-left",
+            "top right": "top-right", "the top right": "top-right",
+            "bottom left": "bottom-left", "the bottom left": "bottom-left",
+            "bottom right": "bottom-right", "the bottom right": "bottom-right",
+            "top": "top", "the top": "top",
+            "bottom": "bottom", "the bottom": "bottom",
+        }
+        
+        position = None
+        for phrase, pos in pos_map.items():
+            if phrase in position_part:
+                position = pos
+                break
+        
+        if position and target_part:
+            return f"action=snap target={target_part} position={position}"
+        return None
+    
+    # --- SWITCH/FOCUS COMMANDS ---
+    if is_switch:
+        for sv in ["switch to", "bring up", "go to", "focus on", "focus",
+                    "show me", "pull up", "jump to", "open up"]:
+            if sv in clean_in:
+                sv_pos = clean_in.index(sv)
+                target = clean_in[sv_pos + len(sv):].strip()
+                if target:
+                    return f"action=focus target={target}"
+        return None
+    
+    # --- MOVE TO MONITOR ---
+    if is_move_monitor:
+        # "move chrome to monitor 2" / "move chrome to second monitor"
+        ordinals = {"second": "1", "2": "1", "third": "2", "3": "2",
+                     "first": "0", "1": "0", "primary": "0"}
+        
+        # Extract target: between "move" and "to"
+        after_move = clean_in.split("move ", 1)[1] if "move " in clean_in else ""
+        if " to " in after_move:
+            target = after_move.split(" to ")[0].strip()
+            monitor_part = after_move.split(" to ")[1].strip()
+        else:
+            return None
+        
+        # Parse monitor number
+        monitor_idx = "1"  # Default to second monitor
+        for word, idx in ordinals.items():
+            if word in monitor_part:
+                monitor_idx = idx
+                break
+        
+        if target:
+            return f"action=move_monitor target={target} monitor={monitor_idx}"
+        return None
+    
+    # --- SIMPLE VERB + TARGET ---
+    # "minimize chrome", "can you maximize notepad", "please restore explorer"
+    verb_map = {
+        "minimize": "minimize",
+        "maximise": "maximize",
+        "maximize": "maximize",
+        "restore": "restore",
+        "center": "center",
+        "centre": "center",
+    }
+    
+    for verb, action in verb_map.items():
+        if verb in clean_in:
+            # Extract target: everything AFTER the verb
+            verb_pos = clean_in.index(verb)
+            target = clean_in[verb_pos + len(verb):].strip()
+            if target:
+                return f"action={action} target={target}"
+            return None
+    
+    # --- SNAP COMMANDS ---
+    # "snap chrome left", "can you snap notepad to the right"
+    if "snap " in clean_in:
+        snap_pos = clean_in.index("snap ")
+        after_snap = clean_in[snap_pos + 5:].strip()
+        # Try to split into target and position
+        pos_words = ["left", "right", "top", "bottom",
+                     "top-left", "top-right", "bottom-left", "bottom-right"]
+        
+        for pw in pos_words:
+            if after_snap.endswith(pw):
+                target = after_snap[:-(len(pw))].strip()
+                target = target.rstrip(" to the").rstrip(" to").strip()
+                if target:
+                    return f"action=snap target={target} position={pw}"
+        
+        # No position found — default to left
+        return f"action=snap target={after_snap} position=left"
+    
+    return None
+
 
 def think(prompt_text, speaker_id="default"):
     global CONVO_HISTORY, USER_NAME, LAST_USER_INPUT, RECENT_QUESTIONS
@@ -128,7 +282,9 @@ def think(prompt_text, speaker_id="default"):
 
     # NEVER block commands — user might retry because first attempt failed
     first_word = words[0] if words else ""
-    is_command = first_word in ["open", "close", "start", "kill", "launch"]
+    window_first_words = ["minimize", "maximise", "maximize", "restore", "snap",
+                          "switch", "focus", "bring", "center", "centre", "put"]
+    is_command = first_word in ["open", "close", "start", "kill", "launch"] + window_first_words
     is_greeting = first_word in ["hi", "hey", "hello", "bye", "goodbye", "good"]
 
     # Skip repetition for commands, greetings, AND requests
@@ -329,6 +485,59 @@ def think(prompt_text, speaker_id="default"):
     # If the first word is a command verb, generate tags directly in Python.
     # This is FASTER and more RELIABLE than asking the LLM to generate tags.
     
+    # --- WINDOW COMMANDS (V1.6) ---
+    # Detect window manipulation commands BEFORE app open/close.
+    # "minimize chrome", "snap notepad left", "put chrome on the left"
+    # "switch to chrome", "bring up notepad", "show desktop", "hide all windows"
+    
+    window_verbs = ["minimize", "maximise", "maximize", "restore", "snap",
+                    "switch to", "focus", "bring up", "center", "centre"]
+    
+    # "put X on the left/right" pattern
+    put_pattern = "put " in clean_in and any(p in clean_in for p in 
+                  ["on the left", "on the right", "on left", "on right",
+                   "top left", "top right", "bottom left", "bottom right"])
+    
+    # "X and Y side by side" / "side by side X and Y"
+    layout_triggers = ["side by side", "split screen", "split view",
+                       "stack", "quad", "tile", "arrange"]
+    is_layout = any(t in clean_in for t in layout_triggers)
+    
+    # "hide all windows" / "show desktop" / "minimize all" / "minimize everything"
+    is_desktop_cmd = False
+    if clean_in in ["show desktop", "hide all windows", "minimize everything",
+                     "minimize all", "minimize all windows", "clear desktop",
+                     "hide everything", "show all windows", "restore all",
+                     "restore all windows"]:
+        is_desktop_cmd = True
+    
+    # "switch to X" / "bring up X" / "go to X" / "focus X"
+    # Also catches: "hey switch to chrome", "can you switch to chrome"
+    switch_verbs = ["switch to", "bring up", "go to", "focus on", "focus",
+                    "show me", "pull up", "jump to", "open up"]
+    is_switch = any(sv in clean_in for sv in switch_verbs)
+    
+    # "move X to monitor 2" / "move X to second monitor"
+    is_move_monitor = ("move" in clean_in and "monitor" in clean_in)
+    
+    # Check if a window verb appears ANYWHERE in the sentence
+    # "can you minimize chrome" → detects "minimize"
+    # "please snap notepad left" → detects "snap"
+    is_window_verb = any(wv in clean_in for wv in window_verbs)
+    
+    if is_desktop_cmd or is_layout or put_pattern or is_window_verb or is_switch or is_move_monitor:
+        tag_params = _build_window_tag(clean_in, is_desktop_cmd, is_layout, 
+                                        put_pattern, is_switch, is_move_monitor)
+        if tag_params:
+            import random as _rand
+            speech = _rand.choice([
+                "On it.",
+                "Done.",
+                "Got it.",
+                "Right away.",
+            ])
+            return f"{speech} ###WINDOW: {tag_params}"
+
     if first_word in ["open", "close", "start", "kill", "launch"]:
         command_verb = first_word
         remaining = clean_in
@@ -367,8 +576,6 @@ def think(prompt_text, speaker_id="default"):
             
             import random as _rand
             # Natural speech before command
-            app_list = ", ".join(apps)
-            import random as _rand
             app_list = ", ".join(apps)
             if tag == "OPEN":
                 speech = _rand.choice([

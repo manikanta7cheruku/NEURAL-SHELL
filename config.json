@@ -40,5 +40,10 @@
     "max_results": 3,
     "news_max_results": 3,
     "timeout": 10
+    },
+    "windows": {
+        "enabled": true,
+        "snap_gap": 0,
+        "default_monitor": 0
     }
 }

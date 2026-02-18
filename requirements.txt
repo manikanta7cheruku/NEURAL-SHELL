@@ -38,3 +38,6 @@ resemblyzer
 
 # --- V1.4: Web Search ---
 ddgs
+
+# --- V1.6: Window Mastery ---
+pywin32

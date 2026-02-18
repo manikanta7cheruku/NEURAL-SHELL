@@ -25,7 +25,7 @@ from ears import listen
 from ears.voice_id import identify_speaker, enroll_speaker, is_voice_id_enabled, get_enrolled_speakers
 from ears.core import listen_for_interrupt
 import brain
-import hands
+import hands.core as core
 import mouth
 from mouth import interrupt as mouth_interrupt, is_speaking
 import random
@@ -369,6 +369,32 @@ def seven_logic():
                     app_ui.update_status("⚡ INTERRUPTED", "#ffaa00")
 
                     
+            # STEP B1: EXTRACT WINDOW COMMANDS (V1.6)
+            window_cmds = re.findall(r"###WINDOW:\s*(.*?)(?=###|$)", response)
+            if window_cmds:
+                for param_str in window_cmds:
+                    param_str = param_str.strip()
+                    print(Fore.CYAN + f"[WINDOW CMD] Raw params: {param_str}")
+                    
+                    # Parse key=value pairs
+                    params = {}
+                    for pair in param_str.split():
+                        if "=" in pair:
+                            key, val = pair.split("=", 1)
+                            params[key.strip()] = val.strip()
+                    
+                    if params:
+                        success, msg = hands.manage_window(params)
+                        if success:
+                            app_ui.update_status(f"🪟 {msg}", "#00ff00")
+                        else:
+                            fail_responses = [
+                                msg,
+                                f"Window issue: {msg}",
+                                msg,
+                            ]
+                            mouth.speak(random.choice(fail_responses))
+                            app_ui.update_status(f"🪟 FAILED: {msg}", "#ff0000")
 
             # STEP B: EXTRACT COMMANDS
             commands = re.findall(r"###(OPEN|CLOSE|SEARCH|SYS): (.*?)(?=###|$)", response)
@@ -413,7 +439,7 @@ def seven_logic():
 
                         if cmd_type == "OPEN":
                             app_ui.update_status(f"OPENING: {app_to_run}", "#00ff00")
-                            success = hands.open_app(app_to_run)
+                            success = core.open_app(app_to_run)
                             if not success:
                                 fail_responses = [
                                     f"Can't find {app_to_run}. Check the name?",
@@ -424,7 +450,7 @@ def seven_logic():
                                 mouth.speak(random.choice(fail_responses))
                         elif cmd_type == "CLOSE":
                             app_ui.update_status(f"CLOSING: {app_to_run}", "#ff0000")
-                            success = hands.close_app(app_to_run)
+                            success = core.close_app(app_to_run)
                             if not success:
                                 fail_responses = [
                                     f"{app_to_run} doesn't seem to be running.",
@@ -434,10 +460,10 @@ def seven_logic():
                                 mouth.speak(random.choice(fail_responses))
                         elif cmd_type == "SEARCH":
                             app_ui.update_status(f"SEARCHING: {app_to_run}", "#0000ff")
-                            hands.search_web(app_to_run)
+                            core.search_web(app_to_run)
                         elif cmd_type == "SYS":
                             app_ui.update_status(f"SYSTEM: {app_to_run}", "#ffff00")
-                            hands.system_control(app_to_run)
+                            core.system_control(app_to_run)
             # Clean up temp audio file
             if audio_path and os.path.exists(audio_path):
                 try:
