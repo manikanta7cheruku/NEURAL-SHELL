@@ -337,6 +337,8 @@ while True:
         print(Fore.WHITE + "  /remove speaker  Remove a speaker's voice print")
         print(Fore.WHITE + "  /windows         List all visible windows")
         print(Fore.WHITE + "  /window [cmd]    Test window command (e.g., /window minimize chrome)")
+        print(Fore.WHITE + "                   Actions: focus minimize maximize restore snap center")
+        print(Fore.WHITE + "                   pin unpin fullscreen transparent solid swap undo list")
         print(Fore.WHITE + "  quit / exit      Exit the console")
         print(Fore.CYAN + f"  {'='*50}")
         continue
@@ -415,7 +417,9 @@ while True:
         if not parts:
             print(Fore.RED + "  ❌ Usage: /window minimize chrome")
             print(Fore.WHITE + "  Actions: focus, minimize, maximize, restore, snap, center")
-            print(Fore.WHITE + "           minimize_all, show_desktop, layout")
+            print(Fore.WHITE + "           minimize_all, show_desktop, layout, swap")
+            print(Fore.WHITE + "           pin, unpin, fullscreen, transparent, solid")
+            print(Fore.WHITE + "           close_window, undo, list")
             print(Fore.WHITE + "  Examples:")
             print(Fore.WHITE + "    /window focus chrome")
             print(Fore.WHITE + "    /window snap chrome left")
@@ -429,7 +433,7 @@ while True:
         params = {"action": action}
         
         # No-target commands
-        if action in ["minimize_all", "show_desktop"]:
+        if action in ["minimize_all", "show_desktop", "undo", "list"]:
             pass
         elif action == "layout":
             if len(parts) >= 3:
@@ -447,6 +451,30 @@ while True:
                 params["position"] = "left"
             else:
                 print(Fore.RED + "  ❌ Usage: /window snap chrome left")
+                continue
+        elif action == "swap":
+            if len(parts) >= 2:
+                params["targets"] = parts[1]
+            else:
+                print(Fore.RED + "  ❌ Usage: /window swap chrome,notepad")
+                continue
+        elif action == "transparent":
+            if len(parts) >= 2:
+                params["target"] = parts[1]
+                # Accept: /window transparent chrome 0.5
+                # Accept: /window transparent chrome more
+                # Accept: /window transparent chrome less
+                params["opacity"] = parts[2] if len(parts) >= 3 else "0.8"
+            else:
+                print(Fore.RED + "  ❌ Usage: /window transparent chrome 0.7")
+                print(Fore.WHITE + "         /window transparent chrome more")
+                print(Fore.WHITE + "         /window transparent chrome less")
+                continue
+        elif action == "solid":
+            if len(parts) >= 2:
+                params["target"] = parts[1]
+            else:
+                print(Fore.RED + "  ❌ Usage: /window solid chrome")
                 continue
         elif action == "move_monitor":
             if len(parts) >= 3:

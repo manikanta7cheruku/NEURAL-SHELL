@@ -38,6 +38,13 @@ try:
     import win32api
     import win32process
     WIN32_AVAILABLE = True
+    # V1.6.1: Action history for undo
+    _action_history = []
+    MAX_HISTORY = 20
+    # V1.6.1: Track current opacity per window (hwnd → opacity float)
+    # Needed for "more transparent" / "less transparent" relative adjustments
+    _window_opacity = {}
+
 except ImportError:
     WIN32_AVAILABLE = False
     print(Fore.RED + "[WINDOWS] pywin32 not installed. Run: pip install pywin32")
@@ -219,7 +226,25 @@ def _set_window_pos(hwnd, x, y, w, h):
         )
     except Exception as e:
         print(Fore.RED + f"[WINDOWS] SetWindowPos failed: {e}")
+        
 
+def _save_state(hwnd):
+    """Save window position/size before modifying it. Used for undo."""
+    try:
+        rect = win32gui.GetWindowRect(hwnd)
+        placement = win32gui.GetWindowPlacement(hwnd)
+        title = win32gui.GetWindowText(hwnd)
+        state = {
+            "hwnd": hwnd,
+            "title": title,
+            "rect": rect,
+            "placement": placement,
+        }
+        _action_history.append(state)
+        if len(_action_history) > MAX_HISTORY:
+            _action_history.pop(0)
+    except:
+        pass
 
 def _safe_foreground(hwnd):
     """
@@ -294,13 +319,30 @@ def manage_window(params):
     if action == "layout":
         return _layout(params)
 
-    # --- ACTIONS THAT NEED A TARGET ---
-    if not target:
-        return False, "No target window specified."
+    if action == "undo":
+        return _undo_last()
 
-    hwnd, title = _find_window(target)
-    if not hwnd:
-        return False, f"Can't find window: {target}"
+    if action == "list":
+        return _list_windows()
+
+    if action == "swap":
+        targets_str = params.get("targets", "")
+        return _swap(targets_str)
+
+    # --- RESOLVE "this" / "current" to focused window ---
+    if target in ["this", "current", "this window", "active", "active window", "it"]:
+        hwnd, title = _get_focused_window()
+        if not hwnd:
+            return False, "No active window found."
+        print(Fore.CYAN + f"   -> 'this' resolved to: {title}")
+    else:
+        # --- ACTIONS THAT NEED A TARGET ---
+        if not target:
+            return False, "No target window specified."
+
+        hwnd, title = _find_window(target)
+        if not hwnd:
+            return False, f"Can't find window: {target}"
 
     if action == "focus":
         return _focus(hwnd, title)
@@ -323,6 +365,27 @@ def manage_window(params):
         return _resize(hwnd, title, width, height)
     elif action == "center":
         return _center(hwnd, title)
+    elif action == "close_window":
+        return _close_window(hwnd, title)
+    elif action == "pin":
+        return _pin(hwnd, title, pin=True)
+    elif action == "unpin":
+        return _pin(hwnd, title, pin=False)
+    elif action == "fullscreen":
+        return _fullscreen(hwnd, title)
+    elif action == "transparent":
+        # Opacity can be float ("0.8"), or string ("more"/"less")
+        opacity_raw = params.get("opacity", "0.8")
+        if opacity_raw in ("more", "less"):
+            opacity = opacity_raw
+        else:
+            try:
+                opacity = float(opacity_raw)
+            except:
+                opacity = 0.8
+        return _set_transparency(hwnd, title, opacity)
+    elif action == "solid":
+        return _set_transparency(hwnd, title, opacity=1.0)
     else:
         return False, f"Unknown window action: {action}"
 
@@ -334,6 +397,7 @@ def manage_window(params):
 def _focus(hwnd, title):
     """Bring window to foreground."""
     try:
+        _save_state(hwnd)
         _restore_if_minimized(hwnd)
         _safe_foreground(hwnd)
         print(Fore.GREEN + f"   -> Focused: {title}")
@@ -350,6 +414,7 @@ def _focus(hwnd, title):
 def _minimize(hwnd, title):
     """Minimize window."""
     try:
+        _save_state(hwnd)
         win32gui.ShowWindow(hwnd, win32con.SW_MINIMIZE)
         print(Fore.GREEN + f"   -> Minimized: {title}")
         command_log.log_command("WINDOW", f"minimize {title}", True, "Minimized")
@@ -365,6 +430,7 @@ def _minimize(hwnd, title):
 def _maximize(hwnd, title):
     """Maximize window."""
     try:
+        _save_state(hwnd)
         _restore_if_minimized(hwnd)
         win32gui.ShowWindow(hwnd, win32con.SW_SHOWMAXIMIZED)
         _safe_foreground(hwnd)
@@ -382,6 +448,7 @@ def _maximize(hwnd, title):
 def _restore(hwnd, title):
     """Restore window from minimized/maximized state."""
     try:
+        _save_state(hwnd)
         win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
         _safe_foreground(hwnd)
         print(Fore.GREEN + f"   -> Restored: {title}")
@@ -425,6 +492,7 @@ def _snap(hwnd, title, position, monitor_idx=0):
         return False, f"Unknown snap position: {position}. Use: {', '.join(positions.keys())}"
 
     x, y, w, h = positions[position]
+    _save_state(hwnd)
     _set_window_pos(hwnd, x, y, w, h)
     _safe_foreground(hwnd)
 
@@ -579,6 +647,7 @@ def _move_to_monitor(hwnd, title, monitor_idx):
         # Center on target monitor
         new_x = mx + (mw - curr_w) // 2
         new_y = my + (mh - curr_h) // 2
+        _save_state(hwnd)
         _set_window_pos(hwnd, new_x, new_y, curr_w, curr_h)
         _safe_foreground(hwnd)
         print(Fore.GREEN + f"   -> Moved {title} to monitor {monitor_idx}")
@@ -598,6 +667,7 @@ def _resize(hwnd, title, width, height):
         rect = win32gui.GetWindowRect(hwnd)
         x = rect[0]
         y = rect[1]
+        _save_state(hwnd)
         _set_window_pos(hwnd, x, y, width, height)
         print(Fore.GREEN + f"   -> Resized {title} to {width}x{height}")
         command_log.log_command("WINDOW", f"resize {title} {width}x{height}", True, "Resized")
@@ -621,6 +691,7 @@ def _center(hwnd, title):
         curr_h = rect[3] - rect[1]
         new_x = mx + (mw - curr_w) // 2
         new_y = my + (mh - curr_h) // 2
+        _save_state(hwnd)
         _set_window_pos(hwnd, new_x, new_y, curr_w, curr_h)
         print(Fore.GREEN + f"   -> Centered {title}")
         command_log.log_command("WINDOW", f"center {title}", True, "Centered")
@@ -641,3 +712,253 @@ def _focus_silent(hwnd):
         _safe_foreground(hwnd)
     except:
         pass
+
+
+def _get_focused_window():
+    """Get the currently focused/foreground window. Used for 'this' context."""
+    try:
+        hwnd = win32gui.GetForegroundWindow()
+        title = win32gui.GetWindowText(hwnd)
+        if title and title.strip() and title != "Program Manager":
+            return hwnd, title
+    except:
+        pass
+    return None, None
+
+
+def _close_window(hwnd, title):
+    """Close window gracefully (sends WM_CLOSE — triggers save dialogs)."""
+    try:
+        _save_state(hwnd)
+        win32gui.PostMessage(hwnd, win32con.WM_CLOSE, 0, 0)
+        print(Fore.GREEN + f"   -> Closed window: {title}")
+        command_log.log_command("WINDOW", f"close_window {title}", True, "WM_CLOSE")
+        mood_engine.on_command_result(True)
+        return True, f"Closed {title}"
+    except Exception as e:
+        print(Fore.RED + f"   -> Close window failed: {e}")
+        command_log.log_command("WINDOW", f"close_window {title}", False, str(e))
+        mood_engine.on_command_result(False)
+        return False, f"Couldn't close {title}"
+
+
+def _swap(targets_str):
+    """Swap positions of two windows."""
+    targets = [t.strip() for t in targets_str.split(",") if t.strip()]
+    if len(targets) != 2:
+        return False, "Swap needs exactly 2 windows."
+
+    hwnd1, title1 = _find_window(targets[0])
+    hwnd2, title2 = _find_window(targets[1])
+
+    if not hwnd1:
+        return False, f"Can't find: {targets[0]}"
+    if not hwnd2:
+        return False, f"Can't find: {targets[1]}"
+
+    try:
+        _save_state(hwnd1)
+        _save_state(hwnd2)
+
+        # Get both positions
+        rect1 = win32gui.GetWindowRect(hwnd1)
+        rect2 = win32gui.GetWindowRect(hwnd2)
+
+        # Restore both if maximized/minimized
+        _restore_if_minimized(hwnd1)
+        _restore_if_minimized(hwnd2)
+
+        style1 = win32gui.GetWindowLong(hwnd1, win32con.GWL_STYLE)
+        style2 = win32gui.GetWindowLong(hwnd2, win32con.GWL_STYLE)
+        if style1 & win32con.WS_MAXIMIZE:
+            win32gui.ShowWindow(hwnd1, win32con.SW_RESTORE)
+            time.sleep(0.1)
+        if style2 & win32con.WS_MAXIMIZE:
+            win32gui.ShowWindow(hwnd2, win32con.SW_RESTORE)
+            time.sleep(0.1)
+
+        # Swap: put window1 where window2 was and vice versa
+        w1 = rect1[2] - rect1[0]
+        h1 = rect1[3] - rect1[1]
+        w2 = rect2[2] - rect2[0]
+        h2 = rect2[3] - rect2[1]
+
+        _set_window_pos(hwnd1, rect2[0], rect2[1], w2, h2)
+        _set_window_pos(hwnd2, rect1[0], rect1[1], w1, h1)
+
+        _safe_foreground(hwnd1)
+        time.sleep(0.1)
+        _safe_foreground(hwnd2)
+
+        print(Fore.GREEN + f"   -> Swapped: {title1} ↔ {title2}")
+        command_log.log_command("WINDOW", f"swap {title1} ↔ {title2}", True, "Swapped")
+        mood_engine.on_command_result(True)
+        return True, f"Swapped {targets[0]} and {targets[1]}"
+    except Exception as e:
+        print(Fore.RED + f"   -> Swap failed: {e}")
+        command_log.log_command("WINDOW", f"swap {targets_str}", False, str(e))
+        mood_engine.on_command_result(False)
+        return False, f"Couldn't swap windows"
+
+
+def _pin(hwnd, title, pin=True):
+    """Set or remove always-on-top for a window."""
+    try:
+        _save_state(hwnd)
+        _restore_if_minimized(hwnd)
+        flag = win32con.HWND_TOPMOST if pin else win32con.HWND_NOTOPMOST
+        rect = win32gui.GetWindowRect(hwnd)
+        w = rect[2] - rect[0]
+        h = rect[3] - rect[1]
+        win32gui.SetWindowPos(hwnd, flag, rect[0], rect[1], w, h,
+                              win32con.SWP_SHOWWINDOW)
+        action_word = "Pinned" if pin else "Unpinned"
+        print(Fore.GREEN + f"   -> {action_word}: {title}")
+        command_log.log_command("WINDOW", f"{'pin' if pin else 'unpin'} {title}", True, action_word)
+        mood_engine.on_command_result(True)
+        return True, f"{action_word} {title}"
+    except Exception as e:
+        print(Fore.RED + f"   -> Pin failed: {e}")
+        command_log.log_command("WINDOW", f"pin {title}", False, str(e))
+        mood_engine.on_command_result(False)
+        return False, f"Couldn't pin {title}"
+
+
+def _fullscreen(hwnd, title):
+    """Toggle fullscreen (F11) by focusing window then sending F11."""
+    try:
+        _save_state(hwnd)
+        _restore_if_minimized(hwnd)
+        _safe_foreground(hwnd)
+        time.sleep(0.2)
+        import pyautogui
+        pyautogui.press('f11')
+        print(Fore.GREEN + f"   -> Toggled fullscreen: {title}")
+        command_log.log_command("WINDOW", f"fullscreen {title}", True, "F11 toggle")
+        mood_engine.on_command_result(True)
+        return True, f"Toggled fullscreen for {title}"
+    except Exception as e:
+        print(Fore.RED + f"   -> Fullscreen failed: {e}")
+        command_log.log_command("WINDOW", f"fullscreen {title}", False, str(e))
+        mood_engine.on_command_result(False)
+        return False, f"Couldn't toggle fullscreen for {title}"
+
+
+def _set_transparency(hwnd, title, opacity=0.8):
+    """
+    Set window transparency.
+    
+    Args:
+        opacity: float (0.1 to 1.0) for absolute
+                 "more" to decrease by 20%
+                 "less" to increase by 20%
+    """
+    try:
+        _save_state(hwnd)
+        
+        # Get current opacity (default 1.0 if never set)
+        current = _window_opacity.get(hwnd, 1.0)
+        
+        # Handle relative adjustments
+        if opacity == "more":
+            # More transparent = lower opacity
+            new_opacity = max(0.1, current - 0.2)
+        elif opacity == "less":
+            # Less transparent = higher opacity
+            new_opacity = min(1.0, current + 0.2)
+        else:
+            # Absolute value
+            try:
+                new_opacity = float(opacity)
+            except (ValueError, TypeError):
+                new_opacity = 0.8
+        
+        # Clamp between 10% and 100%
+        new_opacity = max(0.1, min(1.0, new_opacity))
+        
+        # If opacity is 100%, remove the layered style entirely (fully solid)
+        if new_opacity >= 1.0:
+            style = win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE)
+            if style & win32con.WS_EX_LAYERED:
+                win32gui.SetWindowLong(hwnd, win32con.GWL_EXSTYLE, 
+                                       style & ~win32con.WS_EX_LAYERED)
+            _window_opacity[hwnd] = 1.0
+            pct = 100
+        else:
+            # Add WS_EX_LAYERED style if not already set
+            style = win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE)
+            if not (style & win32con.WS_EX_LAYERED):
+                win32gui.SetWindowLong(hwnd, win32con.GWL_EXSTYLE, 
+                                       style | win32con.WS_EX_LAYERED)
+            
+            # Convert to 0-255 alpha
+            alpha = max(25, min(255, int(new_opacity * 255)))
+            win32gui.SetLayeredWindowAttributes(hwnd, 0, alpha, win32con.LWA_ALPHA)
+            
+            # Track new opacity
+            _window_opacity[hwnd] = new_opacity
+            pct = int(new_opacity * 100)
+        
+        # Log with context
+        direction = ""
+        if opacity == "more":
+            direction = f" (was {int(current*100)}%)"
+        elif opacity == "less":
+            direction = f" (was {int(current*100)}%)"
+        
+        print(Fore.GREEN + f"   -> Opacity {pct}%{direction}: {title}")
+        command_log.log_command("WINDOW", f"transparency {title} {pct}%", True, 
+                                f"Alpha={int(new_opacity*255)}")
+        mood_engine.on_command_result(True)
+        return True, f"Set {title} to {pct}% opacity"
+    except Exception as e:
+        print(Fore.RED + f"   -> Transparency failed: {e}")
+        command_log.log_command("WINDOW", f"transparency {title}", False, str(e))
+        mood_engine.on_command_result(False)
+        return False, f"Couldn't set transparency for {title}"
+
+
+def _undo_last():
+    """Undo the last window action by restoring previous position/state."""
+    if not _action_history:
+        return False, "Nothing to undo."
+
+    state = _action_history.pop()
+    hwnd = state["hwnd"]
+    title = state["title"]
+
+    try:
+        # Check if window still exists
+        if not win32gui.IsWindow(hwnd):
+            return False, f"Window '{title}' no longer exists."
+
+        placement = state["placement"]
+        win32gui.SetWindowPlacement(hwnd, placement)
+        _safe_foreground(hwnd)
+
+        print(Fore.GREEN + f"   -> Undid last action on: {title}")
+        command_log.log_command("WINDOW", f"undo {title}", True, "Restored previous state")
+        mood_engine.on_command_result(True)
+        return True, f"Undid last action on {title}"
+    except Exception as e:
+        print(Fore.RED + f"   -> Undo failed: {e}")
+        command_log.log_command("WINDOW", f"undo {title}", False, str(e))
+        mood_engine.on_command_result(False)
+        return False, f"Couldn't undo"
+
+
+def _list_windows():
+    """Return formatted string of all visible windows. For voice responses."""
+    windows = get_window_list()
+    if not windows:
+        return True, "No windows open."
+    names = []
+    for hwnd, title in windows[:10]:
+        # Shorten long titles
+        short = title[:40] + "..." if len(title) > 40 else title
+        names.append(short)
+    window_list = ", ".join(names)
+    count = len(windows)
+    if count > 10:
+        return True, f"You have {count} windows open. The main ones: {window_list}."
+    return True, f"You have {count} windows open: {window_list}."

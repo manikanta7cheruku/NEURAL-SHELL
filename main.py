@@ -387,6 +387,9 @@ def seven_logic():
                         success, msg = hands.manage_window(params)
                         if success:
                             app_ui.update_status(f"🪟 {msg}", "#00ff00")
+                            # Speak result for info commands (list, etc)
+                            if params.get("action") == "list" and msg:
+                                speak_with_interrupt(msg)
                         else:
                             fail_responses = [
                                 msg,

@@ -26,7 +26,7 @@ print(Fore.CYAN + "=" * 60)
 # --- TEST 1: Import and Initialize ---
 print(Fore.YELLOW + "\n[TEST 1] Importing memory system...")
 try:
-    from memory import seven_memory
+    from memory.core import seven_memory
     print(Fore.GREEN + "  ✅ Memory system initialized successfully!")
 except Exception as e:
     print(Fore.RED + f"  ❌ FAILED: {e}")

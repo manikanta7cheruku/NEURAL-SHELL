@@ -73,13 +73,21 @@ def reset_session():
 
 load_name_from_memory()
 
-def _build_window_tag(clean_in, is_desktop_cmd, is_layout, put_pattern, is_switch, is_move_monitor):
+def _build_window_tag(clean_in, is_desktop_cmd, is_notarget_cmd, is_layout, put_pattern, is_switch, is_move_monitor, is_swap, is_window_close, is_transparent, is_solid, is_pin, is_unpin):
     """
     V1.6: Parse natural language into WINDOW tag params.
     Returns param string like 'action=snap target=chrome position=left'
     or None if parsing fails.
     """
     words = clean_in.split()
+
+    # --- NO-TARGET COMMANDS (undo, list, etc) ---
+    if is_notarget_cmd:
+        if "undo" in clean_in or "put it back" in clean_in or "revert" in clean_in:
+            return "action=undo"
+        if ("what" in clean_in and "open" in clean_in) or "list windows" in clean_in or "show windows" in clean_in or "running" in clean_in:
+            return "action=list"
+        return None
     
     # --- DESKTOP COMMANDS (no target needed) ---
     if is_desktop_cmd:
@@ -90,6 +98,24 @@ def _build_window_tag(clean_in, is_desktop_cmd, is_layout, put_pattern, is_switc
         if "show all" in clean_in or "restore all" in clean_in:
             return "action=show_desktop"  # Toggle
         return "action=show_desktop"
+    
+
+    # --- SWAP COMMAND ---
+    if is_swap:
+        # "swap chrome and notepad"
+        noise = ["swap", "and", "with", "please", "can", "you", "the"]
+        app_words = [w for w in clean_in.split() if w not in noise and len(w) > 1]
+        if len(app_words) >= 2:
+            targets = ",".join(app_words[:2])
+            return f"action=swap targets={targets}"
+        return None
+
+    # --- WINDOW-LEVEL CLOSE ---
+    if is_window_close:
+        # "close this window" / "close the active window"
+        if "this" in clean_in or "active" in clean_in or "the window" in clean_in:
+            return "action=close_window target=this"
+        return None
     
     # --- LAYOUT COMMANDS (multiple targets) ---
     if is_layout:
@@ -195,6 +221,8 @@ def _build_window_tag(clean_in, is_desktop_cmd, is_layout, put_pattern, is_switc
         "restore": "restore",
         "center": "center",
         "centre": "center",
+        "fullscreen": "fullscreen",
+        "full screen": "fullscreen",
     }
     
     for verb, action in verb_map.items():
@@ -224,6 +252,130 @@ def _build_window_tag(clean_in, is_desktop_cmd, is_layout, put_pattern, is_switc
         
         # No position found — default to left
         return f"action=snap target={after_snap} position=left"
+    # --- PIN / ALWAYS ON TOP ---
+    # "pin chrome", "keep chrome on top", "can you pin notepad"
+    if is_pin:
+        noise = ["pin", "keep", "on", "top", "always", "please", "can", 
+                 "you", "the", "make", "set", "it"]
+        target_words = [w for w in clean_in.split() if w not in noise and len(w) > 1]
+        if target_words:
+            target = " ".join(target_words)
+            return f"action=pin target={target}"
+        return None
+
+    # "unpin chrome", "remove notepad from top"
+    if is_unpin:
+        noise = ["unpin", "remove", "from", "top", "not", "on", "please", 
+                 "can", "you", "the", "make", "it"]
+        target_words = [w for w in clean_in.split() if w not in noise and len(w) > 1]
+        if target_words:
+            target = " ".join(target_words)
+            return f"action=unpin target={target}"
+        return None
+
+    # --- TRANSPARENCY ---
+    # Supports:
+    #   "make chrome transparent"          → default 80%
+    #   "make chrome 50% transparent"      → exact 50%
+    #   "make chrome a bit transparent"    → light 90%
+    #   "make chrome very transparent"     → heavy 40%
+    #   "make chrome more transparent"     → decrease current by 20%
+    #   "make chrome less transparent"     → increase current by 20%
+    #   "make chrome brighter"             → increase current by 20%
+    #   "set chrome transparency to 60"    → exact 60%
+    #   "keep 70% transparency on chrome"  → exact 70%
+    if is_transparent:
+        import re as _re
+        
+        # Step 1: Check for explicit percentage
+        # Matches: "50%", "50 percent", "50 %", just "50" near "transparent"
+        pct_match = _re.search(r'(\d+)\s*%?\s*(?:percent|transparent|transparency|opacity)?', clean_in)
+        
+        # Step 2: Check for relative words (more/less/bit/very)
+        is_more = any(w in clean_in for w in ["more transparent", "more see through"])
+        is_less = any(w in clean_in for w in ["less transparent", "brighter", 
+                                               "less see through", "bit more visible",
+                                               "more visible", "more opaque"])
+        is_slight = any(w in clean_in for w in ["a bit", "a little", "slightly", 
+                                                  "a touch", "just a bit"])
+        is_very = any(w in clean_in for w in ["very", "really", "super", 
+                                                "extremely", "heavily", "fully"])
+        
+        # Step 3: Determine opacity value
+        if pct_match:
+            # User gave explicit number
+            pct = int(pct_match.group(1))
+            # Clamp between 10% and 100%
+            pct = max(10, min(100, pct))
+            opacity = pct / 100.0
+        elif is_more:
+            # "more transparent" → relative decrease, handled by windows.py
+            opacity = "more"
+        elif is_less:
+            # "less transparent" / "brighter" → relative increase
+            opacity = "less"
+        elif is_slight:
+            # "a bit transparent" → barely noticeable (90%)
+            opacity = 0.9
+        elif is_very:
+            # "very transparent" → heavily transparent (40%)
+            opacity = 0.4
+        else:
+            # Default: noticeable but usable (80%)
+            opacity = 0.8
+        
+        # Step 4: Extract target (remove all noise words including numbers)
+        noise = ["make", "set", "transparent", "see", "through", "translucent",
+                 "please", "can", "you", "the", "it", "a", "bit", "little",
+                 "slightly", "very", "really", "super", "extremely", "heavily",
+                 "more", "less", "much", "touch", "just", "keep", "put",
+                 "percent", "opacity", "transparency", "to", "at", "on",
+                 "brighter", "visible", "opaque", "fully"]
+        # Also remove the percentage number from target
+        words = clean_in.split()
+        target_words = []
+        for w in words:
+            if w in noise or len(w) <= 1:
+                continue
+            # Skip if it's a number (percentage)
+            if w.replace("%", "").isdigit():
+                continue
+            target_words.append(w)
+        
+        if target_words:
+            target = " ".join(target_words)
+            return f"action=transparent target={target} opacity={opacity}"
+        return None
+
+    # "make chrome solid", "make notepad opaque", "make chrome not transparent"
+    # "make chrome normal", "make chrome back to normal"
+    if is_solid:
+        noise = ["make", "set", "solid", "opaque", "not", "transparent",
+                 "please", "can", "you", "the", "it", "back", "normal",
+                 "to", "fully", "completely", "100"]
+        target_words = [w for w in clean_in.split() if w not in noise and len(w) > 1 
+                        and not w.replace("%", "").isdigit()]
+        if target_words:
+            target = " ".join(target_words)
+            return f"action=solid target={target}"
+        return None
+
+    # --- TRANSPARENCY ---
+    if "transparent" in clean_in or "see through" in clean_in:
+        noise = ["make", "set", "transparent", "see", "through", "please", "can", "you", "the"]
+        target_words = [w for w in clean_in.split() if w not in noise and len(w) > 1]
+        if target_words:
+            target = " ".join(target_words)
+            return f"action=transparent target={target} opacity=0.8"
+        return None
+
+    if "solid" in clean_in or "opaque" in clean_in or "not transparent" in clean_in:
+        noise = ["make", "set", "solid", "opaque", "not", "transparent", "please", "can", "you", "the"]
+        target_words = [w for w in clean_in.split() if w not in noise and len(w) > 1]
+        if target_words:
+            target = " ".join(target_words)
+            return f"action=solid target={target}"
+        return None
     
     return None
 
@@ -452,6 +604,70 @@ def think(prompt_text, speaker_id="default"):
     if "call you" in clean_in or "should i call" in clean_in:
         return "You can call me Seven."
     
+    # --- CAPABILITIES (V1.6.1) ---
+    # When user asks what Seven can do, inject capability facts into LLM context
+    # so Seven answers naturally — NOT hardcoded responses
+    capability_triggers = ["what can you do", "what you can do", "your capabilities",
+                           "what are you capable", "what do you do", "capable of",
+                           "tell me what you can", "what are your abilities",
+                           "list your capabilities", "what are your features"]
+    is_capability_q = any(t in clean_in for t in capability_triggers)
+    
+    if is_capability_q:
+        # Build a facts block based on what domain they're asking about
+        is_window_q = any(w in clean_in for w in ["window", "windows", "screen", "display"])
+        is_app_q = any(w in clean_in for w in ["app", "apps", "application", "program"])
+        
+        # Capability facts — Seven's actual knowledge about itself
+        # These get injected into the prompt so the LLM reasons from them
+        cap_facts = []
+        
+        if is_window_q:
+            # Only window facts
+            cap_facts = [
+                "I can minimize, maximize, restore, and center any window.",
+                "I snap windows to any side or corner of the screen.",
+                "I do split-screen layouts: side by side, stacked, or four corners.",
+                "I can pin any window on top so it stays above everything.",
+                "I adjust window transparency to any percentage.",
+                "I swap two windows positions instantly.",
+                "I toggle fullscreen on any window.",
+                "I undo my last window action.",
+                "I understand 'this' as whatever window is currently focused.",
+                "I show desktop and minimize all windows.",
+                "I move windows between monitors.",
+            ]
+        elif is_app_q:
+            # Only app facts
+            cap_facts = [
+                "I open any app by name.",
+                "I close one instance or all instances of an app.",
+                "I know aliases: browser means chrome, files means explorer, music means spotify.",
+                "I log every command I execute.",
+            ]
+        else:
+            # Everything
+            cap_facts = [
+                "I open and close apps by name with alias support.",
+                "I control windows: snap, resize, minimize, maximize, pin, transparency, swap, fullscreen, undo.",
+                "I do split-screen layouts with multiple windows.",
+                "I remember conversations and facts about people long-term.",
+                "I search the web for live data: prices, weather, news via DuckDuckGo.",
+                "I recognize different speakers by their voice.",
+                "Users can interrupt me mid-sentence.",
+                "Everything runs 100% locally. Nothing leaves this machine.",
+            ]
+        
+        # Inject facts into the prompt — LLM will phrase the answer naturally
+        facts_block = "=== YOUR CAPABILITIES (answer from these) ===\n"
+        for fact in cap_facts:
+            facts_block += f"- {fact}\n"
+        facts_block += "=== END CAPABILITIES ===\n"
+        facts_block += "Summarize these naturally. Be concise. Don't list them as bullet points."
+        
+        # Modify the prompt so the LLM sees these facts
+        prompt_text = f"{facts_block}\n\nUser asked: {prompt_text}"
+    
     # --- APP HISTORY ---
     if ("what" in clean_in or "which" in clean_in) and ("app" in clean_in or "open" in clean_in) and ("today" in clean_in or "did i" in clean_in or "did you" in clean_in):
         from memory.command_log import command_log
@@ -490,8 +706,10 @@ def think(prompt_text, speaker_id="default"):
     # "minimize chrome", "snap notepad left", "put chrome on the left"
     # "switch to chrome", "bring up notepad", "show desktop", "hide all windows"
     
+    # Core window verbs — single words that appear at/near start
     window_verbs = ["minimize", "maximise", "maximize", "restore", "snap",
-                    "switch to", "focus", "bring up", "center", "centre"]
+                    "switch to", "focus", "bring up", "center", "centre",
+                    "pin", "unpin", "fullscreen", "full screen", "swap"]
     
     # "put X on the left/right" pattern
     put_pattern = "put " in clean_in and any(p in clean_in for p in 
@@ -505,11 +723,24 @@ def think(prompt_text, speaker_id="default"):
     
     # "hide all windows" / "show desktop" / "minimize all" / "minimize everything"
     is_desktop_cmd = False
-    if clean_in in ["show desktop", "hide all windows", "minimize everything",
-                     "minimize all", "minimize all windows", "clear desktop",
-                     "hide everything", "show all windows", "restore all",
-                     "restore all windows"]:
+    # Desktop + no-target commands
+    desktop_phrases = [
+        "show desktop", "hide all windows", "minimize everything",
+        "minimize all", "minimize all windows", "clear desktop",
+        "hide everything", "show all windows", "restore all",
+        "restore all windows", "view desktop", "show my desktop",
+        "clear screen", "clear all windows", "go to desktop",
+        "desktop", "hide windows"
+    ]
+    notarget_phrases = [
+        "undo that", "undo last", "undo window", "put it back",
+        "revert that", "undo", "whats open", "what is open",
+        "what windows are open", "list windows", "show windows",
+        "what's running", "whats running"
+    ]
+    if clean_in in desktop_phrases:
         is_desktop_cmd = True
+    is_notarget_cmd = clean_in in notarget_phrases or any(p in clean_in for p in notarget_phrases)
     
     # "switch to X" / "bring up X" / "go to X" / "focus X"
     # Also catches: "hey switch to chrome", "can you switch to chrome"
@@ -519,24 +750,195 @@ def think(prompt_text, speaker_id="default"):
     
     # "move X to monitor 2" / "move X to second monitor"
     is_move_monitor = ("move" in clean_in and "monitor" in clean_in)
+    # "swap chrome and notepad"
+    is_swap = "swap" in clean_in and ("and" in clean_in or "," in clean_in)
+    
+    # "close this window" / "close the window" (window-level close, not process kill)
+    is_window_close = ("close this" in clean_in or "close the window" in clean_in 
+                       or "close active" in clean_in)
+    
+    # "make chrome transparent" / "make chrome see through"
+    # Detects "transparent" or "see through" anywhere regardless of word order
+    is_transparent = ("transparent" in clean_in or "see through" in clean_in 
+                      or "translucent" in clean_in)
+    
+    # "make chrome solid" / "make chrome opaque" / "make chrome not transparent"
+    is_solid = (("solid" in clean_in or "opaque" in clean_in) 
+                and "not transparent" not in clean_in) or "not transparent" in clean_in
+    # Fix: "not transparent" = make solid, "solid" = make solid, "opaque" = make solid
+    is_solid = ("solid" in clean_in or "opaque" in clean_in or "not transparent" in clean_in)
+    
+    # "pin chrome" / "keep chrome on top" / "always on top"
+    is_pin = ("pin " in clean_in or "keep" in clean_in and "on top" in clean_in 
+              or "always on top" in clean_in)
+    
+    # "unpin chrome" / "remove from top"
+    is_unpin = ("unpin" in clean_in or "remove from top" in clean_in 
+                or "not on top" in clean_in)
     
     # Check if a window verb appears ANYWHERE in the sentence
     # "can you minimize chrome" → detects "minimize"
     # "please snap notepad left" → detects "snap"
     is_window_verb = any(wv in clean_in for wv in window_verbs)
+
+    # Update is_command to include all window detections
+    # Combine all window-related detections
+    is_any_window = (is_desktop_cmd or is_notarget_cmd or is_layout or put_pattern 
+                     or is_window_verb or is_switch or is_move_monitor or is_swap 
+                     or is_window_close or is_transparent or is_solid or is_pin or is_unpin)
     
-    if is_desktop_cmd or is_layout or put_pattern or is_window_verb or is_switch or is_move_monitor:
-        tag_params = _build_window_tag(clean_in, is_desktop_cmd, is_layout, 
-                                        put_pattern, is_switch, is_move_monitor)
+    # Update is_command so memory/LLM layers skip this
+    if is_any_window:
+        is_command = True
+
+    if is_any_window:
+
+        tag_params = _build_window_tag(clean_in, is_desktop_cmd, is_notarget_cmd,
+                                        is_layout, put_pattern, is_switch, 
+                                        is_move_monitor, is_swap, is_window_close,
+                                        is_transparent, is_solid, is_pin, is_unpin)
         if tag_params:
             import random as _rand
-            speech = _rand.choice([
-                "On it.",
-                "Done.",
-                "Got it.",
-                "Right away.",
-            ])
-            return f"{speech} ###WINDOW: {tag_params}"
+            
+            # --- BUILD CONTEXT-AWARE SPEECH ---
+            # Jarvis doesn't say "On it." — he tells you WHAT he's doing
+            # Parse the tag to understand the action
+            _parts = {}
+            for _p in tag_params.split():
+                if "=" in _p:
+                    _k, _v = _p.split("=", 1)
+                    _parts[_k] = _v
+            
+            _action = _parts.get("action", "")
+            _target = _parts.get("target", "").replace(",", " and ")
+            _position = _parts.get("position", "")
+            _mode = _parts.get("mode", "")
+            
+            # Generate natural speech based on what's happening
+            if _action == "focus":
+                speech = _rand.choice([
+                    f"Switching to {_target}.",
+                    f"Bringing up {_target}.",
+                    f"{_target}, coming up.",
+                ])
+            elif _action == "minimize":
+                if _target in ["this", "current", "active"]:
+                    speech = "Minimizing this window."
+                else:
+                    speech = _rand.choice([
+                        f"Minimizing {_target}.",
+                        f"Putting {_target} away.",
+                        f"{_target}, out of sight.",
+                    ])
+            elif _action == "maximize":
+                speech = _rand.choice([
+                    f"Maximizing {_target}.",
+                    f"Full size on {_target}.",
+                    f"{_target}, going big.",
+                ])
+            elif _action == "restore":
+                speech = _rand.choice([
+                    f"Restoring {_target}.",
+                    f"Bringing {_target} back.",
+                ])
+            elif _action == "snap":
+                speech = _rand.choice([
+                    f"Snapping {_target} to the {_position}.",
+                    f"{_target}, {_position} side.",
+                    f"Putting {_target} on the {_position}.",
+                ])
+            elif _action == "center":
+                speech = f"Centering {_target}."
+            elif _action == "layout":
+                if _mode == "split":
+                    speech = f"Putting {_target} side by side."
+                elif _mode == "stack":
+                    speech = f"Stacking {_target}."
+                elif _mode == "quad":
+                    speech = f"Four corners, {_target}."
+                else:
+                    speech = f"Arranging {_target}."
+            elif _action == "minimize_all":
+                speech = _rand.choice([
+                    "Clearing the deck.",
+                    "Everything down.",
+                    "Desktop, clear.",
+                ])
+            elif _action == "show_desktop":
+                speech = _rand.choice([
+                    "Showing desktop.",
+                    "All clear.",
+                    "Desktop.",
+                ])
+            elif _action == "swap":
+                speech = _rand.choice([
+                    f"Swapping {_target}.",
+                    f"{_target}, switching places.",
+                ])
+            elif _action == "pin":
+                speech = _rand.choice([
+                    f"Pinning {_target} on top.",
+                    f"{_target} stays on top now.",
+                ])
+            elif _action == "unpin":
+                speech = _rand.choice([
+                    f"Unpinning {_target}.",
+                    f"{_target}, back to normal.",
+                ])
+            elif _action == "fullscreen":
+                speech = _rand.choice([
+                    f"Fullscreen on {_target}.",
+                    f"{_target}, going fullscreen.",
+                ])
+            elif _action == "transparent":
+                _opacity = _parts.get("opacity", "0.8")
+                # Build context-aware speech based on opacity type
+                if _opacity == "more":
+                    speech = _rand.choice([
+                        f"Making {_target} more transparent.",
+                        f"{_target}, a bit more see-through.",
+                    ])
+                elif _opacity == "less":
+                    speech = _rand.choice([
+                        f"Making {_target} less transparent.",
+                        f"Brightening {_target} up.",
+                        f"{_target}, more visible now.",
+                    ])
+                else:
+                    try:
+                        pct = int(float(_opacity) * 100)
+                        if pct >= 90:
+                            speech = f"Making {_target} slightly transparent."
+                        elif pct <= 40:
+                            speech = f"Making {_target} very transparent."
+                        else:
+                            speech = f"Setting {_target} to {pct}% opacity."
+                    except:
+                        speech = f"Making {_target} transparent."
+            elif _action == "solid":
+                speech = _rand.choice([
+                    f"Making {_target} solid again.",
+                    f"{_target}, back to full opacity.",
+                ])
+            elif _action == "close_window":
+                speech = "Closing this window."
+            elif _action == "undo":
+                speech = _rand.choice([
+                    "Undoing that.",
+                    "Putting it back.",
+                    "Reverting.",
+                ])
+            elif _action == "list":
+                # List action returns data — speech comes from the result
+                speech = ""
+            else:
+                speech = "On it."
+            
+            # Return speech + tag (if no speech, just the tag)
+            if speech:
+                return f"{speech} ###WINDOW: {tag_params}"
+            else:
+                return f"###WINDOW: {tag_params}"
 
     if first_word in ["open", "close", "start", "kill", "launch"]:
         command_verb = first_word
@@ -788,7 +1190,9 @@ def think(prompt_text, speaker_id="default"):
     long_triggers = ["tell me", "explain", "describe", "what can you", 
                      "list", "how does", "how do", "why", "story",
                      "detail", "everything", "all about", "continue",
-                     "go on", "more about"]
+                     "go on", "more about", "your capabilities",
+                     "what are you capable", "what do you do",
+                     "what you can do", "capable of"]
     needs_long = any(t in clean_in for t in long_triggers)
     
     if needs_long:

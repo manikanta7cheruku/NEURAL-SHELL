@@ -2,6 +2,7 @@
 =============================================================================
 PROJECT SEVEN - hands/__init__.py (Bridge)
 Version: 1.6 (Window Mastery)
+Version: 1.6.1 (Window Mastery + Jarvis Features)
 
 Re-exports all hand functions so existing imports still work:
     import hands → hands.open_app(), hands.close_app(), hands.manage_window()
