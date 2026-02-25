@@ -45,5 +45,10 @@
         "enabled": true,
         "snap_gap": 0,
         "default_monitor": 0
+    },
+    "system": {
+        "enabled": true,
+        "volume_step": 10,
+        "brightness_step": 10
     }
 }

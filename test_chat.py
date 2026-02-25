@@ -13,13 +13,14 @@ from memory import seven_memory
 from memory.command_log import command_log
 from memory.mood import mood_engine
 from ears.voice_id import get_enrolled_speakers, remove_speaker, is_voice_id_enabled
+from hands.system import manage_system, get_system_status
 
 colorama.init(autoreset=True)
 # V1.2: Simulated speaker for text mode
 active_speaker = "default"
 
 print(Fore.CYAN + "=" * 60)
-print(Fore.CYAN + "  SEVEN TEXT DEBUGGER (V1.6 - WINDOW MASTERY)")
+print(Fore.CYAN + "  SEVEN TEXT DEBUGGER (V1.7 - SYSTEM GOD)")
 print(Fore.CYAN + "=" * 60)
 print(Fore.WHITE + "  Commands: /memory | /facts | /convos | /stats")
 print(Fore.WHITE + "  Commands: /logs | /logs N | /mood")
@@ -29,6 +30,7 @@ print(Fore.WHITE + "  Commands: /clear all | /clear logs | /clear mood | quit")
 print(Fore.WHITE + "  Commands: /help (show all commands)")
 print(Fore.WHITE + "  Commands: /speaker [name] | /speakers | /remove speaker [name]")
 print(Fore.WHITE + "  Commands: /windows | /window [cmd]")
+print(Fore.WHITE + "  Commands: /system | /sys [cmd]")
 print(Fore.CYAN + "=" * 60)
 
 # Show mood on startup
@@ -339,6 +341,17 @@ while True:
         print(Fore.WHITE + "  /window [cmd]    Test window command (e.g., /window minimize chrome)")
         print(Fore.WHITE + "                   Actions: focus minimize maximize restore snap center")
         print(Fore.WHITE + "                   pin unpin fullscreen transparent solid swap undo list")
+        print(Fore.WHITE + "")
+        print(Fore.CYAN +  "  --- System Control (V1.7) ---")
+        print(Fore.WHITE + "  /system          Show system status (volume, brightness, battery, WiFi)")
+        print(Fore.WHITE + "  /sys [cmd]       Test system command (e.g., /sys volume_up)")
+        print(Fore.WHITE + "                   Volume: volume_up volume_down volume_set volume_mute volume_get")
+        print(Fore.WHITE + "                   Brightness: brightness_up brightness_down brightness_set brightness_get")
+        print(Fore.WHITE + "                   Battery: battery")
+        print(Fore.WHITE + "                   WiFi: wifi_status wifi_on wifi_off")
+        print(Fore.WHITE + "                   Bluetooth: bluetooth_on bluetooth_off bluetooth_status")
+        print(Fore.WHITE + "                   Media: media_play_pause media_next media_prev media_stop")
+        print(Fore.WHITE + "                   Modes: dark_mode_on/off night_light_on/off dnd_on/off airplane_on/off")
         print(Fore.WHITE + "  quit / exit      Exit the console")
         print(Fore.CYAN + f"  {'='*50}")
         continue
@@ -400,6 +413,53 @@ while True:
             print(Fore.CYAN + f"  [{i}] {title}")
             print(Fore.WHITE + f"       hwnd: {hwnd}")
         print(Fore.CYAN + f"  {'='*50}")
+        continue
+
+    if cmd == "/system":
+        print(Fore.CYAN + f"\n  {'='*50}")
+        print(Fore.CYAN + f"  SYSTEM STATUS (V1.7)")
+        print(Fore.CYAN + f"  {'='*50}")
+        status = get_system_status()
+        for line in status.split("\n"):
+            print(Fore.CYAN + f"  {line}")
+        print(Fore.CYAN + f"  {'='*50}")
+        continue
+
+    if cmd.startswith("/sys "):
+        # Direct system command: /sys volume_up
+        # /sys volume_set 50
+        # /sys battery
+        # /sys media_next
+        sys_cmd = cmd[5:].strip()
+        print(Fore.CYAN + f"  [SYS TEST] Command: {sys_cmd}")
+        
+        parts = sys_cmd.split()
+        if not parts:
+            print(Fore.RED + "  ❌ Usage: /sys volume_up")
+            print(Fore.WHITE + "  Actions: volume_up volume_down volume_set volume_mute volume_unmute volume_get")
+            print(Fore.WHITE + "           brightness_up brightness_down brightness_set brightness_get")
+            print(Fore.WHITE + "           battery wifi_status wifi_on wifi_off")
+            print(Fore.WHITE + "           bluetooth_on bluetooth_off bluetooth_status")
+            print(Fore.WHITE + "           media_play_pause media_next media_prev media_stop")
+            print(Fore.WHITE + "           dark_mode_on dark_mode_off night_light_on night_light_off")
+            print(Fore.WHITE + "           dnd_on dnd_off airplane_on airplane_off")
+            print(Fore.WHITE + "  Examples:")
+            print(Fore.WHITE + "    /sys volume_up")
+            print(Fore.WHITE + "    /sys volume_set 50")
+            print(Fore.WHITE + "    /sys battery")
+            print(Fore.WHITE + "    /sys media_next")
+            print(Fore.WHITE + "    /sys dark_mode_on")
+            continue
+        
+        params = {"action": parts[0]}
+        if len(parts) >= 2:
+            params["value"] = parts[1]
+        
+        success, msg = manage_system(params)
+        if success:
+            print(Fore.GREEN + f"  ✅ {msg}")
+        else:
+            print(Fore.RED + f"  ❌ {msg}")
         continue
 
     if cmd.startswith("/window "):
@@ -568,6 +628,26 @@ while True:
             
             if params:
                 success, msg = manage_window(params)
+                if success:
+                    print(Fore.GREEN + f"  ✅ {msg}")
+                else:
+                    print(Fore.RED + f"  ❌ {msg}")
+
+    # --- EXECUTE SYSTEM COMMANDS (V1.7) ---
+    sys_cmds = re.findall(r"###SYS:\s*(.*?)(?=###|$)", response)
+    if sys_cmds:
+        for param_str in sys_cmds:
+            param_str = param_str.strip()
+            print(Fore.CYAN + f"  [SYS CMD] Params: {param_str}")
+            
+            params = {}
+            for pair in param_str.split():
+                if "=" in pair:
+                    key, val = pair.split("=", 1)
+                    params[key.strip()] = val.strip()
+            
+            if params:
+                success, msg = manage_system(params)
                 if success:
                     print(Fore.GREEN + f"  ✅ {msg}")
                 else:

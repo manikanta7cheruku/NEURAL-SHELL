@@ -41,3 +41,8 @@ ddgs
 
 # --- V1.6: Window Mastery ---
 pywin32
+
+# --- V1.7: System Control ---
+pycaw
+screen-brightness-control
+comtypes

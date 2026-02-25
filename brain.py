@@ -35,6 +35,9 @@ CONVO_HISTORY = {}
 USER_NAME = "Admin"
 LAST_USER_INPUT = ""
 RECENT_QUESTIONS = {}
+# V1.7: Track last system domain for "it" context resolution
+# When user says "make it 40" after "set volume to 60", we know "it" = volume
+LAST_SYSTEM_DOMAIN = None  # "volume", "brightness", etc.
 
 
 def load_name_from_memory():
@@ -379,6 +382,257 @@ def _build_window_tag(clean_in, is_desktop_cmd, is_notarget_cmd, is_layout, put_
     
     return None
 
+# =========================================================================
+#   V1.7
+# =========================================================================
+
+def _build_system_tag(clean_in):
+    """
+    V1.7: Parse natural language into ###SYS: tag params.
+    Uses keyword LOGIC instead of phrase matching.
+    Returns param string like 'action=volume_up value=10' or None.
+    """
+    import re as _re
+    
+    words = clean_in.split()
+    
+    # Helper: extract number from input (whole word only, not substring)
+    def _get_number():
+        for w in words:
+            cleaned = w.replace("%", "")
+            if cleaned.isdigit():
+                return cleaned
+        return None
+    
+    global LAST_SYSTEM_DOMAIN
+    
+    # =========================================================================
+    # VOLUME — detect "volume" or volume-related words anywhere
+    # =========================================================================
+    has_volume = any(w in words for w in ["volume", "sound", "audio"])
+    
+    # Standalone words (exact match — no other context needed)
+    if clean_in == "mute":
+        LAST_SYSTEM_DOMAIN = "volume"
+        return "action=volume_mute"
+    if clean_in == "unmute":
+        LAST_SYSTEM_DOMAIN = "volume"
+        return "action=volume_unmute"
+    if clean_in in ["louder", "softer", "quieter"]:
+        LAST_SYSTEM_DOMAIN = "volume"
+        if clean_in == "louder":
+            return "action=volume_up value=10"
+        return "action=volume_down value=10"
+    
+    if has_volume or any(w in words for w in ["loud", "quiet"]):
+        LAST_SYSTEM_DOMAIN = "volume"
+        
+        # Mute/unmute
+        if "unmute" in clean_in:
+            return "action=volume_unmute"
+        if "mute" in clean_in:
+            return "action=volume_mute"
+        
+        # Status check
+        if any(w in words for w in ["what", "whats", "how", "check", "current", "level", "status"]):
+            return "action=volume_get"
+        
+        num = _get_number()
+        
+        # Max/min (use whole word matching)
+        if any(w in words for w in ["max", "maximum", "full", "highest"]):
+            return "action=volume_set value=100"
+        if any(w in words for w in ["min", "minimum", "lowest", "zero"]):
+            return "action=volume_set value=0"
+        
+        # Set to specific value — if number exists with or without intent words
+        if num:
+            has_set_intent = any(w in words for w in ["set", "to", "at", "keep", "make", "put", "change"])
+            # "volume 50" or "set volume to 50" or "volume to 50"
+            if has_set_intent or len(words) <= 3:
+                return f"action=volume_set value={num}"
+        
+        # Up/down direction
+        is_up = any(w in words for w in ["up", "increase", "raise", "higher", "more", "louder", "crank", "bump", "boost"])
+        is_down = any(w in words for w in ["down", "decrease", "lower", "reduce", "less", "quieter", "softer"])
+        
+        step = num if num else "10"
+        if is_up:
+            return f"action=volume_up value={step}"
+        if is_down:
+            return f"action=volume_down value={step}"
+        
+        # Last resort: just a number with volume
+        if num:
+            return f"action=volume_set value={num}"
+    
+    # =========================================================================
+    # BRIGHTNESS — detect "bright", "dim", "light" (screen context)
+    # =========================================================================
+    has_brightness = any(w in words for w in ["brightness", "bright", "brighter", "brightest"])
+    has_dim = any(w in words for w in ["dim", "dimmer", "dimming"])
+    # "light" only counts if combined with screen context, not "night light" or "light mode"
+    has_screen_light = ("screen" in clean_in and "light" in words and 
+                        "night" not in clean_in and "mode" not in clean_in)
+    
+    # Standalone
+    if clean_in in ["brighter", "dimmer", "dim"]:
+        LAST_SYSTEM_DOMAIN = "brightness"
+        if clean_in == "brighter":
+            return "action=brightness_up value=10"
+        return "action=brightness_down value=10"
+    
+    if has_brightness or has_dim or has_screen_light:
+        LAST_SYSTEM_DOMAIN = "brightness"
+        
+        # Status check
+        if any(w in words for w in ["what", "whats", "how", "check", "current", "level", "status"]):
+            return "action=brightness_get"
+        
+        num = _get_number()
+        
+        # Max/min (whole word matching)
+        if any(w in words for w in ["max", "maximum", "full", "highest", "brightest"]):
+            return "action=brightness_set value=100"
+        if any(w in words for w in ["min", "minimum", "lowest"]):
+            return "action=brightness_set value=5"
+        
+        # Set to specific value
+        if num:
+            has_set_intent = any(w in words for w in ["set", "to", "at", "keep", "make", "put", "change"])
+            if has_set_intent or len(words) <= 3:
+                return f"action=brightness_set value={num}"
+        
+        # Up/down direction
+        is_up = any(w in words for w in ["up", "increase", "raise", "higher", "more", "brighter"])
+        is_down = any(w in words for w in ["down", "decrease", "lower", "reduce", "less", "dimmer", "darker", "dim"])
+        
+        step = num if num else "10"
+        if is_up:
+            return f"action=brightness_up value={step}"
+        if is_down:
+            return f"action=brightness_down value={step}"
+        
+        if num:
+            return f"action=brightness_set value={num}"
+    
+    # =========================================================================
+    # BATTERY — detect "battery" or "charge" or "plugged"
+    # =========================================================================
+    if any(w in words for w in ["battery", "charge", "plugged", "charging"]) or "power status" in clean_in:
+        return "action=battery"
+    
+    # =========================================================================
+    # WIFI — detect "wifi" or "wi-fi" or "internet" + context
+    # =========================================================================
+    has_wifi = any(w in words for w in ["wifi", "wi-fi"]) or (
+                "internet" in clean_in and any(w in words for w in ["connect", "status", "on", "off"]))
+    
+    if has_wifi:
+        if any(w in words for w in ["off", "disable", "disconnect", "kill", "stop"]):
+            return "action=wifi_off"
+        if any(w in words for w in ["on", "enable", "connect", "start"]):
+            return "action=wifi_on"
+        return "action=wifi_status"
+    
+    # =========================================================================
+    # BLUETOOTH — detect "bluetooth"
+    # =========================================================================
+    if "bluetooth" in clean_in:
+        if any(w in words for w in ["off", "disable", "disconnect", "kill", "stop"]):
+            return "action=bluetooth_off"
+        if any(w in words for w in ["on", "enable", "connect", "start"]):
+            return "action=bluetooth_on"
+        return "action=bluetooth_status"
+    
+    # =========================================================================
+    # MEDIA — detect playback intent
+    # =========================================================================
+    # Guard: "open spotify" or "play a game" should NOT trigger media
+    app_context = any(w in words for w in ["open", "launch", "game",
+                                            "video", "youtube", "movie", "film"])
+    
+    if not app_context:
+        # Next/skip — unambiguous
+        if clean_in in ["next", "skip"]:
+            return "action=media_next"
+        if any(p in clean_in for p in ["next track", "next song", "skip song",
+                                        "skip track", "skip this"]):
+            return "action=media_next"
+        
+        # Previous
+        if clean_in in ["previous", "prev"]:
+            return "action=media_prev"
+        if any(p in clean_in for p in ["previous track", "previous song", "prev track",
+                                        "prev song", "last track", "last song",
+                                        "go back a song"]):
+            return "action=media_prev"
+        
+        # Stop (must have music/playing context)
+        if any(p in clean_in for p in ["stop music", "stop playing", "stop the music",
+                                        "stop playback", "stop the song"]):
+            return "action=media_stop"
+        
+        # Play/pause — only if short or has music context
+        has_music = any(w in words for w in ["music", "song", "track", "playback"])
+        if clean_in in ["play", "pause", "resume", "unpause"]:
+            return "action=media_play_pause"
+        if has_music and any(w in words for w in ["play", "pause", "resume", "stop"]):
+            if "stop" in words:
+                return "action=media_stop"
+            return "action=media_play_pause"
+    
+    # =========================================================================
+    # DARK MODE — detect "dark mode" or "light mode"
+    # =========================================================================
+    if "dark mode" in clean_in or "dark theme" in clean_in:
+        if any(w in words for w in ["off", "disable"]):
+            return "action=dark_mode_off"
+        return "action=dark_mode_on"
+    
+    if "light mode" in clean_in or "light theme" in clean_in:
+        if any(w in words for w in ["off", "disable"]):
+            return "action=dark_mode_on"
+        return "action=dark_mode_off"
+    
+    if clean_in in ["go dark", "switch to dark"]:
+        return "action=dark_mode_on"
+    if clean_in in ["go light", "switch to light"]:
+        return "action=dark_mode_off"
+    
+    # =========================================================================
+    # NIGHT LIGHT — detect "night light" or "blue light"
+    # =========================================================================
+    if "night light" in clean_in or "blue light" in clean_in or "night mode" in clean_in:
+        if any(w in words for w in ["off", "disable"]):
+            return "action=night_light_off"
+        return "action=night_light_on"
+    
+    # =========================================================================
+    # DO NOT DISTURB — detect "disturb" or "dnd" or "focus assist"
+    # =========================================================================
+    if "disturb" in clean_in or "dnd" in words or "focus assist" in clean_in:
+        if any(w in words for w in ["off", "disable"]):
+            return "action=dnd_off"
+        return "action=dnd_on"
+    
+    if any(p in clean_in for p in ["silence notifications", "mute notifications",
+                                     "no notifications", "quiet mode"]):
+        return "action=dnd_on"
+    if any(p in clean_in for p in ["enable notifications", "turn on notifications",
+                                     "unmute notifications"]):
+        return "action=dnd_off"
+    
+    # =========================================================================
+    # AIRPLANE MODE — detect "airplane" or "flight mode"
+    # =========================================================================
+    if "airplane" in clean_in or "flight mode" in clean_in:
+        if any(w in words for w in ["off", "disable"]):
+            return "action=airplane_off"
+        return "action=airplane_on"
+    
+    return None
+
 
 def think(prompt_text, speaker_id="default"):
     global CONVO_HISTORY, USER_NAME, LAST_USER_INPUT, RECENT_QUESTIONS
@@ -617,6 +871,9 @@ def think(prompt_text, speaker_id="default"):
         # Build a facts block based on what domain they're asking about
         is_window_q = any(w in clean_in for w in ["window", "windows", "screen", "display"])
         is_app_q = any(w in clean_in for w in ["app", "apps", "application", "program"])
+        is_system_q = any(w in clean_in for w in ["system", "control", "volume", "brightness",
+                                                    "battery", "wifi", "bluetooth", "media",
+                                                    "settings control"])
         
         # Capability facts — Seven's actual knowledge about itself
         # These get injected into the prompt so the LLM reasons from them
@@ -637,6 +894,20 @@ def think(prompt_text, speaker_id="default"):
                 "I show desktop and minimize all windows.",
                 "I move windows between monitors.",
             ]
+        elif is_system_q:
+            # Only system facts
+            cap_facts = [
+                "I control system volume: up, down, mute, unmute, set to specific percentage.",
+                "I adjust screen brightness: up, down, set to specific percentage.",
+                "I check battery status: percentage, plugged in, time remaining.",
+                "I check and toggle WiFi on or off, and show current network.",
+                "I toggle Bluetooth on or off and check its status.",
+                "I control media playback: play, pause, next track, previous track, stop.",
+                "I switch between dark mode and light mode.",
+                "I toggle night light and blue light filter.",
+                "I toggle do not disturb and focus assist.",
+                "I toggle airplane mode.",
+            ]
         elif is_app_q:
             # Only app facts
             cap_facts = [
@@ -653,6 +924,7 @@ def think(prompt_text, speaker_id="default"):
                 "I do split-screen layouts with multiple windows.",
                 "I remember conversations and facts about people long-term.",
                 "I search the web for live data: prices, weather, news via DuckDuckGo.",
+                "I control system settings: volume, brightness, battery, WiFi, Bluetooth, media playback, dark mode, night light, and do not disturb.",
                 "I recognize different speakers by their voice.",
                 "Users can interrupt me mid-sentence.",
                 "Everything runs 100% locally. Nothing leaves this machine.",
@@ -664,6 +936,9 @@ def think(prompt_text, speaker_id="default"):
             facts_block += f"- {fact}\n"
         facts_block += "=== END CAPABILITIES ===\n"
         facts_block += "Summarize these naturally. Be concise. Don't list them as bullet points."
+        
+        # Modify the prompt so the LLM sees these facts
+        prompt_text = f"{facts_block}\n\nUser asked: {prompt_text}"
         
         # Modify the prompt so the LLM sees these facts
         prompt_text = f"{facts_block}\n\nUser asked: {prompt_text}"
@@ -775,6 +1050,144 @@ def think(prompt_text, speaker_id="default"):
     # "unpin chrome" / "remove from top"
     is_unpin = ("unpin" in clean_in or "remove from top" in clean_in 
                 or "not on top" in clean_in)
+    
+    # --- SYSTEM COMMANDS (V1.7) ---
+    # Detect system control commands BEFORE window/app commands.
+    # These are Python-first — bypass LLM entirely.
+    
+    global LAST_SYSTEM_DOMAIN
+    
+    import re as _re_mod
+    def _re_check_num(text):
+        return bool(_re_mod.search(r'\d+', text))
+    
+    # All system trigger words (used for fast pre-check)
+    SYSTEM_TRIGGER_WORDS = [
+        "volume", "mute", "unmute", "louder", "quieter", "softer",
+        "brightness", "brighter", "dimmer", "dim",
+        "battery", "charging", "plugged",
+        "wifi", "bluetooth",
+        "play", "pause", "skip", "next track", "next song", "previous track",
+        "previous song", "stop music", "stop playing", "resume music",
+        "dark mode", "light mode", "dark theme", "light theme",
+        "night light", "blue light", "night mode",
+        "do not disturb", "dnd", "focus assist",
+        "airplane mode", "flight mode"
+    ]
+    
+    # Check for system trigger words
+    # But guard against false positives: "play spotify" should NOT be media control
+    _has_system_trigger = any(t in clean_in for t in SYSTEM_TRIGGER_WORDS)
+    
+    # Guard: if sentence contains app verbs + app names, it's NOT a system command
+    _app_verbs_present = first_word in ["open", "close", "start", "kill", "launch"]
+    
+    # Also trigger if user says generic "it/that" + number and we have a recent system domain
+    _has_context_ref = (LAST_SYSTEM_DOMAIN is not None and (
+                        (any(w in clean_in for w in ["it", "that", "this"]) and _re_check_num(clean_in)) or
+                        (clean_in in ["more", "less", "higher", "lower", "increase", "decrease"])
+                        ))
+    
+    is_system_cmd = (_has_system_trigger and not _app_verbs_present) or _has_context_ref
+    
+    if is_system_cmd:
+        sys_tag = _build_system_tag(clean_in)
+        if sys_tag:
+            is_command = True
+            
+            # V1.7: Track domain for "it" context resolution
+            _parts_check = {}
+            for _pc in sys_tag.split():
+                if "=" in _pc:
+                    _pk, _pv = _pc.split("=", 1)
+                    _parts_check[_pk] = _pv
+            _sys_action = _parts_check.get("action", "")
+            if "volume" in _sys_action:
+                LAST_SYSTEM_DOMAIN = "volume"
+            elif "brightness" in _sys_action:
+                LAST_SYSTEM_DOMAIN = "brightness"
+
+            
+            import random as _rand
+            
+            # Parse tag for speech generation
+            _parts = {}
+            for _p in sys_tag.split():
+                if "=" in _p:
+                    _k, _v = _p.split("=", 1)
+                    _parts[_k] = _v
+            
+            _action = _parts.get("action", "")
+            _value = _parts.get("value", "")
+            
+            # Context-aware speech
+            if _action == "volume_up":
+                speech = _rand.choice(["Turning it up.", "Louder.", "Volume up."])
+            elif _action == "volume_down":
+                speech = _rand.choice(["Turning it down.", "Quieter.", "Volume down."])
+            elif _action == "volume_set":
+                speech = f"Setting volume to {_value}%."
+            elif _action == "volume_mute":
+                speech = _rand.choice(["Muted.", "Going silent.", "Sound off."])
+            elif _action == "volume_unmute":
+                speech = _rand.choice(["Unmuted.", "Sound on.", "You're live."])
+            elif _action == "volume_get":
+                speech = ""  # Result will be spoken from returned data
+            elif _action == "brightness_up":
+                speech = _rand.choice(["Brightening up.", "More brightness.", "Screen brighter."])
+            elif _action == "brightness_down":
+                speech = _rand.choice(["Dimming.", "Less brightness.", "Screen dimmer."])
+            elif _action == "brightness_set":
+                speech = f"Brightness to {_value}%."
+            elif _action == "brightness_get":
+                speech = ""
+            elif _action == "battery":
+                speech = ""  # Result spoken from data
+            elif _action.startswith("wifi"):
+                if "on" in _action:
+                    speech = "Enabling WiFi."
+                elif "off" in _action:
+                    speech = "Disabling WiFi."
+                else:
+                    speech = ""  # Status — result spoken
+            elif _action.startswith("bluetooth"):
+                if "on" in _action:
+                    speech = "Enabling Bluetooth."
+                elif "off" in _action:
+                    speech = "Disabling Bluetooth."
+                else:
+                    speech = ""
+            elif _action == "media_play_pause":
+                speech = _rand.choice(["Play pause.", "Toggled.", ""])
+            elif _action == "media_next":
+                speech = _rand.choice(["Next track.", "Skipping.", "Next."])
+            elif _action == "media_prev":
+                speech = _rand.choice(["Previous track.", "Going back.", "Previous."])
+            elif _action == "media_stop":
+                speech = "Stopping playback."
+            elif _action == "dark_mode_on":
+                speech = _rand.choice(["Going dark.", "Dark mode.", "Switching to dark."])
+            elif _action == "dark_mode_off":
+                speech = _rand.choice(["Going light.", "Light mode.", "Switching to light."])
+            elif _action == "night_light_on":
+                speech = _rand.choice(["Night light on.", "Easy on the eyes.", "Warming the screen."])
+            elif _action == "night_light_off":
+                speech = "Night light off."
+            elif _action == "dnd_on":
+                speech = _rand.choice(["Do not disturb.", "Going quiet.", "Notifications silenced."])
+            elif _action == "dnd_off":
+                speech = "Notifications back on."
+            elif _action == "airplane_on":
+                speech = _rand.choice(["Airplane mode on.", "Going offline.", "All radios off."])
+            elif _action == "airplane_off":
+                speech = _rand.choice(["Airplane mode off.", "Back online.", "Radios on."])
+            else:
+                speech = "On it."
+            
+            if speech:
+                return f"{speech} ###SYS: {sys_tag}"
+            else:
+                return f"###SYS: {sys_tag}"
     
     # Check if a window verb appears ANYWHERE in the sentence
     # "can you minimize chrome" → detects "minimize"

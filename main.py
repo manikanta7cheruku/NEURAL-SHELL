@@ -26,6 +26,7 @@ from ears.voice_id import identify_speaker, enroll_speaker, is_voice_id_enabled,
 from ears.core import listen_for_interrupt
 import brain
 import hands.core as core
+import hands.system as system_mod
 import mouth
 from mouth import interrupt as mouth_interrupt, is_speaking
 import random
@@ -399,6 +400,34 @@ def seven_logic():
                             mouth.speak(random.choice(fail_responses))
                             app_ui.update_status(f"🪟 FAILED: {msg}", "#ff0000")
 
+            # STEP B1.5: EXTRACT SYSTEM COMMANDS (V1.7)
+            sys_cmds = re.findall(r"###SYS:\s*(.*?)(?=###|$)", response)
+            if sys_cmds:
+                for param_str in sys_cmds:
+                    param_str = param_str.strip()
+                    print(Fore.CYAN + f"[SYS CMD] Raw params: {param_str}")
+                    
+                    # Parse key=value pairs
+                    params = {}
+                    for pair in param_str.split():
+                        if "=" in pair:
+                            key, val = pair.split("=", 1)
+                            params[key.strip()] = val.strip()
+                    
+                    if params:
+                        success, msg = system_mod.manage_system(params)
+                        if success:
+                            app_ui.update_status(f"⚙️ {msg}", "#00ff00")
+                            # Speak result for info queries (battery, volume level, etc)
+                            action = params.get("action", "")
+                            info_actions = ["battery", "volume_get", "brightness_get", 
+                                          "wifi_status", "bluetooth_status"]
+                            if action in info_actions and msg:
+                                speak_with_interrupt(msg)
+                        else:
+                            mouth.speak(msg)
+                            app_ui.update_status(f"⚙️ FAILED: {msg}", "#ff0000")
+
             # STEP B: EXTRACT COMMANDS
             commands = re.findall(r"###(OPEN|CLOSE|SEARCH|SYS): (.*?)(?=###|$)", response)
 
@@ -466,7 +495,16 @@ def seven_logic():
                             core.search_web(app_to_run)
                         elif cmd_type == "SYS":
                             app_ui.update_status(f"SYSTEM: {app_to_run}", "#ffff00")
-                            core.system_control(app_to_run)
+                            # V1.7: Route through new system module if it's a key=value format
+                            if "=" in app_to_run:
+                                params = {}
+                                for pair in app_to_run.split():
+                                    if "=" in pair:
+                                        k, v = pair.split("=", 1)
+                                        params[k] = v
+                                system_mod.manage_system(params)
+                            else:
+                                core.system_control(app_to_run)
             # Clean up temp audio file
             if audio_path and os.path.exists(audio_path):
                 try:
