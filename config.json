@@ -8,7 +8,15 @@
     "brain": {
         "model_name": "llama3",
         "temperature": 0.3,
-        "max_history": 10
+        "max_history": 10,
+        "streaming": true,
+        "auto_model": true,
+        "model_tiers": {
+            "high": "llama3",
+            "medium": "phi3:mini",
+            "low": "qwen2:1.5b",
+            "minimum": "tinyllama"
+        }
     },
     "vision": {
         "model_name": "llava"

@@ -30,6 +30,75 @@ from memory.mood import mood_engine
 colorama.init(autoreset=True)
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
+import time as _time
+
+def _stream_sentences(prompt, payload):
+    """
+    V1.9: Stream tokens from Ollama, yield complete sentences.
+    Instead of waiting for full response, yields each sentence
+    as soon as a boundary (. ! ? newline) is detected.
+    """
+    payload["stream"] = True
+    # Remove stream-incompatible options
+    payload.pop("stream", None)
+    
+    buffer = ""
+    sentence_endings = {'.', '!', '?'}
+    
+    try:
+        r = requests.post(OLLAMA_URL, json={**payload, "stream": True}, timeout=60, stream=True)
+        
+        if r.status_code != 200:
+            yield "My brain hiccupped. Try again."
+            return
+        
+        for line in r.iter_lines():
+            if not line:
+                continue
+            
+            try:
+                chunk = json.loads(line)
+                token = chunk.get("response", "")
+                done = chunk.get("done", False)
+                
+                if token:
+                    buffer += token
+                
+                # Check for sentence boundary
+                # Yield when we hit . ! ? followed by space or end
+                if buffer:
+                    # Find last sentence boundary
+                    last_boundary = -1
+                    for i, ch in enumerate(buffer):
+                        if ch in sentence_endings:
+                            # Check it's not a decimal (3.14) or abbreviation
+                            if i + 1 < len(buffer) and buffer[i + 1] == ' ':
+                                last_boundary = i + 1
+                            elif i + 1 >= len(buffer):
+                                last_boundary = i + 1
+                    
+                    if last_boundary > 0:
+                        sentence = buffer[:last_boundary].strip()
+                        buffer = buffer[last_boundary:].strip()
+                        if sentence and len(sentence) > 1:
+                            yield sentence
+                
+                if done:
+                    # Flush remaining buffer
+                    if buffer.strip():
+                        yield buffer.strip()
+                    break
+            
+            except json.JSONDecodeError:
+                continue
+    
+    except requests.exceptions.ConnectionError:
+        yield "I can't reach my brain. Run 'ollama serve' first."
+    except requests.exceptions.Timeout:
+        yield "My brain took too long. Try again."
+    except Exception as e:
+        print(Fore.RED + f"[BRAIN] Stream error: {e}")
+        yield "Something went wrong with my thinking."
 MODEL_NAME = config.KEY['brain']['model_name']
 CONVO_HISTORY = {}
 USER_NAME = "Admin"
@@ -2099,9 +2168,50 @@ def think(prompt_text, speaker_id="default"):
         }
     }
 
-
+    # V1.9: Check if streaming is enabled
+    use_streaming = config.KEY.get('brain', {}).get('streaming', False)
+    
+    if use_streaming:
+        # Return a generator marker so main.py knows to use speak_streamed
+        # We return a special object that main.py can detect
+        start_time = _time.time()
+        
+        def _sentence_gen():
+            full_reply = []
+            for sentence in _stream_sentences(full_prompt, payload):
+                full_reply.append(sentence)
+                yield sentence
+            
+            # After streaming completes, store in history
+            complete_reply = " ".join(full_reply)
+            elapsed = int((_time.time() - start_time) * 1000)
+            
+            try:
+                from brain_manager import record_latency
+                record_latency(elapsed)
+            except:
+                pass
+            
+            if "VISUAL_REPORT:" not in prompt_text:
+                if speaker_id not in CONVO_HISTORY:
+                    CONVO_HISTORY[speaker_id] = []
+                CONVO_HISTORY[speaker_id].append(f"Seven: {complete_reply}")
+        
+        return ("__STREAM__", _sentence_gen())
+    
+    # Non-streaming (original behavior)
+    start_time = _time.time()
+    
     try:
         r = requests.post(OLLAMA_URL, json=payload, timeout=30)
+        
+        elapsed = int((_time.time() - start_time) * 1000)
+        try:
+            from brain_manager import record_latency
+            record_latency(elapsed)
+        except:
+            pass
+        
         if r.status_code == 200:
             reply = r.json().get("response", "").strip()
             if not reply:

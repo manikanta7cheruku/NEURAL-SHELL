@@ -15,6 +15,7 @@ from memory.mood import mood_engine
 from ears.voice_id import get_enrolled_speakers, remove_speaker, is_voice_id_enabled
 from hands.system import manage_system, get_system_status
 from hands.scheduler import manage_schedule, get_all_schedules, get_active_count, list_schedules
+from brain_manager import get_speed_report, get_hardware_summary, recommend_model, get_latency_stats
 
 colorama.init(autoreset=True)
 # V1.2: Simulated speaker for text mode
@@ -34,7 +35,7 @@ from hands.scheduler import start_background as _start_sched
 _start_sched(speak_fn=_test_speak)
 
 print(Fore.CYAN + "=" * 60)
-print(Fore.CYAN + "  SEVEN TEXT DEBUGGER (V1.8 - THE SCHEDULER)")
+print(Fore.CYAN + "  SEVEN TEXT DEBUGGER (V1.9 - VELOCITY UPDATE)")
 print(Fore.CYAN + "=" * 60)
 print(Fore.WHITE + "  Commands: /memory | /facts | /convos | /stats")
 print(Fore.WHITE + "  Commands: /logs | /logs N | /mood")
@@ -358,6 +359,10 @@ while True:
         print(Fore.WHITE + "                   pin unpin fullscreen transparent solid swap undo list")
         print(Fore.WHITE + "")
         print(Fore.WHITE + "")
+        print(Fore.WHITE + "")
+        print(Fore.CYAN +  "  --- Speed & Hardware (V1.9) ---")
+        print(Fore.WHITE + "  /speed           Show latency stats, model info, hardware specs")
+        print(Fore.WHITE + "  /hardware        Detect GPU/VRAM/RAM, recommend best model")
         print(Fore.CYAN +  "  --- Scheduler (V1.8) ---")
         print(Fore.WHITE + "  /schedules       Show all schedules (active, fired, cancelled)")
         print(Fore.WHITE + "  /sched clear     Clear all schedules")
@@ -445,6 +450,33 @@ while True:
         for i, (hwnd, title) in enumerate(windows):
             print(Fore.CYAN + f"  [{i}] {title}")
             print(Fore.WHITE + f"       hwnd: {hwnd}")
+        print(Fore.CYAN + f"  {'='*50}")
+        continue
+
+    if cmd == "/speed":
+        print(Fore.CYAN + f"\n  {'='*50}")
+        print(Fore.CYAN + f"  SPEED & HARDWARE REPORT (V1.9)")
+        print(Fore.CYAN + f"  {'='*50}")
+        report = get_speed_report()
+        for line in report.split("\n"):
+            print(Fore.CYAN + f"  {line}")
+        print(Fore.CYAN + f"  {'='*50}")
+        continue
+
+    if cmd == "/hardware":
+        hw = get_hardware_summary()
+        rec_model, tier, reason = recommend_model(hw)
+        print(Fore.CYAN + f"\n  {'='*50}")
+        print(Fore.CYAN + f"  HARDWARE DETECTION")
+        print(Fore.CYAN + f"  {'='*50}")
+        print(Fore.CYAN + f"  GPU: {hw['gpu']['name']}")
+        print(Fore.CYAN + f"  VRAM: {hw['gpu']['vram_gb']}GB")
+        print(Fore.CYAN + f"  RAM: {hw['ram_gb']}GB")
+        print(Fore.CYAN + f"  CPU: {hw['cpu']['processor']} ({hw['cpu']['cores']} cores)")
+        print(Fore.CYAN + f"  {'─'*50}")
+        print(Fore.GREEN + f"  Recommended Model: {rec_model}")
+        print(Fore.GREEN + f"  Tier: {tier}")
+        print(Fore.GREEN + f"  Reason: {reason}")
         print(Fore.CYAN + f"  {'='*50}")
         continue
 
@@ -672,7 +704,19 @@ while True:
     # --- NORMAL CHAT ---
     print(Fore.MAGENTA + "Seven is thinking...")
     response = brain.think(user_input, speaker_id=active_speaker)
-    print(Fore.GREEN + f"SEVEN: {response}")
+    
+    # V1.9: Handle streaming responses
+    if isinstance(response, tuple) and len(response) == 2 and response[0] == "__STREAM__":
+        _, sentence_gen = response
+        full_parts = []
+        print(Fore.GREEN + "SEVEN: ", end="", flush=True)
+        for sentence in sentence_gen:
+            print(Fore.GREEN + sentence + " ", end="", flush=True)
+            full_parts.append(sentence)
+        print()  # Newline after streaming completes
+        response = " ".join(full_parts)
+    else:
+        print(Fore.GREEN + f"SEVEN: {response}")
 
     # Show mood inline after each response
     m_status = mood_engine.get_status()

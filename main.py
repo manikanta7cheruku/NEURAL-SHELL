@@ -304,7 +304,11 @@ def seven_logic():
 
             if not response:
                 response = "Processing error."
-            # V1.3: Track if speech completes (set later in speech block)
+            
+            # V1.9: Check if response is a streaming generator
+            is_streaming = isinstance(response, tuple) and len(response) == 2 and response[0] == "__STREAM__"
+            
+            # V1.3: Track if speech completes
             completed = True
 
             # =================================================================
@@ -367,7 +371,32 @@ def seven_logic():
             if "###" in response:
                 speech_part = response.split("###")[0].strip()
 
-            if speech_part:
+            if is_streaming and not ("###" in str(response)):
+                # V1.9: Streaming mode — speak sentences as they arrive
+                _, sentence_gen = response
+                interrupt_context["last_input"] = user_input
+                
+                full_response_parts = []
+                for sentence in sentence_gen:
+                    full_response_parts.append(sentence)
+                    
+                    # Check for command tags — don't speak them
+                    if "###" in sentence:
+                        continue
+                    
+                    completed = speak_with_interrupt(sentence)
+                    if not completed:
+                        break
+                
+                # Reconstruct full response for memory storage and command extraction
+                response = " ".join(full_response_parts)
+                speech_part = response.split("###")[0].strip() if "###" in response else response
+                
+                if completed:
+                    app_ui.update_status(speech_part[:80], "#00ccff")
+                else:
+                    app_ui.update_status("⚡ INTERRUPTED", "#ffaa00")
+            elif speech_part:
                 interrupt_context["last_input"] = user_input
                 completed = speak_with_interrupt(speech_part)
                 if completed:
