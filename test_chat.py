@@ -14,13 +14,27 @@ from memory.command_log import command_log
 from memory.mood import mood_engine
 from ears.voice_id import get_enrolled_speakers, remove_speaker, is_voice_id_enabled
 from hands.system import manage_system, get_system_status
+from hands.scheduler import manage_schedule, get_all_schedules, get_active_count, list_schedules
 
 colorama.init(autoreset=True)
 # V1.2: Simulated speaker for text mode
 active_speaker = "default"
+# V1.8: Start scheduler background thread (uses print instead of speak in text mode)
+def _test_speak(text):
+    """Speak callback for test mode — prints AND speaks aloud."""
+    print(Fore.YELLOW + f"\n  🔔 [SCHEDULER FIRES]: {text}")
+    try:
+        import mouth
+        mouth.speak(text)
+    except Exception as e:
+        print(Fore.RED + f"  [SPEAK ERROR] {e}")
+    print(Fore.YELLOW + f"\nYOU: ", end="")
+
+from hands.scheduler import start_background as _start_sched
+_start_sched(speak_fn=_test_speak)
 
 print(Fore.CYAN + "=" * 60)
-print(Fore.CYAN + "  SEVEN TEXT DEBUGGER (V1.7 - SYSTEM GOD)")
+print(Fore.CYAN + "  SEVEN TEXT DEBUGGER (V1.8 - THE SCHEDULER)")
 print(Fore.CYAN + "=" * 60)
 print(Fore.WHITE + "  Commands: /memory | /facts | /convos | /stats")
 print(Fore.WHITE + "  Commands: /logs | /logs N | /mood")
@@ -31,6 +45,7 @@ print(Fore.WHITE + "  Commands: /help (show all commands)")
 print(Fore.WHITE + "  Commands: /speaker [name] | /speakers | /remove speaker [name]")
 print(Fore.WHITE + "  Commands: /windows | /window [cmd]")
 print(Fore.WHITE + "  Commands: /system | /sys [cmd]")
+print(Fore.WHITE + "  Commands: /schedules | /sched [cmd]")
 print(Fore.CYAN + "=" * 60)
 
 # Show mood on startup
@@ -342,6 +357,24 @@ while True:
         print(Fore.WHITE + "                   Actions: focus minimize maximize restore snap center")
         print(Fore.WHITE + "                   pin unpin fullscreen transparent solid swap undo list")
         print(Fore.WHITE + "")
+        print(Fore.WHITE + "")
+        print(Fore.CYAN +  "  --- Scheduler (V1.8) ---")
+        print(Fore.WHITE + "  /schedules       Show all schedules (active, fired, cancelled)")
+        print(Fore.WHITE + "  /sched clear     Clear all schedules")
+        print(Fore.WHITE + "  /sched cancel N  Cancel schedule by ID")
+        print(Fore.WHITE + "  /sched cancel X  Cancel by matching text")
+        print(Fore.WHITE + "  /sched test      Create test reminder (fires in 30 seconds)")
+        print(Fore.WHITE + "")
+        print(Fore.CYAN +  "  --- Natural Language Scheduler ---")
+        print(Fore.WHITE + '  "Set a timer for 10 minutes"')
+        print(Fore.WHITE + '  "Remind me to call Mom at 5pm"')
+        print(Fore.WHITE + '  "Wake me up at 7am"')
+        print(Fore.WHITE + '  "Remind me in 30 minutes to check the oven"')
+        print(Fore.WHITE + '  "Schedule a meeting with John on Friday at 3pm"')
+        print(Fore.WHITE + '  "Every Monday remind me to submit report"')
+        print(Fore.WHITE + '  "Cancel my 5pm reminder"')
+        print(Fore.WHITE + '  "What reminders do I have?"')
+        print(Fore.WHITE + '  "How much time left on my timer?"')
         print(Fore.CYAN +  "  --- System Control (V1.7) ---")
         print(Fore.WHITE + "  /system          Show system status (volume, brightness, battery, WiFi)")
         print(Fore.WHITE + "  /sys [cmd]       Test system command (e.g., /sys volume_up)")
@@ -413,6 +446,76 @@ while True:
             print(Fore.CYAN + f"  [{i}] {title}")
             print(Fore.WHITE + f"       hwnd: {hwnd}")
         print(Fore.CYAN + f"  {'='*50}")
+        continue
+
+    if cmd == "/schedules":
+        print(Fore.CYAN + f"\n  {'='*50}")
+        print(Fore.CYAN + f"  ACTIVE SCHEDULES (V1.8)")
+        print(Fore.CYAN + f"  {'='*50}")
+        all_sched = get_all_schedules()
+        active = [s for s in all_sched if s["status"] == "active"]
+        fired = [s for s in all_sched if s["status"] == "fired"]
+        cancelled = [s for s in all_sched if s["status"] == "cancelled"]
+        
+        if not active:
+            print(Fore.YELLOW + "  No active schedules.")
+        else:
+            for s in active:
+                stype = s["type"].upper()
+                msg = s.get("message", "")
+                time_str = s.get("time", "?")
+                recur = s.get("recur", "none")
+                speaker = s.get("speaker_id", "?")
+                sid = s.get("id", "?")
+                recur_tag = f" [RECUR: {recur}]" if recur != "none" else ""
+                print(Fore.GREEN + f"  [{sid}] {stype}: {msg}")
+                print(Fore.WHITE + f"       Time: {time_str} | Speaker: {speaker}{recur_tag}")
+        
+        print(Fore.CYAN + f"  {'─'*50}")
+        print(Fore.CYAN + f"  Active: {len(active)} | Fired: {len(fired)} | Cancelled: {len(cancelled)} | Total: {len(all_sched)}")
+        print(Fore.CYAN + f"  {'='*50}")
+        continue
+
+    if cmd.startswith("/sched "):
+        sched_cmd = cmd[7:].strip()
+        
+        if sched_cmd == "clear":
+            confirm = input(Fore.YELLOW + "  Clear all schedules? (y/n): ").strip().lower()
+            if confirm == 'y':
+                success, msg = manage_schedule({"action": "cancel", "cancel_type": "all"})
+                print(Fore.GREEN + f"  ✅ {msg}" if success else Fore.RED + f"  ❌ {msg}")
+            else:
+                print(Fore.WHITE + "  Cancelled.")
+            continue
+        
+        if sched_cmd.startswith("cancel "):
+            cancel_arg = sched_cmd[7:].strip()
+            if cancel_arg.isdigit():
+                success, msg = manage_schedule({"action": "cancel", "id": cancel_arg})
+            else:
+                success, msg = manage_schedule({"action": "cancel", "match": cancel_arg})
+            print(Fore.GREEN + f"  ✅ {msg}" if success else Fore.RED + f"  ❌ {msg}")
+            continue
+        
+        if sched_cmd == "test":
+            # Quick test: reminder 30 seconds from now
+            from datetime import datetime, timedelta
+            test_time = datetime.now() + timedelta(seconds=30)
+            success, msg = manage_schedule({
+                "action": "reminder",
+                "time": f"in_30_seconds",
+                "message": "test_reminder_from_dev_console",
+                "speaker_id": active_speaker
+            })
+            print(Fore.GREEN + f"  ✅ {msg}" if success else Fore.RED + f"  ❌ {msg}")
+            print(Fore.WHITE + "  (Will fire in ~30 seconds. Check console for output.)")
+            continue
+        
+        print(Fore.RED + "  ❌ Usage:")
+        print(Fore.WHITE + "    /sched clear          Clear all schedules")
+        print(Fore.WHITE + "    /sched cancel 3       Cancel schedule by ID")
+        print(Fore.WHITE + "    /sched cancel [text]  Cancel by matching text")
+        print(Fore.WHITE + "    /sched test           Create test reminder (30s)")
         continue
 
     if cmd == "/system":
@@ -588,7 +691,10 @@ while True:
     cmd_words = ["open", "close", "start", "kill", "launch",
                  "minimize", "maximize", "maximise", "restore", "snap",
                  "switch to", "bring up", "focus", "center", "centre",
-                 "put", "show desktop", "hide all"]
+                 "put", "show desktop", "hide all",
+                 "set a timer", "set an alarm", "set alarm", "remind me",
+                 "wake me up", "cancel my", "cancel the", "cancel all",
+                 "schedule a meeting", "clear all timers"]
     if any(w in user_input.lower() for w in cmd_words):
         should_store = False
     # Don't store identity responses (they pollute memory with duplicates)
@@ -648,6 +754,28 @@ while True:
             
             if params:
                 success, msg = manage_system(params)
+                if success:
+                    print(Fore.GREEN + f"  ✅ {msg}")
+                else:
+                    print(Fore.RED + f"  ❌ {msg}")
+
+    # --- EXECUTE SCHEDULER COMMANDS (V1.8) ---
+    sched_cmds = re.findall(r"###SCHED:\s*(.*?)(?=###|$)", response)
+    if sched_cmds:
+        for param_str in sched_cmds:
+            param_str = param_str.strip()
+            print(Fore.CYAN + f"  [SCHED CMD] Params: {param_str}")
+            
+            params = {}
+            for pair in param_str.split():
+                if "=" in pair:
+                    key, val = pair.split("=", 1)
+                    params[key.strip()] = val.strip()
+            
+            params["speaker_id"] = active_speaker
+            
+            if params:
+                success, msg = manage_schedule(params)
                 if success:
                     print(Fore.GREEN + f"  ✅ {msg}")
                 else:

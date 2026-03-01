@@ -50,5 +50,12 @@
         "enabled": true,
         "volume_step": 10,
         "brightness_step": 10
+    },
+    "scheduler": {
+        "enabled": true,
+        "check_interval": 15,
+        "default_alarm_message": "Time to wake up.",
+        "default_reminder_time": "09:00",
+        "fire_through_pause": true
     }
 }

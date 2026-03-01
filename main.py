@@ -27,6 +27,7 @@ from ears.core import listen_for_interrupt
 import brain
 import hands.core as core
 import hands.system as system_mod
+import hands.scheduler as scheduler_mod
 import mouth
 from mouth import interrupt as mouth_interrupt, is_speaking
 import random
@@ -164,6 +165,11 @@ def seven_logic():
     # Initial Greeting
     print(Fore.GREEN + "[SYSTEM] Initializing Seven...")
     mouth.speak(f"{config.KEY['identity']['name']} V1.3 Online.")
+    # V1.8: Start background scheduler
+    scheduler_mod.start_background(speak_fn=mouth.speak)
+    sched_count = scheduler_mod.get_active_count()
+    if sched_count > 0:
+        print(Fore.CYAN + f"[SYSTEM] Scheduler active: {sched_count} pending schedule(s).")
     app_ui.update_status("SYSTEM ONLINE", "#00ff00")
 
     # =========================================================================
@@ -399,6 +405,33 @@ def seven_logic():
                             ]
                             mouth.speak(random.choice(fail_responses))
                             app_ui.update_status(f"🪟 FAILED: {msg}", "#ff0000")
+
+            # STEP B1.7: EXTRACT SCHEDULER COMMANDS (V1.8)
+            sched_cmds = re.findall(r"###SCHED:\s*(.*?)(?=###|$)", response)
+            if sched_cmds:
+                for param_str in sched_cmds:
+                    param_str = param_str.strip()
+                    print(Fore.CYAN + f"[SCHED CMD] Raw params: {param_str}")
+                    
+                    # Parse key=value pairs
+                    params = {}
+                    for pair in param_str.split():
+                        if "=" in pair:
+                            key, val = pair.split("=", 1)
+                            params[key.strip()] = val.strip()
+                    
+                    # Inject speaker_id
+                    params["speaker_id"] = speaker_id
+                    
+                    if params:
+                        success, msg = scheduler_mod.manage_schedule(params)
+                        if success:
+                            app_ui.update_status(f"📅 {msg}", "#00ff00")
+                            if msg:
+                                speak_with_interrupt(msg)
+                        else:
+                            mouth.speak(msg)
+                            app_ui.update_status(f"📅 FAILED: {msg}", "#ff0000")
 
             # STEP B1.5: EXTRACT SYSTEM COMMANDS (V1.7)
             sys_cmds = re.findall(r"###SYS:\s*(.*?)(?=###|$)", response)

@@ -383,6 +383,400 @@ def _build_window_tag(clean_in, is_desktop_cmd, is_notarget_cmd, is_layout, put_
     return None
 
 # =========================================================================
+#   V1.8: SCHEDULER TAG BUILDER
+# =========================================================================
+
+def _build_sched_tag(clean_in, words):
+    """
+    V1.8: Parse natural language into ###SCHED: tag params.
+    Returns param string like 'action=reminder time=at_5pm message=call_Mom'
+    or None if not a scheduler command.
+    
+    Handles: alarms, reminders, timers, events, recurring, cancel, list.
+    Spaces in values are replaced with underscores for tag transport.
+    """
+    import re
+    
+    # Helper: encode spaces as underscores for tag value transport
+    def _enc(text):
+        return text.strip().replace(" ", "_") if text else ""
+    
+    # =====================================================================
+    # LIST / QUERY — "what reminders", "show schedule", "any alarms"
+    # =====================================================================
+    
+    # --- Dashboard-ready phrase lists ---
+    LIST_PHRASES = [
+        "what reminders", "what alarms", "what timers", "what events",
+        "show my schedule", "show schedule", "show my reminders",
+        "show my alarms", "show my timers", "list reminders",
+        "list alarms", "list timers", "list schedules", "any alarms",
+        "any reminders", "any timers", "what's scheduled", "whats scheduled",
+        "what is scheduled", "what's coming up", "whats coming up",
+        "upcoming reminders", "upcoming events", "do i have any reminders",
+        "do i have any alarms", "my schedule", "my reminders", "my alarms"
+    ]
+    
+    TIMER_REMAINING_PHRASES = [
+        "how much time left", "how long left", "time remaining",
+        "how much time on my timer", "how long on the timer",
+        "timer status", "whats left on the timer", "whats left on my timer",
+        "how much time is left", "time left on timer"
+    ]
+    
+    for phrase in TIMER_REMAINING_PHRASES:
+        if phrase in clean_in:
+            return "action=timer_remaining"
+    
+    for phrase in LIST_PHRASES:
+        if phrase in clean_in:
+            # Determine if asking about specific type
+            if any(w in clean_in for w in ["alarm", "alarms"]):
+                return "action=list list_type=alarms"
+            elif any(w in clean_in for w in ["timer", "timers"]):
+                return "action=list list_type=timers"
+            elif any(w in clean_in for w in ["reminder", "reminders"]):
+                return "action=list list_type=reminders"
+            elif any(w in clean_in for w in ["event", "events", "meeting", "meetings"]):
+                return "action=list list_type=events"
+            return "action=list"
+    
+    # =====================================================================
+    # CANCEL — "cancel my 5pm reminder", "delete the alarm", "clear all"
+    # =====================================================================
+    
+    CANCEL_VERBS = ["cancel", "delete", "remove", "clear", "stop"]
+    
+    has_cancel = any(w in words for w in CANCEL_VERBS)
+    
+    if has_cancel:
+        # "cancel everything" / "clear all" / "clear all schedules"
+        if any(p in clean_in for p in ["everything", "all schedules", "all reminders",
+                                        "all alarms", "all timers", "clear all"]):
+            # Check if cancelling specific type
+            if "alarm" in clean_in:
+                return "action=cancel cancel_type=alarms"
+            elif "timer" in clean_in:
+                return "action=cancel cancel_type=timers"
+            elif "reminder" in clean_in:
+                return "action=cancel cancel_type=reminders"
+            elif "event" in clean_in or "meeting" in clean_in:
+                return "action=cancel cancel_type=events"
+            return "action=cancel cancel_type=all"
+        
+        # "cancel the alarm" / "delete the timer" / "remove the reminder"
+        if any(w in clean_in for w in ["the alarm", "my alarm"]):
+            return "action=cancel cancel_type=alarm"
+        if any(w in clean_in for w in ["the timer", "my timer"]):
+            return "action=cancel cancel_type=timer"
+        if any(w in clean_in for w in ["the reminder", "my reminder"]):
+            return "action=cancel cancel_type=reminder"
+        
+        # "cancel my 5pm reminder" — extract match text
+        # Remove cancel verb, use rest as match
+        match_text = clean_in
+        for verb in CANCEL_VERBS:
+            match_text = match_text.replace(verb, "")
+        match_text = match_text.replace("my", "").replace("the", "").strip()
+        
+        if match_text:
+            return f"action=cancel match={_enc(match_text)}"
+        
+        return "action=cancel cancel_type=all"
+    
+    # =====================================================================
+    # TIMER — "set a timer for 10 minutes", "5 minute timer"
+    # =====================================================================
+    
+    TIMER_PHRASES = [
+        "set a timer", "start a timer", "timer for", "countdown",
+        "start timer", "set timer", "begin timer", "start a countdown",
+        "timer of", "count down"
+    ]
+    
+    is_timer = any(p in clean_in for p in TIMER_PHRASES)
+    
+    # Also catch: "5 minute timer", "10 min timer", "2 hour timer"
+    timer_suffix = re.search(r'(\d+)\s*(?:minute|min|mins|hour|hr|hrs|second|sec|secs)\s*timer', clean_in)
+    if timer_suffix:
+        is_timer = True
+    
+    if is_timer:
+        # Normalize "after" → works same as "for/in"
+        _timer_input = clean_in.replace("after ", "for ")
+        dur_match = re.search(r'(\d+)\s*(seconds?|secs?|minutes?|mins?|hours?|hrs?)', clean_in)
+        if dur_match:
+            amount = dur_match.group(1)
+            unit = dur_match.group(2)
+            
+            # Convert to seconds
+            unit_lower = unit.lower()
+            amt = int(amount)
+            if unit_lower.startswith("sec"):
+                secs = amt
+            elif unit_lower.startswith("min"):
+                secs = amt * 60
+            elif unit_lower.startswith("h"):
+                secs = amt * 3600
+            else:
+                secs = amt * 60
+            
+            # Extract optional message — look for "for [something]" AFTER the duration
+            message = ""
+            # Get everything after the duration match
+            after_pos = dur_match.end()
+            after_duration = _timer_input[after_pos:].strip()
+            
+            # Also check for "timer" word right after duration and skip it
+            after_duration = re.sub(r'^timer\s*', '', after_duration).strip()
+            
+            if after_duration:
+                # Remove leading "for", "to", "called", "named"
+                after_duration = re.sub(r'^(for|to|called|named)\s+', '', after_duration).strip()
+                if after_duration and len(after_duration) > 1:
+                    message = after_duration
+            
+            tag = f"action=timer duration={secs}"
+            if message:
+                tag += f" message={_enc(message)}"
+            return tag
+        
+        return "action=timer_ask"
+    
+    # =====================================================================
+    # ALARM — "set an alarm for 7am", "wake me up at 6:30"
+    # =====================================================================
+    
+    ALARM_PHRASES = [
+        "set an alarm", "set alarm", "alarm for", "alarm at",
+        "wake me up", "wake me at"
+    ]
+    
+    is_alarm = any(p in clean_in for p in ALARM_PHRASES)
+    
+    if is_alarm:
+        # Extract time — everything after "for", "at", "up at"
+        time_text = clean_in
+        for prefix in ["set an alarm for", "set alarm for", "alarm for",
+                       "set an alarm at", "set alarm at", "alarm at",
+                       "wake me up at", "wake me at"]:
+            if prefix in clean_in:
+                time_text = clean_in.split(prefix)[-1].strip()
+                break
+        
+        # Check for recurrence
+        recur = ""
+        RECUR_WORDS = {
+            "every day": "daily", "everyday": "daily", "daily": "daily",
+            "every morning": "daily", "every night": "daily",
+            "every weekday": "weekdays", "weekdays": "weekdays",
+            "every monday": "every_monday", "every tuesday": "every_tuesday",
+            "every wednesday": "every_wednesday", "every thursday": "every_thursday",
+            "every friday": "every_friday", "every saturday": "every_saturday",
+            "every sunday": "every_sunday"
+        }
+        for phrase, val in RECUR_WORDS.items():
+            if phrase in clean_in:
+                recur = val
+                time_text = time_text.replace(phrase, "").strip()
+                break
+        
+        if time_text:
+            tag = f"action=alarm time={_enc(time_text)}"
+            if recur:
+                tag += f" recur={recur}"
+            return tag
+        
+        return "action=alarm_ask"
+    
+    # =====================================================================
+    # REMINDER — "remind me to X at Y", "reminder to X at Y"
+    # =====================================================================
+    
+    REMINDER_PHRASES = [
+        "remind me", "remember me to", "remember me",
+        "reminder to", "reminder for",
+        "dont let me forget", "don't let me forget",
+        "remind me to", "remind me about", "remember to tell me",
+        "tell me to", "let me know to", "let me know when",
+        "alert me to", "notify me to", "ping me to",
+        "alert me in", "notify me in", "ping me in",
+    ]
+    
+    is_reminder = any(p in clean_in for p in REMINDER_PHRASES)
+    
+    if is_reminder:
+        # Pattern 1: "remind me to [message] at [time]"
+        # Pattern 2: "remind me at [time] to [message]"
+        # Pattern 3: "remind me in [duration] to [message]"
+        # Pattern 4: "every monday remind me to [message]"
+        
+        # Check for recurrence first
+        recur = ""
+        for phrase, val in {
+            "every day": "daily", "everyday": "daily", "daily": "daily",
+            "every weekday": "weekdays",
+            "every monday": "every_monday", "every tuesday": "every_tuesday",
+            "every wednesday": "every_wednesday", "every thursday": "every_thursday",
+            "every friday": "every_friday", "every saturday": "every_saturday",
+            "every sunday": "every_sunday",
+            "weekly": "weekly"
+        }.items():
+            if phrase in clean_in:
+                recur = val
+                break
+        
+        # Extract message and time
+        remainder = clean_in
+        for prefix in REMINDER_PHRASES:
+            if prefix in remainder:
+                remainder = remainder.split(prefix, 1)[-1].strip()
+                break
+        
+        # Remove recurrence phrase from remainder
+        if recur:
+            for phrase in ["every day", "everyday", "daily", "every weekday",
+                          "every monday", "every tuesday", "every wednesday",
+                          "every thursday", "every friday", "every saturday",
+                          "every sunday", "weekly"]:
+                remainder = remainder.replace(phrase, "").strip()
+        
+        message = ""
+        time_text = ""
+        
+        # Handle "after X seconds/minutes" → convert to "in X" internally
+        after_match = re.search(r'after\s+(\d+)\s*(seconds?|secs?|minutes?|mins?|hours?|hrs?)', remainder)
+        if after_match:
+            # Rewrite "after 10 seconds" → "in 10 seconds" so the parser below handles it
+            remainder = remainder.replace(after_match.group(0), f"in {after_match.group(1)} {after_match.group(2)}")
+        
+        # Try "in X minutes/hours" pattern
+        in_match = re.search(r'in\s+(\d+)\s*(seconds?|secs?|minutes?|mins?|hours?|hrs?)', remainder)
+        if in_match:
+            time_text = in_match.group(0)
+            # Message is everything AFTER the duration match, not a blind replace
+            before_match = remainder[:in_match.start()].strip()
+            after_match = remainder[in_match.end():].strip()
+            
+            # Message could be before ("call mom in 20 seconds") or after ("in 20 seconds to call mom")
+            if after_match:
+                message = re.sub(r'^(to|about|that|for)\s+', '', after_match).strip()
+            elif before_match:
+                message = re.sub(r'^(to|about|that|for)\s+', '', before_match).strip()
+            else:
+                message = ""
+        else:
+            # Try "at [time]" split
+            at_match = re.search(r'\b(at\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?)', remainder)
+            if at_match:
+                time_text = at_match.group(0)
+                parts = remainder.split(time_text)
+                # Message is either before or after the time
+                before = parts[0].strip() if parts[0] else ""
+                after = parts[1].strip() if len(parts) > 1 and parts[1] else ""
+                message = before if before else after
+                message = re.sub(r'^(to|about|that)\s+', '', message).strip()
+                message = re.sub(r'(to|about|that)$', '', message).strip()
+            else:
+                # Try "tomorrow", "next monday" etc
+                time_words_pattern = r'(tomorrow|next\s+\w+day|next\s+week|tonight)'
+                tw_match = re.search(time_words_pattern, remainder)
+                if tw_match:
+                    time_text = tw_match.group(0)
+                    # Also grab any clock time near it
+                    clock_after = remainder.split(tw_match.group(0))[-1].strip()
+                    clock_match = re.match(r'(at\s+)?\d{1,2}(?::\d{2})?\s*(?:am|pm)?', clock_after)
+                    if clock_match:
+                        time_text += " " + clock_match.group(0)
+                        clock_after = clock_after[clock_match.end():].strip()
+                    
+                    before = remainder.split(tw_match.group(0))[0].strip()
+                    message = before if before else clock_after
+                    message = re.sub(r'^(to|about|that)\s+', '', message).strip()
+                else:
+                    # No time found — message is everything
+                    message = remainder
+                    message = re.sub(r'^(to|about|that)\s+', '', message).strip()
+        
+        # Build tag
+        if message or time_text:
+            tag = "action=reminder"
+            if time_text:
+                tag += f" time={_enc(time_text)}"
+            if message:
+                tag += f" message={_enc(message)}"
+            if recur:
+                tag += f" recur={recur}"
+            return tag
+        
+        return "action=reminder_ask"
+    
+    # =====================================================================
+    # EVENT/MEETING — "schedule a meeting", "add event"
+    # =====================================================================
+    
+    EVENT_PHRASES = [
+        "schedule a meeting", "schedule meeting", "add meeting",
+        "schedule an event", "schedule event", "add event",
+        "calendar event", "add to calendar", "put on calendar"
+    ]
+    
+    is_event = any(p in clean_in for p in EVENT_PHRASES)
+    
+    if is_event:
+        remainder = clean_in
+        for prefix in EVENT_PHRASES:
+            if prefix in remainder:
+                remainder = remainder.split(prefix, 1)[-1].strip()
+                break
+        
+        message = ""
+        time_text = ""
+        
+        # Try splitting on time indicators
+        at_match = re.search(r'\b(at\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?)', remainder)
+        on_match = re.search(r'\b(on\s+\w+day|on\s+\w+\s+\d+|tomorrow|next\s+\w+)', remainder)
+        
+        if at_match:
+            time_part = at_match.group(0)
+            before = remainder[:at_match.start()].strip()
+            after = remainder[at_match.end():].strip()
+            
+            # Check for date before time
+            if on_match and on_match.start() < at_match.start():
+                time_text = on_match.group(0) + " " + time_part
+                message = before[:on_match.start()].strip()
+                if not message:
+                    message = after
+            else:
+                time_text = time_part
+                if on_match:
+                    time_text = on_match.group(0) + " " + time_text
+                    before = before[:on_match.start()].strip() if on_match.start() < len(before) else before
+                message = before if before else after
+        elif on_match:
+            time_text = on_match.group(0)
+            message = remainder.replace(time_text, "").strip()
+        else:
+            message = remainder
+        
+        # Clean message
+        message = re.sub(r'^(with|for|about|called|named)\s+', '', message).strip()
+        message = re.sub(r'\s+(with|for|about)$', '', message).strip()
+        if not message:
+            message = "meeting"
+        
+        tag = "action=event"
+        if time_text:
+            tag += f" time={_enc(time_text)}"
+        if message:
+            tag += f" message={_enc(message)}"
+        return tag
+    
+    return None
+
+
+# =========================================================================
 #   V1.7
 # =========================================================================
 
@@ -874,6 +1268,8 @@ def think(prompt_text, speaker_id="default"):
         is_system_q = any(w in clean_in for w in ["system", "control", "volume", "brightness",
                                                     "battery", "wifi", "bluetooth", "media",
                                                     "settings control"])
+        is_sched_q = any(w in clean_in for w in ["schedule", "scheduler", "alarm", "reminder",
+                                                   "timer", "calendar", "remind"])
         
         # Capability facts — Seven's actual knowledge about itself
         # These get injected into the prompt so the LLM reasons from them
@@ -908,6 +1304,17 @@ def think(prompt_text, speaker_id="default"):
                 "I toggle do not disturb and focus assist.",
                 "I toggle airplane mode.",
             ]
+        elif is_sched_q:
+            # Only scheduler facts
+            cap_facts = [
+                "I set alarms for specific times with optional recurring patterns.",
+                "I set reminders with custom messages — at specific times or after a delay.",
+                "I set timers that count down and alert when done.",
+                "I schedule calendar events and meetings.",
+                "I support recurring schedules: daily, weekly, specific weekdays.",
+                "I can list all active schedules and cancel them by voice.",
+                "Users can say things like 'remind me in 30 minutes' or 'wake me up at 7am'.",
+            ]
         elif is_app_q:
             # Only app facts
             cap_facts = [
@@ -928,6 +1335,7 @@ def think(prompt_text, speaker_id="default"):
                 "I recognize different speakers by their voice.",
                 "Users can interrupt me mid-sentence.",
                 "Everything runs 100% locally. Nothing leaves this machine.",
+                "I set alarms, reminders, timers, and calendar events. I handle recurring schedules and cancel them by voice.",
             ]
         
         # Inject facts into the prompt — LLM will phrase the answer naturally
@@ -1051,6 +1459,69 @@ def think(prompt_text, speaker_id="default"):
     is_unpin = ("unpin" in clean_in or "remove from top" in clean_in 
                 or "not on top" in clean_in)
     
+    _app_verbs_present = first_word in ["open", "close", "start", "kill", "launch"]
+    
+    # --- SCHEDULER COMMANDS (V1.8) ---
+    # Detect schedule/reminder/alarm/timer commands BEFORE system/window commands.
+    # These are Python-first — bypass LLM entirely.
+    
+    # Dashboard-ready trigger word list
+    SCHED_TRIGGER_WORDS = [
+        "remind", "reminder", "remember me", "alarm", "timer", "countdown",
+        "wake me", "schedule", "calendar", "meeting",
+        "every day", "everyday", "daily reminder", "weekly",
+        "every monday", "every tuesday", "every wednesday",
+        "every thursday", "every friday", "every saturday", "every sunday",
+        "after", "notify", "alert me", "tell me to", "let me know",
+    ]
+    
+    SCHED_TRIGGER_PHRASES = [
+        "set a timer", "set an alarm", "set alarm", "set timer",
+        "start a timer", "remind me", "remember me to", "remember me",
+        "reminder to", "reminder for", "remind me to", "remind me about",
+        "dont let me forget", "don't let me forget",
+        "tell me to", "let me know when", "let me know to",
+        "alert me", "notify me", "ping me",
+        "wake me up", "wake me at", "schedule a meeting", "add meeting",
+        "add event", "cancel my", "cancel the", "cancel all",
+        "delete the alarm", "delete the timer", "delete the reminder",
+        "remove the alarm", "remove the timer", "remove the reminder",
+        "clear all timers", "clear all reminders", "clear all alarms",
+        "what reminders", "what alarms", "what timers",
+        "show my schedule", "show schedule", "any alarms",
+        "any reminders", "any timers", "whats scheduled",
+        "how much time left", "time remaining", "timer status",
+        "list reminders", "list alarms", "list timers",
+        "my schedule", "my reminders", "my alarms",
+        "cancel everything", "clear all schedules",
+        "how long left", "time left on timer"
+    ]
+    
+    _has_sched_trigger = (any(t in clean_in for t in SCHED_TRIGGER_PHRASES) or 
+                          any(t in words for t in ["remind", "reminder", "alarm", "timer", "countdown"]))
+    
+    # Guard: "what time is it" is NOT a scheduler command
+    # Guard: "open timer app" is NOT a scheduler command
+    _sched_guard = _app_verbs_present or ("what time is it" in clean_in)
+    
+    if _has_sched_trigger and not _sched_guard:
+        sched_tag = _build_sched_tag(clean_in, words)
+        if sched_tag:
+            is_command = True
+            
+            # Handle "ask" actions — Seven needs more info
+            if sched_tag == "action=timer_ask":
+                return "How long should I set the timer for?"
+            if sched_tag == "action=alarm_ask":
+                return "What time should I set the alarm for?"
+            if sched_tag == "action=reminder_ask":
+                return "What should I remind you about, and when?"
+            
+            # For all other actions, return the tag
+            # Speech is generated by scheduler.manage_schedule() → spoken by main.py
+            # So we return an empty speech + tag
+            return f"###SCHED: {sched_tag}"
+    
     # --- SYSTEM COMMANDS (V1.7) ---
     # Detect system control commands BEFORE window/app commands.
     # These are Python-first — bypass LLM entirely.
@@ -1080,7 +1551,7 @@ def think(prompt_text, speaker_id="default"):
     _has_system_trigger = any(t in clean_in for t in SYSTEM_TRIGGER_WORDS)
     
     # Guard: if sentence contains app verbs + app names, it's NOT a system command
-    _app_verbs_present = first_word in ["open", "close", "start", "kill", "launch"]
+    #_app_verbs_present = first_word in ["open", "close", "start", "kill", "launch"]
     
     # Also trigger if user says generic "it/that" + number and we have a recent system domain
     _has_context_ref = (LAST_SYSTEM_DOMAIN is not None and (
@@ -1544,8 +2015,9 @@ def think(prompt_text, speaker_id="default"):
         "   - Your name is Seven. "
         f"   - You were created by {config.KEY['identity']['creator']}. "
         "   - You run 100 percent locally on the users PC. "
+        f"   - The current date and time is: {__import__('datetime').datetime.now().strftime('%A, %B %d, %Y at %I:%M %p')}. "
         "   - All data is stored locally. Nothing is sent to any cloud or server. "
-        "   - Your capabilities: open apps, close apps, long-term memory, web search for live data, voice recognition, interruptible speech. "
+        "   - Your capabilities: open apps, close apps, long-term memory, web search for live data, voice recognition, interruptible speech, alarms, reminders, timers, and scheduling. "
         "   - You have access to DuckDuckGo for live prices, weather, news, and trending topics. "
         "   - You know which of your capabilities you used to answer any question. "
         "   - When describing your capabilities, speak naturally. NEVER output command tags. "
