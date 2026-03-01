@@ -1972,6 +1972,39 @@ def think(prompt_text, speaker_id="default"):
             print(Fore.MAGENTA + "[MEMORY] Found relevant memories!")
             print(Fore.MAGENTA + memory_context)
 
+    # =========================================================================
+    # LAYER 5.3: KNOWLEDGE BASE SEARCH (Offline Knowledge — V1.10)
+    # =========================================================================
+    # Searches local knowledge base for factual/general questions.
+    # Only triggers for knowledge-type questions, NOT personal/command/casual.
+    # Priority: Memory > Knowledge > Web > LLM's own knowledge
+    
+    knowledge_context = ""
+    
+    if not is_command and not is_greeting and "VISUAL_REPORT:" not in prompt_text:
+        # Only search knowledge for factual questions
+        knowledge_triggers = ["what is", "what are", "who is", "who was", "who were",
+                             "explain", "define", "how does", "how do", "how is",
+                             "tell me about", "what does", "meaning of", "describe",
+                             "history of", "why is", "why do", "why does", "when was",
+                             "when did", "where is", "where was", "difference between"]
+        
+        is_knowledge_q = any(t in clean_in for t in knowledge_triggers)
+        
+        # Don't search knowledge for personal questions
+        personal_words = ["my", "i ", "me ", "about me", "do i", "am i"]
+        is_personal = any(w in clean_in for w in personal_words)
+        
+        if is_knowledge_q and not is_personal and not memory_context:
+            try:
+                from knowledge import search_knowledge
+                knowledge_context = search_knowledge(prompt_text)
+                if knowledge_context:
+                    print(Fore.CYAN + "[BRAIN] Knowledge base results found!")
+            except ImportError:
+                pass
+            except Exception as e:
+                print(Fore.YELLOW + f"[BRAIN] Knowledge search error: {e}")
             
     # =========================================================================
     # LAYER 5.5: WEB SEARCH (Live Knowledge — V1.4)
@@ -2131,6 +2164,9 @@ def think(prompt_text, speaker_id="default"):
 
     if web_context:
         full_prompt += web_context + "\n\n"
+    
+    if knowledge_context:
+        full_prompt += knowledge_context + "\n\n"
 
     if memory_context:
         full_prompt += memory_context + "\n\n"

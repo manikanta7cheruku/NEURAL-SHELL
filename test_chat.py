@@ -16,6 +16,9 @@ from ears.voice_id import get_enrolled_speakers, remove_speaker, is_voice_id_ena
 from hands.system import manage_system, get_system_status
 from hands.scheduler import manage_schedule, get_all_schedules, get_active_count, list_schedules
 from brain_manager import get_speed_report, get_hardware_summary, recommend_model, get_latency_stats
+import config
+from knowledge import search_knowledge, get_knowledge_stats, clear_knowledge
+from knowledge.indexer import index_file, index_directory, get_index_manifest
 
 colorama.init(autoreset=True)
 # V1.2: Simulated speaker for text mode
@@ -34,8 +37,15 @@ def _test_speak(text):
 from hands.scheduler import start_background as _start_sched
 _start_sched(speak_fn=_test_speak)
 
+# V1.10: Auto-index knowledge files on startup
+_k_config = config.KEY.get("knowledge", {})
+if _k_config.get("enabled", True) and _k_config.get("auto_index", True):
+    _k_files, _k_chunks, _k_msgs = index_directory()
+    if _k_files > 0:
+        print(Fore.GREEN + f"  Knowledge: Auto-indexed {_k_files} files ({_k_chunks} chunks)")
+
 print(Fore.CYAN + "=" * 60)
-print(Fore.CYAN + "  SEVEN TEXT DEBUGGER (V1.9 - VELOCITY UPDATE)")
+print(Fore.CYAN + "  SEVEN TEXT DEBUGGER (V1.10 - OFFLINE KNOWLEDGE)")
 print(Fore.CYAN + "=" * 60)
 print(Fore.WHITE + "  Commands: /memory | /facts | /convos | /stats")
 print(Fore.WHITE + "  Commands: /logs | /logs N | /mood")
@@ -360,6 +370,15 @@ while True:
         print(Fore.WHITE + "")
         print(Fore.WHITE + "")
         print(Fore.WHITE + "")
+        print(Fore.WHITE + "")
+        print(Fore.CYAN +  "  --- Knowledge Base (V1.10) ---")
+        print(Fore.WHITE + "  /knowledge          Show knowledge base stats")
+        print(Fore.WHITE + "  /knowledge search X Search for information")
+        print(Fore.WHITE + "  /knowledge index P  Index a file or directory")
+        print(Fore.WHITE + "  /knowledge reindex  Re-index custom directory")
+        print(Fore.WHITE + "  /knowledge clear    Clear knowledge base")
+        print(Fore.WHITE + "  /knowledge manifest Show indexed files")
+        print(Fore.WHITE + '  Drop .txt/.md files in seven_data/knowledge/custom/')
         print(Fore.CYAN +  "  --- Speed & Hardware (V1.9) ---")
         print(Fore.WHITE + "  /speed           Show latency stats, model info, hardware specs")
         print(Fore.WHITE + "  /hardware        Detect GPU/VRAM/RAM, recommend best model")
@@ -451,6 +470,93 @@ while True:
             print(Fore.CYAN + f"  [{i}] {title}")
             print(Fore.WHITE + f"       hwnd: {hwnd}")
         print(Fore.CYAN + f"  {'='*50}")
+        continue
+
+    if cmd == "/knowledge":
+        stats = get_knowledge_stats()
+        print(Fore.CYAN + f"\n  {'='*50}")
+        print(Fore.CYAN + f"  KNOWLEDGE BASE (V1.10)")
+        print(Fore.CYAN + f"  {'='*50}")
+        print(Fore.CYAN + f"  Total chunks:  {stats['total_chunks']}")
+        print(Fore.CYAN + f"  Sources:       {stats['source_count']}")
+        if stats['sources']:
+            for src in stats['sources']:
+                print(Fore.WHITE + f"    • {src}")
+        print(Fore.CYAN + f"  Storage:       {stats['storage_mb']} MB")
+        print(Fore.CYAN + f"  Custom dir:    seven_data/knowledge/custom/")
+        print(Fore.CYAN + f"  {'='*50}")
+        continue
+
+    if cmd.startswith("/knowledge "):
+        kb_cmd = cmd[11:].strip()
+        
+        if kb_cmd.startswith("search "):
+            query = kb_cmd[7:].strip()
+            if query:
+                result = search_knowledge(query)
+                if result:
+                    print(Fore.GREEN + f"\n  Knowledge results for '{query}':")
+                    for line in result.split("\n"):
+                        print(Fore.WHITE + f"  {line}")
+                else:
+                    print(Fore.YELLOW + f"  No results for '{query}'")
+            else:
+                print(Fore.RED + "  ❌ Usage: /knowledge search quantum physics")
+            continue
+        
+        if kb_cmd.startswith("index "):
+            path = kb_cmd[6:].strip()
+            if os.path.isdir(path):
+                files, chunks, msgs = index_directory(path)
+                for msg in msgs:
+                    print(Fore.GREEN + f"  {msg}")
+                print(Fore.CYAN + f"  Total: {files} files, {chunks} chunks indexed")
+            elif os.path.isfile(path):
+                success, chunks, msg = index_file(path)
+                if success:
+                    print(Fore.GREEN + f"  ✅ {msg}")
+                else:
+                    print(Fore.RED + f"  ❌ {msg}")
+            else:
+                print(Fore.RED + f"  ❌ Path not found: {path}")
+            continue
+        
+        if kb_cmd == "reindex":
+            files, chunks, msgs = index_directory()
+            for msg in msgs:
+                print(Fore.GREEN + f"  {msg}")
+            print(Fore.CYAN + f"  Total: {files} files, {chunks} chunks indexed")
+            continue
+        
+        if kb_cmd == "clear":
+            confirm = input(Fore.YELLOW + "  Clear entire knowledge base? (y/n): ").strip().lower()
+            if confirm == 'y':
+                clear_knowledge()
+                print(Fore.GREEN + "  ✅ Knowledge base cleared.")
+            else:
+                print(Fore.WHITE + "  Cancelled.")
+            continue
+        
+        if kb_cmd == "manifest":
+            manifest = get_index_manifest()
+            print(Fore.CYAN + f"\n  {'='*50}")
+            print(Fore.CYAN + f"  INDEX MANIFEST")
+            print(Fore.CYAN + f"  {'='*50}")
+            if not manifest:
+                print(Fore.YELLOW + "  No files indexed yet.")
+            for fname, info in manifest.items():
+                print(Fore.CYAN + f"  {fname}: {info.get('chunks', 0)} chunks")
+                print(Fore.WHITE + f"    Hash: {info.get('hash', '?')[:16]}...")
+            print(Fore.CYAN + f"  {'='*50}")
+            continue
+        
+        print(Fore.RED + "  ❌ Usage:")
+        print(Fore.WHITE + "    /knowledge              Show stats")
+        print(Fore.WHITE + "    /knowledge search X     Search knowledge base")
+        print(Fore.WHITE + "    /knowledge index PATH   Index file or directory")
+        print(Fore.WHITE + "    /knowledge reindex      Re-index custom directory")
+        print(Fore.WHITE + "    /knowledge clear        Clear knowledge base")
+        print(Fore.WHITE + "    /knowledge manifest     Show indexed files")
         continue
 
     if cmd == "/speed":
