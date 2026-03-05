@@ -16,6 +16,9 @@ ARCHITECTURE:
 """
 
 import os
+os.environ["HF_HUB_OFFLINE"] = "1"
+os.environ["TRANSFORMERS_OFFLINE"] = "1"
+os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
 import chromadb
 from chromadb.utils import embedding_functions
 from colorama import Fore

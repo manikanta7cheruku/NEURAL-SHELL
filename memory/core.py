@@ -28,6 +28,9 @@ ARCHITECTURE:
 
 import os
 os.environ["ANONYMIZED_TELEMETRY"] = "False"
+os.environ["HF_HUB_OFFLINE"] = "1"
+os.environ["TRANSFORMERS_OFFLINE"] = "1"
+os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
 
 # Suppress ChromaDB telemetry errors completely
 import logging
