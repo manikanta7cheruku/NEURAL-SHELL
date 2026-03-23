@@ -38,16 +38,16 @@
         "voice_prints": "./seven_data/voice_prints"
     },
     "interrupt": {
-    "enabled": true,
-    "words": ["stop", "seven", "hey seven", "shut up", "hold on", "wait", "pause"],
-    "listen_during_speech": true,
-    "interrupt_cooldown": 1.5
+        "enabled": true,
+        "words": ["stop", "seven", "hey seven", "shut up", "hold on", "wait", "pause"],
+        "listen_during_speech": true,
+        "interrupt_cooldown": 1.5
     },
     "web": {
-    "enabled": true,
-    "max_results": 3,
-    "news_max_results": 3,
-    "timeout": 10
+        "enabled": true,
+        "max_results": 3,
+        "news_max_results": 3,
+        "timeout": 10
     },
     "windows": {
         "enabled": true,
@@ -72,5 +72,45 @@
         "chunk_size": 500,
         "top_k": 3,
         "auto_index": true
-    }
+    },
+    "commands": {
+        "app_aliases": {
+            "browser": "chrome",
+            "web browser": "chrome",
+            "internet": "chrome",
+            "files": "explorer",
+            "file manager": "explorer",
+            "my computer": "explorer",
+            "this pc": "explorer",
+            "terminal": "cmd",
+            "command prompt": "cmd",
+            "music": "spotify",
+            "player": "spotify",
+            "mail": "outlook",
+            "email": "outlook",
+            "notes": "notepad",
+            "store": "ms-windows-store:",
+            "microsoft store": "ms-windows-store:",
+            "photos": "ms-photos:",
+            "recorder": "soundrecorder:",
+            "voice recorder": "soundrecorder:"
+        },
+        "app_paths": {},
+        "failed_apps": []
+    },
+    "license": {
+        "key": "",
+        "tier": "free",
+        "verified": false
+    },
+    "updates": {
+        "auto_check": true,
+        "check_interval_hours": 24,
+        "auto_download_hotfixes": true,
+        "last_check": "",
+        "update_server": "github",
+        "channel": "stable"
+    },
+    "setup_complete": false,
+    "version": "1.10"
 }

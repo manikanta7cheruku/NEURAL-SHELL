@@ -24,6 +24,7 @@ ARCHITECTURE:
 from ears import listen
 from ears.voice_id import identify_speaker, enroll_speaker, is_voice_id_enabled, get_enrolled_speakers
 from ears.core import listen_for_interrupt
+from backend.api_server import start_api_server, set_state as api_set_state
 import brain
 import hands.core as core
 import hands.system as system_mod
@@ -180,8 +181,12 @@ def seven_logic():
             # --- 1. GUI STATE UPDATES ---
             if is_active:
                 app_ui.update_status("LISTENING...", "#00ff00")
+                api_set_state("listening", True)
+                api_set_state("thinking", False)
+                api_set_state("speaking", False)
             else:
                 app_ui.update_status("PAUSED (Say 'Wake Up')", "#555555")
+                api_set_state("listening", False)
 
             # --- 2. LISTEN INPUT ---
             user_input, audio_path = listen()
@@ -227,6 +232,7 @@ def seven_logic():
             if audio_path and is_voice_id_enabled():
                 speaker_id = identify_speaker(audio_path)
                 print(Fore.CYAN + f"[VOICE ID] Speaker: {speaker_id}")
+                api_set_state("current_speaker", speaker_id)
             
             # --- 2.6. VOICE ENROLLMENT COMMAND ---
             if "enroll my voice" in text_lower or "enroll voice" in text_lower:
@@ -293,6 +299,8 @@ def seven_logic():
             print(Fore.YELLOW + f"USER: {user_input}")
             app_ui.update_status(f"USER: {user_input}", "#00ccff")
             app_ui.update_status("THINKING...", "#ff00ff")
+            api_set_state("thinking", True)
+            api_set_state("listening", False)
 
             # SEND TO BRAIN
             # brain.think() now internally:
@@ -371,6 +379,8 @@ def seven_logic():
             if "###" in response:
                 speech_part = response.split("###")[0].strip()
 
+            api_set_state("speaking", True)
+
             if is_streaming and not ("###" in str(response)):
                 # V1.9: Streaming mode — speak sentences as they arrive
                 _, sentence_gen = response
@@ -403,6 +413,8 @@ def seven_logic():
                     app_ui.update_status(speech_part, "#00ccff")
                 else:
                     app_ui.update_status("⚡ INTERRUPTED", "#ffaa00")
+            api_set_state("speaking", False)
+            api_set_state("thinking", False)
 
                     
             # STEP B1: EXTRACT WINDOW COMMANDS (V1.6)
@@ -432,7 +444,9 @@ def seven_logic():
                                 f"Window issue: {msg}",
                                 msg,
                             ]
+                            api_set_state("speaking", True)
                             mouth.speak(random.choice(fail_responses))
+                            api_set_state("speaking", False)
                             app_ui.update_status(f"🪟 FAILED: {msg}", "#ff0000")
 
             # STEP B1.7: EXTRACT SCHEDULER COMMANDS (V1.8)
@@ -459,7 +473,9 @@ def seven_logic():
                             if msg:
                                 speak_with_interrupt(msg)
                         else:
+                            api_set_state("speaking", True)
                             mouth.speak(msg)
+                            api_set_state("speaking", False)
                             app_ui.update_status(f"📅 FAILED: {msg}", "#ff0000")
 
             # STEP B1.5: EXTRACT SYSTEM COMMANDS (V1.7)
@@ -487,8 +503,10 @@ def seven_logic():
                             if action in info_actions and msg:
                                 speak_with_interrupt(msg)
                         else:
-                            mouth.speak(msg)
-                            app_ui.update_status(f"⚙️ FAILED: {msg}", "#ff0000")
+                            api_set_state("speaking", True)
+                        mouth.speak(msg)
+                        api_set_state("speaking", False)
+                        app_ui.update_status(f"⚙️ FAILED: {msg}", "#ff0000")
 
             # STEP B: EXTRACT COMMANDS
             commands = re.findall(r"###(OPEN|CLOSE|SEARCH|SYS): (.*?)(?=###|$)", response)
@@ -541,7 +559,9 @@ def seven_logic():
                                     f"No luck with {app_to_run}. Is it installed?",
                                     f"Couldn't find {app_to_run}. Try the exact name.",
                                 ]
+                                api_set_state("speaking", True)
                                 mouth.speak(random.choice(fail_responses))
+                                api_set_state("speaking", False)
                         elif cmd_type == "CLOSE":
                             app_ui.update_status(f"CLOSING: {app_to_run}", "#ff0000")
                             success = core.close_app(app_to_run)
@@ -551,7 +571,9 @@ def seven_logic():
                                     f"Can't find {app_to_run} in active processes.",
                                     f"Nothing to close — {app_to_run} isn't open.",
                                 ]
+                                api_set_state("speaking", True)
                                 mouth.speak(random.choice(fail_responses))
+                                api_set_state("speaking", False)
                         elif cmd_type == "SEARCH":
                             app_ui.update_status(f"SEARCHING: {app_to_run}", "#0000ff")
                             core.search_web(app_to_run)
@@ -581,9 +603,14 @@ def seven_logic():
 
 def start_app():
     """
-    Launches the GUI and the Logic Thread.
+    Launches the API server, GUI, and Logic Thread.
     """
     global app_ui
+
+    # Start FastAPI server FIRST (background thread)
+    # This runs on localhost:7777 and serves the React dashboard
+    start_api_server(host="127.0.0.1", port=7777)
+
     root = tk.Tk()
     app_ui = gui.SevenGUI(root)
 
