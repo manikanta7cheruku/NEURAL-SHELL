@@ -2,14 +2,22 @@
     "identity": {
         "name": "Seven",
         "creator": "Team Seven",
-        "wake_words": ["seven", "hey seven", "wake up"],
-        "stop_words": ["stop", "shut up", "pause"]
+        "wake_words": [
+            "seven",
+            "hey seven",
+            "wake up"
+        ],
+        "stop_words": [
+            "stop",
+            "shut up",
+            "pause"
+        ]
     },
     "brain": {
         "model_name": "llama3",
         "temperature": 0.3,
         "max_history": 10,
-        "streaming": false,
+        "streaming": true,
         "auto_model": true,
         "model_tiers": {
             "high": "llama3",
@@ -39,7 +47,15 @@
     },
     "interrupt": {
         "enabled": true,
-        "words": ["stop", "seven", "hey seven", "shut up", "hold on", "wait", "pause"],
+        "words": [
+            "stop",
+            "seven",
+            "hey seven",
+            "shut up",
+            "hold on",
+            "wait",
+            "pause"
+        ],
         "listen_during_speech": true,
         "interrupt_cooldown": 1.5
     },
@@ -75,7 +91,6 @@
     },
     "commands": {
         "app_aliases": {
-            "browser": "chrome",
             "web browser": "chrome",
             "internet": "chrome",
             "files": "explorer",
@@ -93,10 +108,25 @@
             "microsoft store": "ms-windows-store:",
             "photos": "ms-photos:",
             "recorder": "soundrecorder:",
-            "voice recorder": "soundrecorder:"
+            "voice recorder": "soundrecorder:",
+            "youtube": "youtube.com",
+            "browser": "chrome"
         },
         "app_paths": {},
-        "failed_apps": []
+        "failed_apps": [
+            {
+                "timestamp": "2026-03-23 21:52:58",
+                "phrase": "youtube",
+                "attempted": "youtube",
+                "error": "YOUTUBE is not running"
+            },
+            {
+                "timestamp": "2026-03-23 21:54:36",
+                "phrase": "youtube",
+                "attempted": "youtube.com",
+                "error": "YOUTUBE COM is not running"
+            }
+        ]
     },
     "license": {
         "key": "",
