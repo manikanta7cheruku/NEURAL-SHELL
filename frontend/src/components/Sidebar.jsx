@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import useStatus from '../stores/useStatus';
 
@@ -17,6 +18,17 @@ const nav = [
 export default function Sidebar() {
   const loc = useLocation();
   const { connected, label, color } = useStatus();
+
+    useEffect(() => {
+    const id = setInterval(() => {
+      useStatus.getState().fetch();
+    }, 800); // update every 0.8s (adjust if you want faster/slower)
+
+    // initial fetch immediately
+    useStatus.getState().fetch();
+
+    return () => clearInterval(id);
+  }, []);
 
   return (
     <aside className="w-48 bg-s-surface border-r border-s-border flex flex-col h-full select-none">

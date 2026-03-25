@@ -68,6 +68,11 @@ def get_state():
     return dict(_state)
 
 
+def get_state():
+    """Get current state dict."""
+    return dict(_state)
+
+
 # =========================================================================
 # REQUEST/RESPONSE MODELS
 # =========================================================================
@@ -277,6 +282,24 @@ def _execute_actions(action_list, full_response, speaker_id):
 # MEMORY ENDPOINTS
 # =========================================================================
 
+@app.post("/api/memory/facts")
+def add_manual_fact(data: dict):
+    """Manually add a fact."""
+    from memory import seven_memory
+    
+    text = data.get("text", "").strip()
+    category = data.get("category", "manual")
+    
+    if not text:
+        raise HTTPException(status_code=400, detail="Empty fact text")
+    
+    try:
+        seven_memory.store_fact(text, category=category)
+        return {"success": True, "fact": text}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+    
 @app.get("/api/memory/facts")
 def get_facts():
     """Get all stored facts."""
@@ -728,6 +751,27 @@ def verify_license(req: LicenseVerify):
     else:
         return {"valid": False, "tier": "free", "expires": None}
 
+
+# =========================================================================
+# WEBSOCKET ENDPOINT — Sends status every 500ms
+# =========================================================================
+from fastapi import WebSocket
+import asyncio
+
+@app.websocket("/ws/status")
+async def status_websocket(websocket: WebSocket):
+    """Real-time status updates via WebSocket"""
+    await websocket.accept()
+    try:
+        while True:
+            await websocket.send_json({
+                "listening": _state.get("listening", False),
+                "thinking": _state.get("thinking", False),
+                "speaking": _state.get("speaking", False)
+            })
+            await asyncio.sleep(0.5)  # Send every 500ms
+    except:
+        pass  # Client disconnected
 
 # =========================================================================
 # SERVER LAUNCHER — Called from main.py

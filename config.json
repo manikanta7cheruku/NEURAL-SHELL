@@ -109,8 +109,9 @@
             "photos": "ms-photos:",
             "recorder": "soundrecorder:",
             "voice recorder": "soundrecorder:",
-            "youtube": "youtube.com",
-            "browser": "chrome"
+            "youtube": "https://www.youtube.com/",
+            "browser": "chrome",
+            "github": "https://github.com/manikanta7cheruku"
         },
         "app_paths": {},
         "failed_apps": [
@@ -125,6 +126,12 @@
                 "phrase": "youtube",
                 "attempted": "youtube.com",
                 "error": "YOUTUBE COM is not running"
+            },
+            {
+                "timestamp": "2026-03-24 22:31:47",
+                "phrase": "folder",
+                "attempted": "folder",
+                "error": "FOLDER is not running"
             }
         ]
     },

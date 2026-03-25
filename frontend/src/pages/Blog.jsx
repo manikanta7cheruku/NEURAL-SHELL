@@ -11,7 +11,7 @@ const GUIDES = [
   },
   {
     title: 'App Control',
-    content: 'Seven opens and closes any app. Use custom aliases to rename apps (say "browser" instead of "chrome"). Add custom .exe paths for portable apps. You can even add URLs — say "open youtube" to launch youtube.com in your browser.',
+    content: 'Seven opens and closes any app. Use custom aliases to rename apps (say "browser" instead of "chrome"). Add custom .exe paths for portable apps. You can even add URLs — say "open youtube" to launch youtube.com in your browser. Note: Seven can close apps (like Chrome) but cannot close specific browser tabs. "Close youtube" won\'t work because YouTube runs inside Chrome, not as a separate process.',
   },
   {
     title: 'Window Management',

@@ -47,6 +47,18 @@ export default function Commands() {
 
         {tab === 'aliases' && (
           <div className="space-y-2">
+            {/* ADD FORM — NOW FIRST */}
+            <div className="bg-s-card border border-s-border rounded p-3">
+              <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium mb-2">Add — enter an app name or a URL like https://youtube.com</div>
+              <div className="flex gap-2">
+                <input value={nA.n} onChange={e => setNA({ ...nA, n: e.target.value })} placeholder="You say..." className="flex-1 bg-s-bg border border-s-border rounded px-2 py-1.5 text-[11px] text-s-text placeholder-s-text-4 font-mono" />
+                <input value={nA.t} onChange={e => setNA({ ...nA, t: e.target.value })} placeholder="Opens (app or URL)..." className="flex-1 bg-s-bg border border-s-border rounded px-2 py-1.5 text-[11px] text-s-text placeholder-s-text-4 font-mono" />
+                <button onClick={() => { if (nA.n && nA.t) { saveA(nA.n, nA.t); setNA({ n: '', t: '' }); } }} disabled={!nA.n || !nA.t}
+                  className="px-3 py-1.5 border border-s-accent/30 bg-s-accent/8 text-s-accent hover:bg-s-accent/15 disabled:border-s-border disabled:bg-transparent disabled:text-s-text-4 rounded text-[11px] font-medium">Save</button>
+              </div>
+            </div>
+
+            {/* TABLE — NOW SECOND */}
             <div className="bg-s-card border border-s-border rounded overflow-hidden">
               <div className="grid grid-cols-12 gap-2 px-3 py-1.5 bg-s-bg text-[9px] text-s-text-4 uppercase tracking-wider border-b border-s-border font-medium">
                 <div className="col-span-4">You Say</div><div className="col-span-5">Opens</div><div className="col-span-3 text-right">Actions</div>
@@ -66,20 +78,22 @@ export default function Commands() {
                 </div>
               ))}
             </div>
-            <div className="bg-s-card border border-s-border rounded p-3">
-              <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium mb-2">Add — enter an app name or a URL like https://youtube.com</div>
-              <div className="flex gap-2">
-                <input value={nA.n} onChange={e => setNA({ ...nA, n: e.target.value })} placeholder="You say..." className="flex-1 bg-s-bg border border-s-border rounded px-2 py-1.5 text-[11px] text-s-text placeholder-s-text-4 font-mono" />
-                <input value={nA.t} onChange={e => setNA({ ...nA, t: e.target.value })} placeholder="Opens (app or URL)..." className="flex-1 bg-s-bg border border-s-border rounded px-2 py-1.5 text-[11px] text-s-text placeholder-s-text-4 font-mono" />
-                <button onClick={() => { if (nA.n && nA.t) { saveA(nA.n, nA.t); setNA({ n: '', t: '' }); } }} disabled={!nA.n || !nA.t}
-                  className="px-3 py-1.5 border border-s-accent/30 bg-s-accent/8 text-s-accent hover:bg-s-accent/15 disabled:border-s-border disabled:bg-transparent disabled:text-s-text-4 rounded text-[11px] font-medium">Save</button>
-              </div>
-            </div>
           </div>
         )}
 
         {tab === 'paths' && (
           <div className="space-y-2">
+            {/* ADD PATH FORM — NOW FIRST */}
+            <div className="bg-s-card border border-s-border rounded p-3">
+              <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium mb-2">Add Path</div>
+              <div className="flex gap-2">
+                <input value={nP.n} onChange={e => setNP({ ...nP, n: e.target.value })} placeholder="Name..." className="w-28 bg-s-bg border border-s-border rounded px-2 py-1.5 text-[11px] text-s-text placeholder-s-text-4 font-mono" />
+                <input value={nP.p} onChange={e => setNP({ ...nP, p: e.target.value })} placeholder="C:\path\to\app.exe" className="flex-1 bg-s-bg border border-s-border rounded px-2 py-1.5 text-[11px] text-s-text placeholder-s-text-4 font-mono" />
+                <button onClick={saveP} disabled={!nP.n || !nP.p} className="px-3 py-1.5 border border-s-accent/30 bg-s-accent/8 text-s-accent disabled:border-s-border disabled:bg-transparent disabled:text-s-text-4 rounded text-[11px] font-medium">Save</button>
+              </div>
+            </div>
+
+            {/* PATHS TABLE — NOW SECOND */}
             <div className="bg-s-card border border-s-border rounded overflow-hidden">
               {Object.keys(paths).length === 0 ? <div className="py-5 text-center text-[11px] text-s-text-4">No custom paths</div>
               : Object.entries(paths).map(([n, p]) => (
@@ -89,14 +103,6 @@ export default function Commands() {
                   <button onClick={() => delP(n)} className="text-[9px] text-s-text-4 hover:text-s-red opacity-0 group-hover:opacity-100">del</button>
                 </div>
               ))}
-            </div>
-            <div className="bg-s-card border border-s-border rounded p-3">
-              <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium mb-2">Add Path</div>
-              <div className="flex gap-2">
-                <input value={nP.n} onChange={e => setNP({ ...nP, n: e.target.value })} placeholder="Name..." className="w-28 bg-s-bg border border-s-border rounded px-2 py-1.5 text-[11px] text-s-text placeholder-s-text-4 font-mono" />
-                <input value={nP.p} onChange={e => setNP({ ...nP, p: e.target.value })} placeholder="C:\path\to\app.exe" className="flex-1 bg-s-bg border border-s-border rounded px-2 py-1.5 text-[11px] text-s-text placeholder-s-text-4 font-mono" />
-                <button onClick={saveP} disabled={!nP.n || !nP.p} className="px-3 py-1.5 border border-s-accent/30 bg-s-accent/8 text-s-accent disabled:border-s-border disabled:bg-transparent disabled:text-s-text-4 rounded text-[11px] font-medium">Save</button>
-              </div>
             </div>
           </div>
         )}

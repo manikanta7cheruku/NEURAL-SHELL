@@ -264,6 +264,15 @@ def open_app(app_name):
 
     # TIER 1: Resolve alias
     clean_name = _resolve_alias(clean_name)
+
+    # URL SUPPORT — if target looks like a URL, open in browser
+    import webbrowser as _wb
+    if any(clean_name.startswith(p) for p in ['http://', 'https://']) or any(clean_name.endswith(d) for d in ['.com', '.org', '.net', '.io', '.dev', '.app', '.co']):
+        url = clean_name if clean_name.startswith('http') else f'https://{clean_name}'
+        _wb.open(url)
+        command_log.log_command("OPEN", clean_name, True, f"URL: {url}")
+        mood_engine.on_command_result(True)
+        return True
     
     print(Fore.CYAN + f"🔧 HANDS: Opening '{clean_name}'...")
 
