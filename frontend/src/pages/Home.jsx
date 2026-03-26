@@ -11,6 +11,12 @@ export default function Home() {
   const [mem, setMem] = useState(null);
   const [logs, setLogs] = useState([]);
   const [sched, setSched] = useState(0);
+  
+  // EMAIL POPUP
+  const [showEmailPopup, setShowEmailPopup] = useState(false);
+  const [email, setEmail] = useState('');
+  const [emailSuccess, setEmailSuccess] = useState(false);
+  const [emailError, setEmailError] = useState(false);
 
   useEffect(() => {
     st.fetch();
@@ -20,8 +26,62 @@ export default function Home() {
     api.get('/memory/stats').then(r => setMem(r.data)).catch(() => {});
     api.get('/commands/log?limit=10').then(r => setLogs((r.data.recent || []).reverse())).catch(() => {});
     api.get('/schedules').then(r => setSched(r.data.filter(s => s.status === 'active').length)).catch(() => {});
+    
+    // EMAIL POPUP LOGIC — FIXED
+    const emailDismissed = localStorage.getItem('seven_email_dismissed');
+    const emailSaved = localStorage.getItem('seven_email_saved');
+    
+    // Never show if user dismissed or already saved email
+    if (emailDismissed || emailSaved) {
+      return;
+    }
+    
+    // Check backend if email already saved
+    api.get('/email/check').then(r => {
+      if (r.data.saved) {
+        localStorage.setItem('seven_email_saved', 'true');
+        return;
+      }
+      
+      // Show popup after 7 days of first install
+      const installDate = localStorage.getItem('seven_install_date');
+      if (!installDate) {
+        localStorage.setItem('seven_install_date', Date.now().toString());
+      } else {
+        const daysSinceInstall = (Date.now() - parseInt(installDate)) / (1000 * 60 * 60 * 24);
+        if (daysSinceInstall >= 7) {
+          setShowEmailPopup(true);
+        }
+      }
+    }).catch(() => {});
+    
     return () => clearInterval(i);
   }, []);
+
+  const saveEmail = async () => {
+    if (!email || !email.includes('@')) {
+      setEmailError(true);
+      setTimeout(() => setEmailError(false), 3000);
+      return;
+    }
+    try {
+      await api.post('/email/save', { email });
+      setEmailSuccess(true);
+      localStorage.setItem('seven_email_saved', 'true');
+      setTimeout(() => {
+        setShowEmailPopup(false);
+        setEmailSuccess(false);
+      }, 2000);
+    } catch {
+      setEmailError(true);
+      setTimeout(() => setEmailError(false), 3000);
+    }
+  };
+
+  const dismissEmail = () => {
+    localStorage.setItem('seven_email_dismissed', 'true');
+    setShowEmailPopup(false);
+  };
 
   if (st.loading) return <Spinner t="Connecting to Seven..." />;
   if (st.error) return <div className="flex flex-col items-center justify-center h-full gap-2"><span className="text-xs text-s-text-3">{st.error}</span><button onClick={st.fetch} className="text-xs text-s-accent">Retry</button></div>;
@@ -122,6 +182,51 @@ export default function Home() {
           )}
         </div>
       </div>
+
+      {/* EMAIL POPUP */}
+      {showEmailPopup && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-s-surface border border-s-border rounded-lg p-6 w-96">
+            <div className="text-[14px] font-medium text-s-text mb-2">🎉 You have used Seven for 7 days!</div>
+            <div className="text-[11px] text-s-text-3 mb-4">Want to stay updated on new features, bug fixes, and exclusive early access?</div>
+            
+            <input
+              type="email"
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && saveEmail()}
+              placeholder="your@email.com"
+              className="w-full bg-s-bg border border-s-border rounded px-3 py-2 text-[12px] text-s-text mb-4"
+              autoFocus
+            />
+            
+            <div className="text-[10px] text-s-text-4 mb-4">
+              We will only send: feature updates, bug fixes, early access invites. No spam, ever.
+            </div>
+            
+            {emailSuccess && (
+              <div className="mb-3 px-3 py-2 bg-s-green/10 border border-s-green/20 rounded text-[11px] text-s-green">
+                Thanks! You will get update notifications.
+              </div>
+            )}
+            
+            {emailError && (
+              <div className="mb-3 px-3 py-2 bg-s-red/10 border border-s-red/20 rounded text-[11px] text-red-300">
+                Please enter a valid email
+              </div>
+            )}
+            
+            <div className="flex gap-2">
+              <button onClick={saveEmail} disabled={emailSuccess} className="flex-1 px-3 py-2 bg-s-accent text-white rounded text-[12px] font-medium hover:bg-s-accent/90 disabled:opacity-50">
+                {emailSuccess ? 'Saved!' : 'Subscribe'}
+              </button>
+              <button onClick={dismissEmail} className="px-3 py-2 text-s-text-4 hover:text-s-text-3 text-[12px]">
+                Maybe Later
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

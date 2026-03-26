@@ -175,6 +175,10 @@ def chat(req: ChatRequest):
     try:
         response = brain.think(req.text.strip(), speaker_id=req.speaker_id)
         
+        # TRACK ACTIVITY (Phase 2.5)
+        import telemetry
+        telemetry.log_activity()
+        
         # Handle streaming response — flatten it for REST API
         is_streaming = isinstance(response, tuple) and len(response) == 2 and response[0] == "__STREAM__"
         
@@ -255,16 +259,18 @@ def _execute_actions(action_list, full_response, speaker_id):
             system_mod.manage_system(params)
     
     # Scheduler commands
-    sched_cmds = re.findall(r"###SCHED:\s*(.*?)(?=###|$)", full_response)
-    for param_str in sched_cmds:
-        params = {}
-        for pair in param_str.strip().split():
-            if "=" in pair:
-                key, val = pair.split("=", 1)
-                params[key.strip()] = val.strip()
-        params["speaker_id"] = speaker_id
-        if params:
-            scheduler_mod.manage_schedule(params)
+            # Scheduler commands
+            sched_cmds = re.findall(r"###SCHED:\s*(.*?)(?=###|$)", full_response)
+            for param_str in sched_cmds:
+                params = {}
+                for pair in param_str.strip().split():
+                    if "=" in pair:
+                        key, val = pair.split("=", 1)
+                        params[key.strip()] = val.strip()
+                params["speaker_id"] = speaker_id
+                if params:
+                    scheduler_mod.manage_schedule(params)
+                    telemetry.log_activity()  # Track schedule creation
     
     # App commands
     app_cmds = re.findall(r"###(OPEN|CLOSE):\s*(.*?)(?=###|$)", full_response)
@@ -274,8 +280,10 @@ def _execute_actions(action_list, full_response, speaker_id):
             continue
         if cmd_type == "OPEN":
             core.open_app(clean_arg)
+            telemetry.log_activity()  # Track app open
         elif cmd_type == "CLOSE":
             core.close_app(clean_arg)
+            telemetry.log_activity()  # Track app close
 
 
 # =========================================================================
@@ -299,7 +307,7 @@ def add_manual_fact(data: dict):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     
-    
+
 @app.get("/api/memory/facts")
 def get_facts():
     """Get all stored facts."""
@@ -772,6 +780,31 @@ async def status_websocket(websocket: WebSocket):
             await asyncio.sleep(0.5)  # Send every 500ms
     except:
         pass  # Client disconnected
+
+
+# =========================================================================
+# EMAIL COLLECTION ENDPOINT (Phase 2.5)
+# =========================================================================
+
+@app.post("/api/email/save")
+def save_user_email(data: dict):
+    """Save user email for updates."""
+    import telemetry
+    
+    email = data.get("email", "").strip()
+    if not email or "@" not in email:
+        raise HTTPException(status_code=400, detail="Invalid email")
+    
+    telemetry.save_email(email)
+    return {"success": True, "email": email}
+
+
+@app.get("/api/email/check")
+def check_email_saved():
+    """Check if user has saved email."""
+    import telemetry
+    email = telemetry.get_email()
+    return {"saved": email is not None, "email": email}
 
 # =========================================================================
 # SERVER LAUNCHER — Called from main.py

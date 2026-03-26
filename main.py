@@ -25,6 +25,8 @@ from ears import listen
 from ears.voice_id import identify_speaker, enroll_speaker, is_voice_id_enabled, get_enrolled_speakers
 from ears.core import listen_for_interrupt
 from backend.api_server import start_api_server, set_state as api_set_state
+from backend.admin_server import start_admin_server  # ADD THIS
+import telemetry  # ADD THIS
 import brain
 import hands.core as core
 import hands.system as system_mod
@@ -211,6 +213,8 @@ def seven_logic():
                         # Send to brain with context so LLM continues naturally
                         resume_prompt = f"I was interrupted while answering this: '{old_input}'. I had said: '{old_response}'. Now continue from where I left off naturally without repeating what was already said."
                         response = brain.think(resume_prompt, speaker_id=speaker_id)
+                        import telemetry
+                        telemetry.log_activity()
                         if response:
                             speak_with_interrupt(response)
                         else:
@@ -309,6 +313,15 @@ def seven_logic():
             #   3. Extracts facts from user input
             #   4. Sends enhanced prompt to LLM
             response = brain.think(user_input, speaker_id=speaker_id)
+            import telemetry
+            telemetry.log_activity()
+
+            # SEND TO BRAIN
+            response = brain.think(user_input, speaker_id=speaker_id)
+            telemetry.log_activity()
+            
+            # TRACK ACTIVITY (Phase 2.5)
+            telemetry.log_activity()
 
             if not response:
                 response = "Processing error."
@@ -468,6 +481,7 @@ def seven_logic():
                     
                     if params:
                         success, msg = scheduler_mod.manage_schedule(params)
+                        telemetry.log_activity()
                         if success:
                             app_ui.update_status(f"📅 {msg}", "#00ff00")
                             if msg:
@@ -552,6 +566,7 @@ def seven_logic():
                         if cmd_type == "OPEN":
                             app_ui.update_status(f"OPENING: {app_to_run}", "#00ff00")
                             success = core.open_app(app_to_run)
+                            telemetry.log_activity()  # ADD THIS LINE
                             if not success:
                                 fail_responses = [
                                     f"Can't find {app_to_run}. Check the name?",
@@ -565,6 +580,7 @@ def seven_logic():
                         elif cmd_type == "CLOSE":
                             app_ui.update_status(f"CLOSING: {app_to_run}", "#ff0000")
                             success = core.close_app(app_to_run)
+                            telemetry.log_activity()  # ADD THIS LINE
                             if not success:
                                 fail_responses = [
                                     f"{app_to_run} doesn't seem to be running.",
@@ -610,6 +626,15 @@ def start_app():
     # Start FastAPI server FIRST (background thread)
     # This runs on localhost:7777 and serves the React dashboard
     start_api_server(host="127.0.0.1", port=7777)
+
+    # Start FastAPI server FIRST (background thread)
+    #start_api_server(host="127.0.0.1", port=7777)
+    
+    # START ADMIN DASHBOARD (Phase 2.5)
+    start_admin_server()
+    
+    # START TELEMETRY (Phase 2.5)
+    telemetry.start_telemetry()
 
     root = tk.Tk()
     app_ui = gui.SevenGUI(root)
