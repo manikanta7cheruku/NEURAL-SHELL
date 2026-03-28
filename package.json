@@ -1,0 +1,22 @@
+{
+  "name": "vii-desktop",
+  "version": "1.0.0",
+  "description": "VII — Local AI Voice Assistant",
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "concurrently \"npm run frontend:dev\" \"npm run electron:dev\"",
+    "frontend:dev": "cd frontend && npm run dev",
+    "electron:dev": "wait-on http://localhost:5173 && electron .",
+    "build": "cd frontend && npm run build",
+    "dist": "npm run build && electron-builder"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0",
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0",
+    "wait-on": "^8.0.0"
+  },
+  "dependencies": {
+    "electron-store": "^10.0.0"
+  }
+}

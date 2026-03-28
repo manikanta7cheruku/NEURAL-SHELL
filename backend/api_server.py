@@ -23,6 +23,12 @@ import os
 import json
 import datetime
 
+# Telemetry (Phase 2.5)
+try:
+    import telemetry
+except ImportError:
+    telemetry = None
+
 # =========================================================================
 # APP CREATION
 # =========================================================================
@@ -166,6 +172,7 @@ def chat(req: ChatRequest):
     """Send a text message to Seven's brain."""
     import brain
     import re
+    import telemetry
     
     if not req.text or not req.text.strip():
         raise HTTPException(status_code=400, detail="Empty message")
@@ -175,9 +182,11 @@ def chat(req: ChatRequest):
     try:
         response = brain.think(req.text.strip(), speaker_id=req.speaker_id)
         
-        # TRACK ACTIVITY (Phase 2.5)
-        import telemetry
-        telemetry.log_activity()
+        # Track activity for telemetry
+        try:
+            telemetry.log_activity()
+        except:
+            pass  # Don't fail if telemetry has issues
         
         # Handle streaming response — flatten it for REST API
         is_streaming = isinstance(response, tuple) and len(response) == 2 and response[0] == "__STREAM__"

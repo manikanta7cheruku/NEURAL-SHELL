@@ -16,8 +16,14 @@ ARCHITECTURE:
 
 import subprocess
 import sys
+import io
 import os
 import threading
+
+# Fix Windows console encoding
+if sys.platform == 'win32':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 # State tracking
 _current_process = None
@@ -36,7 +42,7 @@ def speak(text):
     global _current_process
 
     # Print visual log
-    print(f"🔊 SEVEN: {text}")
+    print(f"SEVEN: {text}")
 
     # Filter out technical commands
     if "###" in text:
@@ -102,7 +108,8 @@ def speak_streamed(sentence_generator):
             continue
         
         full_text.append(sentence)
-        print(f"🔊 SEVEN: {sentence}")
+        # print(f"\U0001f50a SEVEN: {sentence}")
+        print(f"[VII]: {sentence}")
         
         _interrupted.clear()
         

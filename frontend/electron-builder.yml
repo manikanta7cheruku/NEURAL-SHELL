@@ -1,0 +1,57 @@
+appId: com.seven.desktop
+productName: SEVEN
+copyright: Copyright © 2025 SEVEN
+
+directories:
+  output: dist-electron
+  buildResources: electron
+
+files:
+  - electron/**/*
+  - frontend/dist/**/*
+  - backend/**/*
+  - "*.py"
+  - ears/**/*
+  - hands/**/*
+  - knowledge/**/*
+  - memory/**/*
+  - mouth/**/*
+  - web/**/*
+  - config.json
+  - requirements.txt
+  - "!**/*.pyc"
+  - "!**/__pycache__"
+  - "!.git"
+  - "!node_modules"
+
+extraResources:
+  - from: "."
+    to: "app"
+    filter:
+      - "*.py"
+      - "backend/**/*"
+      - "ears/**/*"
+      - "hands/**/*"
+      - "knowledge/**/*"
+      - "memory/**/*"
+      - "mouth/**/*"
+      - "web/**/*"
+      - "config.json"
+
+win:
+  target:
+    - nsis
+  icon: electron/icon.ico
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  allowElevation: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: SEVEN
+  perMachine: false
+  installerIcon: electron/icon.ico
+  uninstallerIcon: electron/icon.ico
+  installerHeaderIcon: electron/icon.ico
+  license: LICENSE.txt

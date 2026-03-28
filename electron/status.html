@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>VII</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      user-select: none;
+    }
+    
+    html, body {
+      width: 64px;
+      height: 64px;
+      background: transparent !important;
+      overflow: hidden;
+      -webkit-app-region: drag;
+    }
+    
+    body {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    
+    /* Main Orb Container */
+    #orb-container {
+      width: 56px;
+      height: 56px;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      -webkit-app-region: no-drag;
+    }
+    
+    /* The Orb */
+    #orb {
+      width: 52px;
+      height: 52px;
+      border-radius: 50%;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.3s ease;
+      position: relative;
+      z-index: 2;
+    }
+    
+    #orb:hover {
+      transform: scale(1.08);
+    }
+    
+    #orb:active {
+      transform: scale(0.95);
+    }
+    
+    /* VII Text */
+    #orb-text {
+      font-family: 'Georgia', 'Times New Roman', serif;
+      font-size: 14px;
+      font-weight: bold;
+      color: rgba(255, 255, 255, 0.95);
+      letter-spacing: 1px;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+      z-index: 3;
+    }
+    
+    /* Status Ring */
+    #ring {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 56px;
+      height: 56px;
+      border-radius: 50%;
+      border: 2px solid transparent;
+      pointer-events: none;
+      z-index: 1;
+    }
+    
+    /* ==========================================
+       STATUS STYLES - Professional Colors
+       ========================================== */
+    
+    /* IDLE - Soft Gray */
+    .idle #orb {
+      background: linear-gradient(145deg, #6b7280, #4b5563);
+      box-shadow: 
+        0 2px 8px rgba(0, 0, 0, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    }
+    .idle #ring {
+      border-color: rgba(107, 114, 128, 0.5);
+    }
+    
+    /* LISTENING - Vibrant Green (Active State) */
+    .listening #orb {
+      background: linear-gradient(145deg, #22c55e, #16a34a);
+      box-shadow: 
+        0 0 20px rgba(34, 197, 94, 0.5),
+        0 2px 8px rgba(0, 0, 0, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    }
+    .listening #ring {
+      border-color: rgba(34, 197, 94, 0.8);
+      animation: pulse-ring 2s ease-in-out infinite;
+    }
+    .listening #orb::after {
+      content: '';
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(34, 197, 94, 0.3) 0%, transparent 70%);
+      animation: glow 2s ease-in-out infinite;
+    }
+    
+    /* THINKING - Purple (Processing) */
+    .thinking #orb {
+      background: linear-gradient(145deg, #a855f7, #7c3aed);
+      box-shadow: 
+        0 0 20px rgba(168, 85, 247, 0.5),
+        0 2px 8px rgba(0, 0, 0, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    }
+    .thinking #ring {
+      border-color: rgba(168, 85, 247, 0.8);
+      border-style: dashed;
+      animation: spin 1s linear infinite;
+    }
+    
+    /* SPEAKING - Blue (Responding) */
+    .speaking #orb {
+      background: linear-gradient(145deg, #3b82f6, #2563eb);
+      box-shadow: 
+        0 0 20px rgba(59, 130, 246, 0.5),
+        0 2px 8px rgba(0, 0, 0, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    }
+    .speaking #ring {
+      border-color: rgba(59, 130, 246, 0.8);
+      animation: wave 0.5s ease-in-out infinite;
+    }
+    
+    /* ==========================================
+       ANIMATIONS
+       ========================================== */
+    
+    @keyframes pulse-ring {
+      0%, 100% { 
+        transform: translate(-50%, -50%) scale(1); 
+        opacity: 1; 
+      }
+      50% { 
+        transform: translate(-50%, -50%) scale(1.1); 
+        opacity: 0.7; 
+      }
+    }
+    
+    @keyframes glow {
+      0%, 100% { opacity: 0.5; }
+      50% { opacity: 1; }
+    }
+    
+    @keyframes spin {
+      from { transform: translate(-50%, -50%) rotate(0deg); }
+      to { transform: translate(-50%, -50%) rotate(360deg); }
+    }
+    
+    @keyframes wave {
+      0%, 100% { transform: translate(-50%, -50%) scale(1); }
+      50% { transform: translate(-50%, -50%) scale(1.08); }
+    }
+    
+    /* Tooltip */
+    #tooltip {
+      position: fixed;
+      top: -30px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0, 0, 0, 0.9);
+      color: white;
+      padding: 4px 10px;
+      border-radius: 4px;
+      font-family: -apple-system, sans-serif;
+      font-size: 11px;
+      white-space: nowrap;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s ease;
+      z-index: 100;
+    }
+    
+    #orb-container:hover #tooltip {
+      opacity: 1;
+    }
+  </style>
+</head>
+<body class="listening">
+  
+  <div id="orb-container">
+    <div id="ring"></div>
+    <div id="orb">
+      <span id="orb-text">VII</span>
+    </div>
+    <div id="tooltip">Listening</div>
+  </div>
+  
+  <script>
+    // ========================================
+    // ELEMENTS
+    // ========================================
+    const body = document.body;
+    const orb = document.getElementById('orb');
+    const tooltip = document.getElementById('tooltip');
+    
+    // ========================================
+    // STATE
+    // ========================================
+    let currentStatus = 'listening'; // Default to listening (VII always listens)
+    let ws = null;
+    let reconnectAttempts = 0;
+    const maxReconnectAttempts = 50;
+    
+    const statusLabels = {
+      idle: 'Idle',
+      listening: 'Listening',
+      thinking: 'Thinking...',
+      speaking: 'Speaking'
+    };
+    
+    // ========================================
+    // WEBSOCKET CONNECTION
+    // ========================================
+    function connectWebSocket() {
+      if (reconnectAttempts >= maxReconnectAttempts) {
+        console.log('[WS] Max reconnect attempts reached');
+        return;
+      }
+      
+      try {
+        ws = new WebSocket('ws://127.0.0.1:7777/ws/status');
+        
+        ws.onopen = () => {
+          console.log('[WS] Connected to backend');
+          reconnectAttempts = 0;
+          // Default to listening on connect
+          setStatus('listening');
+        };
+        
+        ws.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            console.log('[WS] Status update:', data);
+            
+            // Determine status from backend state
+            let newStatus = 'listening'; // Default
+            
+            if (data.speaking) {
+              newStatus = 'speaking';
+            } else if (data.thinking) {
+              newStatus = 'thinking';
+            } else if (data.listening) {
+              newStatus = 'listening';
+            } else {
+              newStatus = 'idle';
+            }
+            
+            // Also check direct status field
+            if (data.status) {
+              newStatus = data.status;
+            }
+            
+            setStatus(newStatus);
+          } catch (e) {
+            console.error('[WS] Parse error:', e);
+          }
+        };
+        
+        ws.onclose = () => {
+          console.log('[WS] Disconnected');
+          reconnectAttempts++;
+          setTimeout(connectWebSocket, 2000);
+        };
+        
+        ws.onerror = (err) => {
+          console.error('[WS] Error:', err);
+          ws.close();
+        };
+        
+      } catch (e) {
+        console.error('[WS] Connection failed:', e);
+        reconnectAttempts++;
+        setTimeout(connectWebSocket, 2000);
+      }
+    }
+    
+    function setStatus(status) {
+      if (currentStatus === status) return;
+      
+      console.log('[STATUS] Changed:', currentStatus, '->', status);
+      currentStatus = status;
+      
+      // Update body class for styling
+      body.className = status;
+      
+      // Update tooltip
+      tooltip.textContent = statusLabels[status] || 'Unknown';
+    }
+    
+    // ========================================
+    // CLICK HANDLERS
+    // ========================================
+    let clickTimer = null;
+    let clickCount = 0;
+    
+    orb.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      
+      // Right click - show menu
+      if (e.button === 2) {
+        console.log('[ORB] Right click - Show menu');
+        if (window.orbAPI && window.orbAPI.showMenu) {
+          window.orbAPI.showMenu();
+        }
+        return;
+      }
+      
+      // Left click - open dashboard
+      if (e.button === 0) {
+        clickCount++;
+        
+        if (clickTimer) clearTimeout(clickTimer);
+        
+        clickTimer = setTimeout(() => {
+          if (clickCount >= 1) {
+            // Any click opens dashboard
+            console.log('[ORB] Click - Open dashboard');
+            if (window.orbAPI && window.orbAPI.showMainWindow) {
+              window.orbAPI.showMainWindow();
+            }
+          }
+          clickCount = 0;
+        }, 200);
+      }
+    });
+    
+    // Prevent context menu on right click (we handle it ourselves)
+    orb.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      console.log('[ORB] Context menu triggered');
+      if (window.orbAPI && window.orbAPI.showMenu) {
+        window.orbAPI.showMenu();
+      }
+    });
+    
+    // ========================================
+    // INITIALIZATION
+    // ========================================
+    // Start with listening status (default)
+    setStatus('listening');
+    
+    // Connect to WebSocket after short delay
+    setTimeout(() => {
+      console.log('[ORB] Initializing...');
+      console.log('[ORB] API available:', !!window.orbAPI);
+      connectWebSocket();
+    }, 1000);
+  </script>
+</body>
+</html>

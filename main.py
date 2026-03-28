@@ -45,6 +45,13 @@ import colorama
 from colorama import Fore
 import config
 
+# Phase 3: Check if running under Electron
+# Electron sets this environment variable in main.js
+IS_ELECTRON_MODE = os.environ.get('SEVEN_ELECTRON_MODE') == '1'
+
+if IS_ELECTRON_MODE:
+    print("[SYSTEM] Running in Electron Desktop mode (GUI disabled)")
+
 # V1.1: Import the memory system
 from memory import seven_memory
 from memory.mood import mood_engine
@@ -619,30 +626,67 @@ def seven_logic():
 
 def start_app():
     """
-    Launches the API server, GUI, and Logic Thread.
+    Launches the API server and Logic Thread.
+    Phase 3: Supports both Electron mode and standalone Tkinter mode.
     """
     global app_ui
-
-    # Start FastAPI server FIRST (background thread)
-    # This runs on localhost:7777 and serves the React dashboard
+    
+    # Check if running in Electron mode
+    is_electron = os.environ.get('SEVEN_ELECTRON_MODE') == '1'
+    
+    if is_electron:
+        print(Fore.CYAN + "[SYSTEM] Running in ELECTRON mode (no Tkinter GUI)")
+    else:
+        print(Fore.YELLOW + "[SYSTEM] Running in STANDALONE mode (with Tkinter GUI)")
+    
+    # Start FastAPI server (background thread)
     start_api_server(host="127.0.0.1", port=7777)
-
-    # Start FastAPI server FIRST (background thread)
-    #start_api_server(host="127.0.0.1", port=7777)
     
     # START ADMIN DASHBOARD (Phase 2.5)
     start_admin_server()
     
     # START TELEMETRY (Phase 2.5)
     telemetry.start_telemetry()
-
-    root = tk.Tk()
-    app_ui = gui.SevenGUI(root)
-
-    logic_thread = threading.Thread(target=seven_logic, daemon=True)
-    logic_thread.start()
-
-    root.mainloop()
+    
+    if is_electron:
+        # ELECTRON MODE: No Tkinter GUI needed
+        # Create a dummy UI object for status updates
+        class DummyUI:
+            def update_status(self, text, color):
+                # Log status updates (WebSocket handles UI now)
+                clean_text = text[:50] if len(text) > 50 else text
+                # print(f"[STATUS] {clean_text}")
+                pass
+            
+            def close(self):
+                print(Fore.RED + "[SYSTEM] Shutdown requested")
+                os._exit(0)
+        
+        app_ui = DummyUI()
+        
+        # Start logic thread
+        logic_thread = threading.Thread(target=seven_logic, daemon=True)
+        logic_thread.start()
+        
+        # Keep main thread alive
+        print(Fore.GREEN + "[SYSTEM] Backend running. Electron handles UI.")
+        try:
+            import time
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            print(Fore.RED + "\n[SYSTEM] Interrupted by user")
+            os._exit(0)
+    
+    else:
+        # STANDALONE MODE: Use Tkinter GUI
+        root = tk.Tk()
+        app_ui = gui.SevenGUI(root)
+        
+        logic_thread = threading.Thread(target=seven_logic, daemon=True)
+        logic_thread.start()
+        
+        root.mainloop()
 
 
 if __name__ == "__main__":
