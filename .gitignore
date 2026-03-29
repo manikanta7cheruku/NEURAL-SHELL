@@ -21,3 +21,24 @@ memory.json
 
 # V1.1: Personal memory database (contains user conversations — private)
 seven_data/
+
+# Node modules (NEVER push these)
+node_modules/
+frontend/node_modules/
+
+# Build outputs
+frontend/dist/
+dist/
+build/
+
+# Electron build artifacts
+release/
+out/
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# Logs
+*.log
+npm-debug.log*
