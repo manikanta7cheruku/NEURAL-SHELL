@@ -178,7 +178,7 @@ function createMainWindow() {
 }
 
 // ============================================================================
-// STATUS ORB - DRAGGABLE VERSION
+// STATUS ORB
 // ============================================================================
 function createStatusWindow() {
   if (statusWindow) {
@@ -189,15 +189,14 @@ function createStatusWindow() {
   const display = screen.getPrimaryDisplay();
   const { width, height } = display.workAreaSize;
   
-  // Position: Bottom-right corner with margin
-  const orbSize = 64;
-  const margin = 24;
-  const x = width - orbSize - margin;
-  const y = height - orbSize - margin;
+  const orbWindowSize = 80;
+  const margin = 20;
+  const x = width - orbWindowSize - margin;
+  const y = height - orbWindowSize - margin;
   
   statusWindow = new BrowserWindow({
-    width: orbSize,
-    height: orbSize,
+    width: orbWindowSize,
+    height: orbWindowSize,
     x: x,
     y: y,
     frame: false,
@@ -210,6 +209,7 @@ function createStatusWindow() {
     closable: false,
     hasShadow: false,
     focusable: true,
+    movable: false,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -219,12 +219,8 @@ function createStatusWindow() {
 
   statusWindow.loadFile(path.join(__dirname, 'status.html'));
   
-  // Set highest always-on-top level
   statusWindow.setAlwaysOnTop(true, 'screen-saver', 1);
   statusWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-  
-  // ENABLE DRAGGING
-  statusWindow.setMovable(true);
   
   statusWindow.on('closed', () => {
     statusWindow = null;
@@ -347,7 +343,7 @@ function resetOrbPosition() {
   if (statusWindow) {
     const display = screen.getPrimaryDisplay();
     const { width, height } = display.workAreaSize;
-    statusWindow.setPosition(width - 88, height - 88);
+    statusWindow.setPosition(width - 100, height - 100);
     console.log('[ORB] Position reset');
   }
 }
@@ -434,6 +430,42 @@ ipcMain.on('quit-app', () => {
   app.isQuitting = true;
   stopPython();
   app.quit();
+});
+
+// ── Toggle Dashboard: click orb to show/hide ──
+ipcMain.on('toggle-dashboard', () => {
+  if (!mainWindow) {
+    createMainWindow();
+    return;
+  }
+  
+  if (mainWindow.isVisible()) {
+    mainWindow.hide();
+    console.log('[ORB] Dashboard hidden');
+  } else {
+    mainWindow.show();
+    mainWindow.focus();
+    console.log('[ORB] Dashboard shown');
+  }
+});
+
+// ── Manual Orb Drag ──
+let orbDragOffset = { x: 0, y: 0 };
+let orbIsDragging = false;
+
+ipcMain.on('orb-drag-start', (event, mousePos) => {
+  if (!statusWindow) return;
+  const [winX, winY] = statusWindow.getPosition();
+  orbDragOffset.x = mousePos.x - winX;
+  orbDragOffset.y = mousePos.y - winY;
+  orbIsDragging = true;
+});
+
+ipcMain.on('orb-drag-move', (event, mousePos) => {
+  if (!statusWindow || !orbIsDragging) return;
+  const newX = Math.round(mousePos.x - orbDragOffset.x);
+  const newY = Math.round(mousePos.y - orbDragOffset.y);
+  statusWindow.setPosition(newX, newY);
 });
 
 ipcMain.on('toggle-listening', async () => {

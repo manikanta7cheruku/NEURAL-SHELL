@@ -10,369 +10,456 @@
       box-sizing: border-box;
       user-select: none;
     }
-    
+
     html, body {
-      width: 64px;
-      height: 64px;
+      width: 80px;
+      height: 80px;
       background: transparent !important;
       overflow: hidden;
-      -webkit-app-region: drag;
     }
-    
+
     body {
       display: flex;
       align-items: center;
       justify-content: center;
     }
-    
-    /* Main Orb Container */
+
+    /* ══════════════════════════════════════
+       ORB CONTAINER
+       ══════════════════════════════════════ */
     #orb-container {
-      width: 56px;
-      height: 56px;
+      width: 80px;
+      height: 80px;
       position: relative;
       display: flex;
       align-items: center;
       justify-content: center;
-      -webkit-app-region: no-drag;
     }
-    
-    /* The Orb */
+
+    /* ══════════════════════════════════════
+       THE ORB - Always dark, glass-like
+       ══════════════════════════════════════ */
     #orb {
-      width: 52px;
-      height: 52px;
+      width: 42px;
+      height: 42px;
       border-radius: 50%;
-      cursor: pointer;
+      background: radial-gradient(
+        ellipse at 35% 30%,
+        #1a1a2e 0%,
+        #12121c 40%,
+        #0a0a12 100%
+      );
+      border: 1px solid rgba(255, 255, 255, 0.04);
       display: flex;
       align-items: center;
       justify-content: center;
-      transition: all 0.3s ease;
       position: relative;
-      z-index: 2;
+      z-index: 3;
+      transition: border-color 0.6s ease, transform 0.12s ease;
+      pointer-events: none;
     }
-    
-    #orb:hover {
-      transform: scale(1.08);
+
+    /* Glass highlight on orb */
+    #orb::before {
+      content: '';
+      position: absolute;
+      top: 4px;
+      left: 8px;
+      width: 18px;
+      height: 8px;
+      border-radius: 50%;
+      background: linear-gradient(
+        180deg,
+        rgba(255, 255, 255, 0.07) 0%,
+        transparent 100%
+      );
+      z-index: 5;
     }
-    
-    #orb:active {
-      transform: scale(0.95);
-    }
-    
+
     /* VII Text */
     #orb-text {
       font-family: 'Georgia', 'Times New Roman', serif;
-      font-size: 14px;
+      font-size: 11px;
       font-weight: bold;
-      color: rgba(255, 255, 255, 0.95);
-      letter-spacing: 1px;
-      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
-      z-index: 3;
+      color: rgba(255, 255, 255, 0.35);
+      letter-spacing: 2px;
+      z-index: 4;
+      transition: color 0.6s ease, text-shadow 0.6s ease;
     }
-    
-    /* Status Ring */
-    #ring {
+
+    /* ══════════════════════════════════════
+       AMBIENT GLOW
+       ══════════════════════════════════════ */
+    #orb-glow {
       position: absolute;
       top: 50%;
       left: 50%;
       transform: translate(-50%, -50%);
-      width: 56px;
-      height: 56px;
+      width: 42px;
+      height: 42px;
       border-radius: 50%;
-      border: 2px solid transparent;
+      pointer-events: none;
+      z-index: 0;
+      transition: box-shadow 0.8s ease;
+    }
+
+    /* ══════════════════════════════════════
+       PULSE RING
+       ══════════════════════════════════════ */
+    #pulse-ring {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 50px;
+      height: 50px;
+      border-radius: 50%;
+      border: 1.5px solid transparent;
       pointer-events: none;
       z-index: 1;
+      transition: border-color 0.6s ease;
     }
-    
-    /* ==========================================
-       STATUS STYLES - Professional Colors
-       ========================================== */
-    
-    /* IDLE - Soft Gray */
-    .idle #orb {
-      background: linear-gradient(145deg, #6b7280, #4b5563);
-      box-shadow: 
-        0 2px 8px rgba(0, 0, 0, 0.3),
-        inset 0 1px 0 rgba(255, 255, 255, 0.1);
-    }
-    .idle #ring {
-      border-color: rgba(107, 114, 128, 0.5);
-    }
-    
-    /* LISTENING - Vibrant Green (Active State) */
-    .listening #orb {
-      background: linear-gradient(145deg, #22c55e, #16a34a);
-      box-shadow: 
-        0 0 20px rgba(34, 197, 94, 0.5),
-        0 2px 8px rgba(0, 0, 0, 0.2),
-        inset 0 1px 0 rgba(255, 255, 255, 0.2);
-    }
-    .listening #ring {
-      border-color: rgba(34, 197, 94, 0.8);
-      animation: pulse-ring 2s ease-in-out infinite;
-    }
-    .listening #orb::after {
-      content: '';
+
+    /* Ghost ring */
+    #ghost-ring {
       position: absolute;
-      width: 100%;
-      height: 100%;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 50px;
+      height: 50px;
       border-radius: 50%;
-      background: radial-gradient(circle, rgba(34, 197, 94, 0.3) 0%, transparent 70%);
-      animation: glow 2s ease-in-out infinite;
+      border: 1px solid transparent;
+      pointer-events: none;
+      z-index: 0;
+      opacity: 0;
     }
-    
-    /* THINKING - Purple (Processing) */
+
+    /* ══════════════════════════════════════
+       INTERACTION LAYER
+       One single layer handles BOTH
+       dragging AND clicking
+       ══════════════════════════════════════ */
+    #interaction-layer {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 80px;
+      height: 80px;
+      z-index: 10;
+      cursor: grab;
+      border-radius: 50%;
+    }
+
+    #interaction-layer:active {
+      cursor: grabbing;
+    }
+
+    /* Hover effect - applied to orb via parent */
+    #interaction-layer:hover ~ #orb {
+      transform: scale(1.08);
+      border-color: rgba(255, 255, 255, 0.08);
+    }
+
+    /* ══════════════════════════════════════════════
+       STATE: IDLE
+       ══════════════════════════════════════════════ */
+    .idle #orb {
+      border-color: rgba(40, 40, 55, 0.3);
+    }
+    .idle #orb-text {
+      color: rgba(255, 255, 255, 0.2);
+    }
+    .idle #orb-glow {
+      box-shadow: 0 0 8px rgba(40, 40, 60, 0.08);
+    }
+    .idle #pulse-ring {
+      border-color: rgba(40, 40, 60, 0.08);
+    }
+
+    /* ══════════════════════════════════════════════
+       STATE: LISTENING — Green
+       ══════════════════════════════════════════════ */
+    .listening #orb {
+      border-color: rgba(34, 197, 94, 0.1);
+    }
+    .listening #orb-text {
+      color: rgba(255, 255, 255, 0.45);
+      text-shadow: 0 0 8px rgba(34, 197, 94, 0.15);
+    }
+    .listening #orb-glow {
+      box-shadow:
+        0 0 20px rgba(34, 197, 94, 0.12),
+        0 0 40px rgba(34, 197, 94, 0.06);
+    }
+    .listening #pulse-ring {
+      border-color: rgba(34, 197, 94, 0.4);
+      animation: pulse 2.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+    }
+    .listening #ghost-ring {
+      border-color: rgba(34, 197, 94, 0.15);
+      opacity: 1;
+      animation: pulse 2.4s cubic-bezier(0.4, 0, 0.2, 1) infinite 0.6s;
+    }
+
+    /* ══════════════════════════════════════════════
+       STATE: THINKING — Purple
+       ══════════════════════════════════════════════ */
     .thinking #orb {
-      background: linear-gradient(145deg, #a855f7, #7c3aed);
-      box-shadow: 
-        0 0 20px rgba(168, 85, 247, 0.5),
-        0 2px 8px rgba(0, 0, 0, 0.2),
-        inset 0 1px 0 rgba(255, 255, 255, 0.2);
+      border-color: rgba(168, 85, 247, 0.1);
     }
-    .thinking #ring {
-      border-color: rgba(168, 85, 247, 0.8);
+    .thinking #orb-text {
+      color: rgba(255, 255, 255, 0.45);
+      text-shadow: 0 0 8px rgba(168, 85, 247, 0.15);
+    }
+    .thinking #orb-glow {
+      box-shadow:
+        0 0 22px rgba(168, 85, 247, 0.15),
+        0 0 40px rgba(168, 85, 247, 0.06);
+    }
+    .thinking #pulse-ring {
+      border-color: rgba(168, 85, 247, 0.4);
       border-style: dashed;
-      animation: spin 1s linear infinite;
+      border-width: 1.5px;
+      animation: spin 2s linear infinite;
     }
-    
-    /* SPEAKING - Blue (Responding) */
+
+    /* ══════════════════════════════════════════════
+       STATE: SPEAKING — Blue
+       ══════════════════════════════════════════════ */
     .speaking #orb {
-      background: linear-gradient(145deg, #3b82f6, #2563eb);
-      box-shadow: 
-        0 0 20px rgba(59, 130, 246, 0.5),
-        0 2px 8px rgba(0, 0, 0, 0.2),
-        inset 0 1px 0 rgba(255, 255, 255, 0.2);
+      border-color: rgba(59, 130, 246, 0.1);
     }
-    .speaking #ring {
-      border-color: rgba(59, 130, 246, 0.8);
-      animation: wave 0.5s ease-in-out infinite;
+    .speaking #orb-text {
+      color: rgba(255, 255, 255, 0.45);
+      text-shadow: 0 0 8px rgba(59, 130, 246, 0.15);
     }
-    
-    /* ==========================================
+    .speaking #orb-glow {
+      box-shadow:
+        0 0 20px rgba(59, 130, 246, 0.12),
+        0 0 40px rgba(59, 130, 246, 0.06);
+    }
+    .speaking #pulse-ring {
+      border-color: rgba(59, 130, 246, 0.4);
+      animation: breathe 1s ease-in-out infinite;
+    }
+    .speaking #ghost-ring {
+      border-color: rgba(59, 130, 246, 0.12);
+      opacity: 1;
+      animation: breathe 1s ease-in-out infinite 0.2s;
+    }
+
+    /* ══════════════════════════════════════
        ANIMATIONS
-       ========================================== */
-    
-    @keyframes pulse-ring {
-      0%, 100% { 
-        transform: translate(-50%, -50%) scale(1); 
-        opacity: 1; 
+       ══════════════════════════════════════ */
+    @keyframes pulse {
+      0% {
+        transform: translate(-50%, -50%) scale(1);
+        opacity: 0.6;
       }
-      50% { 
-        transform: translate(-50%, -50%) scale(1.1); 
-        opacity: 0.7; 
+      70% {
+        transform: translate(-50%, -50%) scale(1.35);
+        opacity: 0;
+      }
+      100% {
+        transform: translate(-50%, -50%) scale(1.35);
+        opacity: 0;
       }
     }
-    
-    @keyframes glow {
-      0%, 100% { opacity: 0.5; }
-      50% { opacity: 1; }
-    }
-    
+
     @keyframes spin {
       from { transform: translate(-50%, -50%) rotate(0deg); }
       to { transform: translate(-50%, -50%) rotate(360deg); }
     }
-    
-    @keyframes wave {
-      0%, 100% { transform: translate(-50%, -50%) scale(1); }
-      50% { transform: translate(-50%, -50%) scale(1.08); }
+
+    @keyframes breathe {
+      0%, 100% {
+        transform: translate(-50%, -50%) scale(1);
+        opacity: 0.5;
+      }
+      50% {
+        transform: translate(-50%, -50%) scale(1.12);
+        opacity: 0.25;
+      }
     }
-    
-    /* Tooltip */
+
+    /* ══════════════════════════════════════
+       TOOLTIP
+       ══════════════════════════════════════ */
     #tooltip {
       position: fixed;
-      top: -30px;
+      top: -26px;
       left: 50%;
       transform: translateX(-50%);
-      background: rgba(0, 0, 0, 0.9);
-      color: white;
-      padding: 4px 10px;
-      border-radius: 4px;
-      font-family: -apple-system, sans-serif;
-      font-size: 11px;
+      background: #0e0e18;
+      color: rgba(255, 255, 255, 0.4);
+      padding: 3px 10px;
+      border-radius: 3px;
+      border: 1px solid rgba(255, 255, 255, 0.04);
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      font-size: 9px;
+      font-weight: 600;
+      letter-spacing: 1.2px;
+      text-transform: uppercase;
       white-space: nowrap;
       opacity: 0;
       pointer-events: none;
-      transition: opacity 0.2s ease;
+      transition: opacity 0.15s ease;
       z-index: 100;
     }
-    
+
     #orb-container:hover #tooltip {
       opacity: 1;
     }
   </style>
 </head>
 <body class="listening">
-  
+
   <div id="orb-container">
-    <div id="ring"></div>
+    <div id="orb-glow"></div>
+    <div id="ghost-ring"></div>
+    <div id="pulse-ring"></div>
     <div id="orb">
       <span id="orb-text">VII</span>
     </div>
+    <!-- Single layer: handles drag + click + right-click -->
+    <div id="interaction-layer"></div>
     <div id="tooltip">Listening</div>
   </div>
-  
+
   <script>
-    // ========================================
-    // ELEMENTS
-    // ========================================
     const body = document.body;
-    const orb = document.getElementById('orb');
+    const interactionLayer = document.getElementById('interaction-layer');
     const tooltip = document.getElementById('tooltip');
-    
-    // ========================================
-    // STATE
-    // ========================================
-    let currentStatus = 'listening'; // Default to listening (VII always listens)
+
+    let currentStatus = 'listening';
     let ws = null;
     let reconnectAttempts = 0;
     const maxReconnectAttempts = 50;
-    
+
     const statusLabels = {
-      idle: 'Idle',
+      idle: 'Offline',
       listening: 'Listening',
-      thinking: 'Thinking...',
+      thinking: 'Processing',
       speaking: 'Speaking'
     };
-    
+
     // ========================================
-    // WEBSOCKET CONNECTION
+    // UNIFIED INTERACTION: DRAG + CLICK
     // ========================================
-    function connectWebSocket() {
-      if (reconnectAttempts >= maxReconnectAttempts) {
-        console.log('[WS] Max reconnect attempts reached');
-        return;
-      }
-      
-      try {
-        ws = new WebSocket('ws://127.0.0.1:7777/ws/status');
-        
-        ws.onopen = () => {
-          console.log('[WS] Connected to backend');
-          reconnectAttempts = 0;
-          // Default to listening on connect
-          setStatus('listening');
-        };
-        
-        ws.onmessage = (event) => {
-          try {
-            const data = JSON.parse(event.data);
-            console.log('[WS] Status update:', data);
-            
-            // Determine status from backend state
-            let newStatus = 'listening'; // Default
-            
-            if (data.speaking) {
-              newStatus = 'speaking';
-            } else if (data.thinking) {
-              newStatus = 'thinking';
-            } else if (data.listening) {
-              newStatus = 'listening';
-            } else {
-              newStatus = 'idle';
-            }
-            
-            // Also check direct status field
-            if (data.status) {
-              newStatus = data.status;
-            }
-            
-            setStatus(newStatus);
-          } catch (e) {
-            console.error('[WS] Parse error:', e);
-          }
-        };
-        
-        ws.onclose = () => {
-          console.log('[WS] Disconnected');
-          reconnectAttempts++;
-          setTimeout(connectWebSocket, 2000);
-        };
-        
-        ws.onerror = (err) => {
-          console.error('[WS] Error:', err);
-          ws.close();
-        };
-        
-      } catch (e) {
-        console.error('[WS] Connection failed:', e);
-        reconnectAttempts++;
-        setTimeout(connectWebSocket, 2000);
-      }
-    }
-    
-    function setStatus(status) {
-      if (currentStatus === status) return;
-      
-      console.log('[STATUS] Changed:', currentStatus, '->', status);
-      currentStatus = status;
-      
-      // Update body class for styling
-      body.className = status;
-      
-      // Update tooltip
-      tooltip.textContent = statusLabels[status] || 'Unknown';
-    }
-    
-    // ========================================
-    // CLICK HANDLERS
-    // ========================================
-    let clickTimer = null;
-    let clickCount = 0;
-    
-    orb.addEventListener('mousedown', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      
-      // Right click - show menu
-      if (e.button === 2) {
-        console.log('[ORB] Right click - Show menu');
-        if (window.orbAPI && window.orbAPI.showMenu) {
-          window.orbAPI.showMenu();
-        }
-        return;
-      }
-      
-      // Left click - open dashboard
+    let isMouseDown = false;
+    let startScreenX = 0;
+    let startScreenY = 0;
+    let hasDragged = false;
+    const DRAG_THRESHOLD = 5;
+
+    interactionLayer.addEventListener('mousedown', (e) => {
       if (e.button === 0) {
-        clickCount++;
-        
-        if (clickTimer) clearTimeout(clickTimer);
-        
-        clickTimer = setTimeout(() => {
-          if (clickCount >= 1) {
-            // Any click opens dashboard
-            console.log('[ORB] Click - Open dashboard');
-            if (window.orbAPI && window.orbAPI.showMainWindow) {
-              window.orbAPI.showMainWindow();
-            }
-          }
-          clickCount = 0;
-        }, 200);
+        // Left button: could be drag or click
+        isMouseDown = true;
+        hasDragged = false;
+        startScreenX = e.screenX;
+        startScreenY = e.screenY;
+
+        if (window.orbAPI && window.orbAPI.dragStart) {
+          window.orbAPI.dragStart(e.screenX, e.screenY);
+        }
+
+        e.preventDefault();
       }
     });
-    
-    // Prevent context menu on right click (we handle it ourselves)
-    orb.addEventListener('contextmenu', (e) => {
+
+    document.addEventListener('mousemove', (e) => {
+      if (!isMouseDown) return;
+
+      const dx = Math.abs(e.screenX - startScreenX);
+      const dy = Math.abs(e.screenY - startScreenY);
+
+      if (dx > DRAG_THRESHOLD || dy > DRAG_THRESHOLD) {
+        hasDragged = true;
+      }
+
+      // Always send move — main.js decides whether to move window
+      if (window.orbAPI && window.orbAPI.dragMove) {
+        window.orbAPI.dragMove(e.screenX, e.screenY);
+      }
+    });
+
+    document.addEventListener('mouseup', (e) => {
+      if (!isMouseDown) return;
+      isMouseDown = false;
+
+      if (e.button === 0 && !hasDragged) {
+        // Didn't drag — this is a CLICK
+        console.log('[ORB] Click detected — toggle dashboard');
+        if (window.orbAPI && window.orbAPI.toggleDashboard) {
+          window.orbAPI.toggleDashboard();
+        }
+      }
+    });
+
+    // RIGHT CLICK — context menu
+    interactionLayer.addEventListener('contextmenu', (e) => {
       e.preventDefault();
       e.stopPropagation();
-      console.log('[ORB] Context menu triggered');
+      console.log('[ORB] Right click — show menu');
       if (window.orbAPI && window.orbAPI.showMenu) {
         window.orbAPI.showMenu();
       }
     });
-    
+
     // ========================================
-    // INITIALIZATION
+    // WEBSOCKET
     // ========================================
-    // Start with listening status (default)
+    function connectWebSocket() {
+      if (reconnectAttempts >= maxReconnectAttempts) return;
+
+      try {
+        ws = new WebSocket('ws://127.0.0.1:7777/ws/status');
+
+        ws.onopen = () => {
+          reconnectAttempts = 0;
+          setStatus('listening');
+        };
+
+        ws.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            let s = 'listening';
+            if (data.speaking) s = 'speaking';
+            else if (data.thinking) s = 'thinking';
+            else if (data.listening) s = 'listening';
+            else s = 'idle';
+            if (data.status) s = data.status;
+            setStatus(s);
+          } catch (e) {}
+        };
+
+        ws.onclose = () => {
+          reconnectAttempts++;
+          setTimeout(connectWebSocket, 2000);
+        };
+
+        ws.onerror = () => ws.close();
+
+      } catch (e) {
+        reconnectAttempts++;
+        setTimeout(connectWebSocket, 2000);
+      }
+    }
+
+    function setStatus(status) {
+      if (currentStatus === status) return;
+      currentStatus = status;
+      body.className = status;
+      tooltip.textContent = statusLabels[status] || 'Unknown';
+    }
+
+    // ========================================
+    // INIT
+    // ========================================
     setStatus('listening');
-    
-    // Connect to WebSocket after short delay
-    setTimeout(() => {
-      console.log('[ORB] Initializing...');
-      console.log('[ORB] API available:', !!window.orbAPI);
-      connectWebSocket();
-    }, 1000);
+    setTimeout(() => connectWebSocket(), 1000);
   </script>
 </body>
 </html>

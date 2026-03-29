@@ -1,15 +1,22 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('orbAPI', {
-  // Show main dashboard window
+  // Click: toggle dashboard show/hide
+  toggleDashboard: () => ipcRenderer.send('toggle-dashboard'),
+
+  // Legacy: always show
   showMainWindow: () => ipcRenderer.send('show-main-window'),
-  
-  // Show right-click context menu
+
+  // Right-click menu
   showMenu: () => ipcRenderer.send('show-orb-menu'),
-  
-  // Navigate to specific page
+
+  // Navigate
   navigateTo: (route) => ipcRenderer.send('navigate-to', route),
-  
-  // Quit application
-  quitApp: () => ipcRenderer.send('quit-app')
+
+  // Quit
+  quitApp: () => ipcRenderer.send('quit-app'),
+
+  // Drag
+  dragStart: (x, y) => ipcRenderer.send('orb-drag-start', { x, y }),
+  dragMove: (x, y) => ipcRenderer.send('orb-drag-move', { x, y })
 });
