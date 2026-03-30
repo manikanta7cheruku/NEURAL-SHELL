@@ -456,6 +456,39 @@
     }
 
     // ========================================
+    // CLICK-THROUGH TRANSPARENT AREAS
+    // Mouse passes through empty space,
+    // but stops on the orb itself
+    // ========================================
+    const onMouseEvent = (e) => {
+      const el = document.elementFromPoint(e.clientX, e.clientY);
+      
+      // If mouse is on the interaction layer or orb area — capture it
+      if (el && (el.id === 'interaction-layer' || 
+                 el.id === 'orb' || 
+                 el.id === 'orb-text' ||
+                 el.id === 'orb-container')) {
+        if (window.orbAPI && window.orbAPI.setIgnoreMouseEvents) {
+          window.orbAPI.setIgnoreMouseEvents(false);
+        }
+      } else {
+        // Mouse is on transparent area — let it pass through
+        if (window.orbAPI && window.orbAPI.setIgnoreMouseEvents) {
+          window.orbAPI.setIgnoreMouseEvents(true);
+        }
+      }
+    };
+
+    document.addEventListener('mousemove', onMouseEvent);
+    document.addEventListener('mouseleave', () => {
+      // When mouse leaves the window entirely, let clicks pass through
+      if (window.orbAPI && window.orbAPI.setIgnoreMouseEvents) {
+        window.orbAPI.setIgnoreMouseEvents(true);
+      }
+    });
+    document.addEventListener('mouseenter', onMouseEvent);
+
+    // ========================================
     // INIT
     // ========================================
     setStatus('listening');

@@ -219,6 +219,9 @@ function createStatusWindow() {
 
   statusWindow.loadFile(path.join(__dirname, 'status.html'));
   
+  // Start with click-through enabled so transparent areas don't block
+  statusWindow.setIgnoreMouseEvents(true, { forward: true });
+  
   statusWindow.setAlwaysOnTop(true, 'screen-saver', 1);
   statusWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   
@@ -480,6 +483,16 @@ ipcMain.on('toggle-listening', async () => {
     req.end();
   } catch (e) {
     console.error('[IPC] Toggle failed:', e.message);
+  }
+});
+
+// ── Click-through for transparent areas ──
+ipcMain.on('set-ignore-mouse', (event, ignore) => {
+  if (!statusWindow) return;
+  if (ignore) {
+    statusWindow.setIgnoreMouseEvents(true, { forward: true });
+  } else {
+    statusWindow.setIgnoreMouseEvents(false);
   }
 });
 
