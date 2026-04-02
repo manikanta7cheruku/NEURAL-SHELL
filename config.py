@@ -89,7 +89,14 @@ def update_config(updates):
 def get_defaults():
     """Backup settings in case the JSON file is broken or missing."""
     return {
-        "identity": {"name": "Seven", "creator": "Team Seven", "wake_words": ["seven"]},
+        "identity": {
+            "name": "Seven", 
+            "creator": "Team Seven", 
+            "wake_words": ["seven", "hey seven"],
+            "pause_words": ["not you", "hold on", "wait", "stop listening"],
+            "resume_words": ["wake up", "seven", "continue", "start listening"],
+            "shutdown_words": ["go to sleep", "goodbye", "shutdown", "close seven"]
+        },
         "email": "",
         "brain": {
             "model_name": "llama3",

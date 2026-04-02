@@ -1,17 +1,22 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import useStatus from '../stores/useStatus';
 import PageHeader from '../components/PageHeader';
 import Spinner from '../components/Spinner';
 import api from '../api';
-import React from 'react';
 
 export default function Home() {
+  const navigate = useNavigate();
   const st = useStatus();
   const [hw, setHw] = useState(null);
   const [speed, setSpeed] = useState(null);
   const [mem, setMem] = useState(null);
   const [logs, setLogs] = useState([]);
   const [sched, setSched] = useState(0);
+  const [usage, setUsage] = useState(null);
+  const [usageHistory, setUsageHistory] = useState([]);
+  const [config, setConfig] = useState(null);
+  const [referralStats, setReferralStats] = useState(null);
   
   // EMAIL POPUP
   const [showEmailPopup, setShowEmailPopup] = useState(false);
@@ -22,39 +27,47 @@ export default function Home() {
   useEffect(() => {
     st.fetch();
     const i = setInterval(st.fetch, 3000);
+    
     api.get('/hardware').then(r => setHw(r.data)).catch(() => {});
     api.get('/speed').then(r => setSpeed(r.data)).catch(() => {});
     api.get('/memory/stats').then(r => setMem(r.data)).catch(() => {});
     api.get('/commands/log?limit=10').then(r => setLogs((r.data.recent || []).reverse())).catch(() => {});
     api.get('/schedules').then(r => setSched(r.data.filter(s => s.status === 'active').length)).catch(() => {});
+    api.get('/usage/stats').then(r => setUsage(r.data)).catch(() => {});
+    api.get('/usage/history').then(r => setUsageHistory(r.data.history || [])).catch(() => {
+      const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+      const today = new Date().getDay();
+      const history = [];
+      for (let i = 6; i >= 0; i--) {
+        const dayIndex = (today - i + 7) % 7;
+        history.push({ day: days[dayIndex], hours: 0 });
+      }
+      setUsageHistory(history);
+    });
+    api.get('/config').then(r => setConfig(r.data)).catch(() => {});
+    api.get('/referral/stats').then(r => setReferralStats(r.data)).catch(() => {});
     
-    // EMAIL POPUP LOGIC — FIXED
+    // EMAIL POPUP LOGIC
     const emailDismissed = localStorage.getItem('seven_email_dismissed');
     const emailSaved = localStorage.getItem('seven_email_saved');
     
-    // Never show if user dismissed or already saved email
-    if (emailDismissed || emailSaved) {
-      return;
-    }
-    
-    // Check backend if email already saved
-    api.get('/email/check').then(r => {
-      if (r.data.saved) {
-        localStorage.setItem('seven_email_saved', 'true');
-        return;
-      }
-      
-      // Show popup after 7 days of first install
-      const installDate = localStorage.getItem('seven_install_date');
-      if (!installDate) {
-        localStorage.setItem('seven_install_date', Date.now().toString());
-      } else {
-        const daysSinceInstall = (Date.now() - parseInt(installDate)) / (1000 * 60 * 60 * 24);
-        if (daysSinceInstall >= 7) {
-          setShowEmailPopup(true);
+    if (!emailDismissed && !emailSaved) {
+      api.get('/email/check').then(r => {
+        if (r.data.saved) {
+          localStorage.setItem('seven_email_saved', 'true');
+          return;
         }
-      }
-    }).catch(() => {});
+        const installDate = localStorage.getItem('seven_install_date');
+        if (!installDate) {
+          localStorage.setItem('seven_install_date', Date.now().toString());
+        } else {
+          const daysSinceInstall = (Date.now() - parseInt(installDate)) / (1000 * 60 * 60 * 24);
+          if (daysSinceInstall >= 7) {
+            setShowEmailPopup(true);
+          }
+        }
+      }).catch(() => {});
+    }
     
     return () => clearInterval(i);
   }, []);
@@ -84,16 +97,41 @@ export default function Home() {
     setShowEmailPopup(false);
   };
 
+  const copyReferralLink = () => {
+    if (referralStats) {
+      navigator.clipboard.writeText(`https://seven.app/ref/${referralStats.referral_code}`);
+      alert('Referral link copied!');
+    }
+  };
+
   if (st.loading) return <Spinner t="Connecting to Seven..." />;
-  if (st.error) return <div className="flex flex-col items-center justify-center h-full gap-2"><span className="text-xs text-s-text-3">{st.error}</span><button onClick={st.fetch} className="text-xs text-s-accent">Retry</button></div>;
+  if (st.error) return (
+    <div className="flex flex-col items-center justify-center h-full gap-2">
+      <span className="text-xs text-s-text-3">{st.error}</span>
+      <button onClick={st.fetch} className="text-xs text-s-accent">Retry</button>
+    </div>
+  );
+
+  const tier = config?.license?.tier || 'free';
+  const isPro = tier === 'pro' || tier === 'ultimate';
+  
+  const chartData = usageHistory.length > 0 ? usageHistory : [
+    { day: 'Mon', hours: 0 }, { day: 'Tue', hours: 0 }, { day: 'Wed', hours: 0 },
+    { day: 'Thu', hours: 0 }, { day: 'Fri', hours: 0 }, { day: 'Sat', hours: 0 }, { day: 'Sun', hours: 0 }
+  ];
+  const maxHours = Math.max(...chartData.map(h => h.hours), 1);
 
   return (
     <div className="h-full flex flex-col">
-      <PageHeader title="Dashboard" sub={`${st.label()} • ${st.uptime} uptime`}
-        right={<span className="text-[10px] text-s-text-4 font-mono">v{st.version}</span>} />
+      <PageHeader 
+        title="Dashboard" 
+        sub={`${st.label()} • ${st.uptime} uptime`}
+        right={<span className="text-[10px] text-s-text-4 font-mono">v{st.version}</span>} 
+      />
 
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
-        {/* Status */}
+        
+        {/* Status Row */}
         <div className="grid grid-cols-7 gap-2">
           {[
             { l: 'Status', v: st.label(), c: st.color() },
@@ -111,7 +149,7 @@ export default function Home() {
           ))}
         </div>
 
-        {/* Memory */}
+        {/* Memory Row */}
         {mem && (
           <div className="grid grid-cols-4 gap-2">
             {[
@@ -128,8 +166,141 @@ export default function Home() {
           </div>
         )}
 
+        {/* Plan + Usage Chart (Side by Side like Hardware/Latency) */}
         <div className="grid grid-cols-2 gap-3">
-          {/* Hardware */}
+          
+          {/* Your Plan + Why Upgrade (Combined) */}
+          <div className="bg-s-card border border-s-border rounded p-3">
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium">Your Plan</div>
+              <span className={`text-[10px] font-medium px-2 py-0.5 rounded ${
+                isPro ? 'bg-s-accent/10 text-s-accent' : 'bg-s-border text-s-text-4'
+              }`}>
+                {tier.toUpperCase()}
+              </span>
+            </div>
+            
+            <div className="space-y-1.5 mb-3">
+              {config?.email && (
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] text-s-text-3">Email</span>
+                  <span className="text-[9px] text-s-text font-mono truncate max-w-[100px]">{config.email}</span>
+                </div>
+              )}
+              {usage && (
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] text-s-text-3">Total Time</span>
+                  <span className="text-[10px] text-s-text-2 font-mono">{usage.display}</span>
+                </div>
+              )}
+              {config?.license?.is_trial && config?.license?.expires_at && (
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] text-s-text-3">Trial</span>
+                  <span className="text-[9px] text-s-orange">
+                    {Math.max(0, Math.ceil((new Date(config.license.expires_at) - new Date()) / (1000 * 60 * 60 * 24)))}d left
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* Why Upgrade (Only for Free users) */}
+            {!isPro && (
+              <div className="pt-2 border-t border-s-border">
+                <div className="text-[9px] text-s-accent mb-1.5">Why upgrade?</div>
+                <div className="text-[9px] text-s-text-3 leading-relaxed">
+                  More memory • Custom voice commands • Unlimited schedules
+                </div>
+              </div>
+            )}
+            
+            <button 
+              onClick={() => navigate('/plans')}
+              className="w-full mt-3 py-1.5 border border-s-accent/30 bg-s-accent/8 text-s-accent rounded text-[10px] font-medium hover:bg-s-accent/20"
+            >
+              {isPro ? 'Manage Plan' : 'View Plans'} →
+            </button>
+          </div>
+
+          {/* Last 7 Days Usage Chart */}
+          <div className="bg-s-card border border-s-border rounded p-3">
+            <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium mb-3">Last 7 Days</div>
+            <div className="flex items-end justify-between h-[80px] gap-1 px-1">
+              {chartData.map((day, i) => (
+                <div key={i} className="flex-1 flex flex-col items-center">
+                  <div 
+                    className="w-full bg-s-border rounded-t relative group cursor-pointer"
+                    style={{ height: '65px' }}
+                  >
+                    <div 
+                      className="absolute bottom-0 w-full bg-s-accent rounded-t transition-all"
+                      style={{ height: day.hours > 0 ? `${Math.max((day.hours / maxHours) * 65, 4)}px` : '2px' }}
+                    />
+                    <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 bg-s-bg border border-s-border rounded px-1.5 py-0.5 text-[9px] text-s-text opacity-0 group-hover:opacity-100 whitespace-nowrap z-10">
+                      {day.hours > 0 ? `${day.hours}hr` : '0hr'}
+                    </div>
+                  </div>
+                  <span className="text-[8px] text-s-text-4 mt-1">{day.day}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Referral Card */}
+        <div className="bg-gradient-to-r from-s-accent/5 to-s-accent/10 border border-s-accent/20 rounded p-3">
+          <div className="flex items-start justify-between">
+            <div className="flex-1">
+              <div className="text-[12px] font-medium text-s-text mb-1">🎁 Refer Friends, Earn ₹100 Each</div>
+              <p className="text-[10px] text-s-text-3">Share Seven → Friend uses 77 hours → You earn ₹100 credit</p>
+              
+              {referralStats && (
+                <div className="flex items-center gap-4 mt-2">
+                  <div className="text-center">
+                    <div className="text-[14px] font-mono font-bold text-s-accent">₹{referralStats.total_credits}</div>
+                    <div className="text-[8px] text-s-text-4">Earned</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-[14px] font-mono font-bold text-s-green">{referralStats.completed_referrals}</div>
+                    <div className="text-[8px] text-s-text-4">Completed</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-[14px] font-mono font-bold text-s-orange">{referralStats.pending_referrals}</div>
+                    <div className="text-[8px] text-s-text-4">Pending</div>
+                  </div>
+                </div>
+              )}
+            </div>
+            
+            <div className="flex flex-col gap-2">
+              {referralStats ? (
+                <>
+                  <button 
+                    onClick={copyReferralLink}
+                    className="px-4 py-2 bg-s-accent text-white rounded text-[10px] font-medium hover:bg-s-accent/90"
+                  >
+                    📋 Copy Link
+                  </button>
+                  <button 
+                    onClick={() => navigate('/settings')}
+                    className="px-4 py-2 border border-s-accent/30 bg-s-accent/8 text-s-accent rounded text-[10px] font-medium hover:bg-s-accent/20"
+                  >
+                    View Details
+                  </button>
+                </>
+              ) : (
+                <button 
+                  onClick={() => navigate('/settings')}
+                  className="px-4 py-2 bg-s-accent text-white rounded text-[10px] font-medium hover:bg-s-accent/90"
+                >
+                  Get Started →
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Hardware + Speed Row */}
+        <div className="grid grid-cols-2 gap-3">
           {hw && (
             <div className="bg-s-card border border-s-border rounded p-3">
               <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium mb-2">Hardware</div>
@@ -150,45 +321,26 @@ export default function Home() {
             </div>
           )}
 
-          {/* Speed */}
           <div className="bg-s-card border border-s-border rounded p-3">
             <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium mb-2">Latency</div>
-            {speed?.count > 0 ? (
-              <div className="grid grid-cols-2 gap-2">
-                {[['Average', `${speed.avg}ms`], ['Fastest', `${speed.min}ms`], ['Slowest', `${speed.max}ms`], ['Samples', speed.count]].map(([k, v]) => (
-                  <div key={k} className="bg-s-bg rounded px-2 py-1.5 text-center">
-                    <div className="text-[13px] font-mono font-medium text-s-text">{v}</div>
-                    <div className="text-[9px] text-s-text-4">{k}</div>
-                  </div>
-                ))}
-              </div>
-            ) : <div className="text-[11px] text-s-text-4 py-4 text-center">No data yet</div>}
-          </div>
-        </div>
-
-        {/* License & Usage Card - NEW */}
-        <div className="bg-s-card border border-s-border rounded p-3">
-          <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium mb-2">
-            Your License & Usage
-          </div>
-          <div className="space-y-2">
-            <UsageTime />
-            <div className="flex items-center justify-between pt-2 border-t border-s-border">
-              <span className="text-[11px] text-s-text-3">Upgrade Plan</span>
-              <button 
-                onClick={() => window.location.href = '/#/plans'}
-                className="text-[10px] text-s-accent hover:text-s-accent/80"
-              >
-                View Plans →
-              </button>
+            <div className="grid grid-cols-2 gap-2">
+              {(speed?.count > 0 ? [['Average', `${speed.avg}ms`], ['Fastest', `${speed.min}ms`], ['Slowest', `${speed.max}ms`], ['Samples', speed.count]]
+                : [['Average', '—'], ['Fastest', '—'], ['Slowest', '—'], ['Samples', '0']]).map(([k, v]) => (
+                <div key={k} className="bg-s-bg rounded px-2 py-1.5 text-center">
+                  <div className="text-[13px] font-mono font-medium text-s-text">{v}</div>
+                  <div className="text-[9px] text-s-text-4">{k}</div>
+                </div>
+              ))}
             </div>
           </div>
         </div>
 
-        {/* Activity */}
+        {/* Recent Activity */}
         <div className="bg-s-card border border-s-border rounded p-3">
           <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium mb-2">Recent Activity</div>
-          {logs.length === 0 ? <div className="text-[11px] text-s-text-4 py-3 text-center">No commands yet</div> : (
+          {logs.length === 0 ? (
+            <div className="text-[11px] text-s-text-4 py-3 text-center">No commands yet — try saying "Hey Seven"</div>
+          ) : (
             <div className="space-y-px">
               {logs.map((l, i) => (
                 <div key={i} className="flex items-center gap-2 py-1 text-[11px]">
@@ -237,10 +389,17 @@ export default function Home() {
             )}
             
             <div className="flex gap-2">
-              <button onClick={saveEmail} disabled={emailSuccess} className="flex-1 px-3 py-2 bg-s-accent text-white rounded text-[12px] font-medium hover:bg-s-accent/90 disabled:opacity-50">
+              <button 
+                onClick={saveEmail} 
+                disabled={emailSuccess} 
+                className="flex-1 px-3 py-2 bg-s-accent text-white rounded text-[12px] font-medium hover:bg-s-accent/90 disabled:opacity-50"
+              >
                 {emailSuccess ? 'Saved!' : 'Subscribe'}
               </button>
-              <button onClick={dismissEmail} className="px-3 py-2 text-s-text-4 hover:text-s-text-3 text-[12px]">
+              <button 
+                onClick={dismissEmail} 
+                className="px-3 py-2 text-s-text-4 hover:text-s-text-3 text-[12px]"
+              >
                 Maybe Later
               </button>
             </div>
@@ -248,59 +407,5 @@ export default function Home() {
         </div>
       )}
     </div>
-  );
-}
-
-// Helper component to show usage time and license info
-function UsageTime() {
-  const [usage, setUsage] = React.useState(null);
-  const [config, setConfig] = React.useState(null);
-  
-  React.useEffect(() => {
-    api.get('/usage/stats').then(r => setUsage(r.data)).catch(() => {});
-    api.get('/config').then(r => setConfig(r.data)).catch(() => {});
-  }, []);
-
-  const tier = config?.license?.tier || 'free';
-  const isPro = tier === 'pro' || tier === 'ultimate';
-  
-  return (
-    <>
-      {/* Email */}
-      {config?.email && (
-        <div className="flex items-center justify-between">
-          <span className="text-[11px] text-s-text-3">Email</span>
-          <span className="text-[10px] text-s-text font-mono truncate max-w-[150px]">{config.email}</span>
-        </div>
-      )}
-      
-      {/* Current Plan */}
-      <div className="flex items-center justify-between">
-        <span className="text-[11px] text-s-text-3">Plan</span>
-        <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${
-          isPro ? 'bg-s-accent/10 text-s-accent' : 'bg-s-border text-s-text-4'
-        }`}>
-          {tier.toUpperCase()}
-        </span>
-      </div>
-      
-      {/* Trial Status */}
-      {config?.license?.is_trial && config?.license?.expires_at && (
-        <div className="flex items-center justify-between">
-          <span className="text-[11px] text-s-text-3">Trial</span>
-          <span className="text-[10px] text-s-orange">
-            {Math.max(0, Math.ceil((new Date(config.license.expires_at) - new Date()) / (1000 * 60 * 60 * 24)))} days left
-          </span>
-        </div>
-      )}
-      
-      {/* Time Spent */}
-      {usage && (
-        <div className="flex items-center justify-between">
-          <span className="text-[11px] text-s-text-3">Time Used</span>
-          <span className="text-[11px] text-s-text-2 font-mono">{usage.display}</span>
-        </div>
-      )}
-    </>
   );
 }

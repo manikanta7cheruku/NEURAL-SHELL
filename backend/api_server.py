@@ -964,6 +964,162 @@ def get_usage_stats():
     }
 
 # =========================================================================
+# USAGE STATS ENDPOINTS
+# =========================================================================
+
+@app.get("/api/usage/stats")
+def get_usage_stats():
+    """Get current user's total usage time."""
+    import license as license_module
+    
+    device_id = license_module.get_device_id()
+    
+    license_module.init_db()
+    
+    import sqlite3
+    conn = sqlite3.connect(license_module.LICENSE_DB)
+    c = conn.cursor()
+    
+    # Get total usage hours
+    c.execute("SELECT usage_hours FROM activations WHERE device_id = ?", (device_id,))
+    row = c.fetchone()
+    
+    total_hours = row[0] if row else 0
+    
+    conn.close()
+    
+    # Convert to human readable
+    if total_hours < 1:
+        minutes = int(total_hours * 60)
+        time_str = f"{minutes} min"
+    elif total_hours < 24:
+        time_str = f"{int(total_hours)} hr"
+    elif total_hours < 168:
+        days = int(total_hours / 24)
+        time_str = f"{days} days"
+    elif total_hours < 720:
+        weeks = int(total_hours / 168)
+        time_str = f"{weeks} weeks"
+    elif total_hours < 8760:
+        months = int(total_hours / 720)
+        time_str = f"{months} months"
+    else:
+        years = int(total_hours / 8760)
+        time_str = f"{years} years"
+    
+    return {
+        "total_hours": round(total_hours, 2),
+        "display": time_str
+    }
+
+
+@app.get("/api/usage/history")
+def get_usage_history():
+    """Get usage history for last 7 days."""
+    import sqlite3
+    from datetime import datetime, timedelta
+    
+    # For now, generate from telemetry database
+    try:
+        conn = sqlite3.connect("data/telemetry.db")
+        c = conn.cursor()
+        
+        # Get last 7 days of activity
+        history = []
+        for i in range(7):
+            date = (datetime.now() - timedelta(days=i)).strftime("%Y-%m-%d")
+            
+            # Count activities for this day
+            c.execute("""
+                SELECT COUNT(*) FROM stats 
+                WHERE DATE(last_seen) = ?
+            """, (date,))
+            row = c.fetchone()
+            
+            # Estimate hours based on activity (rough estimate)
+            activities = row[0] if row else 0
+            estimated_hours = min(activities * 0.5, 8)  # Cap at 8 hours per day
+            
+            history.append({
+                "date": date,
+                "day": (datetime.now() - timedelta(days=i)).strftime("%a"),
+                "hours": round(estimated_hours, 1)
+            })
+        
+        conn.close()
+        
+        # Reverse to show oldest first
+        history.reverse()
+        
+        return {"history": history}
+    except Exception as e:
+        # Return dummy data if no history yet
+        history = []
+        for i in range(6, -1, -1):
+            date = (datetime.now() - timedelta(days=i))
+            history.append({
+                "date": date.strftime("%Y-%m-%d"),
+                "day": date.strftime("%a"),
+                "hours": 0
+            })
+        return {"history": history}
+
+
+@app.get("/api/voice-control/words")
+def get_voice_control_words():
+    """Get current wake/pause/shutdown words."""
+    import config
+    
+    identity = config.KEY.get("identity", {})
+    tier = config.KEY.get("license", {}).get("tier", "free")
+    
+    return {
+        "wake_words": identity.get("wake_words", ["seven"]),
+        "pause_words": identity.get("pause_words", ["hold on"]),
+        "resume_words": identity.get("resume_words", ["wake up"]),
+        "shutdown_words": identity.get("shutdown_words", ["go to sleep"]),
+        "tier": tier,
+        "can_edit": tier in ["pro", "ultimate"]
+    }
+
+
+@app.put("/api/voice-control/words")
+def update_voice_control_words(data: dict):
+    """Update wake/pause/shutdown words (Pro only)."""
+    import config
+    
+    tier = config.KEY.get("license", {}).get("tier", "free")
+    
+    if tier not in ["pro", "ultimate"]:
+        raise HTTPException(status_code=403, detail="Pro plan required to customize voice commands")
+    
+    updates = {}
+    
+    if "wake_words" in data:
+        updates["identity.wake_words"] = [w.lower().strip() for w in data["wake_words"] if w.strip()]
+    
+    if "pause_words" in data:
+        updates["identity.pause_words"] = [w.lower().strip() for w in data["pause_words"] if w.strip()]
+    
+    if "resume_words" in data:
+        updates["identity.resume_words"] = [w.lower().strip() for w in data["resume_words"] if w.strip()]
+    
+    if "shutdown_words" in data:
+        updates["identity.shutdown_words"] = [w.lower().strip() for w in data["shutdown_words"] if w.strip()]
+    
+    # Update each field
+    for key, value in updates.items():
+        parts = key.split(".")
+        if len(parts) == 2:
+            if parts[0] not in config.KEY:
+                config.KEY[parts[0]] = {}
+            config.KEY[parts[0]][parts[1]] = value
+    
+    config.save_config()
+    
+    return {"success": True, "message": "Voice commands updated"}
+
+# =========================================================================
 # SERVER LAUNCHER — Called from main.py
 # =========================================================================
 
