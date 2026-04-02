@@ -746,27 +746,129 @@ def get_speakers():
 # LICENSE ENDPOINT (Placeholder — Full implementation in Phase 5)
 # =========================================================================
 
-@app.post("/api/license/verify")
-def verify_license(req: LicenseVerify):
-    """Verify a license key."""
-    import config
+import license as license_module
+
+class LicenseActivate(BaseModel):
+    key: str
+    email: Optional[str] = None
+
+class LicenseDeactivate(BaseModel):
+    key: Optional[str] = None
+
+class TrialStart(BaseModel):
+    email: str
+
+class ReferralRegister(BaseModel):
+    code: str
+    email: str
+
+
+@app.post("/api/license/activate")
+def activate_license_endpoint(req: LicenseActivate):
+    """Activate a license key."""
+    success, message, data = license_module.activate_license(req.key, req.email)
     
-    # Phase 5 will add real validation
-    # For now: accept any key matching format SEVEN-XXXX-XXXX-XXXX-XXXX
-    import re
-    pattern = r'^SEVEN-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$'
-    
-    if re.match(pattern, req.key.upper()):
-        config.update_config({
-            "license": {
-                "key": req.key.upper(),
-                "tier": "pro",
-                "verified": True
-            }
-        })
-        return {"valid": True, "tier": "pro", "expires": "2099-12-31"}
+    if success:
+        return {"success": True, "message": message, "license": data}
     else:
-        return {"valid": False, "tier": "free", "expires": None}
+        raise HTTPException(status_code=400, detail=message)
+
+
+@app.get("/api/license/status")
+def get_license_status():
+    """Get current license status."""
+    validation = license_module.validate_license()
+    features = license_module.get_features(validation["tier"])
+    
+    device_id = license_module.get_device_id()
+    
+    # Get license key from config
+    import config
+    license_key = config.KEY.get("license", {}).get("key", "")
+    is_trial = config.KEY.get("license", {}).get("is_trial", False)
+    
+    return {
+        "tier": validation["tier"],
+        "valid": validation["valid"],
+        "expires_at": validation.get("expires_at"),
+        "days_until_expiry": validation.get("days_until_expiry"),
+        "offline_mode": validation.get("offline_mode", False),
+        "offline_days": validation.get("offline_days", 0),
+        "features": features,
+        "license_key": license_key,
+        "is_trial": is_trial,
+        "device_id": device_id[:8] + "..."
+    }
+
+
+@app.post("/api/license/validate")
+def validate_license_endpoint():
+    """Force online validation."""
+    validation = license_module.validate_license(online=True)
+    return validation
+
+
+@app.post("/api/license/deactivate")
+def deactivate_license_endpoint(req: LicenseDeactivate):
+    """Deactivate license on current device."""
+    success, message = license_module.deactivate_device(req.key)
+    
+    if success:
+        return {"success": True, "message": message}
+    else:
+        raise HTTPException(status_code=400, detail=message)
+
+
+@app.get("/api/license/features")
+def get_license_features():
+    """Get feature flags for current tier."""
+    features = license_module.get_features()
+    return features
+
+
+@app.post("/api/license/trial")
+def start_trial_endpoint(req: TrialStart):
+    """Start 14-day Pro trial."""
+    success, message = license_module.start_trial(req.email)
+    
+    if success:
+        telemetry.save_email(req.email)  # Save email for updates
+        return {"success": True, "message": message}
+    else:
+        raise HTTPException(status_code=400, detail=message)
+
+
+@app.get("/api/license/pricing")
+def get_pricing():
+    """Get pricing information."""
+    return {
+        "tiers": license_module.TIER_FEATURES,
+        "pricing": license_module.PRICING
+    }
+
+
+@app.get("/api/referral/stats")
+def get_referral_stats_endpoint():
+    """Get referral statistics."""
+    email = telemetry.get_email()
+    if not email:
+        raise HTTPException(status_code=400, detail="Email required for referral system")
+    
+    stats = license_module.get_referral_stats(email)
+    return stats
+
+
+@app.post("/api/referral/register")
+def register_referral_endpoint(req: ReferralRegister):
+    """Register a referral code."""
+    device_id = license_module.get_device_id()
+    success, message = license_module.register_referral(req.code, req.email, device_id)
+    
+    if success:
+        telemetry.save_email(req.email)
+        return {"success": True, "message": message}
+    else:
+        raise HTTPException(status_code=400, detail=message)
 
 
 # =========================================================================

@@ -160,16 +160,22 @@ def log_activity():
     if last_activity_time is None or (now - last_activity_time) > SESSION_TIMEOUT:
         session_start_time = now
     else:
-        # Continue existing session — cap at 2 hours per day
+        # Continue existing session
         session_duration = now - session_start_time
         if session_duration < 7200:
             total_active_seconds += (now - last_activity_time)
     
     last_activity_time = now
-
-def get_active_hours():
-    """Get total active hours."""
-    return total_active_seconds / 3600.0
+    
+    # Track referral usage (NEW)
+    try:
+        import license as license_module
+        hours = total_active_seconds / 3600.0
+        if hours > 0.1:  # Only track if meaningful usage
+            device_id = license_module.get_device_id()
+            license_module.track_referral_usage(device_id, hours)
+    except:
+        pass
 
 # =============================================================================
 # SEND PING

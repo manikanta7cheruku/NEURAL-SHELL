@@ -65,6 +65,37 @@ export default function Settings() {
           </div>
         </div>
 
+{/* License Details */}
+<div className="bg-s-card border border-s-border rounded p-4">
+  <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium mb-3">License & Features</div>
+  <div className="space-y-2">
+    <div className="flex items-center justify-between">
+      <span className="text-[11px] text-s-text-3">Current Tier</span>
+      <span className={`text-[11px] font-medium px-2 py-0.5 rounded ${isPro ? 'bg-s-accent/10 text-s-accent' : 'bg-s-border text-s-text-4'}`}>
+        {local.license?.tier?.toUpperCase() || 'FREE'}
+      </span>
+    </div>
+    {isPro && local.license?.key && (
+      <>
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] text-s-text-3">License Key</span>
+          <span className="text-[10px] font-mono text-s-text-2">{local.license.key.slice(0, 12)}••••</span>
+        </div>
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] text-s-text-3">Device</span>
+          <span className="text-[10px] font-mono text-s-text-4">{local.license?.device_id || '...'}</span>
+        </div>
+      </>
+    )}
+  </div>
+  {!isPro && (
+    <button onClick={() => window.location.hash = '#/plans'} 
+      className="w-full mt-3 py-1.5 border border-s-accent/30 bg-s-accent/8 text-s-accent rounded text-[11px] font-medium hover:bg-s-accent/20">
+      Upgrade to Pro
+    </button>
+  )}
+</div>
+
         {/* Hardware + Speed side by side */}
         <div className="grid grid-cols-2 gap-3">
           {hw && (

@@ -9,6 +9,7 @@ import Memory from './pages/Memory';
 import Schedules from './pages/Schedules';
 import Knowledge from './pages/Knowledge';
 import Settings from './pages/Settings';
+import useLicense from './stores/useLicense';
 import Plans from './pages/Plans';
 import Blog from './pages/Blog';
 import Feedback from './pages/Feedback';
@@ -32,6 +33,11 @@ function NavigationHelper() {
 }
 
 export default function App() {
+  const { fetchStatus } = useLicense();
+  
+  useEffect(() => {
+    fetchStatus();
+  }, []);
   return (
     <BrowserRouter>
       <NavigationHelper />
