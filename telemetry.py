@@ -58,6 +58,13 @@ def save_email(email):
     os.makedirs(DATA_DIR, exist_ok=True)
     with open(EMAIL_FILE, "w") as f:
         f.write(email.strip())
+    
+    # Also save to config
+    try:
+        import config
+        config.update_config({"email": email.strip()})
+    except:
+        pass
 
 def get_email():
     """Get saved email or None."""
@@ -160,12 +167,26 @@ def log_activity():
     if last_activity_time is None or (now - last_activity_time) > SESSION_TIMEOUT:
         session_start_time = now
     else:
-        # Continue existing session
+        # Continue existing session — cap at 2 hours per day
         session_duration = now - session_start_time
         if session_duration < 7200:
-            total_active_seconds += (now - last_activity_time)
+            elapsed = now - last_activity_time
+            total_active_seconds += elapsed
     
     last_activity_time = now
+    
+    # Track referral usage (NEW)
+    try:
+        import license as license_module
+        hours = total_active_seconds / 3600.0
+        if hours > 0.01:  # Only track if meaningful usage (36 seconds+)
+            device_id = license_module.get_device_id()
+            license_module.track_referral_usage(device_id, hours)
+            
+            # Reset after tracking
+            total_active_seconds = 0
+    except:
+        pass
     
     # Track referral usage (NEW)
     try:

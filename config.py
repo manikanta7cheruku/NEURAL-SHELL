@@ -90,6 +90,7 @@ def get_defaults():
     """Backup settings in case the JSON file is broken or missing."""
     return {
         "identity": {"name": "Seven", "creator": "Team Seven", "wake_words": ["seven"]},
+        "email": "",
         "brain": {
             "model_name": "llama3",
             "temperature": 0.3,

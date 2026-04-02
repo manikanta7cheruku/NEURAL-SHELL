@@ -917,6 +917,52 @@ def check_email_saved():
     email = telemetry.get_email()
     return {"saved": email is not None, "email": email}
 
+@app.get("/api/usage/stats")
+def get_usage_stats():
+    """Get current user's total usage time."""
+    import license as license_module
+    
+    device_id = license_module.get_device_id()
+    
+    init_db = license_module.init_db
+    init_db()
+    
+    import sqlite3
+    conn = sqlite3.connect(license_module.LICENSE_DB)
+    c = conn.cursor()
+    
+    # Get total usage hours
+    c.execute("SELECT usage_hours FROM activations WHERE device_id = ?", (device_id,))
+    row = c.fetchone()
+    
+    total_hours = row[0] if row else 0
+    
+    conn.close()
+    
+    # Convert to human readable
+    if total_hours < 1:
+        minutes = int(total_hours * 60)
+        time_str = f"{minutes} min"
+    elif total_hours < 24:
+        time_str = f"{int(total_hours)} hr"
+    elif total_hours < 168:  # Less than a week
+        days = int(total_hours / 24)
+        time_str = f"{days} days"
+    elif total_hours < 720:  # Less than a month
+        weeks = int(total_hours / 168)
+        time_str = f"{weeks} weeks"
+    elif total_hours < 8760:  # Less than a year
+        months = int(total_hours / 720)
+        time_str = f"{months} months"
+    else:
+        years = int(total_hours / 8760)
+        time_str = f"{years} years"
+    
+    return {
+        "total_hours": round(total_hours, 2),
+        "display": time_str
+    }
+
 # =========================================================================
 # SERVER LAUNCHER — Called from main.py
 # =========================================================================

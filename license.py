@@ -607,13 +607,13 @@ def generate_referral_code(email: str) -> str:
 def track_referral_usage(device_id: str, hours: float):
     """
     Track usage hours for referral system.
-    Called by telemetry.
+    Called by telemetry every session.
     """
     init_db()
     conn = sqlite3.connect(LICENSE_DB)
     c = conn.cursor()
     
-    # Update usage hours
+    # Update activation record (tracks total usage)
     c.execute("UPDATE activations SET usage_hours = usage_hours + ? WHERE device_id = ?",
               (hours, device_id))
     
@@ -684,16 +684,54 @@ def get_referral_stats(email: str) -> Dict:
     else:
         total_credits, referrals_count = 0, 0
     
-    # Get pending referrals
+    # Get pending referrals with time details
     c.execute("""
-        SELECT COUNT(*), SUM(usage_hours)
+        SELECT referred_email, usage_hours, created_at
         FROM referrals 
         WHERE referrer_email = ? AND is_complete = 0
+        ORDER BY created_at DESC
     """, (email,))
     
-    pending_row = c.fetchone()
-    pending_count = pending_row[0] if pending_row[0] else 0
-    pending_hours = pending_row[1] if pending_row[1] else 0
+    pending = []
+    for row in c.fetchall():
+        ref_email, hours, created = row
+        
+        # Format time remaining
+        hours_left = max(0, 77 - hours)
+        
+        # Format usage time
+        if hours < 1:
+            usage_display = f"{int(hours * 60)} min"
+        elif hours < 24:
+            usage_display = f"{int(hours)} hr"
+        else:
+            days = int(hours / 24)
+            usage_display = f"{days} days"
+        
+        pending.append({
+            "email": ref_email,
+            "usage_hours": round(hours, 1),
+            "usage_display": usage_display,
+            "hours_left": round(hours_left, 1),
+            "progress_percent": min(100, int((hours / 77) * 100)),
+            "created_at": created[:10]
+        })
+    
+    # Get completed referrals (no time shown for privacy)
+    c.execute("""
+        SELECT referred_email, completed_at
+        FROM referrals 
+        WHERE referrer_email = ? AND is_complete = 1
+        ORDER BY completed_at DESC
+    """, (email,))
+    
+    completed = []
+    for row in c.fetchall():
+        ref_email, completed_date = row
+        completed.append({
+            "email": ref_email,
+            "completed_at": completed_date[:10]
+        })
     
     conn.close()
     
@@ -715,11 +753,68 @@ def get_referral_stats(email: str) -> Dict:
         "referral_code": generate_referral_code(email),
         "total_credits": total_credits,
         "completed_referrals": referrals_count,
-        "pending_referrals": pending_count,
-        "pending_hours": round(pending_hours, 1),
+        "pending_referrals": len(pending),
         "next_milestone": next_milestone,
-        "milestone_reward": milestone_reward
+        "milestone_reward": milestone_reward,
+        "pending_details": pending,
+        "completed_details": completed
     }
+
+def auto_register_referral_from_installer(referred_email: str, installer_code: str = None):
+    """
+    Auto-register referral when user installs Seven.
+    Called during first launch if installer has referral code embedded.
+    
+    Args:
+        referred_email: New user's email
+        installer_code: Referrer's code (from installer filename or registry)
+    
+    Returns:
+        (success, message)
+    """
+    if not installer_code:
+        return False, "No referral code"
+    
+    device_id = get_device_id()
+    
+    init_db()
+    conn = sqlite3.connect(LICENSE_DB)
+    c = conn.cursor()
+    
+    # Check if already referred
+    c.execute("SELECT COUNT(*) FROM referrals WHERE referred_device_id = ?", (device_id,))
+    if c.fetchone()[0] > 0:
+        conn.close()
+        return False, "Already used a referral"
+    
+    # Find referrer by code
+    # Referral code format: SEVEN-ABCD (last 4 chars of email hash)
+    code_suffix = installer_code.split('-')[-1]
+    
+    c.execute("SELECT email FROM licenses WHERE license_key LIKE ? LIMIT 1", (f"%{code_suffix}%",))
+    row = c.fetchone()
+    
+    if not row:
+        # Try to find in credits table
+        c.execute("SELECT email FROM credits LIMIT 1")  # TODO: Better matching
+        row = c.fetchone()
+    
+    if not row:
+        conn.close()
+        return False, "Invalid referral code"
+    
+    referrer_email = row[0]
+    
+    # Create referral record
+    c.execute("""
+        INSERT INTO referrals (referrer_code, referrer_email, referred_email, referred_device_id, created_at, usage_hours)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, (installer_code, referrer_email, referred_email, device_id, datetime.now().isoformat(), 0))
+    
+    conn.commit()
+    conn.close()
+    
+    return True, f"Referral registered! {referrer_email} will get ₹100 credit after you use Seven for 77 hours"
 
 def register_referral(referral_code: str, referred_email: str, referred_device_id: str) -> Tuple[bool, str]:
     """Register a new referral."""

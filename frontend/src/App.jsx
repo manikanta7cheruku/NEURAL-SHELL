@@ -11,6 +11,7 @@ import Knowledge from './pages/Knowledge';
 import Settings from './pages/Settings';
 import useLicense from './stores/useLicense';
 import Plans from './pages/Plans';
+import Purchase from './pages/Purchase';
 import Blog from './pages/Blog';
 import Feedback from './pages/Feedback';
 
@@ -57,6 +58,7 @@ export default function App() {
               <Route path="/knowledge" element={<Knowledge />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="/plans" element={<Plans />} />
+              <Route path="/purchase" element={<Purchase />} />
               <Route path="/blog" element={<Blog />} />
               <Route path="/feedback" element={<Feedback />} />
             </Routes>

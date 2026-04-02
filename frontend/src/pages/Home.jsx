@@ -3,6 +3,7 @@ import useStatus from '../stores/useStatus';
 import PageHeader from '../components/PageHeader';
 import Spinner from '../components/Spinner';
 import api from '../api';
+import React from 'react';
 
 export default function Home() {
   const st = useStatus();
@@ -165,6 +166,25 @@ export default function Home() {
           </div>
         </div>
 
+        {/* License & Usage Card - NEW */}
+        <div className="bg-s-card border border-s-border rounded p-3">
+          <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium mb-2">
+            Your License & Usage
+          </div>
+          <div className="space-y-2">
+            <UsageTime />
+            <div className="flex items-center justify-between pt-2 border-t border-s-border">
+              <span className="text-[11px] text-s-text-3">Upgrade Plan</span>
+              <button 
+                onClick={() => window.location.href = '/#/plans'}
+                className="text-[10px] text-s-accent hover:text-s-accent/80"
+              >
+                View Plans →
+              </button>
+            </div>
+          </div>
+        </div>
+
         {/* Activity */}
         <div className="bg-s-card border border-s-border rounded p-3">
           <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium mb-2">Recent Activity</div>
@@ -228,5 +248,59 @@ export default function Home() {
         </div>
       )}
     </div>
+  );
+}
+
+// Helper component to show usage time and license info
+function UsageTime() {
+  const [usage, setUsage] = React.useState(null);
+  const [config, setConfig] = React.useState(null);
+  
+  React.useEffect(() => {
+    api.get('/usage/stats').then(r => setUsage(r.data)).catch(() => {});
+    api.get('/config').then(r => setConfig(r.data)).catch(() => {});
+  }, []);
+
+  const tier = config?.license?.tier || 'free';
+  const isPro = tier === 'pro' || tier === 'ultimate';
+  
+  return (
+    <>
+      {/* Email */}
+      {config?.email && (
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] text-s-text-3">Email</span>
+          <span className="text-[10px] text-s-text font-mono truncate max-w-[150px]">{config.email}</span>
+        </div>
+      )}
+      
+      {/* Current Plan */}
+      <div className="flex items-center justify-between">
+        <span className="text-[11px] text-s-text-3">Plan</span>
+        <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${
+          isPro ? 'bg-s-accent/10 text-s-accent' : 'bg-s-border text-s-text-4'
+        }`}>
+          {tier.toUpperCase()}
+        </span>
+      </div>
+      
+      {/* Trial Status */}
+      {config?.license?.is_trial && config?.license?.expires_at && (
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] text-s-text-3">Trial</span>
+          <span className="text-[10px] text-s-orange">
+            {Math.max(0, Math.ceil((new Date(config.license.expires_at) - new Date()) / (1000 * 60 * 60 * 24)))} days left
+          </span>
+        </div>
+      )}
+      
+      {/* Time Spent */}
+      {usage && (
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] text-s-text-3">Time Used</span>
+          <span className="text-[11px] text-s-text-2 font-mono">{usage.display}</span>
+        </div>
+      )}
+    </>
   );
 }
