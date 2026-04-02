@@ -3,12 +3,14 @@ import useConfig from '../stores/useConfig';
 import api from '../api';
 import PageHeader from '../components/PageHeader';
 import Spinner from '../components/Spinner';
+import { useNavigate } from 'react-router-dom';
 
 const TEMPS = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0];
 const TEMP_LABELS = { 0.1: 'Precise', 0.3: 'Focused', 0.5: 'Balanced', 0.7: 'Creative', 1.0: 'Wild' };
 
 export default function Settings() {
   const { config, loading, fetch: fc, update } = useConfig();
+  const navigate = useNavigate();
   const [hw, setHw] = useState(null);
   const [speed, setSpeed] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -89,10 +91,10 @@ export default function Settings() {
     )}
   </div>
   {!isPro && (
-    <button onClick={() => window.location.hash = '#/plans'} 
-      className="w-full mt-3 py-1.5 border border-s-accent/30 bg-s-accent/8 text-s-accent rounded text-[11px] font-medium hover:bg-s-accent/20">
-      Upgrade to Pro
-    </button>
+    <button onClick={() => navigate('/plans')} 
+  className="w-full mt-3 py-1.5 border border-s-accent/30 bg-s-accent/8 text-s-accent rounded text-[11px] font-medium hover:bg-s-accent/20">
+  Upgrade to Pro
+</button>
   )}
 </div>
 

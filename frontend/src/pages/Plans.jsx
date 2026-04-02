@@ -36,8 +36,105 @@ const FEATURES = {
     'Memory export & backup',
     'Multi-device (3 devices)',
     'Priority support',
-    'All Upcoming Future Features'
+    'All future features'
   ]
+};
+
+const DETAILED_FEATURES = {
+  free: {
+    title: "Free Tier — Get Started",
+    description: "Perfect for trying out Seven's core features",
+    details: [
+      {
+        feature: "7 Facts Remembered",
+        example: "Seven remembers: 'My favorite color is blue', 'I work at Google', 'My birthday is Jan 15'"
+      },
+      {
+        feature: "7 Conversations Saved",
+        example: "Last 7 chat histories are kept — older ones are deleted"
+      },
+      {
+        feature: "1 Knowledge File",
+        example: "Upload your resume.pdf — Seven can answer questions about it"
+      },
+      {
+        feature: "7 Schedules",
+        example: "Set reminders like: 'Remind me to take medicine at 9 PM daily'"
+      },
+      {
+        feature: "Basic Window Control",
+        example: "Commands: 'Open Chrome', 'Close window', 'Set volume to 50%'"
+      },
+      {
+        feature: "3 URL Shortcuts",
+        example: "Say 'Open YouTube' → Goes to youtube.com"
+      }
+    ]
+  },
+  pro: {
+    title: "Pro Tier — Power User",
+    description: "For daily Seven users who need more memory and control",
+    details: [
+      {
+        feature: "77 Facts & Conversations",
+        example: "10x more memory — Seven remembers your preferences, work details, family info"
+      },
+      {
+        feature: "7 Knowledge Files",
+        example: "Upload course notes, work docs, research papers — ask Seven anything about them"
+      },
+      {
+        feature: "17 Schedules",
+        example: "Morning alarms, work reminders, meeting alerts, medication schedules"
+      },
+      {
+        feature: "Advanced Window Control",
+        example: "'Move window to left half', 'Switch to Chrome', 'Show me Notepad'"
+      },
+      {
+        feature: "7 App Aliases",
+        example: "Say 'browser' → Opens Chrome (you define shortcuts)"
+      },
+      {
+        feature: "7 Custom Commands",
+        example: "'Start work mode' → Opens VS Code, Slack, Chrome in specific layout"
+      }
+    ]
+  },
+  ultimate: {
+    title: "Ultimate Tier — Maximum Power",
+    description: "Unlock every feature Seven has to offer",
+    details: [
+      {
+        feature: "Unlimited Everything",
+        example: "No limits on facts, conversations, files, schedules, searches"
+      },
+      {
+        feature: "Voice Recognition",
+        example: "Seven identifies who's speaking — 'Hey Seven' from you vs your brother → different responses"
+      },
+      {
+        feature: "Full System Control",
+        example: "'Always open Spotify minimized', 'Chrome on monitor 2', custom window rules"
+      },
+      {
+        feature: "Recurring Schedules",
+        example: "'Every Monday at 9 AM, remind me to submit report' — auto-repeats"
+      },
+      {
+        feature: "Memory Export",
+        example: "Download all your conversations, facts, knowledge base as backup"
+      },
+      {
+        feature: "Multi-Device (3)",
+        example: "Use same license on laptop, desktop, work PC"
+      },
+      {
+        feature: "Priority Support",
+        example: "Get help within 24 hours via email/Discord"
+      }
+    ]
+  }
 };
 
 export default function Plans() {
@@ -49,6 +146,7 @@ export default function Plans() {
   const [referralStats, setReferralStats] = useState(null);
   const [copied, setCopied] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [expandedPlan, setExpandedPlan] = useState(null);
 
   useEffect(() => {
     fetchStatus().then(() => setLoading(false));
@@ -123,7 +221,7 @@ export default function Plans() {
                   )}
                 </div>
               </div>
-              <div className="text-3xl">���</div>
+              <div className="text-3xl">✨</div>
             </div>
           </div>
         )}
@@ -141,19 +239,50 @@ export default function Plans() {
                 <span className="text-2xl font-bold text-s-text font-mono">{plan.price}</span>
                 <span className="text-[10px] text-s-text-4 ml-1">{plan.sub}</span>
               </div>
-              <div className="mt-3 space-y-1 flex-1 max-h-[240px] overflow-y-auto">
+              <div className="mt-3 space-y-1 flex-1 max-h-[200px] overflow-y-auto">
                 {plan.features.map(f => <div key={f} className="text-[11px] text-s-text-3 py-0.5">✓ {f}</div>)}
               </div>
+              
+              {/* Know More Button */}
+              <button 
+                onClick={() => setExpandedPlan(expandedPlan === plan.tier ? null : plan.tier)}
+                className="mt-3 w-full py-1.5 border border-s-border bg-s-bg text-s-text-3 rounded text-[10px] font-medium hover:bg-s-card-h hover:text-s-text-2"
+              >
+                {expandedPlan === plan.tier ? 'Show Less' : 'Know More'}
+              </button>
+
               {plan.current ? (
-                <div className="mt-3 text-center py-1.5 border border-s-border rounded text-[11px] text-s-text-4">Current Plan</div>
+                <div className="mt-2 text-center py-1.5 border border-s-border rounded text-[11px] text-s-text-4">Current Plan</div>
               ) : tier === 'free' && plan.tier !== 'free' ? (
-                <div className="mt-3 text-center py-1.5 border border-s-accent/30 bg-s-accent/10 rounded text-[11px] text-s-accent cursor-not-allowed">
-                  Activate below
+                <div className="mt-2 text-center py-1.5 border border-s-accent/30 bg-s-accent/10 rounded text-[11px] text-s-accent cursor-not-allowed">
+                  Activate below ↓
                 </div>
               ) : null}
             </div>
           ))}
         </div>
+
+        {/* Expanded Plan Details */}
+        {expandedPlan && (
+          <div className="bg-s-card border border-s-border rounded p-4">
+            <div className="text-[13px] font-semibold text-s-text mb-1">{DETAILED_FEATURES[expandedPlan].title}</div>
+            <p className="text-[11px] text-s-text-3 mb-3">{DETAILED_FEATURES[expandedPlan].description}</p>
+            <div className="space-y-3">
+              {DETAILED_FEATURES[expandedPlan].details.map((item, i) => (
+                <div key={i} className="bg-s-bg rounded p-3 border border-s-border">
+                  <div className="text-[11px] font-medium text-s-text-2 mb-1">✦ {item.feature}</div>
+                  <p className="text-[10px] text-s-text-4 italic">Example: {item.example}</p>
+                </div>
+              ))}
+            </div>
+            <button 
+              onClick={() => setExpandedPlan(null)}
+              className="mt-3 w-full py-1.5 border border-s-border bg-s-bg text-s-text-3 rounded text-[10px] font-medium hover:bg-s-card-h"
+            >
+              Close Details
+            </button>
+          </div>
+        )}
 
         {/* Trial Section */}
         {tier === 'free' && !isTrial && (
@@ -172,19 +301,28 @@ export default function Plans() {
         )}
 
         {/* Activation Section */}
-        {tier === 'free' && !isTrial && (
-          <div className="bg-s-card border border-s-border rounded p-4">
-            <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium mb-2">Activate License Key</div>
-            <div className="flex gap-2">
-              <input value={key} onChange={e => setKey(e.target.value)} placeholder="VII-XXXX-XXXX-XXXX"
-                className="flex-1 bg-s-bg border border-s-border rounded px-2.5 py-1.5 text-[12px] text-s-text font-mono placeholder-s-text-4" />
-              <button onClick={handleActivate} className="px-3 py-1.5 border border-s-accent/30 bg-s-accent/8 text-s-accent rounded text-[11px] font-medium">
-                Activate
-              </button>
-            </div>
-            {msg && <p className={`text-[10px] mt-1 ${msgType === 'success' ? 'text-s-green' : 'text-s-red'}`}>{msg}</p>}
+        <div className="bg-s-card border border-s-border rounded p-4">
+          <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium mb-2">
+            {tier === 'free' ? 'Activate License Key' : 'Have a Different License?'}
           </div>
-        )}
+          {tier === 'free' && (
+            <p className="text-[11px] text-s-text-3 mb-2">Already purchased? Enter your license key below</p>
+          )}
+          <div className="flex gap-2">
+            <input value={key} onChange={e => setKey(e.target.value)} placeholder="VII-XXXX-XXXX-XXXX"
+              className="flex-1 bg-s-bg border border-s-border rounded px-2.5 py-1.5 text-[12px] text-s-text font-mono placeholder-s-text-4" />
+            <button onClick={handleActivate} className="px-3 py-1.5 border border-s-accent/30 bg-s-accent/8 text-s-accent rounded text-[11px] font-medium">
+              Activate
+            </button>
+          </div>
+          {msg && <p className={`text-[10px] mt-1 ${msgType === 'success' ? 'text-s-green' : 'text-s-red'}`}>{msg}</p>}
+          
+          {tier === 'free' && (
+            <p className="text-[9px] text-s-text-4 mt-2">
+              Don't have a key? <a href="https://seven.app/buy" target="_blank" className="text-s-accent underline">Purchase here</a> or start a free trial above
+            </p>
+          )}
+        </div>
 
         {/* Referral Section */}
         {referralStats && (
