@@ -149,5 +149,6 @@
         "channel": "stable"
     },
     "setup_complete": false,
-    "version": "1.10"
+    "version": "1.10",
+    "email": "jacksonnote@gmail.com"
 }

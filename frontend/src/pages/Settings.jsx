@@ -24,7 +24,7 @@ export default function Settings() {
   
   // Referral Setup State
   const [referralEmail, setReferralEmail] = useState('');
-  const [referralSetupStep, setReferralSetupStep] = useState('email'); // 'email' | 'share' | 'stats'
+  const [referralSetupStep, setReferralSetupStep] = useState('email');
   const [referralLinkCopied, setReferralLinkCopied] = useState(false);
   const [savingReferralEmail, setSavingReferralEmail] = useState(false);
 
@@ -33,7 +33,6 @@ export default function Settings() {
     api.get('/hardware').then(r => setHw(r.data)).catch(() => {}); 
     api.get('/speed').then(r => setSpeed(r.data)).catch(() => {});
     api.get('/voice-control/words').then(r => setVoiceWords(r.data)).catch(() => {
-      // Set defaults if API fails
       setVoiceWords({
         wake_words: ['seven', 'hey seven'],
         pause_words: ['not you', 'hold on', 'wait'],
@@ -52,7 +51,6 @@ export default function Settings() {
       setReferralStats(r.data);
       setReferralSetupStep('stats');
     } catch {
-      // No referral stats yet - show email step
       setReferralSetupStep('email');
     }
   };
@@ -126,15 +124,32 @@ export default function Settings() {
 
   const shareOnWhatsApp = () => {
     if (referralStats) {
-      const text = `Hey! I'm using Seven, an AI voice assistant that runs 100% locally on your PC. Try it out: https://seven.app/ref/${referralStats.referral_code}`;
+      const text = `Hey! I'm using Seven, an AI voice assistant that runs 100% locally. When you use it for 7 hours, we both get free premium access! Try it: https://seven.app/ref/${referralStats.referral_code}`;
       window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
     }
   };
 
-  const shareOnTwitter = () => {
+  const shareOnX = () => {
     if (referralStats) {
       const text = `Just discovered Seven - an AI voice assistant that runs 100% locally! No cloud, full privacy. Try it: https://seven.app/ref/${referralStats.referral_code}`;
-      window.open(`https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`, '_blank');
+      window.open(`https://x.com/intent/tweet?text=${encodeURIComponent(text)}`, '_blank');
+    }
+  };
+
+  const shareNative = async () => {
+    if (referralStats && navigator.share) {
+      try {
+        await navigator.share({ 
+          title: 'Seven - Local AI Assistant', 
+          text: 'Try Seven - 100% local AI assistant. Use it for 7 hours and we both get premium free!', 
+          url: `https://seven.app/ref/${referralStats.referral_code}` 
+        });
+      } catch (e) {
+        // User cancelled or share failed
+        copyReferralLink();
+      }
+    } else {
+      copyReferralLink();
     }
   };
 
@@ -146,7 +161,6 @@ export default function Settings() {
     setSavingReferralEmail(true);
     try {
       await api.post('/email/save', { email: referralEmail });
-      // Reload referral stats
       await loadReferralStats();
       setReferralSetupStep('share');
     } catch {
@@ -159,10 +173,23 @@ export default function Settings() {
     if (referralStats) {
       navigator.clipboard.writeText(`https://seven.app/ref/${referralStats.referral_code}`);
       setReferralLinkCopied(true);
-      // After copying, show stats
       setTimeout(() => {
         setReferralSetupStep('stats');
       }, 2000);
+    }
+  };
+
+  // Format time
+  const formatTime = (hours) => {
+    if (!hours || hours === 0) return '0 min';
+    const totalMinutes = Math.round(hours * 60);
+    if (totalMinutes < 60) {
+      return `${totalMinutes} min`;
+    } else {
+      const hrs = Math.floor(totalMinutes / 60);
+      const mins = totalMinutes % 60;
+      if (mins === 0) return `${hrs} hr`;
+      return `${hrs} hr ${mins} min`;
     }
   };
 
@@ -222,7 +249,7 @@ export default function Settings() {
           </div>
         </div>
 
-        {/* Voice Control Words - Visible to ALL tiers */}
+        {/* Voice Control Words */}
         <div className={`bg-s-card border rounded p-4 ${canEditVoice ? 'border-s-border' : 'border-s-accent/30'}`}>
           <div className="flex items-center justify-between mb-3">
             <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium">Voice Control Commands</div>
@@ -324,31 +351,62 @@ export default function Settings() {
 
         {/* Referral System */}
         <div className="bg-gradient-to-br from-s-accent/5 to-s-accent/10 border border-s-accent/20 rounded p-4">
-          <div className="text-[9px] text-s-accent uppercase tracking-wider font-medium mb-3">🎁 Refer & Earn</div>
+          <div className="text-[9px] text-s-accent uppercase tracking-wider font-medium mb-3">🎁 Share Seven, Get Premium Free</div>
           
-          {/* How it works - Always visible */}
+          {/* How it works */}
           <div className="bg-s-bg/50 border border-s-border rounded p-3 mb-4">
             <div className="text-[11px] font-medium text-s-text mb-2">How It Works</div>
-            <div className="grid grid-cols-4 gap-2">
-              {[
-                { step: '1', icon: '📧', text: 'Enter email' },
-                { step: '2', icon: '📤', text: 'Share link' },
-                { step: '3', icon: '⏱', text: 'Friend uses 77hr' },
-                { step: '4', icon: '💰', text: 'Earn ₹100' },
-              ].map((item, i) => (
-                <div key={i} className="text-center">
-                  <div className="text-lg mb-1">{item.icon}</div>
-                  <div className="text-[8px] text-s-text-4">{item.text}</div>
+            <div className="space-y-2">
+              <div className="flex items-start gap-2">
+                <span className="w-5 h-5 bg-s-accent/20 text-s-accent rounded-full flex items-center justify-center text-[9px] font-bold shrink-0">1</span>
+                <div>
+                  <div className="text-[10px] text-s-text-2">Share your unique link</div>
+                  <div className="text-[8px] text-s-text-4">Send to friends via WhatsApp, X, or any platform</div>
                 </div>
-              ))}
+              </div>
+              <div className="flex items-start gap-2">
+                <span className="w-5 h-5 bg-s-accent/20 text-s-accent rounded-full flex items-center justify-center text-[9px] font-bold shrink-0">2</span>
+                <div>
+                  <div className="text-[10px] text-s-text-2">Friend downloads Seven</div>
+                  <div className="text-[8px] text-s-text-4">They install and start using Seven on their PC</div>
+                </div>
+              </div>
+              <div className="flex items-start gap-2">
+                <span className="w-5 h-5 bg-s-accent/20 text-s-accent rounded-full flex items-center justify-center text-[9px] font-bold shrink-0">3</span>
+                <div>
+                  <div className="text-[10px] text-s-text-2">Friend uses Seven for 7 hours</div>
+                  <div className="text-[8px] text-s-text-4">Total usage time, not consecutive</div>
+                </div>
+              </div>
+              <div className="flex items-start gap-2">
+                <span className="w-5 h-5 bg-s-green/20 text-s-green rounded-full flex items-center justify-center text-[9px] font-bold shrink-0">✓</span>
+                <div>
+                  <div className="text-[10px] text-s-green font-medium">Both of you win!</div>
+                  <div className="text-[8px] text-s-text-4">
+                    You get <strong className="text-s-accent">Ultimate free for 1 month</strong> • 
+                    Friend gets <strong className="text-s-green">Pro free for 1 month</strong>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
 
           {/* Step 1: Email Input */}
           {referralSetupStep === 'email' && (
             <div className="bg-s-bg border border-s-border rounded p-3">
-              <div className="text-[11px] font-medium text-s-text mb-2">Step 1: Enter Your Email</div>
-              <p className="text-[9px] text-s-text-4 mb-3">We'll use this to track your referrals and credits</p>
+              <div className="text-[11px] font-medium text-s-text mb-2">Enter Your Email to Start</div>
+              
+              {/* Privacy Notice */}
+              <div className="bg-s-accent/5 border border-s-accent/20 rounded p-2 mb-3">
+                <div className="flex items-start gap-2">
+                  <span className="text-[12px]">🔒</span>
+                  <div className="text-[9px] text-s-text-3 leading-relaxed">
+                    <strong>Privacy First:</strong> We only use your email to send updates and your license key. 
+                    No spam, no selling data. Your data never leaves your device.
+                  </div>
+                </div>
+              </div>
+              
               <div className="flex gap-2">
                 <input 
                   type="email"
@@ -371,8 +429,7 @@ export default function Settings() {
           {/* Step 2: Share Link */}
           {referralSetupStep === 'share' && referralStats && (
             <div className="bg-s-bg border border-s-border rounded p-3">
-              <div className="text-[11px] font-medium text-s-text mb-2">Step 2: Share Your Link</div>
-              <p className="text-[9px] text-s-text-4 mb-3">Copy this link and share it with friends</p>
+              <div className="text-[11px] font-medium text-s-text mb-2">Share Your Unique Link</div>
               
               <div className="bg-s-card border border-s-accent/30 rounded p-3 mb-3">
                 <div className="text-[10px] text-s-text-3 mb-1">Your Referral Link</div>
@@ -396,9 +453,9 @@ export default function Settings() {
               </div>
 
               {referralLinkCopied && (
-                <div className="bg-s-orange/10 border border-s-orange/30 rounded p-2 mb-3">
-                  <p className="text-[10px] text-s-orange">
-                    ⚠️ <strong>Save this link!</strong> You won't see it again after closing this page.
+                <div className="bg-s-green/10 border border-s-green/30 rounded p-2 mb-3">
+                  <p className="text-[10px] text-s-green">
+                    ✓ Link copied! Share it with your friends now.
                   </p>
                 </div>
               )}
@@ -408,18 +465,13 @@ export default function Settings() {
                   className="flex-1 py-2 bg-[#25D366]/10 border border-[#25D366]/30 text-[#25D366] rounded text-[10px] font-medium hover:bg-[#25D366]/20">
                   📱 WhatsApp
                 </button>
-                <button onClick={shareOnTwitter}
-                  className="flex-1 py-2 bg-[#1DA1F2]/10 border border-[#1DA1F2]/30 text-[#1DA1F2] rounded text-[10px] font-medium hover:bg-[#1DA1F2]/20">
-                  🐦 Twitter
+                <button onClick={shareOnX}
+                  className="flex-1 py-2 bg-[#000]/10 border border-[#333]/30 text-s-text rounded text-[10px] font-medium hover:bg-[#000]/20">
+                  𝕏 Post
                 </button>
-                <button onClick={() => {
-                  navigator.share?.({ 
-                    title: 'Seven AI', 
-                    text: 'Try Seven - 100% local AI assistant', 
-                    url: `https://seven.app/ref/${referralStats.referral_code}` 
-                  });
-                }} className="flex-1 py-2 bg-s-border/50 border border-s-border text-s-text-2 rounded text-[10px] font-medium hover:bg-s-border">
-                  📤 More
+                <button onClick={shareNative}
+                  className="flex-1 py-2 bg-s-accent/10 border border-s-accent/30 text-s-accent rounded text-[10px] font-medium hover:bg-s-accent/20">
+                  📤 Share
                 </button>
               </div>
             </div>
@@ -447,37 +499,32 @@ export default function Settings() {
                   className="flex-1 py-1.5 bg-[#25D366]/10 border border-[#25D366]/30 text-[#25D366] rounded text-[9px] font-medium hover:bg-[#25D366]/20">
                   WhatsApp
                 </button>
-                <button onClick={shareOnTwitter}
-                  className="flex-1 py-1.5 bg-[#1DA1F2]/10 border border-[#1DA1F2]/30 text-[#1DA1F2] rounded text-[9px] font-medium hover:bg-[#1DA1F2]/20">
-                  Twitter
+                <button onClick={shareOnX}
+                  className="flex-1 py-1.5 bg-[#000]/10 border border-[#333]/30 text-s-text rounded text-[9px] font-medium hover:bg-[#000]/20">
+                  𝕏 Post
                 </button>
-                <button onClick={() => {
-                  navigator.share?.({ title: 'Seven AI', text: 'Try Seven', url: `https://seven.app/ref/${referralStats.referral_code}` });
-                }} className="flex-1 py-1.5 bg-s-border/50 border border-s-border text-s-text-2 rounded text-[9px] font-medium hover:bg-s-border">
-                  More
+                <button onClick={shareNative}
+                  className="flex-1 py-1.5 bg-s-accent/10 border border-s-accent/30 text-s-accent rounded text-[9px] font-medium hover:bg-s-accent/20">
+                  📤 Share
                 </button>
               </div>
 
               {/* Stats */}
-              <div className="grid grid-cols-3 gap-2 mb-3">
-                <div className="bg-s-bg rounded px-2 py-2 text-center">
-                  <div className="text-[16px] font-mono font-bold text-s-accent">₹{referralStats.total_credits}</div>
-                  <div className="text-[8px] text-s-text-4">Credits Earned</div>
-                </div>
+              <div className="grid grid-cols-2 gap-2 mb-3">
                 <div className="bg-s-bg rounded px-2 py-2 text-center">
                   <div className="text-[16px] font-mono font-bold text-s-green">{referralStats.completed_referrals}</div>
-                  <div className="text-[8px] text-s-text-4">Completed</div>
+                  <div className="text-[8px] text-s-text-4">Friends Completed</div>
                 </div>
                 <div className="bg-s-bg rounded px-2 py-2 text-center">
                   <div className="text-[16px] font-mono font-bold text-s-orange">{referralStats.pending_referrals}</div>
-                  <div className="text-[8px] text-s-text-4">Pending</div>
+                  <div className="text-[8px] text-s-text-4">In Progress</div>
                 </div>
               </div>
 
               {/* Pending Referrals */}
               {referralStats.pending_details?.length > 0 && (
                 <div className="mb-3">
-                  <div className="text-[10px] text-s-text-3 mb-2">Pending Referrals</div>
+                  <div className="text-[10px] text-s-text-3 mb-2">Friends In Progress</div>
                   <div className="space-y-2 max-h-[120px] overflow-y-auto">
                     {referralStats.pending_details.map((ref, i) => (
                       <div key={i} className="bg-s-bg rounded p-2 border border-s-border">
@@ -489,8 +536,8 @@ export default function Settings() {
                           <div className="bg-s-accent h-1.5 rounded-full" style={{ width: `${ref.progress_percent}%` }} />
                         </div>
                         <div className="flex justify-between text-[8px] text-s-text-4">
-                          <span>{ref.usage_display} used</span>
-                          <span>{ref.hours_left}hr to go</span>
+                          <span>{formatTime(ref.usage_hours)} used</span>
+                          <span>{formatTime(ref.hours_left)} to go</span>
                         </div>
                       </div>
                     ))}
@@ -506,38 +553,38 @@ export default function Settings() {
                     {referralStats.completed_details.map((ref, i) => (
                       <div key={i} className="bg-s-bg rounded p-2 border border-s-border flex justify-between items-center">
                         <span className="text-[10px] text-s-text-2 font-mono">{ref.email}</span>
-                        <span className="text-[9px] text-s-green font-medium">+₹100</span>
+                        <span className="text-[9px] text-s-green font-medium">+1 month Ultimate</span>
                       </div>
                     ))}
                   </div>
                 </div>
               )}
 
-              {/* Next Milestone */}
-              {referralStats.next_milestone && (
-                <div className="mb-3 p-2 bg-s-accent/10 border border-s-accent/20 rounded">
-                  <p className="text-[10px] text-s-text-3">
-                    <strong className="text-s-accent">{referralStats.next_milestone - referralStats.completed_referrals} more</strong> to unlock: {referralStats.milestone_reward}
-                  </p>
-                </div>
-              )}
-
               {/* Refer Another */}
-              <button 
-                onClick={() => {
-                  copyReferralLink();
-                }}
-                className="w-full py-2 bg-s-accent text-white rounded text-[11px] font-medium hover:bg-s-accent/90"
-              >
-                🔗 Refer Another Friend
-              </button>
+             <button 
+  onClick={() => {
+    if (referralStats && navigator.share) {
+      navigator.share({ 
+        title: 'Seven - Local AI Assistant', 
+        text: 'Try Seven - 100% local AI assistant. Use it for 7 hours and we both get premium free!', 
+        url: `https://seven.app/ref/${referralStats.referral_code}` 
+      }).catch(() => {
+        copyReferralLink();
+      });
+    } else {
+      copyReferralLink();
+    }
+  }}
+  className="w-full py-2 bg-s-accent text-white rounded text-[11px] font-medium hover:bg-s-accent/90"
+>
+  🔗 Share With Another Friend
+</button>
             </>
           )}
         </div>
 
-        {/* License + Account Side by Side */}
+        {/* License + Account */}
         <div className="grid grid-cols-2 gap-3">
-          {/* License Status */}
           <div className="bg-s-card border border-s-border rounded p-4">
             <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium mb-3">License</div>
             <div className="space-y-2">
@@ -562,7 +609,6 @@ export default function Settings() {
             )}
           </div>
 
-          {/* Account + Identity */}
           <div className="bg-s-card border border-s-border rounded p-4">
             <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium mb-3">Account</div>
             {local.email && (

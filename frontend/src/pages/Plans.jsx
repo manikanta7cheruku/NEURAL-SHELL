@@ -474,32 +474,6 @@ export default function Plans() {
         )}
 
         {/* ================================================================= */}
-        {/* TRIAL SECTION */}
-        {/* ================================================================= */}
-        {tier === 'free' && !isTrial && (
-          <div className="bg-s-card border border-s-border rounded p-4">
-            <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium mb-2">Start Free Trial</div>
-            <p className="text-[11px] text-s-text-3 mb-3">Try Pro features free for 14 days — no credit card required</p>
-            <div className="flex gap-2">
-              <input 
-                value={email} 
-                onChange={e => setEmail(e.target.value)} 
-                placeholder="your@email.com" 
-                type="email"
-                className="flex-1 bg-s-bg border border-s-border rounded px-2.5 py-1.5 text-[12px] text-s-text placeholder-s-text-4" 
-              />
-              <button 
-                onClick={handleTrial} 
-                className="px-3 py-1.5 border border-s-accent/30 bg-s-accent/8 text-s-accent rounded text-[11px] font-medium hover:bg-s-accent/20"
-              >
-                Start Trial
-              </button>
-            </div>
-            <p className="text-[9px] text-s-text-4 mt-1">We'll only use your email for license management — no spam!</p>
-          </div>
-        )}
-
-        {/* ================================================================= */}
         {/* ACTIVATION SECTION */}
         {/* ================================================================= */}
         <div className="bg-s-card border border-s-border rounded p-4">
@@ -542,46 +516,39 @@ export default function Plans() {
         {/* ================================================================= */}
         {/* REFERRAL SECTION */}
         {/* ================================================================= */}
-        {referralStats && (
-          <div className="bg-s-card border border-s-border rounded p-4">
-            <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium mb-2">Referral Rewards</div>
-            <p className="text-[11px] text-s-text-3 mb-2">
-              Share Seven with friends. They use it for 77 hours = you get ₹100 credit!
-            </p>
-            <div className="flex gap-2 mb-3">
-              <input 
-                value={`https://seven.app/ref/${referralStats.referral_code}`} 
-                readOnly
-                className="flex-1 bg-s-bg border border-s-border rounded px-2.5 py-1.5 text-[11px] text-s-text font-mono" 
-              />
-              <button 
-                onClick={copyReferral} 
-                className="px-3 py-1.5 border border-s-accent/30 bg-s-accent/8 text-s-accent rounded text-[11px] font-medium hover:bg-s-accent/20"
-              >
-                {copied ? 'Copied!' : 'Copy'}
-              </button>
-            </div>
-            <div className="grid grid-cols-3 gap-2">
-              <div className="bg-s-bg rounded px-2 py-1.5 text-center">
-                <div className="text-[14px] font-mono font-medium text-s-text">₹{referralStats.total_credits}</div>
-                <div className="text-[8px] text-s-text-4">Credits</div>
-              </div>
-              <div className="bg-s-bg rounded px-2 py-1.5 text-center">
-                <div className="text-[14px] font-mono font-medium text-s-text">{referralStats.completed_referrals}</div>
-                <div className="text-[8px] text-s-text-4">Completed</div>
-              </div>
-              <div className="bg-s-bg rounded px-2 py-1.5 text-center">
-                <div className="text-[14px] font-mono font-medium text-s-text">{referralStats.pending_referrals}</div>
-                <div className="text-[8px] text-s-text-4">Pending</div>
-              </div>
-            </div>
-            {referralStats.next_milestone && (
-              <p className="text-[10px] text-s-text-4 mt-2">
-                Next: {referralStats.next_milestone - referralStats.completed_referrals} more for {referralStats.milestone_reward}
-              </p>
-            )}
-          </div>
-        )}
+       {/* Referral Section */}
+{referralStats && (
+  <div className="bg-gradient-to-r from-s-accent/5 to-s-accent/10 border border-s-accent/20 rounded p-4">
+    <div className="text-[9px] text-s-accent uppercase tracking-wider font-medium mb-2">🎁 Share Seven, Get Premium Free</div>
+    <p className="text-[11px] text-s-text-3 mb-3">
+      Share Seven with friends. When they use it for <strong className="text-s-accent">7 hours</strong>, 
+      you get <strong className="text-s-accent">Ultimate free for 1 month</strong> and 
+      they get <strong className="text-s-green">Pro free for 1 month!</strong>
+    </p>
+    <div className="flex gap-2 mb-3">
+      <input value={`https://seven.app/ref/${referralStats.referral_code}`} readOnly
+        className="flex-1 bg-s-bg border border-s-border rounded px-2.5 py-1.5 text-[11px] text-s-text font-mono" />
+      <button onClick={copyReferral} className="px-3 py-1.5 border border-s-accent/30 bg-s-accent/8 text-s-accent rounded text-[11px] font-medium">
+        {copied ? 'Copied!' : 'Copy'}
+      </button>
+    </div>
+    <div className="grid grid-cols-2 gap-2">
+      <div className="bg-s-bg rounded px-2 py-1.5 text-center">
+        <div className="text-[14px] font-mono font-medium text-s-green">{referralStats.completed_referrals}</div>
+        <div className="text-[8px] text-s-text-4">Friends Completed</div>
+      </div>
+      <div className="bg-s-bg rounded px-2 py-1.5 text-center">
+        <div className="text-[14px] font-mono font-medium text-s-orange">{referralStats.pending_referrals}</div>
+        <div className="text-[8px] text-s-text-4">In Progress</div>
+      </div>
+    </div>
+    {referralStats.next_milestone && (
+      <p className="text-[10px] text-s-text-4 mt-2">
+        Next: {referralStats.next_milestone - referralStats.completed_referrals} more friends for bonus rewards!
+      </p>
+    )}
+  </div>
+)}
 
       </div>
 

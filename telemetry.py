@@ -165,36 +165,46 @@ def log_activity():
     
     # Start new session if idle timeout passed
     if last_activity_time is None or (now - last_activity_time) > SESSION_TIMEOUT:
+        # Save previous session if any
+        if total_active_seconds > 60:  # More than 1 minute
+            _save_session_time(total_active_seconds)
         session_start_time = now
+        total_active_seconds = 0
     else:
-        # Continue existing session — cap at 2 hours per day
-        session_duration = now - session_start_time
-        if session_duration < 7200:
-            elapsed = now - last_activity_time
+        # Continue existing session
+        elapsed = now - last_activity_time
+        if elapsed < SESSION_TIMEOUT:
             total_active_seconds += elapsed
     
     last_activity_time = now
     
-    # Track referral usage (NEW)
-    try:
-        import license as license_module
-        hours = total_active_seconds / 3600.0
-        if hours > 0.01:  # Only track if meaningful usage (36 seconds+)
+    # Track referral usage if significant time passed
+    if total_active_seconds > 300:  # Every 5 minutes
+        try:
+            import license as license_module
+            hours = total_active_seconds / 3600.0
             device_id = license_module.get_device_id()
             license_module.track_referral_usage(device_id, hours)
-            
-            # Reset after tracking
-            total_active_seconds = 0
-    except:
-        pass
-    
-    # Track referral usage (NEW)
+        except:
+            pass
+
+
+def _save_session_time(seconds):
+    """Save session time to database."""
     try:
         import license as license_module
-        hours = total_active_seconds / 3600.0
-        if hours > 0.1:  # Only track if meaningful usage
-            device_id = license_module.get_device_id()
-            license_module.track_referral_usage(device_id, hours)
+        device_id = license_module.get_device_id()
+        hours = seconds / 3600.0
+        
+        license_module.init_db()
+        import sqlite3
+        conn = sqlite3.connect(license_module.LICENSE_DB)
+        c = conn.cursor()
+        
+        c.execute("UPDATE activations SET usage_hours = usage_hours + ? WHERE device_id = ?",
+                  (hours, device_id))
+        conn.commit()
+        conn.close()
     except:
         pass
 

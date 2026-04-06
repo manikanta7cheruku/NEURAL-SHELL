@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import useStatus from '../stores/useStatus';
 import PageHeader from '../components/PageHeader';
 import Spinner from '../components/Spinner';
+import ReferralPrompt from '../components/ReferralPrompt';
 import api from '../api';
 
 export default function Home() {
@@ -17,12 +18,8 @@ export default function Home() {
   const [usageHistory, setUsageHistory] = useState([]);
   const [config, setConfig] = useState(null);
   const [referralStats, setReferralStats] = useState(null);
+  const [showExpiredPrompt, setShowExpiredPrompt] = useState(false);
   
-  // EMAIL POPUP
-  const [showEmailPopup, setShowEmailPopup] = useState(false);
-  const [email, setEmail] = useState('');
-  const [emailSuccess, setEmailSuccess] = useState(false);
-  const [emailError, setEmailError] = useState(false);
 
   useEffect(() => {
     st.fetch();
@@ -47,55 +44,18 @@ export default function Home() {
     api.get('/config').then(r => setConfig(r.data)).catch(() => {});
     api.get('/referral/stats').then(r => setReferralStats(r.data)).catch(() => {});
     
-    // EMAIL POPUP LOGIC
-    const emailDismissed = localStorage.getItem('seven_email_dismissed');
-    const emailSaved = localStorage.getItem('seven_email_saved');
-    
-    if (!emailDismissed && !emailSaved) {
-      api.get('/email/check').then(r => {
-        if (r.data.saved) {
-          localStorage.setItem('seven_email_saved', 'true');
-          return;
-        }
-        const installDate = localStorage.getItem('seven_install_date');
-        if (!installDate) {
-          localStorage.setItem('seven_install_date', Date.now().toString());
-        } else {
-          const daysSinceInstall = (Date.now() - parseInt(installDate)) / (1000 * 60 * 60 * 24);
-          if (daysSinceInstall >= 7) {
-            setShowEmailPopup(true);
-          }
-        }
-      }).catch(() => {});
-    }
-    
     return () => clearInterval(i);
   }, []);
 
-  const saveEmail = async () => {
-    if (!email || !email.includes('@')) {
-      setEmailError(true);
-      setTimeout(() => setEmailError(false), 3000);
-      return;
+  // Check if plan expired
+  useEffect(() => {
+    if (config?.license?.expires_at) {
+      const expiry = new Date(config.license.expires_at);
+      if (expiry < new Date()) {
+        setShowExpiredPrompt(true);
+      }
     }
-    try {
-      await api.post('/email/save', { email });
-      setEmailSuccess(true);
-      localStorage.setItem('seven_email_saved', 'true');
-      setTimeout(() => {
-        setShowEmailPopup(false);
-        setEmailSuccess(false);
-      }, 2000);
-    } catch {
-      setEmailError(true);
-      setTimeout(() => setEmailError(false), 3000);
-    }
-  };
-
-  const dismissEmail = () => {
-    localStorage.setItem('seven_email_dismissed', 'true');
-    setShowEmailPopup(false);
-  };
+  }, [config]);
 
   const copyReferralLink = () => {
     if (referralStats) {
@@ -130,6 +90,10 @@ export default function Home() {
       />
 
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
+
+     {/* Referral Prompts */}
+        {showExpiredPrompt && <ReferralPrompt type="plan_expired" />}
+        {!isPro && !referralStats && <ReferralPrompt type="welcome" />}
         
         {/* Status Row */}
         <div className="grid grid-cols-7 gap-2">
@@ -166,10 +130,10 @@ export default function Home() {
           </div>
         )}
 
-        {/* Plan + Usage Chart (Side by Side like Hardware/Latency) */}
+        {/* Plan + Usage Chart */}
         <div className="grid grid-cols-2 gap-3">
           
-          {/* Your Plan + Why Upgrade (Combined) */}
+          {/* Your Plan + Why Upgrade */}
           <div className="bg-s-card border border-s-border rounded p-3">
             <div className="flex items-center justify-between mb-2">
               <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium">Your Plan</div>
@@ -190,7 +154,7 @@ export default function Home() {
               {usage && (
                 <div className="flex items-center justify-between">
                   <span className="text-[10px] text-s-text-3">Total Time</span>
-                  <span className="text-[10px] text-s-text-2 font-mono">{usage.display}</span>
+                  <span className="text-[10px] text-s-text-2 font-mono">{formatTime(usage.total_hours)}</span>
                 </div>
               )}
               {config?.license?.is_trial && config?.license?.expires_at && (
@@ -203,7 +167,6 @@ export default function Home() {
               )}
             </div>
 
-            {/* Why Upgrade (Only for Free users) */}
             {!isPro && (
               <div className="pt-2 border-t border-s-border">
                 <div className="text-[9px] text-s-accent mb-1.5">Why upgrade?</div>
@@ -222,26 +185,29 @@ export default function Home() {
           </div>
 
           {/* Last 7 Days Usage Chart */}
-          <div className="bg-s-card border border-s-border rounded p-3">
+          <div className="bg-s-card border border-s-border rounded p-3 mt-0">
             <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium mb-3">Last 7 Days</div>
-            <div className="flex items-end justify-between h-[80px] gap-1 px-1">
-              {chartData.map((day, i) => (
-                <div key={i} className="flex-1 flex flex-col items-center">
-                  <div 
-                    className="w-full bg-s-border rounded-t relative group cursor-pointer"
-                    style={{ height: '65px' }}
-                  >
+            <div className="flex items-end justify-between h-[80px] gap-1 px-1 mt-10">
+              {chartData.map((day, i) => {
+                const barHeight = day.hours > 0 ? Math.max((day.hours / maxHours) * 65, 4) : 2;
+                return (
+                  <div key={i} className="flex-1 flex flex-col items-center">
                     <div 
-                      className="absolute bottom-0 w-full bg-s-accent rounded-t transition-all"
-                      style={{ height: day.hours > 0 ? `${Math.max((day.hours / maxHours) * 65, 4)}px` : '2px' }}
-                    />
-                    <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 bg-s-bg border border-s-border rounded px-1.5 py-0.5 text-[9px] text-s-text opacity-0 group-hover:opacity-100 whitespace-nowrap z-10">
-                      {day.hours > 0 ? `${day.hours}hr` : '0hr'}
+                      className="w-full bg-s-border rounded-t relative group cursor-pointer"
+                      style={{ height: '65px' }}
+                    >
+                      <div 
+                        className="absolute bottom-0 w-full bg-s-accent rounded-t transition-all"
+                        style={{ height: `${barHeight}px` }}
+                      />
+                      <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 bg-s-bg border border-s-border rounded px-1.5 py-0.5 text-[9px] text-s-text opacity-0 group-hover:opacity-100 whitespace-nowrap z-10">
+                        {formatTime(day.hours)}
+                      </div>
                     </div>
+                    <span className="text-[8px] text-s-text-4 mt-1">{day.day}</span>
                   </div>
-                  <span className="text-[8px] text-s-text-4 mt-1">{day.day}</span>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </div>
@@ -250,15 +216,13 @@ export default function Home() {
         <div className="bg-gradient-to-r from-s-accent/5 to-s-accent/10 border border-s-accent/20 rounded p-3">
           <div className="flex items-start justify-between">
             <div className="flex-1">
-              <div className="text-[12px] font-medium text-s-text mb-1">🎁 Refer Friends, Earn ₹100 Each</div>
-              <p className="text-[10px] text-s-text-3">Share Seven → Friend uses 77 hours → You earn ₹100 credit</p>
+              <div className="text-[12px] font-medium text-s-text mb-1">🎁 Share Seven, Unlock Premium</div>
+              <p className="text-[10px] text-s-text-3 mb-2">
+                When your friend uses Seven for 7 hours, <strong className="text-s-accent">you get Ultimate free for 1 month</strong> and <strong className="text-s-green">they get Pro free for 1 month!</strong>
+              </p>
               
               {referralStats && (
-                <div className="flex items-center gap-4 mt-2">
-                  <div className="text-center">
-                    <div className="text-[14px] font-mono font-bold text-s-accent">₹{referralStats.total_credits}</div>
-                    <div className="text-[8px] text-s-text-4">Earned</div>
-                  </div>
+                <div className="flex items-center gap-4">
                   <div className="text-center">
                     <div className="text-[14px] font-mono font-bold text-s-green">{referralStats.completed_referrals}</div>
                     <div className="text-[8px] text-s-text-4">Completed</div>
@@ -354,58 +318,6 @@ export default function Home() {
           )}
         </div>
       </div>
-
-      {/* EMAIL POPUP */}
-      {showEmailPopup && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-s-surface border border-s-border rounded-lg p-6 w-96">
-            <div className="text-[14px] font-medium text-s-text mb-2">🎉 You have used Seven for 7 days!</div>
-            <div className="text-[11px] text-s-text-3 mb-4">Want to stay updated on new features, bug fixes, and exclusive early access?</div>
-            
-            <input
-              type="email"
-              value={email}
-              onChange={e => setEmail(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && saveEmail()}
-              placeholder="your@email.com"
-              className="w-full bg-s-bg border border-s-border rounded px-3 py-2 text-[12px] text-s-text mb-4"
-              autoFocus
-            />
-            
-            <div className="text-[10px] text-s-text-4 mb-4">
-              We will only send: feature updates, bug fixes, early access invites. No spam, ever.
-            </div>
-            
-            {emailSuccess && (
-              <div className="mb-3 px-3 py-2 bg-s-green/10 border border-s-green/20 rounded text-[11px] text-s-green">
-                Thanks! You will get update notifications.
-              </div>
-            )}
-            
-            {emailError && (
-              <div className="mb-3 px-3 py-2 bg-s-red/10 border border-s-red/20 rounded text-[11px] text-red-300">
-                Please enter a valid email
-              </div>
-            )}
-            
-            <div className="flex gap-2">
-              <button 
-                onClick={saveEmail} 
-                disabled={emailSuccess} 
-                className="flex-1 px-3 py-2 bg-s-accent text-white rounded text-[12px] font-medium hover:bg-s-accent/90 disabled:opacity-50"
-              >
-                {emailSuccess ? 'Saved!' : 'Subscribe'}
-              </button>
-              <button 
-                onClick={dismissEmail} 
-                className="px-3 py-2 text-s-text-4 hover:text-s-text-3 text-[12px]"
-              >
-                Maybe Later
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

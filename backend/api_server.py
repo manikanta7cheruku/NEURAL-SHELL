@@ -130,6 +130,13 @@ def get_status():
     """Get current Seven system status."""
     import config
     from memory.mood import mood_engine
+
+    # Track activity (dashboard polling = user is active)
+    try:
+        import telemetry
+        telemetry.log_activity()
+    except:
+        pass
     
     uptime_secs = int(time.time() - _start_time)
     hours = uptime_secs // 3600
@@ -178,6 +185,12 @@ def chat(req: ChatRequest):
         raise HTTPException(status_code=400, detail="Empty message")
     
     set_state("thinking", True)
+
+    # Track activity for time spent
+    try:
+        telemetry.log_activity()
+    except:
+        pass  # Don't fail if telemetry has issues
     
     try:
         response = brain.think(req.text.strip(), speaker_id=req.speaker_id)
@@ -1118,6 +1131,68 @@ def update_voice_control_words(data: dict):
     config.save_config()
     
     return {"success": True, "message": "Voice commands updated"}
+
+# =========================================================================
+# REFERRAL COMPLETION CHECK
+# =========================================================================
+
+@app.get("/api/referral/completed-pending")
+def get_completed_pending_referrals():
+    """
+    Get list of referrals that just completed 7 hours.
+    Admin endpoint to know when to send license keys.
+    """
+    import license as license_module
+    import sqlite3
+    
+    license_module.init_db()
+    
+    conn = sqlite3.connect(license_module.LICENSE_DB)
+    c = conn.cursor()
+    
+    # Get recently completed referrals (within last 7 days)
+    c.execute("""
+        SELECT r.referred_email, r.referrer_email, r.completed_at, r.usage_hours
+        FROM referrals r
+        WHERE r.is_complete = 1 
+        AND r.completed_at > datetime('now', '-7 days')
+        ORDER BY r.completed_at DESC
+    """)
+    
+    completed = []
+    for row in c.fetchall():
+        completed.append({
+            "referred_email": row[0],
+            "referrer_email": row[1],
+            "completed_at": row[2],
+            "usage_hours": round(row[3], 1)
+        })
+    
+    # Get referrals close to completion (>5 hours)
+    c.execute("""
+        SELECT r.referred_email, r.referrer_email, r.usage_hours, r.created_at
+        FROM referrals r
+        WHERE r.is_complete = 0 
+        AND r.usage_hours >= 5
+        ORDER BY r.usage_hours DESC
+    """)
+    
+    almost_complete = []
+    for row in c.fetchall():
+        almost_complete.append({
+            "referred_email": row[0],
+            "referrer_email": row[1],
+            "usage_hours": round(row[2], 1),
+            "hours_left": round(7 - row[2], 1),
+            "created_at": row[3]
+        })
+    
+    conn.close()
+    
+    return {
+        "completed_recently": completed,
+        "almost_complete": almost_complete
+    }
 
 # =========================================================================
 # SERVER LAUNCHER — Called from main.py

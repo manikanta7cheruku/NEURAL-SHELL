@@ -607,7 +607,9 @@ def generate_referral_code(email: str) -> str:
 def track_referral_usage(device_id: str, hours: float):
     """
     Track usage hours for referral system.
-    Called by telemetry every session.
+    When referred user hits 7 hours:
+    - Referred user gets Pro free for 1 month
+    - Referrer gets Ultimate free for 1 month
     """
     init_db()
     conn = sqlite3.connect(LICENSE_DB)
@@ -619,52 +621,39 @@ def track_referral_usage(device_id: str, hours: float):
     
     # Check if this user was referred
     c.execute("""
-        SELECT id, referrer_email, usage_hours, is_complete 
+        SELECT id, referrer_email, referred_email, usage_hours, is_complete 
         FROM referrals 
         WHERE referred_device_id = ? AND is_complete = 0
     """, (device_id,))
     
     row = c.fetchone()
     if row:
-        ref_id, referrer_email, current_hours, is_complete = row
+        ref_id, referrer_email, referred_email, current_hours, is_complete = row
         new_hours = current_hours + hours
         
         c.execute("UPDATE referrals SET usage_hours = ? WHERE id = ?", (new_hours, ref_id))
         
-        # Check if reached 77 hours
-        if new_hours >= 77 and not is_complete:
+        # Check if reached 7 hours (changed from 77)
+        if new_hours >= 7 and not is_complete:
             c.execute("UPDATE referrals SET is_complete = 1, completed_at = ? WHERE id = ?",
                       (datetime.now().isoformat(), ref_id))
             
-            # Add ₹100 credit to referrer
+            # Update referrer's referral count
             c.execute("SELECT total_credits, referrals_count FROM credits WHERE email = ?", 
                       (referrer_email,))
             credit_row = c.fetchone()
             
             if credit_row:
-                new_credits = credit_row[0] + 100
                 new_count = credit_row[1] + 1
-                c.execute("UPDATE credits SET total_credits = ?, referrals_count = ?, last_updated = ? WHERE email = ?",
-                          (new_credits, new_count, datetime.now().isoformat(), referrer_email))
+                c.execute("UPDATE credits SET referrals_count = ?, last_updated = ? WHERE email = ?",
+                          (new_count, datetime.now().isoformat(), referrer_email))
             else:
                 c.execute("INSERT INTO credits (email, total_credits, referrals_count, last_updated) VALUES (?, ?, ?, ?)",
-                          (referrer_email, 100, 1, datetime.now().isoformat()))
+                          (referrer_email, 0, 1, datetime.now().isoformat()))
             
-            # Check for milestone bonuses
-            c.execute("SELECT referrals_count FROM credits WHERE email = ?", (referrer_email,))
-            count = c.fetchone()[0]
-            
-            bonus = 0
-            if count == 5:
-                bonus = 100
-            elif count == 10:
-                bonus = 200
-            elif count == 25:
-                bonus = 500
-            
-            if bonus > 0:
-                c.execute("UPDATE credits SET total_credits = total_credits + ? WHERE email = ?",
-                          (bonus, referrer_email))
+            print(f"[REFERRAL] ✅ Completed! Referrer: {referrer_email}, Referred: {referred_email}")
+            print(f"[REFERRAL] → Referrer gets Ultimate 1 month FREE")
+            print(f"[REFERRAL] → Referred user gets Pro 1 month FREE")
     
     conn.commit()
     conn.close()
@@ -697,7 +686,7 @@ def get_referral_stats(email: str) -> Dict:
         ref_email, hours, created = row
         
         # Format time remaining
-        hours_left = max(0, 77 - hours)
+        hours_left = max(0, 7 - hours)
         
         # Format usage time
         if hours < 1:
@@ -713,7 +702,7 @@ def get_referral_stats(email: str) -> Dict:
             "usage_hours": round(hours, 1),
             "usage_display": usage_display,
             "hours_left": round(hours_left, 1),
-            "progress_percent": min(100, int((hours / 77) * 100)),
+            "progress_percent": min(100, int((hours / 7) * 100)),
             "created_at": created[:10]
         })
     
