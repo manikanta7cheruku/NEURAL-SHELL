@@ -166,27 +166,38 @@ def log_activity():
     # Start new session if idle timeout passed
     if last_activity_time is None or (now - last_activity_time) > SESSION_TIMEOUT:
         # Save previous session if any
-        if total_active_seconds > 60:  # More than 1 minute
+        if total_active_seconds > 30:  # More than 30 seconds
             _save_session_time(total_active_seconds)
         session_start_time = now
         total_active_seconds = 0
     else:
         # Continue existing session
         elapsed = now - last_activity_time
-        if elapsed < SESSION_TIMEOUT:
+        if elapsed < SESSION_TIMEOUT and elapsed > 0:
             total_active_seconds += elapsed
     
     last_activity_time = now
     
-    # Track referral usage if significant time passed
-    if total_active_seconds > 300:  # Every 5 minutes
-        try:
-            import license as license_module
-            hours = total_active_seconds / 3600.0
-            device_id = license_module.get_device_id()
-            license_module.track_referral_usage(device_id, hours)
-        except:
-            pass
+    # Save periodically (every 60 seconds of activity)
+    if total_active_seconds > 60:
+        _save_session_time(total_active_seconds)
+        total_active_seconds = 0
+
+
+def _save_session_time(seconds):
+    """Save session time to database."""
+    if seconds < 10:  # Ignore tiny sessions
+        return
+        
+    try:
+        import license as license_module
+        device_id = license_module.get_device_id()
+        hours = seconds / 3600.0
+        
+        license_module.track_referral_usage(device_id, hours)
+        print(f"[TELEMETRY] Saved {round(seconds/60, 1)} minutes of usage")
+    except Exception as e:
+        print(f"[TELEMETRY] Failed to save time: {e}")
 
 
 def _save_session_time(seconds):

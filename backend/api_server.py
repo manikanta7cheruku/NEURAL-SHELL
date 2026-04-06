@@ -984,12 +984,12 @@ def get_usage_stats():
 def get_usage_stats():
     """Get current user's total usage time."""
     import license as license_module
+    import sqlite3
     
     device_id = license_module.get_device_id()
     
     license_module.init_db()
     
-    import sqlite3
     conn = sqlite3.connect(license_module.LICENSE_DB)
     c = conn.cursor()
     
@@ -999,29 +999,34 @@ def get_usage_stats():
     
     total_hours = row[0] if row else 0
     
+    # Also get from telemetry session
+    try:
+        import telemetry
+        session_hours = telemetry.get_active_hours()
+        total_hours += session_hours
+    except:
+        pass
+    
     conn.close()
     
     # Convert to human readable
-    if total_hours < 1:
-        minutes = int(total_hours * 60)
-        time_str = f"{minutes} min"
-    elif total_hours < 24:
-        time_str = f"{int(total_hours)} hr"
-    elif total_hours < 168:
-        days = int(total_hours / 24)
-        time_str = f"{days} days"
-    elif total_hours < 720:
-        weeks = int(total_hours / 168)
-        time_str = f"{weeks} weeks"
-    elif total_hours < 8760:
-        months = int(total_hours / 720)
-        time_str = f"{months} months"
+    total_minutes = int(total_hours * 60)
+    
+    if total_minutes < 1:
+        time_str = "0 min"
+    elif total_minutes < 60:
+        time_str = f"{total_minutes} min"
     else:
-        years = int(total_hours / 8760)
-        time_str = f"{years} years"
+        hrs = total_minutes // 60
+        mins = total_minutes % 60
+        if mins == 0:
+            time_str = f"{hrs} hr"
+        else:
+            time_str = f"{hrs} hr {mins} min"
     
     return {
-        "total_hours": round(total_hours, 2),
+        "total_hours": round(total_hours, 4),
+        "total_minutes": total_minutes,
         "display": time_str
     }
 

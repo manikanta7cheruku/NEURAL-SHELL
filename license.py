@@ -606,18 +606,30 @@ def generate_referral_code(email: str) -> str:
 
 def track_referral_usage(device_id: str, hours: float):
     """
-    Track usage hours for referral system.
-    When referred user hits 7 hours:
-    - Referred user gets Pro free for 1 month
-    - Referrer gets Ultimate free for 1 month
+    Track usage hours for ALL users (not just referrals).
+    - Updates activation record
+    - Creates record if doesn't exist
+    - Checks referral completion
     """
     init_db()
     conn = sqlite3.connect(LICENSE_DB)
     c = conn.cursor()
     
-    # Update activation record (tracks total usage)
-    c.execute("UPDATE activations SET usage_hours = usage_hours + ? WHERE device_id = ?",
-              (hours, device_id))
+    # Check if activation record exists
+    c.execute("SELECT usage_hours FROM activations WHERE device_id = ?", (device_id,))
+    row = c.fetchone()
+    
+    if row:
+        # Update existing
+        new_total = row[0] + hours
+        c.execute("UPDATE activations SET usage_hours = ?, last_validated = ? WHERE device_id = ?",
+                  (new_total, datetime.now().isoformat(), device_id))
+    else:
+        # Create new activation record for tracking
+        c.execute("""
+            INSERT INTO activations (license_key, device_id, activated_at, last_validated, usage_hours)
+            VALUES (?, ?, ?, ?, ?)
+        """, ("FREE_USER", device_id, datetime.now().isoformat(), datetime.now().isoformat(), hours))
     
     # Check if this user was referred
     c.execute("""
@@ -626,34 +638,32 @@ def track_referral_usage(device_id: str, hours: float):
         WHERE referred_device_id = ? AND is_complete = 0
     """, (device_id,))
     
-    row = c.fetchone()
-    if row:
-        ref_id, referrer_email, referred_email, current_hours, is_complete = row
+    ref_row = c.fetchone()
+    if ref_row:
+        ref_id, referrer_email, referred_email, current_hours, is_complete = ref_row
         new_hours = current_hours + hours
         
         c.execute("UPDATE referrals SET usage_hours = ? WHERE id = ?", (new_hours, ref_id))
         
-        # Check if reached 7 hours (changed from 77)
+        # Check if reached 7 hours
         if new_hours >= 7 and not is_complete:
             c.execute("UPDATE referrals SET is_complete = 1, completed_at = ? WHERE id = ?",
                       (datetime.now().isoformat(), ref_id))
             
-            # Update referrer's referral count
-            c.execute("SELECT total_credits, referrals_count FROM credits WHERE email = ?", 
-                      (referrer_email,))
+            # Update referrer's count
+            c.execute("SELECT referrals_count FROM credits WHERE email = ?", (referrer_email,))
             credit_row = c.fetchone()
             
             if credit_row:
-                new_count = credit_row[1] + 1
-                c.execute("UPDATE credits SET referrals_count = ?, last_updated = ? WHERE email = ?",
-                          (new_count, datetime.now().isoformat(), referrer_email))
+                c.execute("UPDATE credits SET referrals_count = referrals_count + 1, last_updated = ? WHERE email = ?",
+                          (datetime.now().isoformat(), referrer_email))
             else:
                 c.execute("INSERT INTO credits (email, total_credits, referrals_count, last_updated) VALUES (?, ?, ?, ?)",
                           (referrer_email, 0, 1, datetime.now().isoformat()))
             
-            print(f"[REFERRAL] ✅ Completed! Referrer: {referrer_email}, Referred: {referred_email}")
-            print(f"[REFERRAL] → Referrer gets Ultimate 1 month FREE")
-            print(f"[REFERRAL] → Referred user gets Pro 1 month FREE")
+            print(f"[REFERRAL] ✅ Completed! {referred_email} used 7 hours")
+            print(f"[REFERRAL] → Referrer {referrer_email} gets Ultimate 1 month")
+            print(f"[REFERRAL] → Referred {referred_email} gets Pro 1 month")
     
     conn.commit()
     conn.close()
