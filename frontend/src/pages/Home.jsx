@@ -74,6 +74,22 @@ export default function Home() {
 
   const tier = config?.license?.tier || 'free';
   const isPro = tier === 'pro' || tier === 'ultimate';
+
+  // Format time display
+  const formatTime = (hours) => {
+    if (!hours || hours === 0) return '0 min';
+    const totalMinutes = Math.round(hours * 60);
+    if (totalMinutes < 60) {
+      return `${totalMinutes} min`;
+    } else {
+      const hrs = Math.floor(totalMinutes / 60);
+      const mins = totalMinutes % 60;
+      if (mins === 0) {
+        return `${hrs} hr`;
+      }
+      return `${hrs} hr ${mins} min`;
+    }
+  };
   
   const chartData = usageHistory.length > 0 ? usageHistory : [
     { day: 'Mon', hours: 0 }, { day: 'Tue', hours: 0 }, { day: 'Wed', hours: 0 },
