@@ -930,84 +930,84 @@ def check_email_saved():
     email = telemetry.get_email()
     return {"saved": email is not None, "email": email}
 
-@app.get("/api/usage/stats")
-def get_usage_stats():
-    """Get current user's total usage time."""
-    import license as license_module
-    
-    device_id = license_module.get_device_id()
-    
-    init_db = license_module.init_db
-    init_db()
-    
-    import sqlite3
-    conn = sqlite3.connect(license_module.LICENSE_DB)
-    c = conn.cursor()
-    
-    # Get total usage hours
-    c.execute("SELECT usage_hours FROM activations WHERE device_id = ?", (device_id,))
-    row = c.fetchone()
-    
-    total_hours = row[0] if row else 0
-    
-    conn.close()
-    
-    # Convert to human readable
-    if total_hours < 1:
-        minutes = int(total_hours * 60)
-        time_str = f"{minutes} min"
-    elif total_hours < 24:
-        time_str = f"{int(total_hours)} hr"
-    elif total_hours < 168:  # Less than a week
-        days = int(total_hours / 24)
-        time_str = f"{days} days"
-    elif total_hours < 720:  # Less than a month
-        weeks = int(total_hours / 168)
-        time_str = f"{weeks} weeks"
-    elif total_hours < 8760:  # Less than a year
-        months = int(total_hours / 720)
-        time_str = f"{months} months"
-    else:
-        years = int(total_hours / 8760)
-        time_str = f"{years} years"
-    
-    return {
-        "total_hours": round(total_hours, 2),
-        "display": time_str
-    }
-
 # =========================================================================
-# USAGE STATS ENDPOINTS
+# USAGE STATS ENDPOINTS (FIXED)
 # =========================================================================
 
 @app.get("/api/usage/stats")
-def get_usage_stats():
-    """Get current user's total usage time."""
-    import license as license_module
+def get_usage_stats_fixed():
+    """Get current user's total usage time - reads from BOTH databases."""
     import sqlite3
     
-    device_id = license_module.get_device_id()
-    
-    license_module.init_db()
-    
-    conn = sqlite3.connect(license_module.LICENSE_DB)
-    c = conn.cursor()
-    
-    # Get total usage hours
-    c.execute("SELECT usage_hours FROM activations WHERE device_id = ?", (device_id,))
-    row = c.fetchone()
-    
-    total_hours = row[0] if row else 0
-    
-    # Also get from telemetry session
+    # Get device_id
+    device_id = None
     try:
-        import telemetry
-        session_hours = telemetry.get_active_hours()
-        total_hours += session_hours
-    except:
-        pass
+        import license as license_module
+        device_id = license_module.get_device_id()
+    except Exception as e:
+        print(f"[API] Could not get device_id: {e}")
     
-    conn.close()
+    # Get email
+    email = None
+    try:
+        import telemetry as telemetry_module
+        email = telemetry_module.get_email()
+    except Exception as e:
+        print(f"[API] Could not get email: {e}")
+    
+    total_hours = 0
+    last_seen = None
+    
+    # 1. Check telemetry.db (primary source)
+    telemetry_db = "data/telemetry.db"
+    if os.path.exists(telemetry_db):
+        try:
+            conn = sqlite3.connect(telemetry_db)
+            c = conn.cursor()
+            
+            if device_id:
+                c.execute("SELECT active_hours, last_seen, email FROM stats WHERE device_id = ?", (device_id,))
+            else:
+                c.execute("SELECT active_hours, last_seen, email FROM stats ORDER BY last_seen DESC LIMIT 1")
+            
+            row = c.fetchone()
+            if row:
+                total_hours = row[0] or 0
+                last_seen = row[1]
+                if not email and row[2]:
+                    email = row[2]
+            
+            conn.close()
+        except Exception as e:
+            print(f"[API] Usage stats telemetry.db error: {e}")
+    
+    # 2. Also check license.db (backup source)
+    license_db = "data/license.db"
+    if os.path.exists(license_db) and device_id:
+        try:
+            conn = sqlite3.connect(license_db)
+            c = conn.cursor()
+            
+            c.execute("SELECT usage_hours, last_validated FROM activations WHERE device_id = ?", (device_id,))
+            row = c.fetchone()
+            if row:
+                license_hours = row[0] or 0
+                # Use the higher value
+                if license_hours > total_hours:
+                    total_hours = license_hours
+                    last_seen = row[1]
+            
+            conn.close()
+        except Exception as e:
+            print(f"[API] Usage stats license.db error: {e}")
+    
+    # 3. Add current session time (not yet saved to DB)
+    try:
+        import telemetry as telemetry_module
+        session_hours = telemetry_module.get_active_hours()
+        total_hours += session_hours
+    except Exception as e:
+        print(f"[API] Could not get session hours: {e}")
     
     # Convert to human readable
     total_minutes = int(total_hours * 60)
@@ -1027,60 +1027,61 @@ def get_usage_stats():
     return {
         "total_hours": round(total_hours, 4),
         "total_minutes": total_minutes,
-        "display": time_str
+        "display": time_str,
+        "email": email,
+        "device_id": device_id[:8] + "..." if device_id else None,
+        "last_seen": last_seen
     }
 
 
 @app.get("/api/usage/history")
-def get_usage_history():
+def get_usage_history_fixed():
     """Get usage history for last 7 days."""
     import sqlite3
     from datetime import datetime, timedelta
     
-    # For now, generate from telemetry database
+    # Get device_id
+    device_id = None
     try:
-        conn = sqlite3.connect("data/telemetry.db")
-        c = conn.cursor()
-        
-        # Get last 7 days of activity
-        history = []
-        for i in range(7):
-            date = (datetime.now() - timedelta(days=i)).strftime("%Y-%m-%d")
-            
-            # Count activities for this day
-            c.execute("""
-                SELECT COUNT(*) FROM stats 
-                WHERE DATE(last_seen) = ?
-            """, (date,))
+        import license as license_module
+        device_id = license_module.get_device_id()
+    except:
+        pass
+    
+    total_hours = 0
+    
+    # Get total hours from telemetry.db
+    telemetry_db = "data/telemetry.db"
+    if os.path.exists(telemetry_db) and device_id:
+        try:
+            conn = sqlite3.connect(telemetry_db)
+            c = conn.cursor()
+            c.execute("SELECT active_hours FROM stats WHERE device_id = ?", (device_id,))
             row = c.fetchone()
-            
-            # Estimate hours based on activity (rough estimate)
-            activities = row[0] if row else 0
-            estimated_hours = min(activities * 0.5, 8)  # Cap at 8 hours per day
-            
-            history.append({
-                "date": date,
-                "day": (datetime.now() - timedelta(days=i)).strftime("%a"),
-                "hours": round(estimated_hours, 1)
-            })
+            if row:
+                total_hours = row[0] or 0
+            conn.close()
+        except:
+            pass
+    
+    # Build history (for now, show all on today - can enhance later with daily tracking)
+    history = []
+    for i in range(6, -1, -1):
+        date = datetime.now() - timedelta(days=i)
+        day_hours = 0
         
-        conn.close()
+        # Show total on today
+        if i == 0:
+            day_hours = total_hours
         
-        # Reverse to show oldest first
-        history.reverse()
-        
-        return {"history": history}
-    except Exception as e:
-        # Return dummy data if no history yet
-        history = []
-        for i in range(6, -1, -1):
-            date = (datetime.now() - timedelta(days=i))
-            history.append({
-                "date": date.strftime("%Y-%m-%d"),
-                "day": date.strftime("%a"),
-                "hours": 0
-            })
-        return {"history": history}
+        history.append({
+            "date": date.strftime("%Y-%m-%d"),
+            "day": date.strftime("%a"),
+            "hours": round(day_hours, 2),
+            "minutes": int(day_hours * 60)
+        })
+    
+    return {"history": history, "total_hours": round(total_hours, 2)}
 
 
 @app.get("/api/voice-control/words")

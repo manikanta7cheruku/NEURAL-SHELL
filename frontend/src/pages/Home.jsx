@@ -22,14 +22,22 @@ export default function Home() {
   
 
   useEffect(() => {
-    st.fetch();
-    const i = setInterval(st.fetch, 3000);
-    
+  st.fetch();
+  const i = setInterval(st.fetch, 3000);
+  
+  // Initial fetch
+  const fetchAll = () => {
     api.get('/hardware').then(r => setHw(r.data)).catch(() => {});
     api.get('/speed').then(r => setSpeed(r.data)).catch(() => {});
     api.get('/memory/stats').then(r => setMem(r.data)).catch(() => {});
     api.get('/commands/log?limit=10').then(r => setLogs((r.data.recent || []).reverse())).catch(() => {});
     api.get('/schedules').then(r => setSched(r.data.filter(s => s.status === 'active').length)).catch(() => {});
+    api.get('/config').then(r => setConfig(r.data)).catch(() => {});
+    api.get('/referral/stats').then(r => setReferralStats(r.data)).catch(() => {});
+  };
+  
+  // Fetch usage (more frequently for live updates)
+  const fetchUsage = () => {
     api.get('/usage/stats').then(r => setUsage(r.data)).catch(() => {});
     api.get('/usage/history').then(r => setUsageHistory(r.data.history || [])).catch(() => {
       const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -41,11 +49,19 @@ export default function Home() {
       }
       setUsageHistory(history);
     });
-    api.get('/config').then(r => setConfig(r.data)).catch(() => {});
-    api.get('/referral/stats').then(r => setReferralStats(r.data)).catch(() => {});
-    
-    return () => clearInterval(i);
-  }, []);
+  };
+  
+  fetchAll();
+  fetchUsage();
+  
+  // Refresh usage every 10 seconds for live updates
+  const usageInterval = setInterval(fetchUsage, 10000);
+  
+  return () => {
+    clearInterval(i);
+    clearInterval(usageInterval);
+  };
+}, []);
 
   // Check if plan expired
   useEffect(() => {
@@ -167,12 +183,12 @@ export default function Home() {
                   <span className="text-[9px] text-s-text font-mono truncate max-w-[100px]">{config.email}</span>
                 </div>
               )}
-              {usage && (
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] text-s-text-3">Total Time</span>
-                  <span className="text-[10px] text-s-text-2 font-mono">{formatTime(usage.total_hours)}</span>
-                </div>
-              )}
+             {usage && (
+  <div className="flex items-center justify-between">
+    <span className="text-[10px] text-s-text-3">Total Time</span>
+    <span className="text-[10px] text-s-text-2 font-mono">{usage.display || formatTime(usage.total_hours)}</span>
+  </div>
+)}
               {config?.license?.is_trial && config?.license?.expires_at && (
                 <div className="flex items-center justify-between">
                   <span className="text-[10px] text-s-text-3">Trial</span>
