@@ -120,16 +120,16 @@ def init_db():
     
     # Activations table
     c.execute("""
-        CREATE TABLE IF NOT EXISTS activations (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            license_key TEXT,
-            device_id TEXT,
-            activated_at TEXT,
-            last_validated TEXT,
-            usage_hours REAL DEFAULT 0,
-            FOREIGN KEY (license_key) REFERENCES licenses(license_key)
-        )
-    """)
+    CREATE TABLE IF NOT EXISTS activations (
+        device_id TEXT PRIMARY KEY,
+        license_key TEXT,
+        activated_at TEXT,
+        last_validated TEXT,
+        usage_hours REAL DEFAULT 0,
+        email TEXT,
+        FOREIGN KEY (license_key) REFERENCES licenses(license_key)
+    )
+""")
     
     # Referrals table
     c.execute("""

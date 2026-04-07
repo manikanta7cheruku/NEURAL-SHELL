@@ -257,59 +257,146 @@ def list_emails():
     print("=" * 50)
 
 
-def show_usage():
-    """Show usage time for all users."""
+def show_usage(email_filter=None):
+    """Show usage time for all users or specific email."""
     import sqlite3
     
-    ensure_db()
+    # Check both databases
+    license_db_exists = os.path.exists("data/license.db")
+    telemetry_db_exists = os.path.exists("data/telemetry.db")
     
-    conn = sqlite3.connect("data/license.db")
-    c = conn.cursor()
+    if not license_db_exists and not telemetry_db_exists:
+        print("\n❌ No usage data found. Databases don't exist yet.")
+        return
     
-    c.execute("""
-        SELECT device_id, usage_hours, last_validated, license_key
-        FROM activations
-        ORDER BY usage_hours DESC
-    """)
+    all_usage = {}
     
-    rows = c.fetchall()
-    conn.close()
+    # Collect from LICENSE database (activations table)
+    if license_db_exists:
+        conn = sqlite3.connect("data/license.db")
+        c = conn.cursor()
+        
+        c.execute("""
+            SELECT device_id, usage_hours, last_validated, license_key
+            FROM activations
+        """)
+        
+        for row in c.fetchall():
+            device_id, hours, last_seen, license_key = row
+            if device_id not in all_usage:
+                all_usage[device_id] = {
+                    'hours': hours or 0,
+                    'last_seen': last_seen,
+                    'license': license_key,
+                    'email': None
+                }
+        conn.close()
     
-    print("\n" + "=" * 70)
-    print(f"USER USAGE TIME ({len(rows)} users)")
-    print("=" * 70)
+    # Collect from TELEMETRY database (has email)
+    if telemetry_db_exists:
+        conn = sqlite3.connect("data/telemetry.db")
+        c = conn.cursor()
+        
+        c.execute("""
+            SELECT device_id, active_hours, last_seen, email
+            FROM stats
+        """)
+        
+        for row in c.fetchall():
+            device_id, hours, last_seen, email = row
+            if device_id in all_usage:
+                # Merge data (telemetry has email)
+                all_usage[device_id]['email'] = email
+                # Use the higher hours count
+                all_usage[device_id]['hours'] = max(all_usage[device_id]['hours'], hours or 0)
+            else:
+                all_usage[device_id] = {
+                    'hours': hours or 0,
+                    'last_seen': last_seen,
+                    'license': 'FREE_USER',
+                    'email': email
+                }
+        conn.close()
     
-    if not rows:
-        print("\nNo usage data yet.")
+    # Filter by email if provided
+    if email_filter:
+        all_usage = {k: v for k, v in all_usage.items() if v['email'] and email_filter.lower() in v['email'].lower()}
+    
+    # Sort by usage hours (descending)
+    sorted_usage = sorted(all_usage.items(), key=lambda x: x[1]['hours'], reverse=True)
+    
+    print("\n" + "=" * 90)
+    if email_filter:
+        print(f"USAGE TIME FOR: {email_filter} ({len(sorted_usage)} match{'es' if len(sorted_usage) != 1 else ''})")
+    else:
+        print(f"USER USAGE TIME ({len(sorted_usage)} user{'s' if len(sorted_usage) != 1 else ''})")
+    print("=" * 90)
+    
+    if not sorted_usage:
+        if email_filter:
+            print(f"\n❌ No usage data found for email: {email_filter}")
+        else:
+            print("\n⚠️  No usage data yet. Users need to interact with Seven first.")
         return
     
     total_hours = 0
-    for device_id, hours, last_seen, license_key in rows:
+    for device_id, data in sorted_usage:
+        hours = data['hours']
         total_hours += hours
         
         # Format time
-        mins = int(hours * 60)
-        hrs = mins // 60
-        mins = mins % 60
-        time_str = f"{hrs}hr {mins}min" if hrs > 0 else f"{mins}min"
+        if hours < 1:
+            mins = int(hours * 60)
+            time_str = f"{mins} min"
+        else:
+            hrs = int(hours)
+            mins = int((hours - hrs) * 60)
+            time_str = f"{hrs}h {mins}m" if mins > 0 else f"{hrs}h"
         
         # Format device
-        device_short = device_id[:8] + "..." if device_id and len(device_id) > 8 else device_id
+        device_short = device_id[:12] + "..." if len(device_id) > 12 else device_id
         
         # License type
-        lic_type = "FREE" if license_key == "FREE_USER" else license_key[:12] if license_key else "N/A"
+        lic = data['license']
+        if lic == "FREE_USER":
+            lic_display = "FREE"
+        elif lic and lic.startswith("VII-"):
+            lic_display = lic[:16] + "..."
+        else:
+            lic_display = lic or "N/A"
         
-        print(f"\nDevice:    {device_short}")
-        print(f"Usage:     {time_str}")
-        print(f"Last Seen: {last_seen[:16] if last_seen else 'N/A'}")
-        print(f"License:   {lic_type}")
-        print("-" * 70)
+        # Email
+        email = data['email'] or "—"
+        
+        # Last seen
+        last_seen = data['last_seen']
+        if last_seen:
+            try:
+                dt = datetime.fromisoformat(last_seen)
+                last_seen_str = dt.strftime("%Y-%m-%d %H:%M")
+            except:
+                last_seen_str = last_seen[:16]
+        else:
+            last_seen_str = "—"
+        
+        print(f"\n📧 Email:     {email}")
+        print(f"   Device:    {device_short}")
+        print(f"   ⏱️  Usage:    {time_str}")
+        print(f"   Last Seen: {last_seen_str}")
+        print(f"   License:   {lic_display}")
+        print("-" * 90)
     
-    # Total
-    total_mins = int(total_hours * 60)
-    total_hrs = total_mins // 60
-    total_mins = total_mins % 60
-    print(f"\n📊 TOTAL USAGE: {total_hrs}hr {total_mins}min across {len(rows)} users")
+    # Total summary
+    if total_hours < 1:
+        total_mins = int(total_hours * 60)
+        total_str = f"{total_mins} min"
+    else:
+        total_hrs = int(total_hours)
+        total_mins = int((total_hours - total_hrs) * 60)
+        total_str = f"{total_hrs}h {total_mins}m" if total_mins > 0 else f"{total_hrs}h"
+    
+    print(f"\n📊 TOTAL USAGE: {total_str} across {len(sorted_usage)} user{'s' if len(sorted_usage) != 1 else ''}")
+    print("=" * 90)
 
 
 def send_referral_reward(referred_email: str, referrer_email: str):
@@ -421,8 +508,12 @@ def show_help():
 ║  emails                       List all registered emails                  ║
 ║      Example: python admin_tools.py emails                                ║
 ║                                                                           ║
-║  usage                        Show usage time for all users               ║
+║  usage                        Show usage time for ALL users               ║
 ║      Example: python admin_tools.py usage                                 ║
+║                                                                           ║
+║  usage <email>                Show usage time for SPECIFIC user           ║
+║      Example: python admin_tools.py usage jacksonnote@gmail.com           ║
+║                                                                           ║
 ║                                                                           ║
 ╠═══════════════════════════════════════════════════════════════════════════╣
 ║                                                                           ║
@@ -486,7 +577,12 @@ if __name__ == "__main__":
         list_emails()
     
     elif cmd == "usage":
-        show_usage()
+        if len(sys.argv) >= 3:
+            # Specific user by email
+            show_usage(email_filter=sys.argv[2])
+        else:
+            # All users
+            show_usage()
     
     elif cmd == "reward":
         if len(sys.argv) < 4:

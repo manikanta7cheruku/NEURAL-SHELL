@@ -1,11 +1,7 @@
 """
 =============================================================================
-PROJECT SEVEN - telemetry.py (Anonymous Usage Tracking)
-Version: 1.0
-
-PURPOSE:
-    Track anonymous usage stats for analytics dashboard.
-    100% privacy-safe — no personal data collected.
+PROJECT SEVEN - telemetry.py (Usage Time Tracking)
+Version: 1.2 - FIXED: Proper real-time usage tracking
 =============================================================================
 """
 
@@ -13,7 +9,7 @@ import os
 import uuid
 import time
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import datetime
 
 # =============================================================================
 # CONFIGURATION
@@ -23,14 +19,20 @@ DATA_DIR = "data"
 DEVICE_ID_FILE = os.path.join(DATA_DIR, "device_id.txt")
 EMAIL_FILE = os.path.join(DATA_DIR, "email.txt")
 TELEMETRY_DB = os.path.join(DATA_DIR, "telemetry.db")
+LICENSE_DB = os.path.join(DATA_DIR, "license.db")
 
-PING_INTERVAL = 3600  # Send stats every hour
+PING_INTERVAL = 3600  # Background ping every hour
 
-# Session tracking
-last_activity_time = None
-session_start_time = None
-total_active_seconds = 0
+# Session tracking - using list to allow mutation in nested functions
+_session = {
+    "start_time": None,
+    "last_activity": None,
+    "accumulated_seconds": 0,
+    "last_save_time": None
+}
+
 SESSION_TIMEOUT = 600  # 10 minutes idle = session ends
+SAVE_INTERVAL = 30     # Save every 30 seconds (for testing; use 300 for production)
 
 # =============================================================================
 # DEVICE ID MANAGEMENT
@@ -54,23 +56,55 @@ def get_device_id():
 # =============================================================================
 
 def save_email(email):
-    """Save user email if they provide it."""
+    """Save user email."""
     os.makedirs(DATA_DIR, exist_ok=True)
-    with open(EMAIL_FILE, "w") as f:
-        f.write(email.strip())
     
-    # Also save to config
+    email = email.strip().lower()
+    
+    with open(EMAIL_FILE, "w") as f:
+        f.write(email)
+    
+    # Update databases with email
+    device_id = get_device_id()
+    
+    # Update telemetry.db
     try:
-        import config
-        config.update_config({"email": email.strip()})
-    except:
-        pass
+        init_db()
+        conn = sqlite3.connect(TELEMETRY_DB)
+        c = conn.cursor()
+        c.execute("UPDATE stats SET email = ? WHERE device_id = ?", (email, device_id))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"[TELEMETRY] Warning: Could not update telemetry.db email: {e}")
+    
+    # Update license.db
+    try:
+        if os.path.exists(LICENSE_DB):
+            conn = sqlite3.connect(LICENSE_DB)
+            c = conn.cursor()
+            
+            # Try to add email column if it doesn't exist
+            try:
+                c.execute("ALTER TABLE activations ADD COLUMN email TEXT")
+            except:
+                pass
+            
+            c.execute("UPDATE activations SET email = ? WHERE device_id = ?", (email, device_id))
+            conn.commit()
+            conn.close()
+    except Exception as e:
+        print(f"[TELEMETRY] Warning: Could not update license.db email: {e}")
+    
+    print(f"[TELEMETRY] ✓ Email saved: {email}")
+
 
 def get_email():
     """Get saved email or None."""
     if os.path.exists(EMAIL_FILE):
         with open(EMAIL_FILE, "r") as f:
-            return f.read().strip()
+            email = f.read().strip()
+            return email if email else None
     return None
 
 # =============================================================================
@@ -78,7 +112,7 @@ def get_email():
 # =============================================================================
 
 def get_country_from_ip():
-    """Detect country from IP address. IP is NOT saved."""
+    """Detect country from IP address."""
     try:
         import requests
         response = requests.get("https://ipapi.co/json/", timeout=5)
@@ -90,11 +124,11 @@ def get_country_from_ip():
     return "Unknown"
 
 # =============================================================================
-# LOCAL DATABASE (SQLite)
+# DATABASE INITIALIZATION
 # =============================================================================
 
 def init_db():
-    """Initialize local telemetry database."""
+    """Initialize telemetry database."""
     os.makedirs(DATA_DIR, exist_ok=True)
     
     conn = sqlite3.connect(TELEMETRY_DB)
@@ -107,7 +141,7 @@ def init_db():
             email TEXT,
             install_date TEXT,
             last_seen TEXT,
-            active_hours REAL,
+            active_hours REAL DEFAULT 0,
             app_version TEXT,
             license_tier TEXT DEFAULT 'free'
         )
@@ -116,145 +150,195 @@ def init_db():
     conn.commit()
     conn.close()
 
-def save_stats_local(device_id, country, active_hours):
-    """Save stats to local DB."""
-    conn = sqlite3.connect(TELEMETRY_DB)
+
+def init_license_db():
+    """Ensure license.db has proper schema."""
+    if not os.path.exists(LICENSE_DB):
+        return
+    
+    conn = sqlite3.connect(LICENSE_DB)
     c = conn.cursor()
     
-    email = get_email()
-    now = datetime.now().isoformat()
-    app_version = "1.10"
+    # Check if activations table exists
+    c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='activations'")
+    if c.fetchone():
+        # Try to add email column
+        try:
+            c.execute("ALTER TABLE activations ADD COLUMN email TEXT")
+            conn.commit()
+        except:
+            pass
     
-    # Get license tier from config
-    try:
-        import config
-        license_tier = config.KEY.get("license", {}).get("tier", "free")
-    except:
-        license_tier = "free"
-    
-    # Check if user exists
-    c.execute("SELECT install_date, active_hours FROM stats WHERE device_id = ?", (device_id,))
-    row = c.fetchone()
-    
-    if row:
-        install_date = row[0]
-        existing_hours = row[1] or 0
-        new_hours = existing_hours + active_hours
-    else:
-        install_date = now
-        new_hours = active_hours
-    
-    c.execute("""
-        INSERT OR REPLACE INTO stats 
-        (device_id, country, email, install_date, last_seen, active_hours, app_version, license_tier)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    """, (device_id, country, email, install_date, now, new_hours, app_version, license_tier))
-    
-    conn.commit()
     conn.close()
 
 # =============================================================================
-# SESSION TRACKING
+# USAGE TIME TRACKING (CORE LOGIC)
 # =============================================================================
 
 def log_activity():
-    """Call this whenever user does something."""
-    global last_activity_time, session_start_time, total_active_seconds
-    
+    """
+    Call this whenever user does something.
+    Tracks time between activities and saves periodically.
+    """
     now = time.time()
     
-    # Start new session if idle timeout passed
-    if last_activity_time is None or (now - last_activity_time) > SESSION_TIMEOUT:
-        # Save previous session if any
-        if total_active_seconds > 30:  # More than 30 seconds
-            _save_session_time(total_active_seconds)
-        session_start_time = now
-        total_active_seconds = 0
-    else:
-        # Continue existing session
-        elapsed = now - last_activity_time
-        if elapsed < SESSION_TIMEOUT and elapsed > 0:
-            total_active_seconds += elapsed
-    
-    last_activity_time = now
-    
-    # Save periodically (every 60 seconds of activity)
-    if total_active_seconds > 60:
-        _save_session_time(total_active_seconds)
-        total_active_seconds = 0
-
-
-def _save_session_time(seconds):
-    """Save session time to database."""
-    if seconds < 10:  # Ignore tiny sessions
+    # First activity ever
+    if _session["last_activity"] is None:
+        _session["start_time"] = now
+        _session["last_activity"] = now
+        _session["last_save_time"] = now
+        _session["accumulated_seconds"] = 0
+        print(f"[TELEMETRY] Session started")
         return
+    
+    # Calculate time since last activity
+    elapsed = now - _session["last_activity"]
+    
+    # If idle too long, start new session
+    if elapsed > SESSION_TIMEOUT:
+        # Save previous session first
+        if _session["accumulated_seconds"] > 10:
+            _save_usage_time(_session["accumulated_seconds"])
         
-    try:
-        import license as license_module
-        device_id = license_module.get_device_id()
-        hours = seconds / 3600.0
-        
-        license_module.track_referral_usage(device_id, hours)
-        print(f"[TELEMETRY] Saved {round(seconds/60, 1)} minutes of usage")
-    except Exception as e:
-        print(f"[TELEMETRY] Failed to save time: {e}")
+        # Start new session
+        _session["start_time"] = now
+        _session["last_activity"] = now
+        _session["last_save_time"] = now
+        _session["accumulated_seconds"] = 0
+        print(f"[TELEMETRY] New session started (was idle)")
+        return
+    
+    # Accumulate active time
+    if elapsed > 0 and elapsed < SESSION_TIMEOUT:
+        _session["accumulated_seconds"] += elapsed
+    
+    _session["last_activity"] = now
+    
+    # Save periodically
+    time_since_save = now - (_session["last_save_time"] or now)
+    
+    if time_since_save >= SAVE_INTERVAL and _session["accumulated_seconds"] > 0:
+        _save_usage_time(_session["accumulated_seconds"])
+        _session["accumulated_seconds"] = 0
+        _session["last_save_time"] = now
 
 
-def _save_session_time(seconds):
-    """Save session time to database."""
+def _save_usage_time(seconds):
+    """Save accumulated usage time to databases."""
+    if seconds < 5:  # Ignore tiny amounts
+        return
+    
+    hours = seconds / 3600.0
+    device_id = get_device_id()
+    email = get_email()
+    now_iso = datetime.now().isoformat()
+    
+    print(f"[TELEMETRY] Saving {round(seconds, 1)} seconds ({round(hours * 60, 2)} min) for {email or device_id[:8]}")
+    
+    # 1. Save to TELEMETRY database
     try:
-        import license as license_module
-        device_id = license_module.get_device_id()
-        hours = seconds / 3600.0
-        
-        license_module.init_db()
-        import sqlite3
-        conn = sqlite3.connect(license_module.LICENSE_DB)
+        init_db()
+        conn = sqlite3.connect(TELEMETRY_DB)
         c = conn.cursor()
         
-        c.execute("UPDATE activations SET usage_hours = usage_hours + ? WHERE device_id = ?",
-                  (hours, device_id))
+        # Upsert stats
+        c.execute("""
+            INSERT INTO stats (device_id, email, install_date, last_seen, active_hours, app_version, license_tier)
+            VALUES (?, ?, ?, ?, ?, '1.10', 'free')
+            ON CONFLICT(device_id) DO UPDATE SET
+                email = COALESCE(?, email),
+                last_seen = ?,
+                active_hours = active_hours + ?
+        """, (device_id, email, now_iso, now_iso, hours, email, now_iso, hours))
+        
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"[TELEMETRY] ✗ telemetry.db error: {e}")
+    
+    # 2. Save to LICENSE database (for referral tracking)
+    try:
+        if os.path.exists(LICENSE_DB):
+            init_license_db()
+            conn = sqlite3.connect(LICENSE_DB)
+            c = conn.cursor()
+            
+            # Upsert activations
+            c.execute("""
+                INSERT INTO activations (device_id, license_key, activated_at, last_validated, usage_hours, email)
+                VALUES (?, 'FREE_USER', ?, ?, ?, ?)
+                ON CONFLICT(device_id) DO UPDATE SET
+                    usage_hours = usage_hours + ?,
+                    last_validated = ?,
+                    email = COALESCE(?, email)
+            """, (device_id, now_iso, now_iso, hours, email, hours, now_iso, email))
+            
+            # Update referral progress if applicable
+            if email:
+                c.execute("""
+                    UPDATE referrals 
+                    SET usage_hours = usage_hours + ?,
+                        is_complete = CASE 
+                            WHEN usage_hours + ? >= 7 THEN 1 
+                            ELSE 0 
+                        END,
+                        completed_at = CASE 
+                            WHEN usage_hours + ? >= 7 AND is_complete = 0 THEN ?
+                            ELSE completed_at
+                        END
+                    WHERE referred_email = ? AND is_complete = 0
+                """, (hours, hours, hours, now_iso, email))
+            
+            conn.commit()
+            conn.close()
+            
+            print(f"[TELEMETRY] ✓ Saved {round(seconds/60, 1)} min to databases")
+    except Exception as e:
+        print(f"[TELEMETRY] ✗ license.db error: {e}")
+
+
+def get_active_hours():
+    """Get current session's accumulated hours (not yet saved)."""
+    return _session["accumulated_seconds"] / 3600.0
+
+# =============================================================================
+# BACKGROUND TELEMETRY
+# =============================================================================
+
+def send_ping():
+    """Periodic background save."""
+    if _session["accumulated_seconds"] > 0:
+        _save_usage_time(_session["accumulated_seconds"])
+        _session["accumulated_seconds"] = 0
+        _session["last_save_time"] = time.time()
+
+
+def start_telemetry():
+    """Start background telemetry thread."""
+    import threading
+    
+    # Initialize
+    init_db()
+    init_license_db()
+    
+    device_id = get_device_id()
+    email = get_email()
+    
+    # Register device immediately
+    try:
+        conn = sqlite3.connect(TELEMETRY_DB)
+        c = conn.cursor()
+        c.execute("""
+            INSERT OR IGNORE INTO stats 
+            (device_id, email, install_date, last_seen, active_hours, app_version, license_tier)
+            VALUES (?, ?, ?, ?, 0, '1.10', 'free')
+        """, (device_id, email, datetime.now().isoformat(), datetime.now().isoformat()))
         conn.commit()
         conn.close()
     except:
         pass
-
-# =============================================================================
-# SEND PING
-# =============================================================================
-
-def send_ping():
-    """Send anonymous stats to local database."""
-    global total_active_seconds
     
-    try:
-        device_id = get_device_id()
-        country = get_country_from_ip()
-        active_hours = get_active_hours()
-        
-        print(f"[TELEMETRY] Saving: device={device_id[:8]}..., hours={active_hours:.2f}, country={country}")
-        
-        save_stats_local(device_id, country, active_hours)
-        
-        # Reset active seconds after saving
-        total_active_seconds = 0
-        
-        print(f"[TELEMETRY] Saved successfully")
-    except Exception as e:
-        print(f"[TELEMETRY] Error: {e}")
-
-# =============================================================================
-# BACKGROUND THREAD
-# =============================================================================
-
-def start_telemetry():
-    """Start background telemetry."""
-    import threading
-    
-    init_db()
-    
-    # Initial ping to register this device
-    send_ping()
+    print(f"[TELEMETRY] ✓ Device: {device_id[:8]}... | Email: {email or 'Not set'}")
     
     def _ping_loop():
         while True:
@@ -263,4 +347,4 @@ def start_telemetry():
     
     thread = threading.Thread(target=_ping_loop, daemon=True, name="Telemetry")
     thread.start()
-    print("[TELEMETRY] Started (ping every 1 hour)")
+    print(f"[TELEMETRY] Started (saves every {SAVE_INTERVAL}s, background ping every {PING_INTERVAL//60}min)")
