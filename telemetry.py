@@ -134,6 +134,7 @@ def init_db():
     conn = sqlite3.connect(TELEMETRY_DB)
     c = conn.cursor()
     
+    # Main stats table
     c.execute("""
         CREATE TABLE IF NOT EXISTS stats (
             device_id TEXT PRIMARY KEY,
@@ -144,6 +145,17 @@ def init_db():
             active_hours REAL DEFAULT 0,
             app_version TEXT,
             license_tier TEXT DEFAULT 'free'
+        )
+    """)
+    
+    # Daily usage table (NEW - tracks per day)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS daily_usage (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            device_id TEXT,
+            date TEXT,
+            hours REAL DEFAULT 0,
+            UNIQUE(device_id, date)
         )
     """)
     
@@ -235,13 +247,15 @@ def _save_usage_time(seconds):
     
     print(f"[TELEMETRY] Saving {round(seconds, 1)} seconds ({round(hours * 60, 2)} min) for {email or device_id[:8]}")
     
-    # 1. Save to TELEMETRY database
+        # 1. Save to TELEMETRY database
     try:
         init_db()
         conn = sqlite3.connect(TELEMETRY_DB)
         c = conn.cursor()
         
-        # Upsert stats
+        today = datetime.now().strftime("%Y-%m-%d")
+        
+        # Update total stats
         c.execute("""
             INSERT INTO stats (device_id, email, install_date, last_seen, active_hours, app_version, license_tier)
             VALUES (?, ?, ?, ?, ?, '1.10', 'free')
@@ -250,6 +264,14 @@ def _save_usage_time(seconds):
                 last_seen = ?,
                 active_hours = active_hours + ?
         """, (device_id, email, now_iso, now_iso, hours, email, now_iso, hours))
+        
+        # Update DAILY stats (NEW)
+        c.execute("""
+            INSERT INTO daily_usage (device_id, date, hours)
+            VALUES (?, ?, ?)
+            ON CONFLICT(device_id, date) DO UPDATE SET
+                hours = hours + ?
+        """, (device_id, today, hours, hours))
         
         conn.commit()
         conn.close()

@@ -122,6 +122,26 @@ class AppPath(BaseModel):
 
 
 # =========================================================================
+# ROOT ENDPOINT
+# =========================================================================
+
+@app.get("/")
+def root():
+    """Root endpoint - API info."""
+    return {
+        "name": "Seven API",
+        "version": "1.0.0",
+        "status": "running",
+        "docs": "http://127.0.0.1:7777/api/docs",
+        "endpoints": {
+            "status": "/api/status",
+            "chat": "/api/chat",
+            "license": "/api/license/status",
+            "usage": "/api/usage/stats"
+        }
+    }
+
+# =========================================================================
 # STATUS ENDPOINTS
 # =========================================================================
 
@@ -1107,11 +1127,10 @@ def get_usage_stats_fixed():
 
 @app.get("/api/usage/history")
 def get_usage_history_fixed():
-    """Get usage history for last 7 days."""
+    """Get actual daily usage for last 7 days."""
     import sqlite3
     from datetime import datetime, timedelta
     
-    # Get device_id
     device_id = None
     try:
         import license as license_module
@@ -1119,40 +1138,52 @@ def get_usage_history_fixed():
     except:
         pass
     
-    total_hours = 0
+    # Build last 7 days list
+    history = []
+    for i in range(6, -1, -1):
+        date = (datetime.now() - timedelta(days=i))
+        history.append({
+            "date": date.strftime("%Y-%m-%d"),
+            "day": date.strftime("%a"),
+            "hours": 0.0,
+            "minutes": 0
+        })
     
-    # Get total hours from telemetry.db
+    # Get actual data from daily_usage table
     telemetry_db = "data/telemetry.db"
     if os.path.exists(telemetry_db) and device_id:
         try:
             conn = sqlite3.connect(telemetry_db)
             c = conn.cursor()
-            c.execute("SELECT active_hours FROM stats WHERE device_id = ?", (device_id,))
-            row = c.fetchone()
-            if row:
-                total_hours = row[0] or 0
+            
+            # Get last 7 days of daily usage
+            seven_days_ago = (datetime.now() - timedelta(days=6)).strftime("%Y-%m-%d")
+            
+            c.execute("""
+                SELECT date, hours FROM daily_usage
+                WHERE device_id = ? AND date >= ?
+                ORDER BY date ASC
+            """, (device_id, seven_days_ago))
+            
+            # Map actual data to history
+            actual_data = {row[0]: row[1] for row in c.fetchall()}
             conn.close()
-        except:
-            pass
-    
-    # Build history (for now, show all on today - can enhance later with daily tracking)
-    history = []
-    for i in range(6, -1, -1):
-        date = datetime.now() - timedelta(days=i)
-        day_hours = 0
+            
+            # Fill in actual hours
+            for day in history:
+                if day["date"] in actual_data:
+                    day["hours"] = round(actual_data[day["date"]], 3)
+                    day["minutes"] = int(actual_data[day["date"]] * 60)
         
-        # Show total on today
-        if i == 0:
-            day_hours = total_hours
-        
-        history.append({
-            "date": date.strftime("%Y-%m-%d"),
-            "day": date.strftime("%a"),
-            "hours": round(day_hours, 2),
-            "minutes": int(day_hours * 60)
-        })
+        except Exception as e:
+            print(f"[API] Usage history error: {e}")
     
-    return {"history": history, "total_hours": round(total_hours, 2)}
+    total_hours = sum(d["hours"] for d in history)
+    
+    return {
+        "history": history,
+        "total_hours": round(total_hours, 3)
+    }
 
 
 @app.get("/api/voice-control/words")
