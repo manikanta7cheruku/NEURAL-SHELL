@@ -1,7 +1,7 @@
 """
 =============================================================================
 PROJECT SEVEN - telemetry.py (Usage Time Tracking)
-Version: 1.2 - FIXED: Proper real-time usage tracking
+Version: 1.3 - With server sync
 =============================================================================
 """
 
@@ -23,7 +23,7 @@ LICENSE_DB = os.path.join(DATA_DIR, "license.db")
 
 PING_INTERVAL = 3600  # Background ping every hour
 
-# Session tracking - using list to allow mutation in nested functions
+# Session tracking
 _session = {
     "start_time": None,
     "last_activity": None,
@@ -295,6 +295,14 @@ def _save_usage_time(seconds):
             print(f"[TELEMETRY] ✓ Saved {round(seconds/60, 1)} min to databases")
     except Exception as e:
         print(f"[TELEMETRY] ✗ license.db error: {e}")
+    
+    # 3. Sync to server (privacy-safe analytics)
+    try:
+        import server_sync
+        server_sync.send_usage_ping(device_id, hours, email)
+    except Exception as e:
+        # Server offline or not configured - that's OK, local data already saved
+        pass
 
 
 def get_active_hours():
@@ -337,6 +345,14 @@ def start_telemetry():
         conn.close()
     except:
         pass
+    
+    # Try to register on server (if available)
+    try:
+        import server_sync
+        country = get_country_from_ip()
+        server_sync.register_device(device_id, email, country)
+    except:
+        pass  # Server not available, that's OK
     
     print(f"[TELEMETRY] ✓ Device: {device_id[:8]}... | Email: {email or 'Not set'}")
     

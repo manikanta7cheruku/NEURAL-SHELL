@@ -775,6 +775,15 @@ class ReferralRegister(BaseModel):
     code: str
     email: str
 
+def get_device_id():
+    """Get device ID."""
+    try:
+        import license as license_module
+        return license_module.get_device_id()
+    except:
+        import telemetry
+        return telemetry.get_device_id()
+
 
 @app.post("/api/license/activate")
 def activate_license_endpoint(req: LicenseActivate):
@@ -864,24 +873,86 @@ def get_pricing():
 def get_referral_stats_endpoint():
     """Get referral statistics."""
     email = telemetry.get_email()
+    
     if not email:
-        raise HTTPException(status_code=400, detail="Email required for referral system")
+        # Try server
+        try:
+            import server_sync
+            device_id = get_device_id()
+            stats = server_sync.get_referral_stats(device_id=device_id)
+            if stats:
+                return stats
+        except:
+            pass
+        
+        return {
+            "referral_code": None,
+            "completed_referrals": 0,
+            "pending_referrals": 0
+        }
     
-    stats = license_module.get_referral_stats(email)
-    return stats
+    # Try local first
+    try:
+        import license as license_module
+        stats = license_module.get_referral_stats(email)
+        if stats:
+            return stats
+    except:
+        pass
+    
+    # Try server
+    try:
+        import server_sync
+        stats = server_sync.get_referral_stats(email=email)
+        if stats:
+            return stats
+    except:
+        pass
+    
+    return {
+        "referral_code": None,
+        "completed_referrals": 0,
+        "pending_referrals": 0
+    }
 
 
-@app.post("/api/referral/register")
-def register_referral_endpoint(req: ReferralRegister):
-    """Register a referral code."""
-    device_id = license_module.get_device_id()
-    success, message = license_module.register_referral(req.code, req.email, device_id)
+@app.post("/api/referral/create")
+def create_referral_endpoint(data: dict):
+    """Create a referral code."""
+    email = data.get("email") or telemetry.get_email()
     
-    if success:
-        telemetry.save_email(req.email)
-        return {"success": True, "message": message}
-    else:
-        raise HTTPException(status_code=400, detail=message)
+    if not email or "@" not in email:
+        raise HTTPException(status_code=400, detail="Valid email required")
+    
+    # Save email locally
+    telemetry.save_email(email)
+    
+    # Create on server
+    try:
+        import server_sync
+        device_id = get_device_id()
+        result = server_sync.create_referral(device_id, email)
+        
+        if result:
+            return {
+                "success": True,
+                "referral_code": result["referral_code"],
+                "referral_link": result["referral_link"]
+            }
+    except Exception as e:
+        print(f"[API] Server referral creation failed: {e}")
+    
+    # Fallback to local
+    try:
+        import license as license_module
+        code = license_module.create_referral_code(email)
+        return {
+            "success": True,
+            "referral_code": code,
+            "referral_link": f"https://seven.app/ref/{code}"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # =========================================================================
