@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import Sidebar from './components/Sidebar';
 import TitleBar from './components/TitleBar';
+import UpdateBanner from './components/UpdateBanner';
 import Home from './pages/Home';
 import Console from './pages/Console';
 import Commands from './pages/Commands';
@@ -13,11 +14,12 @@ import Plans from './pages/Plans';
 import Purchase from './pages/Purchase';
 import Blog from './pages/Blog';
 import Feedback from './pages/Feedback';
+import Updates from './pages/Updates';
 import Setup from './pages/Setup';
 import useLicense from './stores/useLicense';
 import useConfig from './stores/useConfig';
+import useUpdate from './stores/useUpdate';
 
-// ── Exposes navigate globally for Electron IPC ──
 function NavigationHelper() {
   const navigate = useNavigate();
   useEffect(() => {
@@ -27,26 +29,35 @@ function NavigationHelper() {
   return null;
 }
 
-// ── Main app layout (post-setup) ──
 function MainApp() {
+  // Trigger background update check once on mount
+  const { fetchStatus: fetchUpdateStatus } = useUpdate();
+  useEffect(() => {
+    // Check after 15s so app load is not affected
+    const timer = setTimeout(fetchUpdateStatus, 15000);
+    return () => clearTimeout(timer);
+  }, []);
+
   return (
     <div className="flex h-screen bg-s-bg text-white overflow-hidden flex-col">
       <TitleBar />
+      <UpdateBanner />
       <div className="flex flex-1 overflow-hidden">
         <Sidebar />
         <main className="flex-1 overflow-y-auto">
           <Routes>
-            <Route path="/" element={<Home />} />
-            <Route path="/console" element={<Console />} />
-            <Route path="/commands" element={<Commands />} />
-            <Route path="/memory" element={<Memory />} />
-            <Route path="/schedules" element={<Schedules />} />
-            <Route path="/knowledge" element={<Knowledge />} />
-            <Route path="/settings" element={<Settings />} />
-            <Route path="/plans" element={<Plans />} />
-            <Route path="/purchase" element={<Purchase />} />
-            <Route path="/blog" element={<Blog />} />
-            <Route path="/feedback" element={<Feedback />} />
+            <Route path="/"          element={<Home />}     />
+            <Route path="/console"   element={<Console />}  />
+            <Route path="/commands"  element={<Commands />} />
+            <Route path="/memory"    element={<Memory />}   />
+            <Route path="/schedules" element={<Schedules />}/>
+            <Route path="/knowledge" element={<Knowledge />}/>
+            <Route path="/settings"  element={<Settings />} />
+            <Route path="/plans"     element={<Plans />}    />
+            <Route path="/purchase"  element={<Purchase />} />
+            <Route path="/blog"      element={<Blog />}     />
+            <Route path="/feedback"  element={<Feedback />} />
+            <Route path="/updates"   element={<Updates />}  />
           </Routes>
         </main>
       </div>
@@ -54,25 +65,22 @@ function MainApp() {
   );
 }
 
-// ── Root — decides wizard vs main app ──
 export default function App() {
   const { fetchStatus } = useLicense();
   const { config, fetch: fetchConfig, loading: configLoading } = useConfig();
-  const [setupDone, setSetupDone] = useState(null); // null = checking
+  const [setupDone, setSetupDone] = useState(null);
 
   useEffect(() => {
     fetchConfig();
     fetchStatus();
   }, []);
 
-  // Once config is loaded, check setup flag
   useEffect(() => {
     if (!configLoading && config !== null) {
       setSetupDone(config.setup_complete === true);
     }
   }, [config, configLoading]);
 
-  // Loading state — single dot, no flash
   if (setupDone === null) {
     return (
       <div className="h-screen w-screen bg-s-bg flex items-center justify-center">
@@ -81,7 +89,6 @@ export default function App() {
     );
   }
 
-  // First launch — wizard (no sidebar, no titlebar, standalone)
   if (!setupDone) {
     return (
       <BrowserRouter>
@@ -90,7 +97,6 @@ export default function App() {
     );
   }
 
-  // Normal app
   return (
     <BrowserRouter>
       <NavigationHelper />

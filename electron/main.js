@@ -496,6 +496,32 @@ ipcMain.on('set-ignore-mouse', (event, ignore) => {
   }
 });
 
+
+// ── Update installer (Phase 6) ──
+ipcMain.on('run-installer', (event, installerPath) => {
+  const { exec } = require('node:child_process');
+  const path = require('node:path');
+  const fs = require('node:fs');
+
+  console.log('[UPDATE] Running installer:', installerPath);
+
+  if (!fs.existsSync(installerPath)) {
+    console.error('[UPDATE] Installer not found:', installerPath);
+    return;
+  }
+
+  // Launch installer detached so it survives app quit
+  const child = exec(`"${installerPath}"`, { detached: true });
+  child.unref();
+
+  // Give installer 1 second to start, then quit Seven
+  setTimeout(() => {
+    app.isQuitting = true;
+    stopPython();
+    app.quit();
+  }, 1000);
+});
+
 // ============================================================================
 // APP LIFECYCLE
 // ============================================================================

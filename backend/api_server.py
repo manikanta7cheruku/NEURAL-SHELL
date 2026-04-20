@@ -1478,6 +1478,67 @@ def get_available_voices():
         raise HTTPException(status_code=500, detail=str(e))
     
 # =========================================================================
+# UPDATE SYSTEM ENDPOINTS (Phase 6)
+# =========================================================================
+
+@app.get("/api/update/status")
+def get_update_status():
+    """
+    Current update state — polled by React frontend every 3 seconds
+    when update panel is open or download is in progress.
+    """
+    from backend.updater import get_state, _read_current_version
+    state = get_state()
+    return {
+        **state,
+        "current_version": _read_current_version(),
+    }
+
+
+@app.post("/api/update/check")
+def trigger_update_check():
+    """Force an immediate update check (user clicked 'Check Now')."""
+    from backend.updater import check_for_updates
+    check_for_updates(force=True)
+    return {"success": True, "message": "Check started"}
+
+
+@app.post("/api/update/download")
+def trigger_download():
+    """
+    Start downloading the update in background.
+    Only valid when update_available is True and download_mode is 'manual'.
+    """
+    from backend import updater
+    state = updater.get_state()
+
+    if not state["update_available"]:
+        raise HTTPException(status_code=400, detail="No update available")
+    if state["downloading"]:
+        raise HTTPException(status_code=400, detail="Download already in progress")
+
+    updater.start_download_thread()
+    return {"success": True, "message": "Download started"}
+
+
+@app.post("/api/update/install")
+def trigger_install():
+    """
+    Signal Electron to run the downloaded installer and quit the app.
+    Only valid when download_path exists.
+    """
+    from backend import updater
+    state = updater.get_state()
+
+    path = state.get("download_path")
+    if not path or not os.path.exists(path):
+        raise HTTPException(status_code=400, detail="Installer not downloaded yet")
+
+    # We return the path — Electron picks it up via IPC
+    # The React frontend calls window.electron.runInstaller(path)
+    return {"success": True, "installer_path": path}
+    
+# =========================================================================
 # SERVER LAUNCHER — Called from main.py
 # =========================================================================
 
