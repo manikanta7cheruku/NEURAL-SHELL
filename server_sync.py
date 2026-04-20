@@ -36,11 +36,12 @@ def _async_post(endpoint, data):
     threading.Thread(target=_post, args=(endpoint, data), daemon=True).start()
 
 
-def register_device(device_id, email=None, country=None, referral_code=None):
-    """Register device on server."""
+def register_device(device_id, email=None, name=None, country=None, referral_code=None):
+    """Register or update device on server. Includes name for admin dashboard."""
     _async_post("/api/register", {
         "device_id": device_id,
         "email": email,
+        "name": name,
         "country": country,
         "referral_code": referral_code
     })

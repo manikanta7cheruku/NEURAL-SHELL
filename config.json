@@ -4,14 +4,14 @@
         "creator": "Team Seven",
         "wake_words": [
             "seven",
-            "hey seven",
-            "wake up"
+            "hey seven"
         ],
         "stop_words": [
             "stop",
             "shut up",
             "pause"
-        ]
+        ],
+        "user_name": "Cheruku"
     },
     "brain": {
         "model_name": "llama3",
@@ -148,7 +148,10 @@
         "update_server": "github",
         "channel": "stable"
     },
-    "setup_complete": false,
+    "setup_complete": true,
     "version": "1.10",
-    "email": "jacksonnote@gmail.com"
+    "email": "manikanta@gmail.com",
+    "voice": {
+        "voice_index": 1
+    }
 }

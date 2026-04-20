@@ -1302,6 +1302,181 @@ def get_completed_pending_referrals():
         "almost_complete": almost_complete
     }
 
+
+# =========================================================================
+# SETUP WIZARD ENDPOINTS (Phase 5)
+# =========================================================================
+
+class SetupCompleteRequest(BaseModel):
+    name: str
+    email: str
+    referral_code: Optional[str] = ""
+    wake_word: Optional[str] = "seven"
+    voice_index: Optional[int] = 0
+    model_name: Optional[str] = ""
+
+class VoicePreviewRequest(BaseModel):
+    voice_index: Optional[int] = 0
+
+
+@app.post("/api/setup/complete")
+def complete_setup(req: SetupCompleteRequest):
+    """
+    Called when user finishes setup wizard.
+    Saves all preferences + marks setup_complete: true.
+    Also syncs name + email to Railway admin dashboard.
+    """
+    import config
+
+    # Validate required fields
+    name = req.name.strip()
+    email = req.email.strip()
+
+    if not name:
+        raise HTTPException(status_code=400, detail="Name is required")
+    if not email or "@" not in email or "." not in email:
+        raise HTTPException(status_code=400, detail="Valid email is required")
+
+    # Build config updates
+    wake = req.wake_word.lower().strip() if req.wake_word else "seven"
+
+    updates = {
+        "setup_complete": True,
+        "email": email,
+        "identity": {
+            **config.KEY.get("identity", {}),
+            "user_name": name,
+            "wake_words": [wake, f"hey {wake}"],
+        },
+        "voice": {
+            "voice_index": req.voice_index,
+        },
+    }
+
+    if req.model_name:
+        updates["brain"] = {
+            **config.KEY.get("brain", {}),
+            "model_name": req.model_name,
+        }
+
+    success = config.update_config(updates)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to save configuration")
+
+    # Save email to telemetry (data/email.txt)
+    try:
+        import telemetry
+        telemetry.save_email(email)
+    except Exception:
+        pass
+
+    # Sync name + email to Railway admin dashboard
+    try:
+        import server_sync
+        import license as license_module
+        device_id = license_module.get_device_id()
+
+        # Register/update device on server with name + email
+        server_sync.register_device(
+            device_id=device_id,
+            email=email,
+            name=name,                         # sent to server
+            referral_code=req.referral_code or None
+        )
+    except Exception as e:
+        print(f"[SETUP] Server sync warning: {e}")
+        # Don't fail setup if server is unreachable
+
+    # Register referral if provided
+    if req.referral_code and req.referral_code.strip():
+        try:
+            import server_sync
+            import license as license_module
+            device_id = license_module.get_device_id()
+            server_sync.register_referral(
+                device_id=device_id,
+                referral_code=req.referral_code.strip(),
+                email=email
+            )
+        except Exception:
+            pass
+
+    return {
+        "success": True,
+        "message": f"Welcome to Seven, {name}.",
+    }
+
+
+@app.post("/api/setup/preview-voice")
+def preview_voice(req: VoicePreviewRequest):
+    """
+    Plays a short TTS sample using selected voice index.
+    Runs in a daemon thread — API returns immediately.
+    """
+    import threading
+
+    def _speak():
+        try:
+            import pyttsx3
+            engine = pyttsx3.init()
+            voices = engine.getProperty('voices')
+            if voices and req.voice_index < len(voices):
+                engine.setProperty('voice', voices[req.voice_index].id)
+            engine.setProperty('rate', 185)
+            engine.setProperty('volume', 1.0)
+            engine.say("Hello. I am Seven. Your private AI assistant.")
+            engine.runAndWait()
+        except Exception as e:
+            print(f"[SETUP] Voice preview error: {e}")
+
+    threading.Thread(target=_speak, daemon=True).start()
+    return {"success": True}
+
+
+@app.get("/api/setup/voices")
+def get_available_voices():
+    """
+    Returns all available Windows TTS voices.
+    Called on Step 3 (Personalize) mount.
+    """
+    try:
+        import pyttsx3
+        engine = pyttsx3.init()
+        voices = engine.getProperty('voices')
+
+        result = []
+        for i, v in enumerate(voices):
+            raw = v.name or f"Voice {i}"
+            # Strip Microsoft prefix and Desktop suffix
+            # "Microsoft Zira Desktop - English (United States)" → "Zira"
+            clean = raw.replace("Microsoft ", "")
+            clean = clean.split(" Desktop")[0].split(" -")[0].strip()
+
+            # Detect gender by common name patterns
+            female_names = ["zira", "hazel", "helena", "linda", "susan", "eva",
+                            "aria", "jenny", "michelle", "emma"]
+            gender = "Female" if any(n in clean.lower() for n in female_names) else "Male"
+
+            # Detect language
+            lang = "English"
+            if "(" in raw and ")" in raw:
+                lang_raw = raw.split("(")[-1].split(")")[0]
+                lang = lang_raw.strip()
+
+            result.append({
+                "index": i,
+                "name": clean,
+                "full_name": raw,
+                "gender": gender,
+                "language": lang,
+            })
+
+        engine.stop()
+        return {"voices": result, "count": len(result)}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
 # =========================================================================
 # SERVER LAUNCHER — Called from main.py
 # =========================================================================
