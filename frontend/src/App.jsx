@@ -1,24 +1,24 @@
 import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
-import Sidebar from './components/Sidebar';
-import TitleBar from './components/TitleBar';
-import UpdateBanner from './components/UpdateBanner';
-import Home from './pages/Home';
-import Console from './pages/Console';
-import Commands from './pages/Commands';
-import Memory from './pages/Memory';
-import Schedules from './pages/Schedules';
-import Knowledge from './pages/Knowledge';
-import Settings from './pages/Settings';
-import Plans from './pages/Plans';
-import Purchase from './pages/Purchase';
-import Blog from './pages/Blog';
-import Feedback from './pages/Feedback';
-import Updates from './pages/Updates';
-import Setup from './pages/Setup';
-import useLicense from './stores/useLicense';
-import useConfig from './stores/useConfig';
-import useUpdate from './stores/useUpdate';
+import Sidebar        from './components/Sidebar';
+import TitleBar       from './components/TitleBar';
+import UpdateBanner   from './components/UpdateBanner';
+import Home           from './pages/Home';
+import Console        from './pages/Console';
+import Commands       from './pages/Commands';
+import Memory         from './pages/Memory';
+import Schedules      from './pages/Schedules';
+import Knowledge      from './pages/Knowledge';
+import Settings       from './pages/Settings';
+import Plans          from './pages/Plans';
+import Purchase       from './pages/Purchase';
+import Blog           from './pages/Blog';
+import Feedback       from './pages/Feedback';
+import Updates        from './pages/Updates';
+import Setup          from './pages/Setup';
+import useLicense     from './stores/useLicense';
+import useConfig      from './stores/useConfig';
+import useUpdate      from './stores/useUpdate';
 
 function NavigationHelper() {
   const navigate = useNavigate();
@@ -30,11 +30,9 @@ function NavigationHelper() {
 }
 
 function MainApp() {
-  // Trigger background update check once on mount
   const { fetchStatus: fetchUpdateStatus } = useUpdate();
   useEffect(() => {
-    // Check after 15s so app load is not affected
-    const timer = setTimeout(fetchUpdateStatus, 15000);
+    const timer = setTimeout(fetchUpdateStatus, 15_000);
     return () => clearTimeout(timer);
   }, []);
 
@@ -66,9 +64,9 @@ function MainApp() {
 }
 
 export default function App() {
-  const { fetchStatus } = useLicense();
+  const { fetchStatus }                      = useLicense();
   const { config, fetch: fetchConfig, loading: configLoading } = useConfig();
-  const [setupDone, setSetupDone] = useState(null);
+  const [setupDone, setSetupDone]            = useState(null);
 
   useEffect(() => {
     fetchConfig();
@@ -81,6 +79,7 @@ export default function App() {
     }
   }, [config, configLoading]);
 
+  // ── Loading splash ──
   if (setupDone === null) {
     return (
       <div className="h-screen w-screen bg-s-bg flex items-center justify-center">
@@ -89,6 +88,7 @@ export default function App() {
     );
   }
 
+  // ── Setup wizard (first launch) ──
   if (!setupDone) {
     return (
       <BrowserRouter>
@@ -96,7 +96,8 @@ export default function App() {
       </BrowserRouter>
     );
   }
-
+  
+  // ── Main app ──
   return (
     <BrowserRouter>
       <NavigationHelper />

@@ -42,3 +42,13 @@ Thumbs.db
 # Logs
 *.log
 npm-debug.log*
+
+# Phase 7 — Build artifacts
+python-dist/
+dist-electron/
+frontend/dist/
+
+# Temp files
+*.tmp
+OllamaSetup.exe
+SEVEN-Setup-*.exe

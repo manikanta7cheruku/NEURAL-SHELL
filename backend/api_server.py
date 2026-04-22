@@ -1537,6 +1537,83 @@ def trigger_install():
     # We return the path — Electron picks it up via IPC
     # The React frontend calls window.electron.runInstaller(path)
     return {"success": True, "installer_path": path}
+
+# =========================================================================
+# BOOTSTRAP ENDPOINTS (Phase 7 — First Launch Setup)
+# =========================================================================
+
+@app.get("/api/bootstrap/status")
+def get_bootstrap_status():
+    """
+    Poll this endpoint to get live environment setup progress.
+    React wizard Step 4 polls this every 500ms.
+    """
+    from backend.bootstrap import get_state
+    return get_state()
+
+
+@app.post("/api/bootstrap/start")
+def start_bootstrap():
+    """
+    Start the environment setup sequence.
+    Runs: pip install → Ollama download → Ollama start
+    Returns immediately. Poll /api/bootstrap/status for progress.
+    """
+    from backend import bootstrap
+    bootstrap.run_environment_setup()
+    return {"success": True, "message": "Bootstrap started"}
+
+
+@app.post("/api/bootstrap/pull-model")
+def pull_model_endpoint(data: dict):
+    """
+    Start pulling an Ollama model.
+    Body: {"model": "llama3"}
+    Poll /api/bootstrap/status for progress under model_pull key.
+    """
+    from backend import bootstrap
+    model = data.get("model", "").strip()
+    if not model:
+        raise HTTPException(status_code=400, detail="model name required")
+
+    bootstrap.run_model_pull(model)
+    return {"success": True, "model": model, "message": "Pull started"}
+
+
+@app.get("/api/bootstrap/check")
+def check_environment():
+    """
+    Quick environment health check.
+    Returns what is installed and what is missing.
+    Called when wizard Step 4 mounts to see if setup is needed.
+    """
+    from backend.bootstrap import (
+        check_packages_installed, is_ollama_installed, is_ollama_running
+    )
+
+    packages_ok = check_packages_installed()
+    ollama_installed = is_ollama_installed()
+    ollama_running = is_ollama_running()
+
+    return {
+        "packages_installed": packages_ok,
+        "ollama_installed": ollama_installed,
+        "ollama_running": ollama_running,
+        "needs_setup": not (packages_ok and ollama_installed)
+    }
+
+
+@app.post("/api/bootstrap/start-ollama")
+def start_ollama_endpoint():
+    """Start Ollama service if not already running."""
+    from backend import bootstrap
+    import threading
+
+    def _start():
+        bootstrap.start_ollama()
+
+    threading.Thread(target=_start, daemon=True).start()
+    return {"success": True, "message": "Starting Ollama"}
     
 # =========================================================================
 # SERVER LAUNCHER — Called from main.py

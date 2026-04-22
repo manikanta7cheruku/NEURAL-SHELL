@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import useSetup from '../../stores/useSetup';
 
 const MODELS = [
@@ -117,6 +117,63 @@ export default function StepModel() {
   } = useSetup();
 
   useEffect(() => { fetchHardware(); }, []);
+
+  // ── Model pull state ──
+  const [pulling,      setPulling]      = useState(false);
+  const [pullError,    setPullError]    = useState(null);
+  const [pullProgress, setPullProgress] = useState({ progress: 0, downloaded_gb: 0, total_gb: 0 });
+  const pullPollRef = useRef(null);
+
+  const stopPullPoll = () => {
+    if (pullPollRef.current) { clearInterval(pullPollRef.current); pullPollRef.current = null; }
+  };
+
+  const handleDownloadAndContinue = async () => {
+    if (!data.modelName) return;
+    setPulling(true);
+    setPullError(null);
+    setPullProgress({ progress: 0, downloaded_gb: 0, total_gb: 0 });
+
+    try {
+      await fetch('http://127.0.0.1:7777/api/bootstrap/pull-model', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: data.modelName }),
+      });
+
+      // Poll for progress
+      pullPollRef.current = setInterval(async () => {
+        try {
+          const r = await fetch('http://127.0.0.1:7777/api/bootstrap/status');
+          const state = await r.json();
+          const mp = state.model_pull;
+
+          setPullProgress({
+            progress:      mp?.progress      || 0,
+            downloaded_gb: mp?.downloaded_gb || 0,
+            total_gb:      mp?.total_gb      || 0,
+          });
+
+          if (mp?.status === 'done') {
+            stopPullPoll();
+            setPulling(false);
+            next(); // proceed to Step 6
+          }
+          if (mp?.status === 'error') {
+            stopPullPoll();
+            setPulling(false);
+            setPullError(mp?.error || 'Download failed');
+          }
+        } catch (e) { /* keep polling */ }
+      }, 800);
+
+    } catch (e) {
+      setPulling(false);
+      setPullError('Could not start download. Is the backend running?');
+    }
+  };
+
+  useEffect(() => () => stopPullPoll(), []);
 
   const handleSelect = (model) => {
     setField('modelName', model.ollama);
@@ -261,6 +318,41 @@ export default function StepModel() {
           );
         })}
       </div>
+
+      {/* ── Model pull progress ── */}
+      {pulling && (
+        <div className="px-5 py-4 rounded-xl bg-s-accent/[0.03] border border-s-accent/20 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="w-1.5 h-1.5 rounded-full bg-s-accent animate-pulse" />
+              <span className="text-xs text-s-text font-medium">
+                Downloading {MODELS.find(m => m.ollama === data.modelName)?.name}...
+              </span>
+            </div>
+            <span className="text-xs text-s-accent font-mono">
+              {pullProgress.downloaded_gb > 0
+                ? `${pullProgress.downloaded_gb} / ${pullProgress.total_gb} GB`
+                : `${pullProgress.progress}%`}
+            </span>
+          </div>
+          <div className="h-0.5 w-full bg-s-border rounded-full overflow-hidden">
+            <div
+              className="h-full bg-s-accent rounded-full transition-all duration-300"
+              style={{ width: `${pullProgress.progress}%` }}
+            />
+          </div>
+          <p className="text-[10px] text-s-text-4 font-light">
+            This download happens once. The model lives on your machine permanently.
+          </p>
+        </div>
+      )}
+
+      {pullError && (
+        <div className="px-4 py-3 rounded-xl bg-red-500/[0.05] border border-red-500/20">
+          <p className="text-xs text-red-400">Download failed: {pullError}</p>
+          <p className="text-[10px] text-s-text-4 mt-1">Check your connection and try again.</p>
+        </div>
+      )}
 
       {/* ── Nav ── */}
       <div className="flex gap-3 pt-2">
