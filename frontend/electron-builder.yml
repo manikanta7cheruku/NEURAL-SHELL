@@ -1,18 +1,17 @@
 # =============================================================================
 # PROJECT SEVEN — electron-builder configuration
-# Version: 2.0 (Phase 7 — Professional Installer)
+# Version: 2.4 — disable finish run, fix install path
 # =============================================================================
 
 appId: com.sevenlabs.seven
 productName: SEVEN
 copyright: "Copyright © 2025 Seven Labs. All rights reserved."
 
-# ── Output directory ──
 directories:
   output: dist-electron
   buildResources: electron
 
-# ── Files to pack into the Electron app ──
+# ── Files packed into asar ──
 files:
   - electron/**/*
   - frontend/dist/**/*
@@ -22,16 +21,16 @@ files:
   - "!node_modules"
   - "!venv"
   - "!dist-electron"
+  - "!python-dist"
+  - "!installer"
 
-# ── Extra resources (Python source + runtime) ──
-# These go into resources/app/ in the packaged build
+# ── Extra resources ──
 extraResources:
   - from: "."
     to: "app"
     filter:
       - "*.py"
       - "requirements.txt"
-      - "config.json"
       - "backend/**/*"
       - "ears/**/*"
       - "hands/**/*"
@@ -41,56 +40,43 @@ extraResources:
       - "web/**/*"
       - "!**/*.pyc"
       - "!**/__pycache__"
-  # Embedded Python runtime (built by scripts/prepare-python.js)
+      - "!node_modules/**"
+      - "!venv/**"
+      - "!dist-electron/**"
+      - "!python-dist/**"
+      - "!frontend/**"
+      - "!installer/**"
   - from: "python-dist/python"
     to: "app/python"
     filter:
       - "**/*"
 
-# ── Windows target ──
+# ── Windows — x64 only ──
 win:
   target:
     - target: nsis
       arch:
         - x64
   icon: electron/icon.ico
-  # Publisher shown in Windows security dialog
-  publisherName: "Seven Labs"
-  # Request user-level install (no UAC for app itself)
   requestedExecutionLevel: asInvoker
 
-# ── NSIS Installer configuration ──
+# ── Disable signing ──
+forceCodeSigning: false
+
+# ── NSIS ──
 nsis:
-  # Not one-click — user sees the installer screens
   oneClick: false
-
-  # Allow changing install directory
   allowToChangeInstallationDirectory: true
-
-  # Elevation for install directory write access
   allowElevation: true
-
-  # Shortcuts
   createDesktopShortcut: true
   createStartMenuShortcut: true
   shortcutName: SEVEN
-
-  # Per-user install (no admin required)
   perMachine: false
-
-  # Icons
   installerIcon: electron/icon.ico
   uninstallerIcon: electron/icon.ico
   installerHeaderIcon: electron/icon.ico
-
-  # License agreement screen
   license: LICENSE.txt
-
-  # Custom NSIS script for branding + uninstall dialog
   include: installer/seven.nsh
-
-  # Installer language
-  language: English
-
-  # Delete app directory on uninstall
   deleteAppDataOnUninstall: false
+  # ── Disable run on finish — user launches from desktop shortcut ──
+  runAfterFinish: false
