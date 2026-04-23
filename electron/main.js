@@ -75,6 +75,18 @@ function startPython() {
   const appSource    = getAppSourcePath();
   const pythonScript = path.join(appSource, 'main.py');
 
+  // ── CRITICAL DEBUG ──
+  console.log('[DEBUG] isDev:', isDev);
+  console.log('[DEBUG] app.isPackaged:', app.isPackaged);
+  console.log('[DEBUG] __dirname:', __dirname);
+  console.log('[DEBUG] resourcesPath:', process.resourcesPath);
+  console.log('[DEBUG] appSource:', appSource);
+  console.log('[DEBUG] pythonExe:', pythonExe);
+  console.log('[DEBUG] pythonScript:', pythonScript);
+  console.log('[DEBUG] pythonExe exists:', fs.existsSync(pythonExe));
+  console.log('[DEBUG] pythonScript exists:', fs.existsSync(pythonScript));
+  // ── END DEBUG ──
+
   console.log('[PYTHON] Executable:', pythonExe);
   console.log('[PYTHON] Script:    ', pythonScript);
   console.log('[PYTHON] CWD:       ', appSource);
@@ -90,15 +102,21 @@ function startPython() {
     stdio: ['pipe', 'pipe', 'pipe'],
     env: {
       ...process.env,
-      PYTHONIOENCODING:  'utf-8',
-      PYTHONUNBUFFERED:  '1',
+      PYTHONIOENCODING:   'utf-8',
+      PYTHONUNBUFFERED:   '1',
       SEVEN_ELECTRON_MODE: '1',
-      // Tell Python where the app source lives (used by bootstrap.py)
-      SEVEN_APP_PATH: appSource,
-      // Point Python to the embedded packages
+      SEVEN_APP_PATH:     appSource,
+      // PYTHONPATH must include:
+      // 1. appSource itself — so 'ears', 'brain', 'hands' etc are importable
+      // 2. site-packages — so pip-installed packages are importable
       PYTHONPATH: isDev
-        ? ''
-        : path.join(appSource, 'python', 'Lib', 'site-packages'),
+        ? appSource
+        : [
+            appSource,
+            path.join(appSource, 'python', 'Lib', 'site-packages'),
+            path.join(appSource, 'python', 'Lib'),
+            path.join(appSource, 'python'),
+          ].join(path.delimiter),
     }
   });
 
@@ -115,6 +133,18 @@ function startPython() {
   pythonProcess.on('close', (code) => {
     console.log(`[PYTHON] Exited with code ${code}`);
     pythonProcess = null;
+    
+    // If app is not quitting, Python exited for restart (post-setup)
+    // Restart it automatically after 2 seconds
+    if (!app.isQuitting) {
+      console.log('[PYTHON] Restarting Python backend in 2 seconds...');
+      setTimeout(() => {
+        if (!app.isQuitting) {
+          console.log('[PYTHON] Restarting...');
+          startPython();
+        }
+      }, 2000);
+    }
   });
 
   pythonProcess.on('error', (err) => {
@@ -137,7 +167,8 @@ function stopPython() {
 function waitForBackend() {
   return new Promise((resolve) => {
     const startTime = Date.now();
-    const timeout   = 120_000; // 2 minutes — model loading is slow
+    // const timeout   = 120_000; // 2 minutes — model loading is slow
+    const timeout = isDev ? 120000 : 30000; // 30s in packaged, 2min in dev
 
     const check = () => {
       const req = http.get('http://127.0.0.1:7777/api/status', (res) => {
@@ -193,19 +224,36 @@ function createMainWindow() {
     }
   });
 
-  if (isDev) {
-    mainWindow.loadURL('http://localhost:5173');
-  } else {
-    // In packaged mode, frontend/dist is copied into resources/app/frontend/dist
-    const indexPath = path.join(getAppSourcePath(), 'frontend', 'dist', 'index.html');
-    console.log('[WINDOW] Loading:', indexPath);
-    mainWindow.loadFile(indexPath);
-  }
+if (isDev) {
+  mainWindow.loadURL('http://localhost:5173');
+} else {
+  // In packaged app, electron-builder puts frontend/dist inside the asar
+  // The files section includes frontend/dist/**/* which goes into app.asar
+  // __dirname here is resources/app.asar/electron/
+  // So frontend/dist is at resources/app.asar/frontend/dist/
+  const indexPath = path.join(__dirname, '..', 'frontend', 'dist', 'index.html');
+  console.log('[WINDOW] Loading:', indexPath);
+
+  mainWindow.loadFile(indexPath).catch(err => {
+    console.error('[WINDOW] Failed to load index.html:', err);
+    // Fallback: try extraResources path
+    const fallback = path.join(process.resourcesPath, 'app', 'frontend', 'dist', 'index.html');
+    console.log('[WINDOW] Trying fallback:', fallback);
+    mainWindow.loadFile(fallback).catch(err2 => {
+      console.error('[WINDOW] Fallback also failed:', err2);
+      // Show error page so user sees something
+      mainWindow.loadURL('data:text/html,<h1 style="color:white;background:#09090b;padding:40px;font-family:monospace">SEVEN failed to load.<br><br>Please reinstall.</h1>');
+    });
+  });
+}
 
   mainWindow.once('ready-to-show', () => {
-    mainWindow.show();
-    mainWindow.focus();
-  });
+  mainWindow.show();
+  mainWindow.focus();
+  if (!isDev) {
+    mainWindow.webContents.openDevTools(); // temporary
+  }
+});
 
   mainWindow.on('close', (event) => {
     if (!app.isQuitting) {
@@ -453,6 +501,18 @@ if (!gotTheLock) {
     if (isAppReady) return;
     isAppReady = true;
 
+  // ── TEMPORARY DEBUG — remove after confirming paths ──
+  console.log('[DEBUG] __dirname:', __dirname);
+  console.log('[DEBUG] resourcesPath:', process.resourcesPath);
+  console.log('[DEBUG] appSourcePath:', getAppSourcePath());
+  const testIndex = path.join(__dirname, '..', 'frontend', 'dist', 'index.html');
+  console.log('[DEBUG] index.html exists:', fs.existsSync(testIndex), testIndex);
+  const testMain = path.join(getAppSourcePath(), 'main.py');
+  console.log('[DEBUG] main.py exists:', fs.existsSync(testMain), testMain);
+  const testPython = path.join(getAppSourcePath(), 'python', 'python.exe');
+  console.log('[DEBUG] python.exe exists:', fs.existsSync(testPython), testPython);
+  // ── END DEBUG ──
+
     console.log('[APP] Starting SEVEN Desktop...');
     console.log('[APP] Mode:', isDev ? 'DEVELOPMENT' : 'PACKAGED');
     console.log('[APP] Source path:', getAppSourcePath());
@@ -467,11 +527,28 @@ if (!gotTheLock) {
     console.log('[APP] Waiting for Python backend...');
     const ready = await waitForBackend();
 
-    if (!ready) {
-      console.error('[APP] Backend failed to start. Quitting.');
-      app.quit();
-      return;
-    }
+if (!ready) {
+  console.error('[APP] Backend failed to start. Quitting.');
+  // Show error window so user sees what happened
+  const errWin = new BrowserWindow({ 
+    width: 600, height: 300, 
+    backgroundColor: '#09090b',
+    frame: true,
+    webPreferences: { nodeIntegration: false }
+  });
+  errWin.loadURL(
+    'data:text/html,' + encodeURIComponent(`
+      <body style="background:#09090b;color:#fff;font-family:monospace;padding:40px">
+        <h2 style="color:#ff4444">SEVEN failed to start</h2>
+        <p>Python backend did not respond within 30 seconds.</p>
+        <p style="color:#888">Check that your antivirus is not blocking SEVEN.</p>
+        <p style="color:#888">Try running as Administrator.</p>
+        <p style="color:#555;font-size:11px">Install path: ${getAppSourcePath()}</p>
+      </body>
+    `)
+  );
+  return;
+}
 
     createMainWindow();
     createTray();

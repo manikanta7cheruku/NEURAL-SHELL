@@ -199,6 +199,19 @@ async function main() {
   // Install pip
   await installPip();
 
+    // ── Pre-install minimal packages needed for startup server ──
+  log('Pre-installing fastapi and uvicorn into embedded Python...');
+  const pipExe = path.join(PYTHON_DIR, 'Scripts', 'pip.exe');
+  try {
+    execSync(
+      `"${pipExe}" install fastapi uvicorn pyttsx3 --quiet --no-warn-script-location`,
+      { stdio: 'inherit', cwd: PYTHON_DIR }
+    );
+    ok('fastapi + uvicorn + pyttsx3 pre-installed');
+  } catch (e) {
+    warn('Pre-install failed: ' + e.message);
+  }
+
   // Verify
   const verified = verifyPython();
   if (!verified) {

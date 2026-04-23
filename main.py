@@ -21,12 +21,66 @@ ARCHITECTURE:
 =============================================================================
 """
 
+"""
+PROJECT SEVEN - main.py (The Controller)
+Version: 1.3 + Packaged App Support
+"""
+
+import sys
+import os
+
+# ── MUST BE FIRST — Packaged app path fix ──
+_app_path = os.environ.get('SEVEN_APP_PATH', '')
+if _app_path and _app_path not in sys.path:
+    sys.path.insert(0, _app_path)
+_cwd = os.getcwd()
+if _cwd not in sys.path:
+    sys.path.insert(0, _cwd)
+
+# ── Check if this is a fresh install (packages not yet installed) ──
+def _packages_ready():
+    """Check if core packages are installed."""
+    try:
+        import fastapi
+        import uvicorn
+        import speech_recognition
+        import pyttsx3
+        return True
+    except ImportError:
+        return False
+
+IS_ELECTRON_MODE = os.environ.get('SEVEN_ELECTRON_MODE') == '1'
+
+if not _packages_ready():
+    print("[SYSTEM] Core packages not installed — starting in pre-setup mode")
+    print("[SYSTEM] Waiting for setup wizard to install packages...")
+    
+    # Start minimal server so Electron/wizard can communicate
+    from backend.startup import run_minimal_server
+    run_minimal_server(host="127.0.0.1", port=7777)
+    
+    print("[SYSTEM] Minimal server started. Waiting for setup to complete...")
+    
+    # Keep alive until packages are installed and restart is triggered
+    try:
+        while True:
+            import time
+            time.sleep(1)
+    except KeyboardInterrupt:
+        os._exit(0)
+    
+    # If we get here, restart was triggered
+    os._exit(0)
+
+# ── Full startup — packages are available ──
+print("[SYSTEM] Packages ready — starting full Seven...")
+
 from ears import listen
 from ears.voice_id import identify_speaker, enroll_speaker, is_voice_id_enabled, get_enrolled_speakers
 from ears.core import listen_for_interrupt
 from backend.api_server import start_api_server, set_state as api_set_state
-from backend.admin_server import start_admin_server  # ADD THIS
-import telemetry  # ADD THIS
+from backend.admin_server import start_admin_server
+import telemetry
 import brain
 import hands.core as core
 import hands.system as system_mod
@@ -38,29 +92,13 @@ import brain_manager
 import gui
 import tkinter as tk
 import threading
-import os
-import sys
 import re
 import colorama
 from colorama import Fore
 import config
 
-# Phase 3: Check if running under Electron
-# Electron sets this environment variable in main.js
-IS_ELECTRON_MODE = os.environ.get('SEVEN_ELECTRON_MODE') == '1'
-
 if IS_ELECTRON_MODE:
     print("[SYSTEM] Running in Electron Desktop mode (GUI disabled)")
-
-# V1.1: Import the memory system
-from memory import seven_memory
-from memory.mood import mood_engine
-from memory.command_log import command_log
-
-colorama.init(autoreset=True)
-
-# Global UI Variable to update the window from the thread
-app_ui = None
 
 
 def seven_logic():

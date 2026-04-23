@@ -148,7 +148,7 @@
         "update_server": "github",
         "channel": "stable"
     },
-    "setup_complete": true,
+    "setup_complete": false,
     "version": "1.10",
     "email": "jacksonnote24@gmail.com",
     "voice": {
