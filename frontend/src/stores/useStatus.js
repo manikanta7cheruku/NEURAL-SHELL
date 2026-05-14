@@ -32,9 +32,9 @@ const useStatus = create((set, get) => ({
   },
 
   setLive: (data) => set({
-    listening: data.listening,
-    thinking: data.thinking,
-    speaking: data.speaking
+    listening: data.listening ?? false,
+    thinking:  data.thinking  ?? false,
+    speaking:  data.speaking  ?? false,
   }),
 
   label: () => {
@@ -54,31 +54,78 @@ const useStatus = create((set, get) => ({
   },
 }));
 
-// WebSocket connection
-let ws = null;
+// ── WebSocket with HTTP polling fallback ──
+let ws            = null;
+let wsFailCount   = 0;
+let pollInterval  = null;
+let wsEnabled     = true;
 
-function connect() {
-  if (ws) return;
+const MAX_WS_FAILS = 3; // after 3 fails, switch to HTTP polling permanently
 
-  ws = new WebSocket('ws://localhost:7777/ws/status');
-
-  ws.onmessage = (e) => {
-    try {
-      const data = JSON.parse(e.data);
-      useStatus.getState().setLive(data);
-    } catch {}
-  };
-
-  ws.onclose = () => {
-    ws = null;
-    setTimeout(connect, 2000);
-  };
-
-  ws.onerror = () => {
-    ws.close();
-  };
+function startPolling() {
+  if (pollInterval) return;
+  console.log('[STATUS] WebSocket unavailable — switching to HTTP polling');
+  pollInterval = setInterval(() => {
+    useStatus.getState().fetch();
+  }, 2000);
 }
 
-connect();
+function stopPolling() {
+  if (pollInterval) {
+    clearInterval(pollInterval);
+    pollInterval = null;
+  }
+}
+
+function connect() {
+  // If too many WS failures, use HTTP polling instead
+  if (!wsEnabled || wsFailCount >= MAX_WS_FAILS) {
+    startPolling();
+    return;
+  }
+
+  if (ws && ws.readyState === WebSocket.OPEN) return;
+
+  try {
+    // Use 127.0.0.1 not localhost — avoids IPv6 resolution issues in Electron
+    ws = new WebSocket('ws://127.0.0.1:7777/ws/status');
+
+    ws.onopen = () => {
+      wsFailCount = 0;
+      stopPolling();
+    };
+
+    ws.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        useStatus.getState().setLive(data);
+      } catch {}
+    };
+
+    ws.onclose = () => {
+      ws = null;
+      wsFailCount++;
+      if (wsFailCount >= MAX_WS_FAILS) {
+        // Give up on WebSocket, use polling
+        startPolling();
+      } else {
+        // Retry WebSocket after 3 seconds
+        setTimeout(connect, 3000);
+      }
+    };
+
+    ws.onerror = () => {
+      // onclose will fire after onerror, handles retry
+      if (ws) ws.close();
+    };
+
+  } catch (e) {
+    wsFailCount++;
+    setTimeout(connect, 3000);
+  }
+}
+
+// Start connection after short delay (let backend boot first)
+setTimeout(connect, 3000);
 
 export default useStatus;

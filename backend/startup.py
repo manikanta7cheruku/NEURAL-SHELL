@@ -2,26 +2,6 @@
 =============================================================================
 PROJECT SEVEN - backend/startup.py
 Minimal startup server for pre-setup state
-
-PURPOSE:
-    When packages are not yet installed (fresh install),
-    main.py cannot import ears/brain/etc.
-    This minimal FastAPI server starts INSTEAD, serves just enough
-    for the setup wizard to run bootstrap.py and install packages.
-    
-    After packages are installed and Ollama is ready,
-    the wizard calls /api/bootstrap/restart which restarts
-    the full main.py process.
-
-ENDPOINTS SERVED IN PRE-SETUP MODE:
-    GET  /api/status              ← so Electron knows backend is alive
-    GET  /api/config              ← so wizard reads setup_complete
-    GET  /api/bootstrap/check     ← check what is installed
-    POST /api/bootstrap/start     ← install packages + Ollama
-    GET  /api/bootstrap/status    ← live progress
-    POST /api/bootstrap/pull-model ← pull LLM model
-    POST /api/setup/complete      ← save wizard data
-    POST /api/bootstrap/restart   ← restart as full server
 =============================================================================
 """
 
@@ -30,17 +10,9 @@ import os
 import json
 import threading
 import time
-import subprocess
-
-# ── Minimal deps only — these are always available ──
-# fastapi and uvicorn are installed by bootstrap FIRST
-# so we need to handle the case where even they are missing
 
 def run_minimal_server(host="127.0.0.1", port=7777):
-    """
-    Try to start a minimal FastAPI server.
-    If FastAPI is not installed yet, use raw http.server instead.
-    """
+    """Start minimal FastAPI server or fall back to raw HTTP."""
     try:
         from fastapi import FastAPI
         from fastapi.middleware.cors import CORSMiddleware
@@ -57,75 +29,152 @@ def _start_fastapi_server(host, port):
     from fastapi.middleware.cors import CORSMiddleware
     import uvicorn
 
-    from backend.bootstrap import (
-        get_state, run_environment_setup, run_model_pull,
-        check_packages_installed, is_ollama_installed, is_ollama_running
+    app = FastAPI(
+        title="Seven Startup API",
+        docs_url="/api/docs",
+        redoc_url=None
     )
-
-    app = FastAPI(title="Seven Startup API")
 
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
+        allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
     )
 
+    # ── Root ──
+    @app.get("/")
+    def root():
+        return {
+            "name": "Seven Startup API",
+            "mode": "pre-setup",
+            "status": "running",
+            "docs": "http://127.0.0.1:7777/api/docs"
+        }
+
+    # ── Status ──
     @app.get("/api/status")
     def status():
         return {
-            "listening": False, "speaking": False, "thinking": False,
-            "mode": "pre-setup", "version": _get_version()
+            "listening": False,
+            "speaking": False,
+            "thinking": False,
+            "mode": "pre-setup",
+            "version": _get_version()
         }
 
+    # ── Config — always force setup wizard ──
     @app.get("/api/config")
     def get_config():
-        return _load_config()
+        cfg = _load_config()
+        cfg["setup_complete"] = False
+        cfg["pre_setup_mode"] = True
+        return cfg
 
-    @app.get("/api/bootstrap/check")
-    def bootstrap_check():
+    # ── License stub ──
+    @app.get("/api/license/status")
+    def license_status():
         return {
-            "packages_installed": check_packages_installed(),
-            "ollama_installed":   is_ollama_installed(),
-            "ollama_running":     is_ollama_running(),
-            "needs_setup":        True
+            "tier": "free",
+            "valid": True,
+            "expires_at": None,
+            "days_until_expiry": None,
+            "offline_mode": False,
+            "offline_days": 0,
+            "features": {},
+            "license_key": "",
+            "is_trial": False,
+            "device_id": "unknown"
         }
 
-    @app.post("/api/bootstrap/start")
-    def bootstrap_start():
-        run_environment_setup()
-        return {"success": True}
+    # ── Usage stubs ──
+    @app.get("/api/usage/stats")
+    def usage_stats():
+        return {
+            "total_hours": 0,
+            "total_minutes": 0,
+            "display": "0 min",
+            "email": None,
+            "device_id": None,
+            "last_seen": None
+        }
 
-    @app.get("/api/bootstrap/status")
-    def bootstrap_status():
-        return get_state()
+    @app.get("/api/usage/history")
+    def usage_history():
+        return {"history": [], "total_hours": 0}
 
-    @app.post("/api/bootstrap/pull-model")
-    def pull_model(data: dict):
-        model = data.get("model", "").strip()
-        if not model:
-            return {"error": "model required"}
-        run_model_pull(model)
-        return {"success": True, "model": model}
+    # ── Update stubs ──
+    @app.get("/api/update/status")
+    def update_status():
+        return {
+            "update_available": False,
+            "checking": False,
+            "downloading": False,
+            "download_progress": 0,
+            "download_path": None,
+            "error": None,
+            "info": None,
+            "current_version": _get_version()
+        }
 
-    @app.post("/api/setup/voices")
-    def get_voices():
-        return {"voices": [], "count": 0}
+    @app.post("/api/update/check")
+    def update_check():
+        return {"success": True, "message": "Update check skipped in pre-setup mode"}
 
+    @app.post("/api/update/download")
+    def update_download():
+        return {"success": False, "message": "Updates disabled in pre-setup mode"}
+
+    @app.post("/api/update/install")
+    def update_install():
+        return {"success": False, "message": "No installer in pre-setup mode"}
+
+    # ── Hardware ──
+    @app.get("/api/hardware")
+    def get_hardware():
+        try:
+            import brain_manager
+            hw = brain_manager.get_hardware_summary()
+            rec, tier, reason = brain_manager.recommend_model(hw)
+            installed = brain_manager.get_installed_models()
+            return {
+                "gpu": hw["gpu"], "ram_gb": hw["ram_gb"],
+                "cpu": hw["cpu"], "os": hw["os"],
+                "recommended_model": rec,
+                "recommended_tier": tier,
+                "recommendation_reason": reason,
+                "installed_models": installed
+            }
+        except Exception as e:
+            return {
+                "gpu": {"available": False}, "ram_gb": 8,
+                "cpu": {}, "os": "Windows",
+                "recommended_model": "tinyllama",
+                "recommended_tier": "minimum",
+                "recommendation_reason": str(e),
+                "installed_models": []
+            }
+
+    # ── Voice stubs ──
     @app.get("/api/setup/voices")
-    def get_voices_get():
+    def get_voices():
         try:
             import pyttsx3
             engine = pyttsx3.init()
             voices = engine.getProperty('voices')
             result = []
             for i, v in enumerate(voices or []):
-                raw = v.name or f"Voice {i}"
+                raw   = v.name or f"Voice {i}"
                 clean = raw.replace("Microsoft ", "").split(" Desktop")[0].split(" -")[0].strip()
-                result.append({"index": i, "name": clean, "full_name": raw,
-                               "gender": "Female" if any(n in clean.lower()
-                               for n in ["zira","hazel","aria","jenny"]) else "Male",
-                               "language": "English"})
+                result.append({
+                    "index": i, "name": clean, "full_name": raw,
+                    "gender": "Female" if any(
+                        n in clean.lower()
+                        for n in ["zira", "hazel", "aria", "jenny"]
+                    ) else "Male",
+                    "language": "English"
+                })
             engine.stop()
             return {"voices": result, "count": len(result)}
         except Exception as e:
@@ -149,6 +198,7 @@ def _start_fastapi_server(host, port):
         threading.Thread(target=_speak, daemon=True).start()
         return {"success": True}
 
+    # ── Setup complete ──
     @app.post("/api/setup/complete")
     def setup_complete(data: dict):
         try:
@@ -169,7 +219,6 @@ def _start_fastapi_server(host, port):
                 cfg["brain"]["model_name"] = data["model_name"]
             _save_config(cfg)
 
-            # Save email
             try:
                 data_dir = _get_data_dir()
                 with open(os.path.join(data_dir, "email.txt"), "w") as f:
@@ -181,54 +230,71 @@ def _start_fastapi_server(host, port):
         except Exception as e:
             return {"success": False, "error": str(e)}
 
-    @app.get("/api/hardware")
-    def get_hardware():
-        try:
-            import brain_manager
-            hw  = brain_manager.get_hardware_summary()
-            rec, tier, reason = brain_manager.recommend_model(hw)
-            installed = brain_manager.get_installed_models()
-            return {"gpu": hw["gpu"], "ram_gb": hw["ram_gb"], "cpu": hw["cpu"],
-                    "os": hw["os"], "recommended_model": rec,
-                    "recommended_tier": tier, "recommendation_reason": reason,
-                    "installed_models": installed}
-        except Exception as e:
-            return {"gpu": {"available": False}, "ram_gb": 8, "cpu": {},
-                    "os": "Windows", "recommended_model": "tinyllama",
-                    "recommended_tier": "minimum", "recommendation_reason": str(e),
-                    "installed_models": []}
+    # ── Bootstrap endpoints ──
+    @app.get("/api/bootstrap/check")
+    def bootstrap_check():
+        from backend.bootstrap import (
+            check_packages_installed, is_ollama_installed, is_ollama_running
+        )
+        return {
+            "packages_installed": check_packages_installed(),
+            "ollama_installed":   is_ollama_installed(),
+            "ollama_running":     is_ollama_running(),
+            "needs_setup":        True
+        }
 
+    @app.post("/api/bootstrap/start")
+    def bootstrap_start():
+        from backend.bootstrap import run_environment_setup
+        run_environment_setup()
+        return {"success": True}
+
+    @app.get("/api/bootstrap/status")
+    def bootstrap_status():
+        from backend.bootstrap import get_state
+        return get_state()
+
+    @app.post("/api/bootstrap/pull-model")
+    def pull_model(data: dict):
+        from backend.bootstrap import run_model_pull
+        model = data.get("model", "").strip()
+        if not model:
+            return {"error": "model required"}
+        run_model_pull(model)
+        return {"success": True, "model": model}
+
+    @app.post("/api/bootstrap/start-ollama")
+    def start_ollama_endpoint():
+        from backend.bootstrap import start_ollama as _start_ollama
+        threading.Thread(target=_start_ollama, daemon=True).start()
+        return {"success": True, "message": "Starting Ollama"}
+
+    # ── WebSocket stub (GET fallback) ──
+    @app.get("/ws/status")
+    def ws_status_stub():
+        return {"listening": False, "thinking": False, "speaking": False}
+
+    # ── RESTART — must be last, inside this function ──
     @app.post("/api/bootstrap/restart")
     def restart_full():
-        """
-        Called after setup is complete.
-        Signals the process to restart with full main.py.
-        Electron will detect the backend went down and restart Python.
-        """
-        def _restart():
+        """Exit cleanly — Electron restarts Python in full mode."""
+        def _do_restart():
             time.sleep(1)
-            os._exit(0)  # Force exit — Electron restarts Python
-        threading.Thread(target=_restart, daemon=True).start()
+            print("[STARTUP] Bootstrap complete. Restarting in full mode...")
+            sys.stdout.flush()
+            os._exit(0)
+        threading.Thread(target=_do_restart, daemon=True).start()
         return {"success": True, "message": "Restarting..."}
 
-    # WebSocket stub
-    from fastapi import WebSocket
-    import asyncio
-
-    @app.websocket("/ws/status")
-    async def ws_status(websocket: WebSocket):
-        await websocket.accept()
-        try:
-            while True:
-                await websocket.send_json(
-                    {"listening": False, "thinking": False, "speaking": False}
-                )
-                await asyncio.sleep(0.5)
-        except Exception:
-            pass
-
+    # ── Run server ──
     def _run():
-        uvicorn.run(app, host=host, port=port, log_level="warning", access_log=False)
+        uvicorn.run(
+            app,
+            host=host,
+            port=port,
+            log_level="warning",
+            access_log=False,
+        )
 
     t = threading.Thread(target=_run, daemon=True, name="SevenStartupAPI")
     t.start()
@@ -237,11 +303,7 @@ def _start_fastapi_server(host, port):
 
 
 def _start_raw_server(host, port):
-    """
-    Ultra-minimal HTTP server using only stdlib.
-    Used when even FastAPI/uvicorn are not installed.
-    Returns minimal JSON for /api/status so Electron knows backend is alive.
-    """
+    """Ultra-minimal stdlib HTTP server when FastAPI not installed."""
     import http.server
     import socketserver
 
@@ -249,8 +311,19 @@ def _start_raw_server(host, port):
         def do_GET(self):
             if self.path == "/api/status":
                 body = json.dumps({
-                    "listening": False, "speaking": False, "thinking": False,
-                    "mode": "minimal", "version": "1.1.0"
+                    "listening": False, "speaking": False,
+                    "thinking": False, "mode": "minimal",
+                    "version": "1.1.0"
+                }).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(body)
+            elif self.path == "/api/config":
+                body = json.dumps({
+                    "setup_complete": False,
+                    "pre_setup_mode": True
                 }).encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
@@ -269,7 +342,7 @@ def _start_raw_server(host, port):
             self.wfile.write(b'{"success": true}')
 
         def log_message(self, *args):
-            pass  # Suppress request logs
+            pass
 
     def _run():
         with socketserver.TCPServer((host, port), Handler) as httpd:
@@ -313,7 +386,7 @@ def _save_config(cfg):
 def _get_version():
     try:
         here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        pkg  = os.path.join(here, '..', '..', '..', '..', 'package.json')
+        pkg  = os.path.join(here, 'package.json')
         if os.path.exists(pkg):
             with open(pkg) as f:
                 return json.load(f).get("version", "1.1.0")

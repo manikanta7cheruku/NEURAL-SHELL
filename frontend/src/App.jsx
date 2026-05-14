@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
+import { HashRouter, Routes, Route, useNavigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import Sidebar        from './components/Sidebar';
 import TitleBar       from './components/TitleBar';
@@ -82,8 +82,30 @@ export default function App() {
   // ── Loading splash ──
   if (setupDone === null) {
     return (
-      <div className="h-screen w-screen bg-s-bg flex items-center justify-center">
-        <div className="w-1.5 h-1.5 rounded-full bg-s-accent animate-pulse" />
+      <div className="h-screen w-screen bg-s-bg flex flex-col items-center justify-center gap-6">
+        {/* Logo mark */}
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-12 h-12 rounded-2xl bg-s-accent/10 border border-s-accent/20 flex items-center justify-center">
+            <div className="w-3 h-3 rounded-full bg-s-accent animate-pulse" />
+          </div>
+          <div className="text-center">
+            <div className="text-xl font-semibold text-s-text tracking-widest">SEVEN</div>
+            <div className="text-[10px] text-s-text-4 font-light tracking-wider mt-0.5">Private AI Voice Assistant</div>
+          </div>
+        </div>
+
+        {/* Loading bar */}
+        <div className="w-48 h-px bg-s-border overflow-hidden rounded-full">
+          <div className="h-full bg-s-accent rounded-full animate-[loading_1.5s_ease-in-out_infinite]" 
+               style={{
+                 animation: 'loading 1.5s ease-in-out infinite',
+               }}
+          />
+        </div>
+
+        <div className="text-[10px] text-s-text-4 font-light tracking-widest">
+          Starting...
+        </div>
       </div>
     );
   }
@@ -91,17 +113,17 @@ export default function App() {
   // ── Setup wizard (first launch) ──
   if (!setupDone) {
     return (
-      <BrowserRouter>
+      <HashRouter>
         <Setup onComplete={() => setSetupDone(true)} />
-      </BrowserRouter>
+      </HashRouter>
     );
   }
-  
+
   // ── Main app ──
   return (
-    <BrowserRouter>
+    <HashRouter>
       <NavigationHelper />
       <MainApp />
-    </BrowserRouter>
+    </HashRouter>
   );
 }

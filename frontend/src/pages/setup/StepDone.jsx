@@ -20,16 +20,63 @@ const COMMANDS = [
   },
 ];
 
+// Wait for full backend by polling /api/schedules
+// That endpoint only exists in the full server, not minimal server
+function waitForFullBackend() {
+  return new Promise((resolve) => {
+    let attempts = 0;
+    const maxAttempts = 60;
+
+    const check = async () => {
+      attempts++;
+      try {
+        const r = await fetch('http://127.0.0.1:7777/api/schedules');
+        if (r.ok) {
+          resolve();
+          return;
+        }
+      } catch {}
+
+      if (attempts < maxAttempts) {
+        setTimeout(check, 1000);
+      } else {
+        resolve();
+      }
+    };
+
+    // Wait 3s for Python to die and restart first
+    setTimeout(check, 3000);
+  });
+}
+
 export default function StepDone({ onComplete }) {
   const { data, completeSetup, loading, error } = useSetup();
   const [launched, setLaunched] = useState(false);
+  const [statusMsg, setStatusMsg] = useState('Saving configuration...');
 
   const handleLaunch = async () => {
+    // Step 1 — save config to backend
     const ok = await completeSetup();
-    if (ok) {
-      setLaunched(true);
-      setTimeout(() => onComplete?.(), 900);
+    if (!ok) return;
+
+    setLaunched(true);
+    setStatusMsg('Restarting Seven...');
+
+    // Step 2 — tell Python to restart in full mode
+    try {
+      await fetch('http://127.0.0.1:7777/api/bootstrap/restart', {
+        method: 'POST'
+      });
+    } catch {
+      // Expected — server shuts down, fetch will throw
     }
+
+    // Step 3 — wait for full backend to come up
+    setStatusMsg('Loading your dashboard...');
+    await waitForFullBackend();
+
+    // Step 4 — navigate to dashboard
+    onComplete?.();
   };
 
   return (
@@ -47,7 +94,7 @@ export default function StepDone({ onComplete }) {
             <h2 className="text-2xl font-semibold text-s-text tracking-tight">
               Setup complete.
             </h2>
-            <p className="text-xs text-s-text-3 font-light">Loading your dashboard...</p>
+            <p className="text-xs text-s-text-3 font-light">{statusMsg}</p>
           </>
         ) : (
           <>
@@ -86,15 +133,15 @@ export default function StepDone({ onComplete }) {
         </div>
       )}
 
-      {/* Config summary — before launch */}
+      {/* Config summary */}
       {!launched && (
         <div className="space-y-1.5">
           <p className="text-[10px] text-s-text-4 uppercase tracking-widest">Your configuration</p>
           <div className="px-4 py-3 rounded-xl bg-s-card border border-s-border space-y-2">
             {[
-              { label: 'Name', value: data.name },
-              { label: 'Wake word', value: data.wakeWord || 'seven' },
-              { label: 'Model', value: data.modelName || 'auto' },
+              { label: 'Name',      value: data.name },
+              { label: 'Wake word', value: data.wakeWord  || 'seven' },
+              { label: 'Model',     value: data.modelName || 'auto'  },
             ].map(item => (
               <div key={item.label} className="flex items-center justify-between">
                 <span className="text-[11px] text-s-text-4">{item.label}</span>
@@ -135,9 +182,10 @@ export default function StepDone({ onComplete }) {
       {launched && (
         <div className="w-full py-3 rounded-xl bg-s-green/5 border border-s-green/20 flex items-center justify-center gap-2">
           <div className="w-1.5 h-1.5 rounded-full bg-s-green animate-pulse" />
-          <span className="text-xs text-s-green tracking-wide">Opening dashboard</span>
+          <span className="text-xs text-s-green tracking-wide">{statusMsg}</span>
         </div>
       )}
+
     </div>
   );
 }

@@ -1,48 +1,44 @@
-# requests
-# colorama
-# SpeechRecognition
-# pyaudio
-# setuptools
-# faster-whisper
-# AppOpener
-# pyautogui
-# pyttsx3
-
 # =============================================================================
 # PROJECT SEVEN - Dependencies
-# Version: 1.1 (Memory Update)
+# Version: 1.2 (Fixed versions for embedded Python)
 # =============================================================================
 
-# --- V1.0: Core System ---
+# --- Core ---
 requests
 colorama
-SpeechRecognition
-pyaudio
 setuptools
 psutil
 
-# --- V1.0: Voice ---
+# --- Voice ---
 pyttsx3
 faster-whisper
+SpeechRecognition
+pyaudio
 
-# --- V1.5: App Control ---
+# --- App Control ---
 AppOpener
 pyautogui
 
-# --- V1.1: Memory System (NEW) ---
-chromadb==0.5.23
-sentence-transformers==3.3.1
+# --- Memory System ---
+chromadb
+sentence-transformers
 
-# --- V1.2 Voice Recognization ---
+# --- Voice Recognition ---
 resemblyzer
 
-# --- V1.4: Web Search ---
+# --- Web Search ---
 ddgs
 
-# --- V1.6: Window Mastery ---
+# --- Window Mastery ---
 pywin32
 
-# --- V1.7: System Control ---
+# --- System Control ---
 pycaw
 screen-brightness-control
 comtypes
+
+# --- API ---
+fastapi
+uvicorn[standard]
+websockets
+python-multipart

@@ -13,7 +13,7 @@ ENDPOINTS: 30+ routes covering status, chat, memory, schedules,
 =============================================================================
 """
 
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, Dict, Any, List
@@ -43,8 +43,8 @@ app = FastAPI(
 # CORS — allow React dev server and Electron to connect
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000", "http://localhost:7777", "app://.", "file://"],
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -148,34 +148,48 @@ def root():
 @app.get("/api/status")
 def get_status():
     """Get current Seven system status."""
-    import config
-    from memory.mood import mood_engine
+    # Safe import — during bootstrap, memory may not be initialized yet
+    try:
+        import config
+        model = config.KEY.get("brain", {}).get("model_name", "unknown")
+        version = config.KEY.get("version", "1.1.0")
+    except Exception:
+        model = "unknown"
+        version = "1.1.0"
 
-    # Track activity (dashboard polling = user is active)
     try:
         import telemetry
         telemetry.log_activity()
-    except:
+    except Exception:
         pass
-    
+
     uptime_secs = int(time.time() - _start_time)
     hours = uptime_secs // 3600
     minutes = (uptime_secs % 3600) // 60
-    
-    mood_status = mood_engine.get_status()
-    
+
+    # Safe mood import
+    mood_label = "neutral"
+    mood_value = 0.5
+    try:
+        from memory.mood import mood_engine
+        mood_status = mood_engine.get_status()
+        mood_label = mood_status["label"]
+        mood_value = mood_status["mood_value"]
+    except Exception:
+        pass
+
     return {
         "listening": _state.get("listening", False),
         "speaking": _state.get("speaking", False),
         "thinking": _state.get("thinking", False),
-        "mood": mood_status["label"],
-        "mood_value": mood_status["mood_value"],
-        "model": config.KEY.get("brain", {}).get("model_name", "unknown"),
-        "streaming": config.KEY.get("brain", {}).get("streaming", False),
+        "mood": mood_label,
+        "mood_value": mood_value,
+        "model": model,
+        "streaming": False,
         "uptime": f"{hours}h {minutes}m",
         "uptime_seconds": uptime_secs,
         "speaker": _state.get("current_speaker", "default"),
-        "version": config.KEY.get("version", "1.10")
+        "version": version
     }
 
 
@@ -513,32 +527,57 @@ def get_knowledge_stats():
         return {"total_chunks": 0, "sources": [], "storage_mb": 0}
 
 
-@app.post("/api/knowledge/upload")
-async def upload_knowledge(file: UploadFile = File(...)):
-    """Upload a file to the knowledge base."""
+# ── Check multipart availability at module load (not at decorator time) ──
+def _make_upload_endpoint():
+    """
+    Registers /api/knowledge/upload only if python-multipart is installed.
+    Called once at module load. Avoids import-time crash.
+    """
     try:
-        from knowledge.indexer import index_file
-        
-        # Save uploaded file to knowledge sources directory
-        sources_dir = "seven_data/knowledge"
-        os.makedirs(sources_dir, exist_ok=True)
-        
-        file_path = os.path.join(sources_dir, file.filename)
-        
-        content = await file.read()
-        with open(file_path, "wb") as f:
-            f.write(content)
-        
-        # Index the file
-        chunks = index_file(file_path)
-        
-        return {
-            "success": True,
-            "filename": file.filename,
-            "chunks_indexed": chunks
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        import multipart  # python-multipart
+        _multipart_ok = True
+    except ImportError:
+        _multipart_ok = False
+
+    if _multipart_ok:
+        from fastapi import UploadFile, File as FastAPIFile
+
+        @app.post("/api/knowledge/upload")
+        async def upload_knowledge(file: UploadFile = FastAPIFile(...)):
+            """Upload a file to the knowledge base."""
+            try:
+                from knowledge.indexer import index_file
+                sources_dir = "seven_data/knowledge"
+                os.makedirs(sources_dir, exist_ok=True)
+                file_path = os.path.join(sources_dir, file.filename)
+                content = await file.read()
+                with open(file_path, "wb") as f:
+                    f.write(content)
+                chunks = index_file(file_path)
+                return {
+                    "success": True,
+                    "filename": file.filename,
+                    "chunks_indexed": chunks
+                }
+            except HTTPException:
+                raise
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=str(e))
+    else:
+        # Register a safe fallback endpoint — no multipart dependency
+        @app.post("/api/knowledge/upload")
+        async def upload_knowledge_unavailable(request: Request):
+            """Fallback when python-multipart not installed."""
+            return {
+                "success": False,
+                "error": "python-multipart not installed. Run setup wizard to install packages."
+            }
+
+        print("[API] python-multipart not installed — upload endpoint in fallback mode")
+
+
+# Register the endpoint (safe at import time regardless of multipart)
+_make_upload_endpoint()
 
 
 @app.get("/api/knowledge/search")
@@ -819,28 +858,41 @@ def activate_license_endpoint(req: LicenseActivate):
 @app.get("/api/license/status")
 def get_license_status():
     """Get current license status."""
-    validation = license_module.validate_license()
-    features = license_module.get_features(validation["tier"])
-    
-    device_id = license_module.get_device_id()
-    
-    # Get license key from config
-    import config
-    license_key = config.KEY.get("license", {}).get("key", "")
-    is_trial = config.KEY.get("license", {}).get("is_trial", False)
-    
-    return {
-        "tier": validation["tier"],
-        "valid": validation["valid"],
-        "expires_at": validation.get("expires_at"),
-        "days_until_expiry": validation.get("days_until_expiry"),
-        "offline_mode": validation.get("offline_mode", False),
-        "offline_days": validation.get("offline_days", 0),
-        "features": features,
-        "license_key": license_key,
-        "is_trial": is_trial,
-        "device_id": device_id[:8] + "..."
-    }
+    try:
+        validation = license_module.validate_license()
+        features = license_module.get_features(validation["tier"])
+        device_id = license_module.get_device_id()
+
+        import config
+        license_key = config.KEY.get("license", {}).get("key", "")
+        is_trial = config.KEY.get("license", {}).get("is_trial", False)
+
+        return {
+            "tier": validation["tier"],
+            "valid": validation["valid"],
+            "expires_at": validation.get("expires_at"),
+            "days_until_expiry": validation.get("days_until_expiry"),
+            "offline_mode": validation.get("offline_mode", False),
+            "offline_days": validation.get("offline_days", 0),
+            "features": features,
+            "license_key": license_key,
+            "is_trial": is_trial,
+            "device_id": device_id[:8] + "..."
+        }
+    except Exception as e:
+        # Return safe defaults if license system not ready yet
+        return {
+            "tier": "free",
+            "valid": True,
+            "expires_at": None,
+            "days_until_expiry": None,
+            "offline_mode": False,
+            "offline_days": 0,
+            "features": {},
+            "license_key": "",
+            "is_trial": False,
+            "device_id": "unknown"
+        }
 
 
 @app.post("/api/license/validate")

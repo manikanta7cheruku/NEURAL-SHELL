@@ -203,10 +203,83 @@ async function main() {
   log('Pre-installing fastapi and uvicorn into embedded Python...');
   const pipExe = path.join(PYTHON_DIR, 'Scripts', 'pip.exe');
   try {
+      // ── Pre-install ALL packages needed for Seven to run ──
+  log('Pre-installing all required packages into embedded Python...');
+  const pipExe = path.join(PYTHON_DIR, 'Scripts', 'pip.exe');
+
+  // Install in batches to avoid timeout issues
+  // Batch 1: Core API + Web
+  const batch1 = [
+    'fastapi', 'uvicorn[standard]', 'websockets',
+    'python-multipart', 'requests', 'colorama', 'psutil'
+  ];
+
+  // Batch 2: Voice + Audio
+  const batch2 = [
+    'pyttsx3', 'SpeechRecognition', 'pyaudio'
+  ];
+
+  // Batch 3: AI + Memory (large packages)
+  const batch3 = [
+    'chromadb', 'sentence-transformers', 'faster-whisper'
+  ];
+
+  // Batch 4: System Control
+  const batch4 = [
+    'pywin32', 'pycaw', 'comtypes',
+    'pyautogui', 'screen-brightness-control'
+  ];
+
+  // Batch 5: App Control + Search
+  const batch5 = [
+    'AppOpener', 'ddgs'
+  ];
+
+  // Batch 6: Optional (skip on failure)
+  const batch6Optional = [
+    'resemblyzer'
+  ];
+
+  const batches = [
+    { packages: batch1, name: 'Core API', required: true },
+    { packages: batch2, name: 'Voice + Audio', required: true },
+    { packages: batch3, name: 'AI + Memory', required: true },
+    { packages: batch4, name: 'System Control', required: true },
+    { packages: batch5, name: 'App Control', required: true },
+    { packages: batch6Optional, name: 'Optional', required: false },
+  ];
+
+  for (const batch of batches) {
+    log(`Installing batch: ${batch.name}...`);
+    try {
+      execSync(
+        `"${pipExe}" install ${batch.packages.map(p => `"${p}"`).join(' ')} --quiet --no-warn-script-location`,
+        { stdio: 'inherit', cwd: PYTHON_DIR, timeout: 300000 }
+      );
+      ok(`Batch installed: ${batch.name}`);
+    } catch (e) {
+      if (batch.required) {
+        warn(`Batch failed: ${batch.name} — ${e.message}`);
+        warn('Continuing anyway — bootstrap will retry at first launch');
+      } else {
+        warn(`Optional batch skipped: ${batch.name}`);
+      }
+    }
+  }
+
+  // Install resemblyzer without C deps (avoids webrtcvad compile error)
+  log('Installing resemblyzer (no C deps)...');
+  try {
     execSync(
-      `"${pipExe}" install fastapi uvicorn pyttsx3 --quiet --no-warn-script-location`,
+      `"${pipExe}" install resemblyzer --no-deps --quiet --no-warn-script-location`,
       { stdio: 'inherit', cwd: PYTHON_DIR }
     );
+    ok('resemblyzer installed (no-deps)');
+  } catch (e) {
+    warn('resemblyzer skipped: ' + e.message);
+  }
+
+  ok('All packages pre-installed into embedded Python');
     ok('fastapi + uvicorn + pyttsx3 pre-installed');
   } catch (e) {
     warn('Pre-install failed: ' + e.message);

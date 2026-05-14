@@ -2,21 +2,6 @@
 =============================================================================
 PROJECT SEVEN - backend/bootstrap.py
 First-Launch Environment Setup
-
-PURPOSE:
-    Handles everything the Setup Wizard Step 4 needs:
-    1. Install Python packages from requirements.txt
-    2. Download and install Ollama silently
-    3. Start Ollama service
-    4. Verify the environment is ready
-    5. Pull selected LLM model with progress streaming
-
-    All functions stream progress via Server-Sent Events (SSE)
-    so the React wizard can show live status to the user.
-
-CALLED BY:
-    - api_server.py (new endpoints /api/bootstrap/*)
-    - Only runs during setup wizard (setup_complete: false)
 =============================================================================
 """
 
@@ -29,18 +14,17 @@ import time
 import platform
 import urllib.request
 import tempfile
-from pathlib import Path
 
 # ── Ollama config ──
-OLLAMA_DOWNLOAD_URL = "https://ollama.com/download/OllamaSetup.exe"
+OLLAMA_DOWNLOAD_URL   = "https://ollama.com/download/OllamaSetup.exe"
 OLLAMA_INSTALLER_NAME = "OllamaSetup.exe"
-OLLAMA_HOST = "http://127.0.0.1:11434"
-OLLAMA_CHECK_TIMEOUT = 30  # seconds to wait for Ollama to start
+OLLAMA_HOST           = "http://127.0.0.1:11434"
+OLLAMA_CHECK_TIMEOUT  = 60
 
-# ── Shared state (polled by /api/bootstrap/status) ──
+# ── Shared state ──
 _bootstrap_state = {
     "packages": {
-        "status": "pending",   # pending | running | done | error
+        "status": "pending",
         "current": "",
         "progress": 0,
         "error": None
@@ -69,63 +53,45 @@ _state_lock = threading.Lock()
 
 
 def get_state():
-    """Return a copy of current bootstrap state."""
     with _state_lock:
         return json.loads(json.dumps(_bootstrap_state))
 
 
 def _set(section, **kwargs):
-    """Thread-safe state update."""
     with _state_lock:
         for k, v in kwargs.items():
             _bootstrap_state[section][k] = v
 
 
 # ============================================================================
-# PYTHON DETECTION
+# PYTHON / PIP DETECTION
 # ============================================================================
 
 def get_python_executable():
     """
-    Find the correct Python executable to use.
-    
-    Priority:
-    1. Embedded Python inside app (packaged mode)
-    2. System Python (dev mode)
-    
-    Returns the full path to python.exe
+    Find the correct Python executable.
+    Packaged app: use embedded Python.
+    Dev mode: use current Python.
     """
-    # Check if running from packaged Electron app
-    # Electron sets this env var in main.js
     app_path = os.environ.get('SEVEN_APP_PATH')
-
     if app_path:
-        # Packaged mode — use embedded Python
         embedded = os.path.join(app_path, 'python', 'python.exe')
         if os.path.exists(embedded):
             print(f"[BOOTSTRAP] Using embedded Python: {embedded}")
             return embedded
 
-    # Dev mode — use current Python
+    print(f"[BOOTSTRAP] Using system Python: {sys.executable}")
     return sys.executable
 
 
-def get_pip_executable():
-    """Get pip for the correct Python environment."""
-    python = get_python_executable()
-    return [python, '-m', 'pip']
-
-
 def get_requirements_path():
-    """Find requirements.txt — works in both dev and packaged mode."""
-    # Try app path first (packaged)
+    """Find requirements.txt."""
     app_path = os.environ.get('SEVEN_APP_PATH')
     if app_path:
         req = os.path.join(app_path, 'requirements.txt')
         if os.path.exists(req):
             return req
 
-    # Dev mode — relative to this file
     script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     req = os.path.join(script_dir, 'requirements.txt')
     if os.path.exists(req):
@@ -134,104 +100,226 @@ def get_requirements_path():
     return None
 
 
+def _ensure_pip(python_exe):
+    """
+    Ensure pip is available for this Python executable.
+    Embeddable Python does NOT include pip — we must bootstrap it.
+    Returns True if pip is available after this call.
+    """
+    # Test if pip already works
+    result = subprocess.run(
+        [python_exe, '-m', 'pip', '--version'],
+        capture_output=True
+    )
+    if result.returncode == 0:
+        print("[BOOTSTRAP] pip already available.")
+        return True
+
+    print("[BOOTSTRAP] pip not found — bootstrapping pip...")
+    _set('packages', current='Bootstrapping pip...', progress=1)
+
+    # Download get-pip.py
+    get_pip_url  = "https://bootstrap.pypa.io/get-pip.py"
+    get_pip_path = os.path.join(tempfile.gettempdir(), 'get-pip.py')
+
+    try:
+        urllib.request.urlretrieve(get_pip_url, get_pip_path)
+    except Exception as e:
+        _set('packages', status='error', error=f'Failed to download pip: {e}')
+        return False
+
+    # Install pip
+    result = subprocess.run(
+        [python_exe, get_pip_path, '--no-warn-script-location'],
+        capture_output=True,
+        text=True
+    )
+
+    if result.returncode != 0:
+        _set('packages', status='error',
+             error=f'pip bootstrap failed: {result.stderr[-300:]}')
+        return False
+
+    print("[BOOTSTRAP] pip bootstrapped successfully.")
+    return True
+
+
+def _fix_pth_file(python_exe):
+    """
+    Embeddable Python has a pythonXXX._pth file that DISABLES site-packages.
+    We must uncomment 'import site' in it for pip installs to be importable.
+    
+    This is the #1 silent killer of embedded Python installs.
+    """
+    python_dir = os.path.dirname(python_exe)
+
+    # Find the ._pth file (e.g. python311._pth)
+    pth_files = [
+        f for f in os.listdir(python_dir)
+        if f.endswith('._pth') and f.startswith('python')
+    ]
+
+    if not pth_files:
+        print("[BOOTSTRAP] No ._pth file found — skipping fix")
+        return
+
+    pth_path = os.path.join(python_dir, pth_files[0])
+    print(f"[BOOTSTRAP] Fixing pth file: {pth_path}")
+
+    with open(pth_path, 'r') as f:
+        content = f.read()
+
+    # Uncomment 'import site' if it's commented out
+    fixed = content.replace('#import site', 'import site')
+
+    # Also ensure Lib/site-packages is in the path file
+    lib_line = 'Lib\\site-packages'
+    if lib_line not in fixed:
+        fixed = fixed + f'\n{lib_line}\n'
+
+    if fixed != content:
+        with open(pth_path, 'w') as f:
+            f.write(fixed)
+        print("[BOOTSTRAP] Fixed pth file — site-packages enabled.")
+    else:
+        print("[BOOTSTRAP] pth file already correct.")
+
+
 # ============================================================================
 # STEP 1 — INSTALL PYTHON PACKAGES
 # ============================================================================
 
 def check_packages_installed():
-    """
-    Quick check if core packages are already installed.
-    Returns True if all critical packages are importable.
-    """
-    critical = [
-        'requests', 'fastapi', 'uvicorn', 'pyttsx3',
-        'chromadb', 'sentence_transformers', 'faster_whisper',
-        'psutil', 'pywin32'
-    ]
-    
+    """Check if core packages are installed in the correct Python."""
     python = get_python_executable()
-    
+
+    critical = ['fastapi', 'uvicorn', 'pyttsx3', 'chromadb',
+                'sentence_transformers', 'psutil']
+
     for pkg in critical:
-        check_name = pkg.replace('-', '_')
         result = subprocess.run(
-            [python, '-c', f'import {check_name}'],
+            [python, '-c', f'import {pkg.replace("-", "_")}'],
             capture_output=True
         )
         if result.returncode != 0:
-            print(f"[BOOTSTRAP] Package missing: {pkg}")
+            print(f"[BOOTSTRAP] Missing: {pkg}")
             return False
-    
+
     return True
 
 
 def install_packages():
     """
-    Install all packages from requirements.txt.
-    Updates _bootstrap_state.packages with live progress.
-    Runs synchronously (called from a thread).
+    Install all packages from requirements.txt into the correct Python.
     """
-    _set('packages', status='running', progress=0, current='Starting...', error=None)
+    _set('packages', status='running', progress=0,
+         current='Preparing...', error=None)
 
+    python_exe = get_python_executable()
+
+    # Step 0: Fix ._pth file (must happen before pip)
+    _fix_pth_file(python_exe)
+
+    # Step 1: Ensure pip exists
+    if not _ensure_pip(python_exe):
+        return False
+
+    # Step 2: Get requirements
     req_path = get_requirements_path()
     if not req_path:
         _set('packages', status='error', error='requirements.txt not found')
         return False
 
-    pip = get_pip_executable()
-
-    # First upgrade pip itself
-    _set('packages', current='Upgrading pip...', progress=2)
+    # Step 3: Upgrade pip
+    _set('packages', current='Upgrading pip...', progress=3)
     subprocess.run(
-        pip + ['install', '--upgrade', 'pip', '--quiet'],
+        [python_exe, '-m', 'pip', 'install', '--upgrade', 'pip', '--quiet'],
         capture_output=True
     )
 
-    # Read requirements
-    with open(req_path, 'r') as f:
-        lines = f.readlines()
+        # ── Step 3b: Ensure critical runtime dependencies exist ──
+    # These must be present BEFORE api_server.py imports
+    _set('packages', current='Installing core dependencies...', progress=4)
 
-    # Filter to actual package lines
-    packages = []
-    for line in lines:
-        line = line.strip()
-        if line and not line.startswith('#') and not line.startswith('-'):
-            packages.append(line)
+    critical_runtime_packages = [
+        "python-multipart",
+        "fastapi",
+        "uvicorn[standard]",
+        "websockets",
+        "pyautogui",
+        "requests",
+        "colorama",
+        "psutil",
+        "pyttsx3",
+        "pywin32",
+        "pycaw",
+        "comtypes",
+        "AppOpener",
+        "ddgs",
+        "SpeechRecognition",
+        "pyaudio",
+        "screen-brightness-control",
+    ]
 
-    if not packages:
-        _set('packages', status='error', error='No packages found in requirements.txt')
-        return False
-
-    total = len(packages)
-    print(f"[BOOTSTRAP] Installing {total} packages...")
-
-    for i, pkg in enumerate(packages):
-        pkg_display = pkg.split('==')[0].split('>=')[0].strip()
-        progress = int(((i) / total) * 100)
-        _set('packages', current=f'Installing {pkg_display}...', progress=progress)
-        print(f"[BOOTSTRAP] [{i+1}/{total}] Installing {pkg_display}")
-
+    for pkg in critical_runtime_packages:
         result = subprocess.run(
-            pip + ['install', pkg, '--quiet', '--no-warn-script-location'],
+            [python_exe, "-m", "pip", "install", pkg,
+             "--quiet", "--no-warn-script-location"],
             capture_output=True,
-            text=True
+            text=True,
+            timeout=120
         )
 
         if result.returncode != 0:
-            # Some packages are optional — don't fail on them
-            optional = ['resemblyzer', 'pyaudio', 'screen-brightness-control']
+            print(f"[BOOTSTRAP] Warning: Failed installing {pkg}")
+
+    print("[BOOTSTRAP] Core runtime dependencies ensured.")
+
+    # Step 4: Read packages
+    with open(req_path, 'r') as f:
+        lines = f.readlines()
+
+    packages = [
+        l.strip() for l in lines
+        if l.strip() and not l.startswith('#') and not l.startswith('-')
+    ]
+
+    if not packages:
+        _set('packages', status='error', error='No packages in requirements.txt')
+        return False
+
+    total    = len(packages)
+    optional = ['resemblyzer', 'pyaudio', 'screen-brightness-control']
+
+    print(f"[BOOTSTRAP] Installing {total} packages into {python_exe}")
+
+    for i, pkg in enumerate(packages):
+        pkg_display = pkg.split('==')[0].split('>=')[0].strip()
+        progress    = int(((i) / total) * 100)
+        _set('packages', current=f'Installing {pkg_display}...', progress=progress)
+        print(f"[BOOTSTRAP] [{i+1}/{total}] {pkg_display}")
+
+        result = subprocess.run(
+            [python_exe, '-m', 'pip', 'install', pkg,
+             '--quiet', '--no-warn-script-location'],
+            capture_output=True,
+            text=True,
+            timeout=300
+        )
+
+        if result.returncode != 0:
             is_optional = any(o in pkg.lower() for o in optional)
-
             if is_optional:
-                print(f"[BOOTSTRAP] Optional package failed (ok): {pkg_display}")
+                print(f"[BOOTSTRAP] Optional skipped: {pkg_display}")
                 continue
-            else:
-                error_msg = result.stderr.strip()[-200:] if result.stderr else 'Unknown error'
-                print(f"[BOOTSTRAP] Failed: {pkg_display} — {error_msg}")
-                _set('packages', status='error', error=f'{pkg_display} failed: {error_msg}')
-                return False
+            err = result.stderr.strip()[-300:] if result.stderr else 'Unknown'
+            _set('packages', status='error',
+                 error=f'{pkg_display} failed: {err}')
+            return False
 
-    _set('packages', status='done', progress=100, current='All packages installed')
-    print("[BOOTSTRAP] All packages installed successfully.")
+    _set('packages', status='done', progress=100,
+         current='All packages installed')
+    print("[BOOTSTRAP] All packages installed.")
     return True
 
 
@@ -241,101 +329,120 @@ def install_packages():
 
 def is_ollama_installed():
     """Check if Ollama is installed on this system."""
-    # Check PATH
-    result = subprocess.run(['where', 'ollama'], capture_output=True, text=True)
-    if result.returncode == 0:
+    result = subprocess.run(
+        ['where', 'ollama'],
+        capture_output=True,
+        text=True,
+        encoding='utf-8',
+        errors='ignore'
+    )
+    if result.returncode == 0 and result.stdout.strip():
         return True
 
-    # Check common install locations
-    common_paths = [
-        os.path.join(os.environ.get('LOCALAPPDATA', ''), 'Programs', 'Ollama', 'ollama.exe'),
+    # Also check common install locations directly
+    paths = [
+        os.path.join(os.environ.get('LOCALAPPDATA', ''),
+                     'Programs', 'Ollama', 'ollama.exe'),
         r'C:\Program Files\Ollama\ollama.exe',
-        os.path.join(os.environ.get('USERPROFILE', ''), 'AppData', 'Local', 'Programs', 'Ollama', 'ollama.exe'),
+        os.path.join(os.environ.get('USERPROFILE', ''),
+                     'AppData', 'Local', 'Programs', 'Ollama', 'ollama.exe'),
     ]
-    return any(os.path.exists(p) for p in common_paths)
+    for p in paths:
+        if os.path.exists(p):
+            print(f"[BOOTSTRAP] Ollama found at: {p}")
+            return True
+
+    return False
+
+    paths = [
+        os.path.join(os.environ.get('LOCALAPPDATA', ''),
+                     'Programs', 'Ollama', 'ollama.exe'),
+        r'C:\Program Files\Ollama\ollama.exe',
+        os.path.join(os.environ.get('USERPROFILE', ''),
+                     'AppData', 'Local', 'Programs', 'Ollama', 'ollama.exe'),
+    ]
+    return any(os.path.exists(p) for p in paths)
 
 
 def get_ollama_executable():
-    """Find ollama.exe path."""
-    # Try PATH first
-    result = subprocess.run(['where', 'ollama'], capture_output=True, text=True)
-    if result.returncode == 0:
-        path = result.stdout.strip().split('\n')[0]
+    """Find ollama.exe."""
+    result = subprocess.run(
+        ['where', 'ollama'],
+        capture_output=True,
+        text=True,
+        encoding='utf-8',
+        errors='ignore'
+    )
+    if result.returncode == 0 and result.stdout.strip():
+        path = result.stdout.strip().split('\n')[0].strip()
         if os.path.exists(path):
             return path
 
-    # Check common locations
-    common_paths = [
-        os.path.join(os.environ.get('LOCALAPPDATA', ''), 'Programs', 'Ollama', 'ollama.exe'),
+    paths = [
+        os.path.join(os.environ.get('LOCALAPPDATA', ''),
+                     'Programs', 'Ollama', 'ollama.exe'),
         r'C:\Program Files\Ollama\ollama.exe',
-        os.path.join(os.environ.get('USERPROFILE', ''), 'AppData', 'Local', 'Programs', 'Ollama', 'ollama.exe'),
+        os.path.join(os.environ.get('USERPROFILE', ''),
+                     'AppData', 'Local', 'Programs', 'Ollama', 'ollama.exe'),
     ]
-    for p in common_paths:
+    for p in paths:
         if os.path.exists(p):
             return p
 
-    return 'ollama'  # Fallback — hope it's in PATH
+    return 'ollama'
 
 
 def download_ollama_installer():
-    """
-    Download OllamaSetup.exe to temp directory.
-    Updates _bootstrap_state.ollama_install with progress.
-    Returns path to installer or None on failure.
-    """
+    """Download OllamaSetup.exe with progress."""
     _set('ollama_install', status='running', progress=0, error=None)
 
     dest = os.path.join(tempfile.gettempdir(), OLLAMA_INSTALLER_NAME)
 
-    # If already downloaded, skip
-    if os.path.exists(dest) and os.path.getsize(dest) > 10_000_000:  # > 10MB
+    if os.path.exists(dest) and os.path.getsize(dest) > 10_000_000:
         _set('ollama_install', progress=100)
-        print(f"[BOOTSTRAP] Ollama installer already cached: {dest}")
+        print(f"[BOOTSTRAP] Ollama installer cached: {dest}")
         return dest
 
-    print(f"[BOOTSTRAP] Downloading Ollama from {OLLAMA_DOWNLOAD_URL}")
+    print(f"[BOOTSTRAP] Downloading Ollama...")
 
     try:
-        def _reporthook(block_num, block_size, total_size):
+        def _progress(block_num, block_size, total_size):
+            # No print here — avoids charmap encoding errors on Windows
             if total_size > 0:
                 pct = min(int((block_num * block_size / total_size) * 100), 99)
                 _set('ollama_install', progress=pct)
 
-        urllib.request.urlretrieve(OLLAMA_DOWNLOAD_URL, dest, _reporthook)
+        urllib.request.urlretrieve(OLLAMA_DOWNLOAD_URL, dest, _progress)
         _set('ollama_install', progress=100)
-        print(f"[BOOTSTRAP] Ollama downloaded to {dest}")
+        print(f"[BOOTSTRAP] Ollama downloaded: {dest}")
         return dest
 
     except Exception as e:
-        _set('ollama_install', status='error', error=str(e))
-        print(f"[BOOTSTRAP] Ollama download failed: {e}")
+        error_msg = str(e).encode('ascii', errors='replace').decode('ascii')
+        _set('ollama_install', status='error', error=error_msg)
+        print(f"[BOOTSTRAP] Ollama download failed: {error_msg}")
         return None
 
 
 def install_ollama_silent(installer_path):
-    """
-    Run OllamaSetup.exe silently.
-    /S = silent install (NSIS standard flag)
-    """
-    print(f"[BOOTSTRAP] Running silent Ollama install: {installer_path}")
-
+    """Run OllamaSetup.exe silently."""
+    print(f"[BOOTSTRAP] Installing Ollama silently...")
     try:
         result = subprocess.run(
             [installer_path, '/S'],
             capture_output=True,
-            timeout=120  # 2 min timeout
+            timeout=180
         )
         if result.returncode == 0:
-            print("[BOOTSTRAP] Ollama installed successfully.")
             _set('ollama_install', status='done', progress=100)
+            print("[BOOTSTRAP] Ollama installed.")
             return True
         else:
-            error = f"Installer exited with code {result.returncode}"
-            _set('ollama_install', status='error', error=error)
-            print(f"[BOOTSTRAP] Ollama install failed: {error}")
+            err = f"Exit code {result.returncode}"
+            _set('ollama_install', status='error', error=err)
             return False
     except subprocess.TimeoutExpired:
-        _set('ollama_install', status='error', error='Installation timed out')
+        _set('ollama_install', status='error', error='Install timed out')
         return False
     except Exception as e:
         _set('ollama_install', status='error', error=str(e))
@@ -343,23 +450,16 @@ def install_ollama_silent(installer_path):
 
 
 def setup_ollama():
-    """
-    Full Ollama setup flow:
-    1. Check if already installed
-    2. If not: download + install silently
-    Returns True when Ollama is installed.
-    """
+    """Full Ollama setup: check → download → install."""
     if is_ollama_installed():
         print("[BOOTSTRAP] Ollama already installed.")
         _set('ollama_install', status='done', progress=100)
         return True
 
-    # Download
     installer = download_ollama_installer()
     if not installer:
         return False
 
-    # Install silently
     return install_ollama_silent(installer)
 
 
@@ -368,21 +468,18 @@ def setup_ollama():
 # ============================================================================
 
 def is_ollama_running():
-    """Check if Ollama API is responding."""
+    """Check if Ollama API responds."""
     try:
-        import urllib.request as req
-        with req.urlopen(f"{OLLAMA_HOST}/api/tags", timeout=3) as r:
+        with urllib.request.urlopen(
+            f"{OLLAMA_HOST}/api/tags", timeout=3
+        ) as r:
             return r.status == 200
     except Exception:
         return False
 
 
 def start_ollama():
-    """
-    Start the Ollama service in background.
-    Waits up to OLLAMA_CHECK_TIMEOUT seconds for it to respond.
-    Updates _bootstrap_state.ollama_start.
-    """
+    """Start Ollama service and wait for it to respond."""
     _set('ollama_start', status='running', error=None)
 
     if is_ollama_running():
@@ -398,23 +495,26 @@ def start_ollama():
             [ollama_exe, 'serve'],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            creationflags=subprocess.CREATE_NO_WINDOW if platform.system() == 'Windows' else 0
+            creationflags=(
+                subprocess.CREATE_NO_WINDOW
+                if platform.system() == 'Windows' else 0
+            )
         )
     except Exception as e:
         _set('ollama_start', status='error', error=str(e))
-        print(f"[BOOTSTRAP] Failed to start Ollama: {e}")
         return False
 
-    # Wait for Ollama to respond
+    # Wait up to OLLAMA_CHECK_TIMEOUT seconds
     deadline = time.time() + OLLAMA_CHECK_TIMEOUT
     while time.time() < deadline:
         if is_ollama_running():
-            print("[BOOTSTRAP] Ollama is now running.")
+            print("[BOOTSTRAP] Ollama is running.")
             _set('ollama_start', status='done')
             return True
-        time.sleep(1)
+        time.sleep(2)
 
-    _set('ollama_start', status='error', error='Ollama did not start within 30 seconds')
+    _set('ollama_start', status='error',
+         error='Ollama did not respond within 60 seconds')
     return False
 
 
@@ -423,22 +523,12 @@ def start_ollama():
 # ============================================================================
 
 def pull_model(model_name: str):
-    """
-    Pull an Ollama model with real progress tracking.
-    Streams pull progress to _bootstrap_state.model_pull.
-    
-    Ollama pull outputs JSON lines like:
-        {"status": "pulling manifest"}
-        {"status": "pulling", "digest": "...", "total": 4000000, "completed": 500000}
-        {"status": "success"}
-    
-    Runs synchronously (called from a thread).
-    """
-    _set('model_pull', status='running', model=model_name, progress=0,
-         downloaded_gb=0.0, total_gb=0.0, error=None)
+    """Pull an Ollama model with progress tracking."""
+    _set('model_pull', status='running', model=model_name,
+         progress=0, downloaded_gb=0.0, total_gb=0.0, error=None)
 
     ollama_exe = get_ollama_executable()
-    print(f"[BOOTSTRAP] Pulling model: {model_name}")
+    print(f"[BOOTSTRAP] Pulling: {model_name}")
 
     try:
         process = subprocess.Popen(
@@ -446,11 +536,16 @@ def pull_model(model_name: str):
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
+            encoding='utf-8',
+            errors='replace',
             bufsize=1,
-            creationflags=subprocess.CREATE_NO_WINDOW if platform.system() == 'Windows' else 0
+            creationflags=(
+                subprocess.CREATE_NO_WINDOW
+                if platform.system() == 'Windows' else 0
+            )
         )
 
-        total_bytes = 0
+        total_bytes     = 0
         completed_bytes = 0
 
         for line in process.stdout:
@@ -458,62 +553,51 @@ def pull_model(model_name: str):
             if not line:
                 continue
 
-            # Try to parse as JSON (Ollama outputs JSON lines)
             try:
-                data = json.loads(line)
+                data   = json.loads(line)
                 status = data.get('status', '')
 
                 if 'total' in data and data['total'] > 0:
-                    total_bytes = max(total_bytes, data['total'])
+                    total_bytes     = max(total_bytes, data['total'])
                     completed_bytes = data.get('completed', completed_bytes)
-
-                    pct = int((completed_bytes / total_bytes) * 100)
-                    dl_gb = round(completed_bytes / (1024 ** 3), 2)
-                    total_gb = round(total_bytes / (1024 ** 3), 2)
-
-                    _set('model_pull',
-                         progress=pct,
-                         downloaded_gb=dl_gb,
-                         total_gb=total_gb)
+                    pct             = int((completed_bytes / total_bytes) * 100)
+                    dl_gb           = round(completed_bytes / (1024 ** 3), 2)
+                    total_gb        = round(total_bytes     / (1024 ** 3), 2)
+                    _set('model_pull', progress=pct,
+                         downloaded_gb=dl_gb, total_gb=total_gb)
 
                 elif status == 'success':
                     _set('model_pull', status='done', progress=100)
-                    print(f"[BOOTSTRAP] Model {model_name} pulled successfully.")
 
             except json.JSONDecodeError:
-                # Plain text line — just log it
                 print(f"[BOOTSTRAP] ollama: {line}")
 
         process.wait()
 
         if process.returncode == 0:
             _set('model_pull', status='done', progress=100)
+            print(f"[BOOTSTRAP] Model {model_name} ready.")
             return True
         else:
-            _set('model_pull', status='error', error=f'Pull exited with code {process.returncode}')
+            _set('model_pull', status='error',
+                 error=f'Pull exited with code {process.returncode}')
             return False
 
     except Exception as e:
         _set('model_pull', status='error', error=str(e))
-        print(f"[BOOTSTRAP] Pull failed: {e}")
         return False
 
 
 # ============================================================================
-# FULL BOOTSTRAP SEQUENCE
+# ORCHESTRATORS
 # ============================================================================
 
 def run_environment_setup(on_complete=None):
-    """
-    Run full environment setup in background thread.
-    Steps: packages → ollama install → ollama start
-    
-    on_complete: optional callback(success: bool)
-    """
+    """Run full environment setup in background thread."""
     def _run():
         print("[BOOTSTRAP] Starting environment setup...")
 
-        # Step 1 — Python packages
+        # Packages
         if not check_packages_installed():
             ok = install_packages()
             if not ok:
@@ -522,16 +606,17 @@ def run_environment_setup(on_complete=None):
                 return
         else:
             print("[BOOTSTRAP] Packages already installed.")
-            _set('packages', status='done', progress=100, current='Already installed')
+            _set('packages', status='done', progress=100,
+                 current='Already installed')
 
-        # Step 2 — Ollama install
+        # Ollama install
         ok = setup_ollama()
         if not ok:
             if on_complete:
                 on_complete(False)
             return
 
-        # Step 3 — Start Ollama
+        # Ollama start
         ok = start_ollama()
         if not ok:
             if on_complete:
@@ -541,20 +626,17 @@ def run_environment_setup(on_complete=None):
         with _state_lock:
             _bootstrap_state['overall_ready'] = True
 
-        print("[BOOTSTRAP] Environment setup complete.")
+        print("[BOOTSTRAP] Environment ready.")
         if on_complete:
             on_complete(True)
 
-    t = threading.Thread(target=_run, daemon=True, name="BootstrapSetup")
+    t = threading.Thread(target=_run, daemon=True, name="Bootstrap")
     t.start()
     return t
 
 
 def run_model_pull(model_name: str, on_complete=None):
-    """
-    Pull a model in background thread.
-    on_complete: optional callback(success: bool)
-    """
+    """Pull model in background thread."""
     def _run():
         ok = pull_model(model_name)
         if on_complete:

@@ -104,6 +104,7 @@ function startPython() {
       ...process.env,
       PYTHONIOENCODING:   'utf-8',
       PYTHONUNBUFFERED:   '1',
+      PYTHONUTF8:         '1',        
       SEVEN_ELECTRON_MODE: '1',
       SEVEN_APP_PATH:     appSource,
       // PYTHONPATH must include:
@@ -131,21 +132,29 @@ function startPython() {
   });
 
   pythonProcess.on('close', (code) => {
-    console.log(`[PYTHON] Exited with code ${code}`);
-    pythonProcess = null;
-    
-    // If app is not quitting, Python exited for restart (post-setup)
-    // Restart it automatically after 2 seconds
-    if (!app.isQuitting) {
-      console.log('[PYTHON] Restarting Python backend in 2 seconds...');
-      setTimeout(() => {
-        if (!app.isQuitting) {
-          console.log('[PYTHON] Restarting...');
-          startPython();
-        }
-      }, 2000);
-    }
-  });
+  console.log(`[PYTHON] Exited with code ${code}`);
+  pythonProcess = null;
+
+  if (!app.isQuitting) {
+    // Always restart — code 0 = clean restart (bootstrap done)
+    // code 4294967295 / -1 = also restart (Windows exit)
+    // code 1 = error, still restart
+    const delay = (code === 0) ? 1000 : 3000;
+    console.log(`[PYTHON] Restarting in ${delay/1000} seconds...`);
+    setTimeout(() => {
+      if (!app.isQuitting) {
+        startPython();
+        // After restart, wait for backend and reload the window
+        waitForBackend().then((ready) => {
+          if (ready && mainWindow) {
+            console.log('[ELECTRON] Full backend ready — reloading window');
+            mainWindow.webContents.reload();
+          }
+        });
+      }
+    }, delay);
+  }
+});
 
   pythonProcess.on('error', (err) => {
     console.error('[PYTHON] Failed to start:', err.message);
@@ -168,7 +177,7 @@ function waitForBackend() {
   return new Promise((resolve) => {
     const startTime = Date.now();
     // const timeout   = 120_000; // 2 minutes — model loading is slow
-    const timeout = isDev ? 120000 : 30000; // 30s in packaged, 2min in dev
+    const timeout = isDev ? 120000 : 120000; // 30s in packaged, 2min in dev
 
     const check = () => {
       const req = http.get('http://127.0.0.1:7777/api/status', (res) => {
@@ -250,9 +259,6 @@ if (isDev) {
   mainWindow.once('ready-to-show', () => {
   mainWindow.show();
   mainWindow.focus();
-  if (!isDev) {
-    mainWindow.webContents.openDevTools(); // temporary
-  }
 });
 
   mainWindow.on('close', (event) => {
@@ -336,6 +342,14 @@ function showOrbContextMenu() {
       label: '❌ Quit VII',
       click: () => {
         app.isQuitting = true;
+        if (statusWindow) {
+          statusWindow.destroy();
+          statusWindow = null;
+        }
+        if (mainWindow) {
+          mainWindow.destroy();
+          mainWindow = null;
+        }
         stopPython();
         app.quit();
       }
@@ -359,9 +373,12 @@ function navigateTo(route) {
 function performNavigation(route) {
   const script = `
     (function() {
-      if (window.__navigate) { window.__navigate('${route}'); return; }
-      window.location.href = window.location.origin + window.location.pathname + '#${route}';
-      setTimeout(() => window.dispatchEvent(new PopStateEvent('popstate')), 50);
+      if (window.__navigate) { 
+        window.__navigate('${route}'); 
+        return; 
+      }
+      // HashRouter fallback — set the hash
+      window.location.hash = '${route}';
     })();
   `;
   mainWindow.webContents.executeJavaScript(script).catch(console.error);
@@ -398,6 +415,14 @@ function createTray() {
     { type: 'separator' },
     { label: 'Quit SEVEN', click: () => {
         app.isQuitting = true;
+        if (statusWindow) {
+          statusWindow.destroy();
+          statusWindow = null;
+        }
+        if (mainWindow) {
+          mainWindow.destroy();
+          mainWindow = null;
+        }
         stopPython();
         app.quit();
       }
@@ -421,7 +446,19 @@ ipcMain.on('close-window',      () => mainWindow?.hide());
 ipcMain.on('show-main-window',  () => navigateTo('/'));
 ipcMain.on('show-orb-menu',     () => showOrbContextMenu());
 ipcMain.on('navigate-to',       (_, route) => navigateTo(route));
-ipcMain.on('quit-app',          () => { app.isQuitting = true; stopPython(); app.quit(); });
+ipcMain.on('quit-app', () => { 
+  app.isQuitting = true; 
+  if (statusWindow) {
+    statusWindow.destroy();
+    statusWindow = null;
+  }
+  if (mainWindow) {
+    mainWindow.destroy();
+    mainWindow = null;
+  }
+  stopPython(); 
+  app.quit(); 
+});
 
 ipcMain.on('toggle-dashboard', () => {
   if (!mainWindow) { createMainWindow(); return; }
@@ -520,38 +557,39 @@ if (!gotTheLock) {
     // Start Python backend
     startPython();
 
-    // Show orb immediately (loading indicator)
+    // Show orb immediately
     createStatusWindow();
 
-    // Wait for backend — model loading can take time
-    console.log('[APP] Waiting for Python backend...');
-    const ready = await waitForBackend();
-
-if (!ready) {
-  console.error('[APP] Backend failed to start. Quitting.');
-  // Show error window so user sees what happened
-  const errWin = new BrowserWindow({ 
-    width: 600, height: 300, 
-    backgroundColor: '#09090b',
-    frame: true,
-    webPreferences: { nodeIntegration: false }
-  });
-  errWin.loadURL(
-    'data:text/html,' + encodeURIComponent(`
-      <body style="background:#09090b;color:#fff;font-family:monospace;padding:40px">
-        <h2 style="color:#ff4444">SEVEN failed to start</h2>
-        <p>Python backend did not respond within 30 seconds.</p>
-        <p style="color:#888">Check that your antivirus is not blocking SEVEN.</p>
-        <p style="color:#888">Try running as Administrator.</p>
-        <p style="color:#555;font-size:11px">Install path: ${getAppSourcePath()}</p>
-      </body>
-    `)
-  );
-  return;
-}
-
+    // Create window immediately — React handles the loading state
     createMainWindow();
     createTray();
+
+    // Wait for backend in background — reload window when ready
+    console.log('[APP] Waiting for Python backend...');
+    waitForBackend().then((ready) => {
+      if (!ready) {
+        console.error('[APP] Backend failed to start after 2 minutes.');
+        // Show error in the existing window instead of a new one
+        if (mainWindow) {
+          mainWindow.webContents.loadURL(
+            'data:text/html,' + encodeURIComponent(`
+              <body style="background:#09090b;color:#fff;font-family:monospace;padding:40px">
+                <h2 style="color:#ff4444">SEVEN failed to start</h2>
+                <p>Python backend did not respond within 2 minutes.</p>
+                <p style="color:#888">Check that your antivirus is not blocking SEVEN.</p>
+                <p style="color:#888">Try running as Administrator.</p>
+                <p style="color:#555;font-size:11px">Install path: ${getAppSourcePath()}</p>
+              </body>
+            `)
+          );
+        }
+        return;
+      }
+      console.log('[APP] Backend ready — reloading window.');
+      if (mainWindow) {
+        mainWindow.webContents.reload();
+      }
+    });
 
     // Global hotkey: Alt+S toggle
     globalShortcut.register('Alt+S', () => {
@@ -570,6 +608,14 @@ if (!ready) {
   app.on('before-quit', () => {
     app.isQuitting = true;
     globalShortcut.unregisterAll();
+    if (statusWindow) {
+      statusWindow.destroy();
+      statusWindow = null;
+    }
+    if (mainWindow) {
+      mainWindow.destroy();
+      mainWindow = null;
+    }
     stopPython();
   });
 

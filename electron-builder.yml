@@ -1,0 +1,82 @@
+# =============================================================================
+# PROJECT SEVEN — electron-builder configuration
+# Version: 2.4 — disable finish run, fix install path
+# =============================================================================
+
+appId: com.sevenlabs.seven
+productName: SEVEN
+copyright: "Copyright © 2025 Seven Labs. All rights reserved."
+
+directories:
+  output: dist-electron
+  buildResources: electron
+
+# ── Files packed into asar ──
+files:
+  - electron/**/*
+  - frontend/dist/**/*
+  - "!**/*.pyc"
+  - "!**/__pycache__"
+  - "!.git"
+  - "!node_modules"
+  - "!venv"
+  - "!dist-electron"
+  - "!python-dist"
+  - "!installer"
+
+# ── Extra resources ──
+extraResources:
+  - from: "."
+    to: "app"
+    filter:
+      - "*.py"
+      - "requirements.txt"
+      - "backend/**/*"
+      - "ears/**/*"
+      - "hands/**/*"
+      - "knowledge/**/*"
+      - "memory/**/*"
+      - "mouth/**/*"
+      - "web/**/*"
+      - "!**/*.pyc"
+      - "!**/__pycache__"
+      - "!node_modules/**"
+      - "!venv/**"
+      - "!dist-electron/**"
+      - "!python-dist/**"
+      - "!frontend/**"
+      - "!installer/**"
+  - from: "python-dist/python"
+    to: "app/python"
+    filter:
+      - "**/*"
+
+# ── Windows — x64 only ──
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: electron/icon.ico
+  requestedExecutionLevel: asInvoker
+
+# ── Disable signing ──
+forceCodeSigning: false
+
+# ── NSIS ──
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  allowElevation: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: SEVEN
+  perMachine: false
+  installerIcon: electron/icon.ico
+  uninstallerIcon: electron/icon.ico
+  installerHeaderIcon: electron/icon.ico
+  license: LICENSE.txt
+  include: installer/seven.nsh
+  deleteAppDataOnUninstall: false
+  # ── Disable run on finish — user launches from desktop shortcut ──
+  runAfterFinish: false

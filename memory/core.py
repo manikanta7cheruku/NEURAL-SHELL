@@ -55,7 +55,17 @@ from colorama import Fore
 # CONFIGURATION
 # =============================================================================
 
-MEMORY_DIR = "./seven_data/memory"
+def _get_memory_dir():
+    """Always use %APPDATA%\\SEVEN\\seven_data\\memory — works in both dev and packaged."""
+    appdata = os.environ.get('APPDATA', '')
+    if appdata:
+        path = os.path.join(appdata, 'SEVEN', 'seven_data', 'memory')
+        os.makedirs(path, exist_ok=True)
+        return path
+    # Fallback for non-Windows dev
+    return "./seven_data/memory"
+
+MEMORY_DIR = _get_memory_dir()
 TOP_K_RESULTS = 5
 EMBEDDING_MODEL = "all-MiniLM-L6-v2"
 
@@ -152,6 +162,10 @@ def _load_offline_embedder_standalone(model_name: str):
                 show_progress_bar=False,
                 batch_size=32
             ).tolist()
+
+        def name(self) -> str:
+            """Required by ChromaDB 0.5.23+ to identify embedding function."""
+            return "seven_offline_embedder"
 
     return _OfflineEmbedder(model)
 

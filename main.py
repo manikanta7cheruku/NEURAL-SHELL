@@ -23,60 +23,104 @@ ARCHITECTURE:
 
 """
 PROJECT SEVEN - main.py (The Controller)
-Version: 1.3 + Packaged App Support
+Version: 1.3 + Packaged App Support (Phase 8 Fixed)
 """
 
 import sys
 import os
 
-# ── MUST BE FIRST — Packaged app path fix ──
+# Fix Windows encoding issues
+if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+if sys.stderr and hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+
+# ============================================================================
+# MUST BE FIRST — Path setup before ANY other import
+# ============================================================================
+
+# Add SEVEN_APP_PATH (set by Electron for packaged app)
 _app_path = os.environ.get('SEVEN_APP_PATH', '')
 if _app_path and _app_path not in sys.path:
     sys.path.insert(0, _app_path)
+
+# Add embedded Python paths (packaged app only)
+if _app_path:
+    _embedded_paths = [
+        os.path.join(_app_path, 'python', 'Lib', 'site-packages'),
+        os.path.join(_app_path, 'python', 'Lib'),
+        os.path.join(_app_path, 'python', 'DLLs'),
+        os.path.join(_app_path, 'python'),
+    ]
+    for _p in _embedded_paths:
+        if os.path.exists(_p) and _p not in sys.path:
+            sys.path.insert(0, _p)
+    print(f"[SYSTEM] App path: {_app_path}")
+    _sp = os.path.join(_app_path, 'python', 'Lib', 'site-packages')
+    print(f"[SYSTEM] Site-packages exists: {os.path.exists(_sp)}")
+
+# Add CWD
 _cwd = os.getcwd()
 if _cwd not in sys.path:
     sys.path.insert(0, _cwd)
 
-# ── Check if this is a fresh install (packages not yet installed) ──
+# ============================================================================
+# PACKAGE CHECK — Must happen AFTER path setup
+# ============================================================================
+
 def _packages_ready():
-    """Check if core packages are installed."""
-    try:
-        import fastapi
-        import uvicorn
-        import speech_recognition
-        import pyttsx3
-        return True
-    except ImportError:
-        return False
+    """
+    Check if minimum packages for FULL server are installed.
+    Only checks what's actually imported at startup.
+    """
+    import subprocess
+    python = sys.executable
+
+    # These are the only packages needed before full import chain starts
+    critical = ['fastapi', 'uvicorn', 'pyttsx3', 'speech_recognition']
+
+    for pkg in critical:
+        result = subprocess.run(
+            [python, '-c', f'import {pkg.replace("-","_")}'],
+            capture_output=True
+        )
+        if result.returncode != 0:
+            print(f"[SYSTEM] Missing package: {pkg}")
+            return False
+
+    print("[SYSTEM] Core packages ready.")
+    return True
+
 
 IS_ELECTRON_MODE = os.environ.get('SEVEN_ELECTRON_MODE') == '1'
 
 if not _packages_ready():
     print("[SYSTEM] Core packages not installed — starting in pre-setup mode")
     print("[SYSTEM] Waiting for setup wizard to install packages...")
-    
-    # Start minimal server so Electron/wizard can communicate
+
     from backend.startup import run_minimal_server
     run_minimal_server(host="127.0.0.1", port=7777)
-    
+
     print("[SYSTEM] Minimal server started. Waiting for setup to complete...")
-    
-    # Keep alive until packages are installed and restart is triggered
+
     try:
         while True:
             import time
             time.sleep(1)
     except KeyboardInterrupt:
         os._exit(0)
-    
-    # If we get here, restart was triggered
+
     os._exit(0)
 
-# ── Full startup — packages are available ──
+# ============================================================================
+# FULL STARTUP — All packages available
+# ============================================================================
+
 print("[SYSTEM] Packages ready — starting full Seven...")
 
 from ears import listen
-from ears.voice_id import identify_speaker, enroll_speaker, is_voice_id_enabled, get_enrolled_speakers
+from ears.voice_id import (identify_speaker, enroll_speaker,
+                            is_voice_id_enabled, get_enrolled_speakers)
 from ears.core import listen_for_interrupt
 from backend.api_server import start_api_server, set_state as api_set_state
 from backend.admin_server import start_admin_server
@@ -85,628 +129,475 @@ import brain
 import hands.core as core
 import hands.system as system_mod
 import hands.scheduler as scheduler_mod
+import hands.windows as hands_windows
 import mouth
 from mouth import interrupt as mouth_interrupt, is_speaking
 import random
 import brain_manager
-import gui
-import tkinter as tk
 import threading
 import re
 import colorama
 from colorama import Fore
 import config
 
-if IS_ELECTRON_MODE:
-    print("[SYSTEM] Running in Electron Desktop mode (GUI disabled)")
+# Memory system — used throughout seven_logic
+from memory import seven_memory
+from memory.mood import mood_engine
+from memory.command_log import command_log
 
+# GUI — only in standalone mode
+if not IS_ELECTRON_MODE:
+    import gui
+    import tkinter as tk
+
+# ============================================================================
+# GLOBAL STATE
+# ============================================================================
+
+app_ui = None
+
+# ============================================================================
+# SEVEN LOGIC THREAD
+# ============================================================================
 
 def seven_logic():
-    """
-    The Core Intelligence Loop.
-    Runs on a separate thread to prevent the GUI from freezing.
-    
-    V1.1 Changes:
-    - After every successful conversation, store it in long-term memory
-    - Memory search happens INSIDE brain.think() (not here)
-    - Storage happens HERE (after we have both user input AND response)
-    """
     global app_ui
+
     is_active = True
 
-    # =========================================================================
-    # CONFIGURATION LOADING
-    # =========================================================================
-
-    # =========================================================================
-    # V1.3: INTERRUPT CONFIGURATION
-    # =========================================================================
+    # ── Interrupt configuration ──
     interrupt_config = config.KEY.get('interrupt', {})
-    INTERRUPT_ENABLED = interrupt_config.get('enabled', True)
-    INTERRUPT_WORDS = interrupt_config.get('words', ["stop", "seven", "hey seven"])
-    INTERRUPT_COOLDOWN = interrupt_config.get('interrupt_cooldown', 1.5)
+    INTERRUPT_ENABLED   = interrupt_config.get('enabled', True)
+    INTERRUPT_WORDS     = interrupt_config.get('words', ["stop", "seven", "hey seven"])
+    INTERRUPT_COOLDOWN  = interrupt_config.get('interrupt_cooldown', 1.5)
     last_interrupt_time = [0]
 
+    interrupt_context = {
+        "last_response":    None,
+        "last_input":       None,
+        "was_interrupted":  False
+    }
+
+    # ── Wake / pause / kill words ──
+    WAKE_WORDS  = ["wake up", "seven", "hey seven", "listen", "online", "resume"]
+    PAUSE_WORDS = ["not you", "hold it", "hold on", "just a moment", "wait",
+                   "pause", "stop listening", "sleep", "silence"]
+    KILL_WORDS  = ["shut down", "shutdown", "kill system", "go to sleep", "terminate"]
+
     def speak_with_interrupt(text):
-        """
-        V1.3: Speak with interrupt detection.
-        Starts an interrupt listener thread while speaking.
-        Returns True if completed, False if interrupted.
-        """
-        if not INTERRUPT_ENABLED:
-            mouth.speak(text)
-            return True
-        
+        """Speak with interrupt detection. Returns True if completed."""
         import time as _time
-        if _time.time() - last_interrupt_time[0] < INTERRUPT_COOLDOWN:
+        if not INTERRUPT_ENABLED or (_time.time() - last_interrupt_time[0] < INTERRUPT_COOLDOWN):
             mouth.speak(text)
             return True
-        
-        stop_listening = threading.Event()
+
+        stop_listening  = threading.Event()
         was_interrupted = threading.Event()
-        
+
         def on_interrupt():
             was_interrupted.set()
             mouth_interrupt()
             last_interrupt_time[0] = _time.time()
-        
+
         interrupt_thread = threading.Thread(
             target=listen_for_interrupt,
             args=(INTERRUPT_WORDS, on_interrupt, stop_listening),
             daemon=True
         )
         interrupt_thread.start()
-        
+
         completed = mouth.speak(text)
-        
+
         stop_listening.set()
         interrupt_thread.join(timeout=2)
-        
+
         if was_interrupted.is_set():
-            print("[SYSTEM] ⚡ Speech was interrupted by user")
+            print("[SYSTEM] ⚡ Speech interrupted by user")
             app_ui.update_status("INTERRUPTED", "#ffaa00")
             interrupt_context["was_interrupted"] = True
-            interrupt_context["last_response"] = text
+            interrupt_context["last_response"]   = text
             mouth.speak("Yeah?")
             return False
-        
+
         return True
 
-    # =========================================================================
-    # CONFIGURATION LOADING
-    # =========================================================================
-
-    WAKE_WORDS = ["wake up", "seven", "hey seven", "listen", "online", "resume"]
-    PAUSE_WORDS = ["not you", "hold it", "hold on", "just a moment", "wait",
-                   "pause", "stop listening", "sleep", "silence"]
-    KILL_WORDS = ["shut down", "shutdown", "kill system", "go to sleep", "terminate"]
-
-
-    # V1.3: Interrupt configuration
-    interrupt_config = config.KEY.get('interrupt', {})
-    INTERRUPT_ENABLED = interrupt_config.get('enabled', True)
-    INTERRUPT_WORDS = interrupt_config.get('words', ["stop", "seven", "hey seven"])
-    INTERRUPT_COOLDOWN = interrupt_config.get('interrupt_cooldown', 1.5)
-    last_interrupt_time = [0]  # list so nonlocal works in nested function
-
-    # V1.3: Interrupt context — what was Seven saying when interrupted
-    interrupt_context = {"last_response": None, "last_input": None, "was_interrupted": False}
-
-    # --- V1.1: Show memory stats on startup ---
-    stats = seven_memory.get_stats()
-    print(Fore.GREEN + f"[SYSTEM] Memory loaded: {stats['total_conversations']} conversations, "
-                        f"{stats['total_facts']} facts stored.")
-    
-    # startup display
+    # ── Startup stats ──
+    stats      = seven_memory.get_stats()
     mood_status = mood_engine.get_status()
-    print(Fore.MAGENTA + f"[SYSTEM] Mood: {mood_status['mood_value']:.2f} ({mood_status['label']})")
-    cmd_stats = command_log.get_stats()
-    print(Fore.CYAN + f"[SYSTEM] Commands logged: {cmd_stats['total']} (success rate: {cmd_stats['success_rate']})")
+    cmd_stats  = command_log.get_stats()
 
-        # V1.2: Voice ID status
+    print(Fore.GREEN   + f"[SYSTEM] Memory: {stats['total_conversations']} conversations, "
+                         f"{stats['total_facts']} facts")
+    print(Fore.MAGENTA + f"[SYSTEM] Mood: {mood_status['mood_value']:.2f} ({mood_status['label']})")
+    print(Fore.CYAN    + f"[SYSTEM] Commands: {cmd_stats['total']} (success: {cmd_stats['success_rate']})")
+
     if is_voice_id_enabled():
         speakers = get_enrolled_speakers()
-        print(Fore.CYAN + f"[SYSTEM] Voice ID active. Enrolled speakers: {', '.join(speakers)}")
+        print(Fore.CYAN + f"[SYSTEM] Voice ID active. Speakers: {', '.join(speakers)}")
     else:
-        print(Fore.YELLOW + "[SYSTEM] Voice ID inactive. No speakers enrolled. Say 'Enroll my voice' to start.")
+        print(Fore.YELLOW + "[SYSTEM] Voice ID inactive.")
 
-    # Initial Greeting
-    print(Fore.GREEN + "[SYSTEM] Initializing Seven...")
-    mouth.speak(f"{config.KEY['identity']['name']} V1.3 Online.")
-    # V1.8: Start background scheduler
+    # ── Initial greeting ──
+    mouth.speak(f"{config.KEY['identity']['name']} online.")
     scheduler_mod.start_background(speak_fn=mouth.speak)
     sched_count = scheduler_mod.get_active_count()
     if sched_count > 0:
-        print(Fore.CYAN + f"[SYSTEM] Scheduler active: {sched_count} pending schedule(s).")
+        print(Fore.CYAN + f"[SYSTEM] Scheduler: {sched_count} pending schedule(s).")
     app_ui.update_status("SYSTEM ONLINE", "#00ff00")
 
     # =========================================================================
-    # MAIN EVENT LOOP
+    # MAIN LOOP
     # =========================================================================
     while True:
         try:
-            # --- 1. GUI STATE UPDATES ---
+            # ── GUI / API state ──
             if is_active:
                 app_ui.update_status("LISTENING...", "#00ff00")
                 api_set_state("listening", True)
-                api_set_state("thinking", False)
-                api_set_state("speaking", False)
+                api_set_state("thinking",  False)
+                api_set_state("speaking",  False)
             else:
                 app_ui.update_status("PAUSED (Say 'Wake Up')", "#555555")
                 api_set_state("listening", False)
 
-            # --- 2. LISTEN INPUT ---
+            # ── Listen ──
             user_input, audio_path = listen()
-
             if not user_input:
                 continue
 
+            text_lower = user_input.lower()
 
-            # --- V1.3: INTERRUPT CONTEXT HANDLER ---
-            # --- V1.3: INTERRUPT CONTEXT HANDLER ---
+            # ── Interrupt context handler ──
             if interrupt_context["was_interrupted"]:
-                resume_words = ["continue", "resume", "go on", "go ahead", "keep going", "carry on"]
-                
+                resume_words = ["continue", "resume", "go on", "go ahead",
+                                "keep going", "carry on"]
                 if any(w in text_lower for w in resume_words):
                     old_response = interrupt_context["last_response"]
-                    old_input = interrupt_context["last_input"]
-                    interrupt_context["was_interrupted"] = False
-                    interrupt_context["last_response"] = None
-                    interrupt_context["last_input"] = None
-                    
+                    old_input    = interrupt_context["last_input"]
+                    interrupt_context.update(
+                        {"was_interrupted": False, "last_response": None, "last_input": None}
+                    )
                     if old_response and old_input:
-                        # Send to brain with context so LLM continues naturally
-                        resume_prompt = f"I was interrupted while answering this: '{old_input}'. I had said: '{old_response}'. Now continue from where I left off naturally without repeating what was already said."
-                        response = brain.think(resume_prompt, speaker_id=speaker_id)
-                        import telemetry
-                        telemetry.log_activity()
+                        resume_prompt = (
+                            f"I was interrupted while answering: '{old_input}'. "
+                            f"I had said: '{old_response}'. "
+                            f"Continue from where I left off naturally."
+                        )
+                        response = brain.think(resume_prompt, speaker_id="default")
                         if response:
                             speak_with_interrupt(response)
                         else:
                             mouth.speak("Sorry, I lost my train of thought.")
                     else:
                         mouth.speak("Sorry, I lost my train of thought. Ask me again?")
-                    continue
                 else:
-                    interrupt_context["was_interrupted"] = False
-                    interrupt_context["last_response"] = None
-                    interrupt_context["last_input"] = None
+                    interrupt_context.update(
+                        {"was_interrupted": False, "last_response": None, "last_input": None}
+                    )
+                continue
 
-            # --- 2.5. VOICE IDENTIFICATION (V1.2) ---
-
-            text_lower = user_input.lower()
-
-            # --- 2.5. VOICE IDENTIFICATION (V1.2) ---
+            # ── Voice ID ──
             speaker_id = "default"
             if audio_path and is_voice_id_enabled():
                 speaker_id = identify_speaker(audio_path)
                 print(Fore.CYAN + f"[VOICE ID] Speaker: {speaker_id}")
                 api_set_state("current_speaker", speaker_id)
-            
-            # --- 2.6. VOICE ENROLLMENT COMMAND ---
+
+            # ── Voice enrollment ──
             if "enroll my voice" in text_lower or "enroll voice" in text_lower:
-                # Ask for name
                 mouth.speak("What name should I save this voice as?")
                 app_ui.update_status("ENROLLING — Speak your name...", "#ff00ff")
                 name_input, name_audio = listen()
                 if name_input:
                     enroll_name = name_input.strip().replace(".", "").replace("!", "")
-                    mouth.speak(f"Now say a few sentences so I can learn your voice, {enroll_name}.")
-                    app_ui.update_status(f"ENROLLING {enroll_name} — Keep talking...", "#ff00ff")
-                    # Record a longer sample for enrollment
+                    mouth.speak(f"Now say a few sentences, {enroll_name}.")
+                    app_ui.update_status(f"ENROLLING {enroll_name}...", "#ff00ff")
                     enroll_input, enroll_audio = listen()
                     if enroll_audio:
                         success = enroll_speaker(enroll_name, enroll_audio)
-                        if success:
-                            mouth.speak(f"Got it. I'll recognize your voice now, {enroll_name}.")
-                        else:
-                            mouth.speak("I couldn't capture your voice clearly. Try again.")
+                        mouth.speak(
+                            f"Got it, {enroll_name}." if success
+                            else "I couldn't capture your voice clearly. Try again."
+                        )
                     else:
                         mouth.speak("I didn't hear anything. Try again.")
                 else:
                     mouth.speak("I didn't catch your name. Try again.")
                 continue
 
-            # =================================================================
-            # 3. TRIGGER WORD FILTERS
-            # =================================================================
-
-            # A. KILL COMMAND (Always Active)
+            # ── Kill command ──
             if any(trigger in text_lower for trigger in KILL_WORDS):
-                print(Fore.RED + f"USER COMMAND: KILL ({user_input})")
                 app_ui.update_status("SHUTTING DOWN...", "#ff0000")
                 mouth.speak("Systems offline. Goodbye.")
                 app_ui.close()
                 os._exit(0)
 
-            # B. WAKE COMMAND
+            # ── Wake command ──
             if any(trigger in text_lower for trigger in WAKE_WORDS):
                 if not is_active:
                     is_active = True
                     mouth.speak("I'm listening.")
-                    print(Fore.GREEN + "SYSTEM: RESUMED")
                     app_ui.update_status("RESUMED", "#00ff00")
-                    continue
+                continue
 
-            # C. PAUSE COMMAND
-            if is_active:
-                if any(trigger in text_lower for trigger in PAUSE_WORDS):
-                    is_active = False
-                    mouth.speak("Standing by.")
-                    print(Fore.MAGENTA + "SYSTEM: PAUSED")
-                    app_ui.update_status("PAUSED", "#555555")
-                    continue
+            # ── Pause command ──
+            if is_active and any(trigger in text_lower for trigger in PAUSE_WORDS):
+                is_active = False
+                mouth.speak("Standing by.")
+                app_ui.update_status("PAUSED", "#555555")
+                continue
 
-            # If Paused, ignore everything
             if not is_active:
                 continue
 
-            # =================================================================
-            # 4. CORE PROCESSING (Active Mode)
-            # =================================================================
-
+            # ── Core processing ──
             print(Fore.YELLOW + f"USER: {user_input}")
-            app_ui.update_status(f"USER: {user_input}", "#00ccff")
             app_ui.update_status("THINKING...", "#ff00ff")
             api_set_state("thinking", True)
             api_set_state("listening", False)
 
-            # SEND TO BRAIN
-            # brain.think() now internally:
-            #   1. Checks Python overrides
-            #   2. Searches memory for relevant context
-            #   3. Extracts facts from user input
-            #   4. Sends enhanced prompt to LLM
             response = brain.think(user_input, speaker_id=speaker_id)
-            import telemetry
-            telemetry.log_activity()
-
-            # SEND TO BRAIN
-            response = brain.think(user_input, speaker_id=speaker_id)
-            telemetry.log_activity()
-            
-            # TRACK ACTIVITY (Phase 2.5)
             telemetry.log_activity()
 
             if not response:
                 response = "Processing error."
-            
-            # V1.9: Check if response is a streaming generator
-            is_streaming = isinstance(response, tuple) and len(response) == 2 and response[0] == "__STREAM__"
-            
-            # V1.3: Track if speech completes
+
+            is_streaming = (
+                isinstance(response, tuple)
+                and len(response) == 2
+                and response[0] == "__STREAM__"
+            )
             completed = True
 
-            # =================================================================
-            # V1.1: STORE CONVERSATION IN LONG-TERM MEMORY
-            # =================================================================
-            # We store AFTER getting the response so we save both sides
-            # We DON'T store:
-            #   - Pure command responses (###OPEN, ###CLOSE) — no useful info
-            #   - Very short exchanges ("hi" → "hello") — noise
-            #   - Visual reports — they're real-time, not historical
-            
+            # ── Memory storage ──
             should_store = True
-            
-            # Don't store pure command outputs
-            if response.strip().startswith("###"):
+            if isinstance(response, str) and response.strip().startswith("###"):
                 should_store = False
-            
-            # Don't store very short greetings (they're noise in memory)
             if len(user_input.strip()) <= 3:
                 should_store = False
-            
-            # Don't store if it's just a greeting response
-            greeting_words = ["hi", "hello", "hey"]
-            if user_input.lower().strip() in greeting_words:
+            if user_input.lower().strip() in ["hi", "hello", "hey"]:
                 should_store = False
-            
-            # Don't store identity responses (they pollute memory)
-            identity_phrases = ["i am seven", "you can call me seven",
-                                "still seven", "you just asked",
-                                "you've asked me this", "you haven't told me that",
-                                f"you are {brain.USER_NAME.lower()}"]
-            response_lower = response.lower()
-            if any(phrase in response_lower for phrase in identity_phrases):
-                should_store = False
-            
-            if should_store:
-                # Store in long-term memory (ChromaDB)
-                # This runs in the background — doesn't slow down response
-                try:
-                    # Clean the response: remove command tags before storing
-                    clean_response = re.sub(r'###\w+:\s*\S+', '', response).strip()
-                    # V1.3: Tag interrupted responses so Seven knows it was cut off
-                    if not completed and clean_response:
-                        clean_response = f"[INTERRUPTED] {clean_response}"
-                    if clean_response:
-                        if speaker_id != "default" and speaker_id != "unknown":
-                            seven_memory.store_conversation(user_input, clean_response, user_id=speaker_id)
-                        else:
-                            seven_memory.store_conversation(user_input, clean_response)
-                except Exception as e:
-                    # Memory storage failure should NEVER crash Seven
-                    print(Fore.RED + f"[MEMORY ERROR] Failed to store: {e}")
 
-            # =================================================================
-            # PHASE 1.5: COMMAND PIPELINE (The Hands)
-            # =================================================================
-
-            # STEP A: Separate Speech from Actions
+            # ── Speech part ──
             speech_part = response
-            if "###" in response:
+            if isinstance(response, str) and "###" in response:
                 speech_part = response.split("###")[0].strip()
 
             api_set_state("speaking", True)
 
-            if is_streaming and not ("###" in str(response)):
-                # V1.9: Streaming mode — speak sentences as they arrive
+            if is_streaming:
                 _, sentence_gen = response
                 interrupt_context["last_input"] = user_input
-                
-                full_response_parts = []
+                full_parts = []
                 for sentence in sentence_gen:
-                    full_response_parts.append(sentence)
-                    
-                    # Check for command tags — don't speak them
+                    full_parts.append(sentence)
                     if "###" in sentence:
                         continue
-                    
                     completed = speak_with_interrupt(sentence)
                     if not completed:
                         break
-                
-                # Reconstruct full response for memory storage and command extraction
-                response = " ".join(full_response_parts)
+                response    = " ".join(full_parts)
                 speech_part = response.split("###")[0].strip() if "###" in response else response
-                
-                if completed:
-                    app_ui.update_status(speech_part[:80], "#00ccff")
-                else:
-                    app_ui.update_status("⚡ INTERRUPTED", "#ffaa00")
+                app_ui.update_status(
+                    "⚡ INTERRUPTED" if not completed else speech_part[:80],
+                    "#ffaa00" if not completed else "#00ccff"
+                )
             elif speech_part:
                 interrupt_context["last_input"] = user_input
                 completed = speak_with_interrupt(speech_part)
-                if completed:
-                    app_ui.update_status(speech_part, "#00ccff")
-                else:
-                    app_ui.update_status("⚡ INTERRUPTED", "#ffaa00")
+                app_ui.update_status(
+                    "⚡ INTERRUPTED" if not completed else speech_part,
+                    "#ffaa00" if not completed else "#00ccff"
+                )
+
             api_set_state("speaking", False)
             api_set_state("thinking", False)
 
-                    
-            # STEP B1: EXTRACT WINDOW COMMANDS (V1.6)
+            # ── Store conversation ──
+            if should_store and isinstance(response, str):
+                try:
+                    clean_response = re.sub(r'###\w+:\s*\S+', '', response).strip()
+                    if not completed and clean_response:
+                        clean_response = f"[INTERRUPTED] {clean_response}"
+                    if clean_response:
+                        seven_memory.store_conversation(
+                            user_input, clean_response,
+                            user_id=speaker_id if speaker_id not in ("default", "unknown")
+                                   else "default"
+                        )
+                except Exception as e:
+                    print(Fore.RED + f"[MEMORY ERROR] {e}")
+
+            # ── Command pipeline ──
+            if not isinstance(response, str):
+                continue
+
+            # Window commands
             window_cmds = re.findall(r"###WINDOW:\s*(.*?)(?=###|$)", response)
-            if window_cmds:
-                for param_str in window_cmds:
-                    param_str = param_str.strip()
-                    print(Fore.CYAN + f"[WINDOW CMD] Raw params: {param_str}")
-                    
-                    # Parse key=value pairs
-                    params = {}
-                    for pair in param_str.split():
-                        if "=" in pair:
-                            key, val = pair.split("=", 1)
-                            params[key.strip()] = val.strip()
-                    
-                    if params:
-                        success, msg = hands.manage_window(params)
+            for param_str in window_cmds:
+                params = {}
+                for pair in param_str.strip().split():
+                    if "=" in pair:
+                        k, v = pair.split("=", 1)
+                        params[k.strip()] = v.strip()
+                if params:
+                    try:
+                        success, msg = hands_windows.manage_window(params)
                         if success:
                             app_ui.update_status(f"🪟 {msg}", "#00ff00")
-                            # Speak result for info commands (list, etc)
                             if params.get("action") == "list" and msg:
-                                speak_with_interrupt(msg)
-                        else:
-                            fail_responses = [
-                                msg,
-                                f"Window issue: {msg}",
-                                msg,
-                            ]
-                            api_set_state("speaking", True)
-                            mouth.speak(random.choice(fail_responses))
-                            api_set_state("speaking", False)
-                            app_ui.update_status(f"🪟 FAILED: {msg}", "#ff0000")
-
-            # STEP B1.7: EXTRACT SCHEDULER COMMANDS (V1.8)
-            sched_cmds = re.findall(r"###SCHED:\s*(.*?)(?=###|$)", response)
-            if sched_cmds:
-                for param_str in sched_cmds:
-                    param_str = param_str.strip()
-                    print(Fore.CYAN + f"[SCHED CMD] Raw params: {param_str}")
-                    
-                    # Parse key=value pairs
-                    params = {}
-                    for pair in param_str.split():
-                        if "=" in pair:
-                            key, val = pair.split("=", 1)
-                            params[key.strip()] = val.strip()
-                    
-                    # Inject speaker_id
-                    params["speaker_id"] = speaker_id
-                    
-                    if params:
-                        success, msg = scheduler_mod.manage_schedule(params)
-                        telemetry.log_activity()
-                        if success:
-                            app_ui.update_status(f"📅 {msg}", "#00ff00")
-                            if msg:
                                 speak_with_interrupt(msg)
                         else:
                             api_set_state("speaking", True)
                             mouth.speak(msg)
                             api_set_state("speaking", False)
-                            app_ui.update_status(f"📅 FAILED: {msg}", "#ff0000")
+                            app_ui.update_status(f"🪟 FAILED: {msg}", "#ff0000")
+                    except Exception as e:
+                        print(Fore.RED + f"[WINDOW CMD ERROR] {e}")
 
-            # STEP B1.5: EXTRACT SYSTEM COMMANDS (V1.7)
+            # Scheduler commands
+            sched_cmds = re.findall(r"###SCHED:\s*(.*?)(?=###|$)", response)
+            for param_str in sched_cmds:
+                params = {"speaker_id": speaker_id}
+                for pair in param_str.strip().split():
+                    if "=" in pair:
+                        k, v = pair.split("=", 1)
+                        params[k.strip()] = v.strip()
+                if params:
+                    success, msg = scheduler_mod.manage_schedule(params)
+                    telemetry.log_activity()
+                    if success:
+                        app_ui.update_status(f"📅 {msg}", "#00ff00")
+                        if msg:
+                            speak_with_interrupt(msg)
+                    else:
+                        api_set_state("speaking", True)
+                        mouth.speak(msg)
+                        api_set_state("speaking", False)
+                        app_ui.update_status(f"📅 FAILED: {msg}", "#ff0000")
+
+            # System commands
             sys_cmds = re.findall(r"###SYS:\s*(.*?)(?=###|$)", response)
-            if sys_cmds:
-                for param_str in sys_cmds:
-                    param_str = param_str.strip()
-                    print(Fore.CYAN + f"[SYS CMD] Raw params: {param_str}")
-                    
-                    # Parse key=value pairs
-                    params = {}
-                    for pair in param_str.split():
-                        if "=" in pair:
-                            key, val = pair.split("=", 1)
-                            params[key.strip()] = val.strip()
-                    
-                    if params:
-                        success, msg = system_mod.manage_system(params)
-                        if success:
-                            app_ui.update_status(f"⚙️ {msg}", "#00ff00")
-                            # Speak result for info queries (battery, volume level, etc)
-                            action = params.get("action", "")
-                            info_actions = ["battery", "volume_get", "brightness_get", 
-                                          "wifi_status", "bluetooth_status"]
-                            if action in info_actions and msg:
-                                speak_with_interrupt(msg)
-                        else:
-                            api_set_state("speaking", True)
+            for param_str in sys_cmds:
+                params = {}
+                for pair in param_str.strip().split():
+                    if "=" in pair:
+                        k, v = pair.split("=", 1)
+                        params[k.strip()] = v.strip()
+                if params:
+                    success, msg = system_mod.manage_system(params)
+                    if success:
+                        app_ui.update_status(f"⚙️ {msg}", "#00ff00")
+                        action = params.get("action", "")
+                        if action in ["battery", "volume_get", "brightness_get",
+                                      "wifi_status", "bluetooth_status"] and msg:
+                            speak_with_interrupt(msg)
+                    else:
+                        api_set_state("speaking", True)
                         mouth.speak(msg)
                         api_set_state("speaking", False)
                         app_ui.update_status(f"⚙️ FAILED: {msg}", "#ff0000")
 
-            # STEP B: EXTRACT COMMANDS
-            commands = re.findall(r"###(OPEN|CLOSE|SEARCH|SYS): (.*?)(?=###|$)", response)
+            # App open/close/search commands
+            commands = re.findall(r"###(OPEN|CLOSE|SEARCH):\s*(.*?)(?=###|$)", response)
+            for cmd_type, arg in commands:
+                clean_arg = arg.replace('"','').replace("'","").replace(",","").replace(".","").strip()
+                if not clean_arg:
+                    continue
 
-            if commands:
-                print(Fore.CYAN + f"COMMANDS FOUND: {commands}")
+                # Split multiple apps
+                if " and " in clean_arg:
+                    sub_apps = clean_arg.split(" and ")
+                elif "," in clean_arg:
+                    sub_apps = clean_arg.split(",")
+                elif "&" in clean_arg:
+                    sub_apps = clean_arg.split("&")
+                else:
+                    sub_apps = [clean_arg]
 
-                for cmd_type, arg in commands:
-                    clean_arg = arg.replace('"', '').replace("'", "").replace(",", "").replace(".", "").strip()
-
-                    if not clean_arg:
+                for app_name in sub_apps:
+                    app_name = app_name.strip()
+                    if not app_name:
                         continue
 
-                    # --- SAFETY NET: SPLIT MULTIPLE APPS ---
-                    sub_apps = []
+                    if cmd_type == "OPEN":
+                        app_ui.update_status(f"OPENING: {app_name}", "#00ff00")
+                        success = core.open_app(app_name)
+                        telemetry.log_activity()
+                        if not success:
+                            api_set_state("speaking", True)
+                            mouth.speak(f"Can't find {app_name}. Is it installed?")
+                            api_set_state("speaking", False)
 
-                    if " and " in clean_arg:
-                        sub_apps = clean_arg.split(" and ")
-                    elif "," in clean_arg:
-                        sub_apps = clean_arg.split(",")
-                    elif "&" in clean_arg:
-                        sub_apps = clean_arg.split("&")
-                    else:
-                        known_apps = ["camera", "control panel", "notepad", "chrome", "explorer"]
-                        lower_arg = clean_arg.lower()
-                        found_split = False
+                    elif cmd_type == "CLOSE":
+                        app_ui.update_status(f"CLOSING: {app_name}", "#ff0000")
+                        success = core.close_app(app_name)
+                        telemetry.log_activity()
+                        if not success:
+                            api_set_state("speaking", True)
+                            mouth.speak(f"{app_name} doesn't seem to be running.")
+                            api_set_state("speaking", False)
 
-                        for app in known_apps:
-                            if app in lower_arg:
-                                sub_apps.append(app)
-                                lower_arg = lower_arg.replace(app, "")
-                                found_split = True
+                    elif cmd_type == "SEARCH":
+                        app_ui.update_status(f"SEARCHING: {app_name}", "#0000ff")
+                        core.search_web(app_name)
 
-                        if not found_split:
-                            sub_apps = [clean_arg]
-
-                    # --- EXECUTION LOOP ---
-                    for app_to_run in sub_apps:
-                        app_to_run = app_to_run.strip()
-                        if not app_to_run:
-                            continue
-
-                        if cmd_type == "OPEN":
-                            app_ui.update_status(f"OPENING: {app_to_run}", "#00ff00")
-                            success = core.open_app(app_to_run)
-                            telemetry.log_activity()  # ADD THIS LINE
-                            if not success:
-                                fail_responses = [
-                                    f"Can't find {app_to_run}. Check the name?",
-                                    f"{app_to_run} doesn't seem to exist on this machine.",
-                                    f"No luck with {app_to_run}. Is it installed?",
-                                    f"Couldn't find {app_to_run}. Try the exact name.",
-                                ]
-                                api_set_state("speaking", True)
-                                mouth.speak(random.choice(fail_responses))
-                                api_set_state("speaking", False)
-                        elif cmd_type == "CLOSE":
-                            app_ui.update_status(f"CLOSING: {app_to_run}", "#ff0000")
-                            success = core.close_app(app_to_run)
-                            telemetry.log_activity()  # ADD THIS LINE
-                            if not success:
-                                fail_responses = [
-                                    f"{app_to_run} doesn't seem to be running.",
-                                    f"Can't find {app_to_run} in active processes.",
-                                    f"Nothing to close — {app_to_run} isn't open.",
-                                ]
-                                api_set_state("speaking", True)
-                                mouth.speak(random.choice(fail_responses))
-                                api_set_state("speaking", False)
-                        elif cmd_type == "SEARCH":
-                            app_ui.update_status(f"SEARCHING: {app_to_run}", "#0000ff")
-                            core.search_web(app_to_run)
-                        elif cmd_type == "SYS":
-                            app_ui.update_status(f"SYSTEM: {app_to_run}", "#ffff00")
-                            # V1.7: Route through new system module if it's a key=value format
-                            if "=" in app_to_run:
-                                params = {}
-                                for pair in app_to_run.split():
-                                    if "=" in pair:
-                                        k, v = pair.split("=", 1)
-                                        params[k] = v
-                                system_mod.manage_system(params)
-                            else:
-                                core.system_control(app_to_run)
-            # Clean up temp audio file
+            # Clean up temp audio
             if audio_path and os.path.exists(audio_path):
                 try:
                     os.remove(audio_path)
-                except:
+                except Exception:
                     pass
 
         except Exception as e:
-            print(Fore.RED + f"CRITICAL ERROR in Main Loop: {e}")
+            print(Fore.RED + f"[CRITICAL ERROR] Main loop: {e}")
+            import traceback
+            traceback.print_exc()
             app_ui.update_status("ERROR RECOVERED", "#ff0000")
 
 
+# ============================================================================
+# START APP
+# ============================================================================
+
 def start_app():
-    """
-    Launches the API server and Logic Thread.
-    Phase 3: Supports both Electron mode and standalone Tkinter mode.
-    """
     global app_ui
-    
-    # Check if running in Electron mode
-    is_electron = os.environ.get('SEVEN_ELECTRON_MODE') == '1'
-    
+
+    is_electron = IS_ELECTRON_MODE
+
     if is_electron:
         print(Fore.CYAN + "[SYSTEM] Running in ELECTRON mode (no Tkinter GUI)")
     else:
         print(Fore.YELLOW + "[SYSTEM] Running in STANDALONE mode (with Tkinter GUI)")
-    
-    # Start FastAPI server (background thread)
+
+    # Start API server
     start_api_server(host="127.0.0.1", port=7777)
-    
-    # START ADMIN DASHBOARD (Phase 2.5)
-    start_admin_server()
-    
-    # START TELEMETRY (Phase 2.5)
-    telemetry.start_telemetry()
-    
+
+    # Start admin dashboard
+    try:
+        start_admin_server()
+    except Exception as e:
+        print(Fore.YELLOW + f"[SYSTEM] Admin server skipped: {e}")
+
+    # Start telemetry
+    try:
+        telemetry.start_telemetry()
+    except Exception as e:
+        print(Fore.YELLOW + f"[SYSTEM] Telemetry skipped: {e}")
+
     if is_electron:
-        # ELECTRON MODE: No Tkinter GUI needed
-        # Create a dummy UI object for status updates
         class DummyUI:
             def update_status(self, text, color):
-                # Log status updates (WebSocket handles UI now)
-                clean_text = text[:50] if len(text) > 50 else text
-                # print(f"[STATUS] {clean_text}")
                 pass
-            
             def close(self):
                 print(Fore.RED + "[SYSTEM] Shutdown requested")
                 os._exit(0)
-        
+
         app_ui = DummyUI()
-        
-        # Start logic thread
+
         logic_thread = threading.Thread(target=seven_logic, daemon=True)
         logic_thread.start()
-        
-        # Keep main thread alive
+
         print(Fore.GREEN + "[SYSTEM] Backend running. Electron handles UI.")
         try:
             import time
@@ -715,15 +606,17 @@ def start_app():
         except KeyboardInterrupt:
             print(Fore.RED + "\n[SYSTEM] Interrupted by user")
             os._exit(0)
-    
+
     else:
-        # STANDALONE MODE: Use Tkinter GUI
-        root = tk.Tk()
-        app_ui = gui.SevenGUI(root)
-        
+        import tkinter as tk
+        import gui as gui_module
+
+        root   = tk.Tk()
+        app_ui = gui_module.SevenGUI(root)
+
         logic_thread = threading.Thread(target=seven_logic, daemon=True)
         logic_thread.start()
-        
+
         root.mainloop()
 
 
