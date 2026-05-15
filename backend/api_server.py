@@ -74,11 +74,6 @@ def get_state():
     return dict(_state)
 
 
-def get_state():
-    """Get current state dict."""
-    return dict(_state)
-
-
 # =========================================================================
 # REQUEST/RESPONSE MODELS
 # =========================================================================
@@ -453,7 +448,8 @@ def get_memory_stats():
     stats = seven_memory.get_stats()
     
     # Calculate storage size
-    memory_dir = "./seven_data/memory"
+    _appdata = os.environ.get('APPDATA', os.path.expanduser('~'))
+    memory_dir = os.path.join(_appdata, 'SEVEN', 'memory')
     storage_bytes = 0
     if os.path.exists(memory_dir):
         for root, dirs, files in os.walk(memory_dir):
@@ -1102,7 +1098,8 @@ def get_usage_stats_fixed():
     last_seen = None
     
     # 1. Check telemetry.db (primary source)
-    telemetry_db = "data/telemetry.db"
+    _appdata = os.environ.get('APPDATA', os.path.expanduser('~'))
+    telemetry_db = os.path.join(_appdata, 'SEVEN', 'data', 'telemetry.db')
     if os.path.exists(telemetry_db):
         try:
             conn = sqlite3.connect(telemetry_db)
@@ -1125,7 +1122,7 @@ def get_usage_stats_fixed():
             print(f"[API] Usage stats telemetry.db error: {e}")
     
     # 2. Also check license.db (backup source)
-    license_db = "data/license.db"
+    license_db = os.path.join(_appdata, 'SEVEN', 'data', 'license.db')
     if os.path.exists(license_db) and device_id:
         try:
             conn = sqlite3.connect(license_db)
@@ -1202,7 +1199,8 @@ def get_usage_history_fixed():
         })
     
     # Get actual data from daily_usage table
-    telemetry_db = "data/telemetry.db"
+    _appdata = os.environ.get('APPDATA', os.path.expanduser('~'))
+    telemetry_db = os.path.join(_appdata, 'SEVEN', 'data', 'telemetry.db')
     if os.path.exists(telemetry_db) and device_id:
         try:
             conn = sqlite3.connect(telemetry_db)

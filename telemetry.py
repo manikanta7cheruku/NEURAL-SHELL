@@ -15,11 +15,18 @@ from datetime import datetime
 # CONFIGURATION
 # =============================================================================
 
-DATA_DIR = "data"
+def _get_data_dir():
+    """Always use %APPDATA%\SEVEN\data — works in dev and packaged."""
+    app_data = os.environ.get('APPDATA', os.path.expanduser('~'))
+    d = os.path.join(app_data, 'SEVEN', 'data')
+    os.makedirs(d, exist_ok=True)
+    return d
+
+DATA_DIR      = _get_data_dir()
 DEVICE_ID_FILE = os.path.join(DATA_DIR, "device_id.txt")
-EMAIL_FILE = os.path.join(DATA_DIR, "email.txt")
-TELEMETRY_DB = os.path.join(DATA_DIR, "telemetry.db")
-LICENSE_DB = os.path.join(DATA_DIR, "license.db")
+EMAIL_FILE     = os.path.join(DATA_DIR, "email.txt")
+TELEMETRY_DB   = os.path.join(DATA_DIR, "telemetry.db")
+LICENSE_DB     = os.path.join(DATA_DIR, "license.db")
 
 PING_INTERVAL = 3600  # Background ping every hour
 
@@ -380,9 +387,13 @@ def start_telemetry():
     
     def _ping_loop():
         while True:
-            time.sleep(PING_INTERVAL)
-            send_ping()
+            time.sleep(60)  # check every minute
+            # Log activity to accumulate time while app is open
+            log_activity()
+            # Save if we have accumulated time
+            if _session["accumulated_seconds"] > 0:
+                send_ping()
     
     thread = threading.Thread(target=_ping_loop, daemon=True, name="Telemetry")
     thread.start()
-    print(f"[TELEMETRY] Started (saves every {SAVE_INTERVAL}s, background ping every {PING_INTERVAL//60}min)")
+    print(f"[TELEMETRY] Started (auto-logs every 60s, saves every {SAVE_INTERVAL}s)")

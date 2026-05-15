@@ -67,7 +67,7 @@ function startPolling() {
   console.log('[STATUS] WebSocket unavailable — switching to HTTP polling');
   pollInterval = setInterval(() => {
     useStatus.getState().fetch();
-  }, 2000);
+  }, 5000); // every 5s is enough — each call logs activity
 }
 
 function stopPolling() {

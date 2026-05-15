@@ -118,37 +118,29 @@ if not _packages_ready():
 
 print("[SYSTEM] Packages ready — starting full Seven...")
 
-from ears import listen
-from ears.voice_id import (identify_speaker, enroll_speaker,
-                            is_voice_id_enabled, get_enrolled_speakers)
-from ears.core import listen_for_interrupt
-from backend.api_server import start_api_server, set_state as api_set_state
-from backend.admin_server import start_admin_server
-import telemetry
-import brain
-import hands.core as core
-import hands.system as system_mod
-import hands.scheduler as scheduler_mod
-import hands.windows as hands_windows
-import mouth
-from mouth import interrupt as mouth_interrupt, is_speaking
-import random
-import brain_manager
+# ── These are safe to import immediately (no heavy models) ──
 import threading
 import re
+import random
+
 import colorama
 from colorama import Fore
+colorama.init()
+
 import config
 
-# Memory system — used throughout seven_logic
-from memory import seven_memory
-from memory.mood import mood_engine
-from memory.command_log import command_log
+# ── API server imports (FastAPI only — no AI models) ──
+from backend.api_server import start_api_server, set_state as api_set_state
 
-# GUI — only in standalone mode
-if not IS_ELECTRON_MODE:
-    import gui
-    import tkinter as tk
+# ── Admin server ──
+from backend.admin_server import start_admin_server
+
+# ── Telemetry (SQLite only — fast) ──
+import telemetry
+
+# ── Heavy imports done LAZILY inside seven_logic thread ──
+# ears, brain, mouth, memory load AFTER API server is already up
+# This means the frontend can connect within 2-3 seconds
 
 # ============================================================================
 # GLOBAL STATE
@@ -162,6 +154,28 @@ app_ui = None
 
 def seven_logic():
     global app_ui
+
+    # ── Load heavy modules here — AFTER API server is already running ──
+    # This is why startup is fast — API responds in 2s, models load in background
+    print("[SYSTEM] Loading AI modules...")
+
+    from ears import listen
+    from ears.voice_id import (identify_speaker, enroll_speaker,
+                                is_voice_id_enabled, get_enrolled_speakers)
+    from ears.core import listen_for_interrupt
+    import brain
+    import brain_manager
+    import hands.core as core
+    import hands.system as system_mod
+    import hands.scheduler as scheduler_mod
+    import hands.windows as hands_windows
+    import mouth
+    from mouth import interrupt as mouth_interrupt, is_speaking
+    from memory import seven_memory
+    from memory.mood import mood_engine
+    from memory.command_log import command_log
+
+    print("[SYSTEM] AI modules loaded.")
 
     is_active = True
 
@@ -570,20 +584,21 @@ def start_app():
     else:
         print(Fore.YELLOW + "[SYSTEM] Running in STANDALONE mode (with Tkinter GUI)")
 
-    # Start API server
+    # ── Start API server FIRST — frontend can connect immediately ──
     start_api_server(host="127.0.0.1", port=7777)
+    print(Fore.GREEN + "[SYSTEM] API server up — frontend can connect now")
 
-    # Start admin dashboard
-    try:
-        start_admin_server()
-    except Exception as e:
-        print(Fore.YELLOW + f"[SYSTEM] Admin server skipped: {e}")
-
-    # Start telemetry
+    # ── Start telemetry (SQLite only — fast) ──
     try:
         telemetry.start_telemetry()
     except Exception as e:
         print(Fore.YELLOW + f"[SYSTEM] Telemetry skipped: {e}")
+
+    # ── Admin server ──
+    try:
+        start_admin_server()
+    except Exception as e:
+        print(Fore.YELLOW + f"[SYSTEM] Admin server skipped: {e}")
 
     if is_electron:
         class DummyUI:
