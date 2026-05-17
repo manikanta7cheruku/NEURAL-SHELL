@@ -46,18 +46,49 @@ if _app_path and _app_path not in sys.path:
 
 # Add embedded Python paths (packaged app only)
 if _app_path:
+    _embedded_python = os.path.join(_app_path, 'python', 'python.exe')
+    _embedded_sp     = os.path.join(_app_path, 'python', 'Lib', 'site-packages')
+    _embedded_lib    = os.path.join(_app_path, 'python', 'Lib')
+    _embedded_dlls   = os.path.join(_app_path, 'python', 'DLLs')
+
+    print(f"[SYSTEM] App path: {_app_path}")
+    print(f"[SYSTEM] Site-packages exists: {os.path.exists(_embedded_sp)}")
+
+    # ── If we are running under WRONG Python, re-launch under embedded Python ──
+    # This happens when developer runs `python main.py` with system Python
+    # In packaged app, Electron always spawns the embedded python.exe correctly
+    _running_embedded = (
+        os.path.exists(_embedded_python) and
+        os.path.normcase(sys.executable) == os.path.normcase(_embedded_python)
+    )
+
+    if not _running_embedded and os.path.exists(_embedded_python):
+        # Check if we are in packaged app (not dev mode test)
+        _is_packaged = os.path.exists(
+            os.path.join(_app_path, 'python', 'python311.dll')
+        ) or os.path.exists(
+            os.path.join(_app_path, 'python', 'python3.dll')
+        )
+
+        if _is_packaged:
+            print(f"[SYSTEM] Wrong Python detected. Re-launching under embedded Python...")
+            import subprocess
+            result = subprocess.run(
+                [_embedded_python] + sys.argv,
+                env={**os.environ, 'SEVEN_RELAUNCHED': '1'}
+            )
+            sys.exit(result.returncode)
+
+    # Add embedded paths to sys.path
     _embedded_paths = [
-        os.path.join(_app_path, 'python', 'Lib', 'site-packages'),
-        os.path.join(_app_path, 'python', 'Lib'),
-        os.path.join(_app_path, 'python', 'DLLs'),
+        _embedded_sp,
+        _embedded_lib,
+        _embedded_dlls,
         os.path.join(_app_path, 'python'),
     ]
     for _p in _embedded_paths:
         if os.path.exists(_p) and _p not in sys.path:
             sys.path.insert(0, _p)
-    print(f"[SYSTEM] App path: {_app_path}")
-    _sp = os.path.join(_app_path, 'python', 'Lib', 'site-packages')
-    print(f"[SYSTEM] Site-packages exists: {os.path.exists(_sp)}")
 
 # Add CWD
 _cwd = os.getcwd()
@@ -71,12 +102,29 @@ if _cwd not in sys.path:
 def _packages_ready():
     """
     Check if minimum packages for FULL server are installed.
-    Only checks what's actually imported at startup.
+    Uses embedded Python when running in packaged app.
+    Uses sys.executable in dev mode.
     """
     import subprocess
-    python = sys.executable
 
-    # These are the only packages needed before full import chain starts
+    # ── Find correct Python to check against ──
+    # In packaged app: SEVEN_APP_PATH points to resources/app
+    # Embedded Python is at resources/app/python/python.exe
+    app_path = os.environ.get('SEVEN_APP_PATH', '')
+    embedded_python = os.path.join(app_path, 'python', 'python.exe') if app_path else ''
+
+    if app_path and os.path.exists(embedded_python):
+        python = embedded_python
+        print(f"[SYSTEM] Checking embedded Python: {embedded_python}")
+    else:
+        python = sys.executable
+        print(f"[SYSTEM] Checking system Python: {python}")
+
+    # ── Check site-packages path ──
+    if app_path:
+        sp = os.path.join(app_path, 'python', 'Lib', 'site-packages')
+        print(f"[SYSTEM] Site-packages exists: {os.path.exists(sp)}")
+
     critical = ['fastapi', 'uvicorn', 'pyttsx3', 'speech_recognition']
 
     for pkg in critical:

@@ -14,7 +14,18 @@ import os
 from datetime import datetime
 from colorama import Fore
 
-LOG_PATH = "./seven_data/command_log.json"
+def _get_log_path():
+    """Always use %APPDATA%\SEVEN\seven_data — works in dev and packaged."""
+    appdata = os.environ.get('APPDATA', '')
+    if appdata:
+        d = os.path.join(appdata, 'SEVEN', 'seven_data')
+        os.makedirs(d, exist_ok=True)
+        return os.path.join(d, 'command_log.json')
+    # Fallback for non-Windows
+    os.makedirs('./seven_data', exist_ok=True)
+    return './seven_data/command_log.json'
+
+LOG_PATH = _get_log_path()
 
 
 class CommandLog:
@@ -28,11 +39,11 @@ class CommandLog:
     """
 
     def __init__(self):
-        os.makedirs(os.path.dirname(LOG_PATH), exist_ok=True)
+        os.makedirs(os.path.dirname(os.path.abspath(LOG_PATH)), exist_ok=True)
         if not os.path.exists(LOG_PATH):
             with open(LOG_PATH, "w") as f:
                 json.dump([], f)
-        print(Fore.CYAN + f"[COMMAND LOG] Initialized. Storage: {os.path.abspath(LOG_PATH)}")
+        print(Fore.CYAN + f"[COMMAND LOG] Initialized. Storage: {LOG_PATH}")
 
     def _load(self):
         """Load all logs from disk."""

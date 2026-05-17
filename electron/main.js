@@ -131,26 +131,28 @@ function startPython() {
     if (msg) console.error(`[PYTHON ERR] ${msg}`);
   });
 
-  pythonProcess.on('close', (code) => {
+ pythonProcess.on('close', (code) => {
   console.log(`[PYTHON] Exited with code ${code}`);
   pythonProcess = null;
 
   if (!app.isQuitting) {
-    // Always restart — code 0 = clean restart (bootstrap done)
-    // code 4294967295 / -1 = also restart (Windows exit)
-    // code 1 = error, still restart
-    const delay = (code === 0) ? 1000 : 3000;
+    const delay = (code === 0) ? 1500 : 3000;
     console.log(`[PYTHON] Restarting in ${delay/1000} seconds...`);
     setTimeout(() => {
       if (!app.isQuitting) {
         startPython();
-        // After restart, wait for backend and reload the window
-        waitForBackend().then((ready) => {
-          if (ready && mainWindow) {
-            console.log('[ELECTRON] Full backend ready — reloading window');
-            mainWindow.webContents.reload();
-          }
-        });
+        // Only reload window if it was a clean restart (setup wizard done)
+        // Don't reload on crash restarts — let Python stabilize first
+        if (code === 0) {
+          waitForBackend().then((ready) => {
+            if (ready && mainWindow) {
+              console.log('[ELECTRON] Full backend ready — reloading window');
+              mainWindow.webContents.reload();
+            }
+          });
+        }
+        // For crash restarts (non-zero code), just let Python restart silently
+        // The frontend will reconnect via its polling
       }
     }, delay);
   }

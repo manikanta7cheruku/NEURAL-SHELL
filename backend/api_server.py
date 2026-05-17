@@ -362,9 +362,8 @@ def add_manual_fact(data: dict):
 @app.get("/api/memory/facts")
 def get_facts():
     """Get all stored facts."""
-    from memory import seven_memory
-    
     try:
+        from memory import seven_memory
         all_facts = seven_memory.user_facts.get()
         if not all_facts or not all_facts['documents']:
             return []
@@ -399,9 +398,8 @@ def delete_fact(fact_id: str):
 @app.get("/api/memory/conversations")
 def get_conversations(limit: int = 50, offset: int = 0):
     """Get stored conversations (paginated)."""
-    from memory import seven_memory
-    
     try:
+        from memory import seven_memory
         all_convos = seven_memory.conversations.get()
         if not all_convos or not all_convos['documents']:
             return {"conversations": [], "total": 0}
@@ -443,19 +441,29 @@ def delete_conversation(conv_id: str):
 @app.get("/api/memory/stats")
 def get_memory_stats():
     """Get memory statistics."""
-    from memory import seven_memory
-    
-    stats = seven_memory.get_stats()
-    
+    try:
+        from memory import seven_memory
+        stats = seven_memory.get_stats()
+    except Exception as e:
+        print(f"[API] Memory stats error: {e}")
+        stats = {
+            "total_conversations": 0,
+            "total_facts": 0,
+            "storage_path": ""
+        }
+
     # Calculate storage size
     _appdata = os.environ.get('APPDATA', os.path.expanduser('~'))
-    memory_dir = os.path.join(_appdata, 'SEVEN', 'memory')
+    memory_dir = os.path.join(_appdata, 'SEVEN', 'seven_data', 'memory')
     storage_bytes = 0
     if os.path.exists(memory_dir):
         for root, dirs, files in os.walk(memory_dir):
             for f in files:
-                storage_bytes += os.path.getsize(os.path.join(root, f))
-    
+                try:
+                    storage_bytes += os.path.getsize(os.path.join(root, f))
+                except Exception:
+                    pass
+
     stats["storage_mb"] = round(storage_bytes / (1024 * 1024), 2)
     return stats
 
@@ -1074,103 +1082,73 @@ def check_email_saved():
 # =========================================================================
 
 @app.get("/api/usage/stats")
+@app.get("/api/usage/stats")
 def get_usage_stats_fixed():
-    """Get current user's total usage time - reads from BOTH databases."""
+    """Get current user's total usage time."""
     import sqlite3
-    
-    # Get device_id
-    device_id = None
+
     try:
-        import license as license_module
-        device_id = license_module.get_device_id()
+        import telemetry as tel
+        device_id = tel.get_device_id()
+        email     = tel.get_email()
+        tel_db    = tel.TELEMETRY_DB
     except Exception as e:
-        print(f"[API] Could not get device_id: {e}")
-    
-    # Get email
-    email = None
-    try:
-        import telemetry as telemetry_module
-        email = telemetry_module.get_email()
-    except Exception as e:
-        print(f"[API] Could not get email: {e}")
-    
+        print(f"[API] Telemetry import error: {e}")
+        return {
+            "total_hours": 0, "total_minutes": 0,
+            "display": "0 min", "email": None,
+            "device_id": None, "last_seen": None
+        }
+
     total_hours = 0
-    last_seen = None
-    
-    # 1. Check telemetry.db (primary source)
-    _appdata = os.environ.get('APPDATA', os.path.expanduser('~'))
-    telemetry_db = os.path.join(_appdata, 'SEVEN', 'data', 'telemetry.db')
-    if os.path.exists(telemetry_db):
+    last_seen   = None
+
+    if os.path.exists(tel_db):
         try:
-            conn = sqlite3.connect(telemetry_db)
-            c = conn.cursor()
-            
-            if device_id:
-                c.execute("SELECT active_hours, last_seen, email FROM stats WHERE device_id = ?", (device_id,))
-            else:
-                c.execute("SELECT active_hours, last_seen, email FROM stats ORDER BY last_seen DESC LIMIT 1")
-            
+            conn = sqlite3.connect(tel_db)
+            c    = conn.cursor()
+            c.execute(
+                "SELECT active_hours, last_seen, email FROM stats WHERE device_id = ?",
+                (device_id,)
+            )
             row = c.fetchone()
+            if not row:
+                c.execute(
+                    "SELECT active_hours, last_seen, email FROM stats ORDER BY last_seen DESC LIMIT 1"
+                )
+                row = c.fetchone()
             if row:
                 total_hours = row[0] or 0
-                last_seen = row[1]
+                last_seen   = row[1]
                 if not email and row[2]:
                     email = row[2]
-            
             conn.close()
         except Exception as e:
-            print(f"[API] Usage stats telemetry.db error: {e}")
-    
-    # 2. Also check license.db (backup source)
-    license_db = os.path.join(_appdata, 'SEVEN', 'data', 'license.db')
-    if os.path.exists(license_db) and device_id:
-        try:
-            conn = sqlite3.connect(license_db)
-            c = conn.cursor()
-            
-            c.execute("SELECT usage_hours, last_validated FROM activations WHERE device_id = ?", (device_id,))
-            row = c.fetchone()
-            if row:
-                license_hours = row[0] or 0
-                # Use the higher value
-                if license_hours > total_hours:
-                    total_hours = license_hours
-                    last_seen = row[1]
-            
-            conn.close()
-        except Exception as e:
-            print(f"[API] Usage stats license.db error: {e}")
-    
-    # 3. Add current session time (not yet saved to DB)
+            print(f"[API] telemetry.db read error: {e}")
+
     try:
-        import telemetry as telemetry_module
-        session_hours = telemetry_module.get_active_hours()
-        total_hours += session_hours
-    except Exception as e:
-        print(f"[API] Could not get session hours: {e}")
-    
-    # Convert to human readable
+        import telemetry as tel
+        total_hours += tel.get_active_hours()
+    except Exception:
+        pass
+
     total_minutes = int(total_hours * 60)
-    
     if total_minutes < 1:
         time_str = "0 min"
     elif total_minutes < 60:
         time_str = f"{total_minutes} min"
     else:
-        hrs = total_minutes // 60
+        hrs  = total_minutes // 60
         mins = total_minutes % 60
-        if mins == 0:
-            time_str = f"{hrs} hr"
-        else:
-            time_str = f"{hrs} hr {mins} min"
-    
+        time_str = f"{hrs} hr {mins} min" if mins else f"{hrs} hr"
+
     return {
-        "total_hours": round(total_hours, 4),
+        "total_hours":   round(total_hours, 4),
         "total_minutes": total_minutes,
-        "display": time_str,
-        "email": email,
-        "device_id": device_id[:8] + "..." if device_id else None,
-        "last_seen": last_seen
+        "display":       time_str,
+        "email":         email,
+        "device_id":     device_id[:8] + "..." if device_id else None,
+        "last_seen":     last_seen
     }
 
 
@@ -1179,60 +1157,47 @@ def get_usage_history_fixed():
     """Get actual daily usage for last 7 days."""
     import sqlite3
     from datetime import datetime, timedelta
-    
-    device_id = None
+
     try:
-        import license as license_module
-        device_id = license_module.get_device_id()
-    except:
-        pass
-    
-    # Build last 7 days list
+        import telemetry as tel
+        device_id = tel.get_device_id()
+        tel_db    = tel.TELEMETRY_DB
+    except Exception:
+        device_id = None
+        tel_db    = None
+
     history = []
     for i in range(6, -1, -1):
-        date = (datetime.now() - timedelta(days=i))
+        date = datetime.now() - timedelta(days=i)
         history.append({
-            "date": date.strftime("%Y-%m-%d"),
-            "day": date.strftime("%a"),
-            "hours": 0.0,
+            "date":    date.strftime("%Y-%m-%d"),
+            "day":     date.strftime("%a"),
+            "hours":   0.0,
             "minutes": 0
         })
-    
-    # Get actual data from daily_usage table
-    _appdata = os.environ.get('APPDATA', os.path.expanduser('~'))
-    telemetry_db = os.path.join(_appdata, 'SEVEN', 'data', 'telemetry.db')
-    if os.path.exists(telemetry_db) and device_id:
+
+    if tel_db and os.path.exists(tel_db) and device_id:
         try:
-            conn = sqlite3.connect(telemetry_db)
-            c = conn.cursor()
-            
-            # Get last 7 days of daily usage
+            conn = sqlite3.connect(tel_db)
+            c    = conn.cursor()
             seven_days_ago = (datetime.now() - timedelta(days=6)).strftime("%Y-%m-%d")
-            
             c.execute("""
                 SELECT date, hours FROM daily_usage
                 WHERE device_id = ? AND date >= ?
                 ORDER BY date ASC
             """, (device_id, seven_days_ago))
-            
-            # Map actual data to history
-            actual_data = {row[0]: row[1] for row in c.fetchall()}
+            actual = {row[0]: row[1] for row in c.fetchall()}
             conn.close()
-            
-            # Fill in actual hours
             for day in history:
-                if day["date"] in actual_data:
-                    day["hours"] = round(actual_data[day["date"]], 3)
-                    day["minutes"] = int(actual_data[day["date"]] * 60)
-        
+                if day["date"] in actual:
+                    day["hours"]   = round(actual[day["date"]], 3)
+                    day["minutes"] = int(actual[day["date"]] * 60)
         except Exception as e:
             print(f"[API] Usage history error: {e}")
-    
-    total_hours = sum(d["hours"] for d in history)
-    
+
     return {
-        "history": history,
-        "total_hours": round(total_hours, 3)
+        "history":     history,
+        "total_hours": round(sum(d["hours"] for d in history), 3)
     }
 
 
