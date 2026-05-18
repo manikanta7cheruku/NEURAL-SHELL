@@ -47,17 +47,17 @@ def register_device(device_id, email=None, name=None, country=None, referral_cod
     })
 
 
-def send_usage_ping(device_id, hours_delta, email=None):
-    """Send usage time to server."""
+def send_usage_ping(device_id, minutes_delta, email=None):
+    """Send usage time to server in minutes."""
     result = _post("/api/usage/ping", {
         "device_id": device_id,
-        "hours_delta": hours_delta,
+        "minutes_delta": minutes_delta,
         "email": email
     })
-    
+
     if result and result.get("referral_completed"):
-        print("[SERVER] 🎉 Referral completed! Check admin dashboard.")
-    
+        print("[SERVER] Referral completed!")
+
     return result
 
 

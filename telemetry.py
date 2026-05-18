@@ -28,18 +28,20 @@ EMAIL_FILE     = os.path.join(DATA_DIR, "email.txt")
 TELEMETRY_DB   = os.path.join(DATA_DIR, "telemetry.db")
 LICENSE_DB     = os.path.join(DATA_DIR, "license.db")
 
-PING_INTERVAL = 3600  # Background ping every hour
+# ── Timing constants ──
+SESSION_TIMEOUT  = 600   # 10 min idle = session ends
+SAVE_INTERVAL    = 60    # Save to local DB every 60 seconds
+SERVER_INTERVAL  = 600   # Ping server every 10 minutes
 
-# Session tracking
+# ── Session state ──
 _session = {
-    "start_time": None,
-    "last_activity": None,
+    "start_time":          None,
+    "last_activity":       None,
     "accumulated_seconds": 0,
-    "last_save_time": None
+    "last_save_time":      None,
+    "last_server_sync":    None,   # tracks last server ping separately
+    "pending_minutes":     0,      # minutes accumulated since last server ping
 }
-
-SESSION_TIMEOUT = 600  # 10 minutes idle = session ends
-SAVE_INTERVAL = 30     # Save every 30 seconds (for testing; use 300 for production)
 
 # =============================================================================
 # DEVICE ID MANAGEMENT
@@ -242,158 +244,238 @@ def log_activity():
         _session["last_save_time"] = now
 
 
-def _save_usage_time(seconds):
-    """Save accumulated usage time to databases."""
-    if seconds < 5:  # Ignore tiny amounts
+def _format_time(total_minutes):
+    """Convert minutes to readable string. e.g. 1502 → '1 day 1 hr 2 min'"""
+    total_minutes = int(total_minutes)
+    days    = total_minutes // 1440
+    remain  = total_minutes % 1440
+    hours   = remain // 60
+    minutes = remain % 60
+
+    if days > 0:
+        return f"{days} day{'s' if days > 1 else ''} {hours} hr {minutes} min"
+    elif hours > 0:
+        return f"{hours} hr {minutes} min"
+    else:
+        return f"{minutes} min"
+
+
+def _save_usage_time(seconds, sync_server=False):
+    """
+    Save accumulated usage time to local databases.
+    sync_server=True → also ping Render server with pending minutes.
+    """
+    if seconds < 5:
         return
-    
-    hours = seconds / 3600.0
+
+    minutes   = seconds / 60.0
     device_id = get_device_id()
-    email = get_email()
-    now_iso = datetime.now().isoformat()
-    
-    print(f"[TELEMETRY] Saving {round(seconds, 1)} seconds ({round(hours * 60, 2)} min) for {email or device_id[:8]}")
-    
-        # 1. Save to TELEMETRY database
+    email     = get_email()
+    now_iso   = datetime.now().isoformat()
+    today     = datetime.now().strftime("%Y-%m-%d")
+
+    print(f"[TELEMETRY] Saving {round(minutes, 1)} min for "
+          f"{email or device_id[:8]}...")
+
+    # ── 1. Local telemetry.db ──
     try:
         init_db()
         conn = sqlite3.connect(TELEMETRY_DB)
-        c = conn.cursor()
-        
-        today = datetime.now().strftime("%Y-%m-%d")
-        
-        # Update total stats
+        c    = conn.cursor()
+
         c.execute("""
-            INSERT INTO stats (device_id, email, install_date, last_seen, active_hours, app_version, license_tier)
-            VALUES (?, ?, ?, ?, ?, '1.10', 'free')
+            INSERT INTO stats
+                (device_id, email, install_date, last_seen, active_hours, app_version, license_tier)
+            VALUES (?, ?, ?, ?, ?, '1.1.0', 'free')
             ON CONFLICT(device_id) DO UPDATE SET
-                email = COALESCE(?, email),
-                last_seen = ?,
+                email        = COALESCE(?, email),
+                last_seen    = ?,
                 active_hours = active_hours + ?
-        """, (device_id, email, now_iso, now_iso, hours, email, now_iso, hours))
-        
-        # Update DAILY stats (NEW)
+        """, (device_id, email, now_iso, now_iso, minutes / 60.0,
+              email, now_iso, minutes / 60.0))
+
         c.execute("""
             INSERT INTO daily_usage (device_id, date, hours)
             VALUES (?, ?, ?)
             ON CONFLICT(device_id, date) DO UPDATE SET
                 hours = hours + ?
-        """, (device_id, today, hours, hours))
-        
+        """, (device_id, today, minutes / 60.0, minutes / 60.0))
+
         conn.commit()
         conn.close()
+        print(f"[TELEMETRY] Local DB saved — {_format_time(_get_total_minutes())}")
     except Exception as e:
-        print(f"[TELEMETRY] ✗ telemetry.db error: {e}")
-    
-    # 2. Save to LICENSE database (for referral tracking)
+        print(f"[TELEMETRY] local DB error: {e}")
+
+    # ── 2. Local license.db (referral tracking) ──
     try:
         if os.path.exists(LICENSE_DB):
             init_license_db()
             conn = sqlite3.connect(LICENSE_DB)
-            c = conn.cursor()
-            
-            # Upsert activations
+            c    = conn.cursor()
+
             c.execute("""
-                INSERT INTO activations (device_id, license_key, activated_at, last_validated, usage_hours, email)
+                INSERT INTO activations
+                    (device_id, license_key, activated_at, last_validated, usage_hours, email)
                 VALUES (?, 'FREE_USER', ?, ?, ?, ?)
                 ON CONFLICT(device_id) DO UPDATE SET
-                    usage_hours = usage_hours + ?,
+                    usage_hours   = usage_hours + ?,
                     last_validated = ?,
-                    email = COALESCE(?, email)
-            """, (device_id, now_iso, now_iso, hours, email, hours, now_iso, email))
-            
-            # Update referral progress if applicable
+                    email         = COALESCE(?, email)
+            """, (device_id, now_iso, now_iso, minutes / 60.0, email,
+                  minutes / 60.0, now_iso, email))
+
             if email:
                 c.execute("""
-                    UPDATE referrals 
+                    UPDATE referrals
                     SET usage_hours = usage_hours + ?,
-                        is_complete = CASE 
-                            WHEN usage_hours + ? >= 7 THEN 1 
-                            ELSE 0 
+                        is_complete = CASE
+                            WHEN usage_hours + ? >= 7 THEN 1
+                            ELSE 0
                         END,
-                        completed_at = CASE 
+                        completed_at = CASE
                             WHEN usage_hours + ? >= 7 AND is_complete = 0 THEN ?
                             ELSE completed_at
                         END
                     WHERE referred_email = ? AND is_complete = 0
-                """, (hours, hours, hours, now_iso, email))
-            
+                """, (minutes / 60.0, minutes / 60.0,
+                      minutes / 60.0, now_iso, email))
+
             conn.commit()
             conn.close()
-            
-            print(f"[TELEMETRY] ✓ Saved {round(seconds/60, 1)} min to databases")
     except Exception as e:
-        print(f"[TELEMETRY] ✗ license.db error: {e}")
-    
-    # 3. Sync to server (privacy-safe analytics)
+        print(f"[TELEMETRY] license.db error: {e}")
+
+    # ── 3. Server ping (every SERVER_INTERVAL seconds only) ──
+    if sync_server:
+        pending = _session["pending_minutes"]
+        if pending >= 1:
+            try:
+                import server_sync
+                server_sync.send_usage_ping(device_id, round(pending, 2), email)
+                _session["pending_minutes"]  = 0
+                _session["last_server_sync"] = time.time()
+                print(f"[TELEMETRY] Server synced: {round(pending, 2)} min sent")
+            except Exception:
+                pass  # Server offline — local data already saved, no data lost
+
+
+def _get_total_minutes():
+    """Read total minutes from local telemetry.db."""
     try:
-        import server_sync
-        server_sync.send_usage_ping(device_id, hours, email)
-    except Exception as e:
-        # Server offline or not configured - that's OK, local data already saved
-        pass
+        conn = sqlite3.connect(TELEMETRY_DB)
+        c    = conn.cursor()
+        c.execute("SELECT active_hours FROM stats WHERE device_id = ?",
+                  (get_device_id(),))
+        row = c.fetchone()
+        conn.close()
+        return (row[0] or 0) * 60 if row else 0
+    except Exception:
+        return 0
 
 
 def get_active_hours():
-    """Get current session's accumulated hours (not yet saved)."""
+    """Get current session accumulated hours (not yet saved)."""
     return _session["accumulated_seconds"] / 3600.0
+
+
+def get_active_minutes():
+    """Get current session accumulated minutes (not yet saved)."""
+    return _session["accumulated_seconds"] / 60.0
 
 # =============================================================================
 # BACKGROUND TELEMETRY
 # =============================================================================
 
-def send_ping():
-    """Periodic background save."""
-    if _session["accumulated_seconds"] > 0:
-        _save_usage_time(_session["accumulated_seconds"])
-        _session["accumulated_seconds"] = 0
-        _session["last_save_time"] = time.time()
+def send_ping(force_server=False):
+    """Save accumulated time locally. Ping server if interval reached."""
+    if _session["accumulated_seconds"] <= 0:
+        return
+
+    now         = time.time()
+    last_sync   = _session["last_server_sync"] or 0
+    do_server   = force_server or (now - last_sync >= SERVER_INTERVAL)
+
+    # Add to pending minutes before saving
+    pending_add = _session["accumulated_seconds"] / 60.0
+    _session["pending_minutes"] += pending_add
+
+    _save_usage_time(_session["accumulated_seconds"], sync_server=do_server)
+    _session["accumulated_seconds"] = 0
+    _session["last_save_time"]      = now
 
 
 def start_telemetry():
-    """Start background telemetry thread."""
+    """
+    Start telemetry system.
+    1. Init local DBs
+    2. Register device on server immediately (background)
+    3. Start background loop: log every 60s, save every 60s, server every 10min
+    """
     import threading
-    
-    # Initialize
+
     init_db()
     init_license_db()
-    
+
     device_id = get_device_id()
-    email = get_email()
-    
-    # Register device immediately
+    email     = get_email()
+
+    # ── Register in local DB immediately ──
     try:
         conn = sqlite3.connect(TELEMETRY_DB)
-        c = conn.cursor()
+        c    = conn.cursor()
         c.execute("""
-            INSERT OR IGNORE INTO stats 
-            (device_id, email, install_date, last_seen, active_hours, app_version, license_tier)
-            VALUES (?, ?, ?, ?, 0, '1.10', 'free')
-        """, (device_id, email, datetime.now().isoformat(), datetime.now().isoformat()))
+            INSERT OR IGNORE INTO stats
+                (device_id, email, install_date, last_seen, active_hours,
+                 app_version, license_tier)
+            VALUES (?, ?, ?, ?, 0, '1.1.0', 'free')
+        """, (device_id, email,
+              datetime.now().isoformat(), datetime.now().isoformat()))
         conn.commit()
         conn.close()
-    except:
+    except Exception:
         pass
-    
-    # Try to register on server (if available)
-    try:
-        import server_sync
-        country = get_country_from_ip()
-        server_sync.register_device(device_id, email, country)
-    except:
-        pass  # Server not available, that's OK
-    
-    print(f"[TELEMETRY] ✓ Device: {device_id[:8]}... | Email: {email or 'Not set'}")
-    
+
+    # ── Register on Render server immediately (background, non-blocking) ──
+    def _register():
+        try:
+            import server_sync
+            country = get_country_from_ip()
+            # Correct arg order: device_id, email, name, country, referral_code
+            server_sync.register_device(
+                device_id=device_id,
+                email=email,
+                name=None,
+                country=country,
+                referral_code=None
+            )
+            print(f"[TELEMETRY] Registered on server — country: {country}")
+        except Exception as e:
+            print(f"[TELEMETRY] Server register failed (offline ok): {e}")
+
+    threading.Thread(target=_register, daemon=True, name="TelemetryRegister").start()
+
+    total_min = _get_total_minutes()
+    print(f"[TELEMETRY] Device: {device_id[:8]}... | "
+          f"Email: {email or 'Not set'} | "
+          f"Total: {_format_time(total_min)}")
+
+    # ── Background loop ──
     def _ping_loop():
         while True:
-            time.sleep(60)  # check every minute
-            # Log activity to accumulate time while app is open
+            time.sleep(60)  # tick every 60 seconds = 1 minute
+
+            # Count this minute as active
             log_activity()
-            # Save if we have accumulated time
+
+            # Save locally every tick
+            # Ping server every SERVER_INTERVAL seconds (10 min)
             if _session["accumulated_seconds"] > 0:
                 send_ping()
-    
-    thread = threading.Thread(target=_ping_loop, daemon=True, name="Telemetry")
+
+    thread = threading.Thread(
+        target=_ping_loop, daemon=True, name="Telemetry"
+    )
     thread.start()
-    print(f"[TELEMETRY] Started (auto-logs every 60s, saves every {SAVE_INTERVAL}s)")
+    print("[TELEMETRY] Started — tracking every minute, "
+          "server sync every 10 min")
