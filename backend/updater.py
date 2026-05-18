@@ -19,7 +19,7 @@ import tempfile
 from packaging import version as pkg_version
 
 # ── Config ──
-SERVER_URL  = "https://vii-server-production.up.railway.app"
+SERVER_URL  = "https://seven-server-u2rp.onrender.com/"
 TIMEOUT     = 8
 CHECK_DELAY = 15   # seconds after app start before first check
 
