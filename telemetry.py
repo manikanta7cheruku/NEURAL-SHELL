@@ -31,7 +31,8 @@ LICENSE_DB     = os.path.join(DATA_DIR, "license.db")
 # ── Timing constants ──
 SESSION_TIMEOUT  = 600   # 10 min idle = session ends
 SAVE_INTERVAL    = 60    # Save to local DB every 60 seconds
-SERVER_INTERVAL  = 600   # Ping server every 10 minutes
+#SERVER_INTERVAL  = 600   # Ping server every 10 minutes
+SERVER_INTERVAL  = 120   # Ping server every 2 minutes
 
 # ── Session state ──
 _session = {
