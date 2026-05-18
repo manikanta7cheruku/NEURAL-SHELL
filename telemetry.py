@@ -399,9 +399,15 @@ def send_ping(force_server=False):
     """
     Save accumulated time locally.
     Send ONLY new minutes (delta) to server every SERVER_INTERVAL.
-    Never sends total — always sends what accumulated since last sync.
+    Never sends total - always sends what accumulated since last sync.
     """
-    if _session["accumulated_seconds"] <= 0:
+    try:
+        if _session["accumulated_seconds"] <= 0:
+            return
+    except Exception as e:
+        print(f"[TELEMETRY] send_ping error: {e}")
+        import traceback
+        traceback.print_exc()
         return
 
     now       = time.time()
@@ -502,16 +508,25 @@ def start_telemetry():
     # Background loop
     def _ping_loop():
         while True:
-            time.sleep(60)  # tick every 60 seconds = 1 minute
+            try:
+                time.sleep(60)
 
-            # Add 60 seconds directly - app is open so user is active
-            _session["accumulated_seconds"] += 60
-            _session["last_activity"] = time.time()
-            if _session["start_time"] is None:
-                _session["start_time"] = time.time()
+                # Add 60 seconds - app is open so user is active
+                _session["accumulated_seconds"] += 60
+                _session["last_activity"] = time.time()
+                if _session["start_time"] is None:
+                    _session["start_time"] = time.time()
 
-            # Save locally and ping server every tick
-            send_ping()
+                print(f"[TELEMETRY] Tick - accumulated: "
+                      f"{_session['accumulated_seconds']}s "
+                      f"pending: {_session['pending_minutes']}m")
+
+                send_ping()
+
+            except Exception as e:
+                print(f"[TELEMETRY] _ping_loop error: {e}")
+                import traceback
+                traceback.print_exc()
 
     thread = threading.Thread(
         target=_ping_loop, daemon=True, name="Telemetry"
