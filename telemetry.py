@@ -28,12 +28,12 @@ EMAIL_FILE     = os.path.join(DATA_DIR, "email.txt")
 TELEMETRY_DB   = os.path.join(DATA_DIR, "telemetry.db")
 LICENSE_DB     = os.path.join(DATA_DIR, "license.db")
 
-# ── Timing constants ──
+# Timing constants
 SESSION_TIMEOUT  = 600   # 10 min idle = session ends
 SAVE_INTERVAL    = 60    # Save to local DB every 60 seconds
 SERVER_INTERVAL  = 120   # Ping server every 2 minutes
 
-# ── Session state ──
+# Session state
 _session = {
     "start_time":          None,
     "last_activity":       None,
@@ -278,7 +278,7 @@ def _save_usage_time(seconds, sync_server=False):
     print(f"[TELEMETRY] Saving {round(minutes, 1)} min for "
           f"{email or device_id[:8]}...")
 
-    # ── 1. Local telemetry.db ──
+    # 1. Local telemetry.db
     try:
         init_db()
         conn = sqlite3.connect(TELEMETRY_DB)
@@ -308,7 +308,7 @@ def _save_usage_time(seconds, sync_server=False):
     except Exception as e:
         print(f"[TELEMETRY] local DB error: {e}")
 
-    # ── 2. Local license.db (referral tracking) ──
+    # 2. Local license.db (referral tracking)
     try:
         if os.path.exists(LICENSE_DB):
             init_license_db()
@@ -347,7 +347,7 @@ def _save_usage_time(seconds, sync_server=False):
     except Exception as e:
         print(f"[TELEMETRY] license.db error: {e}")
 
-    # ── 3. Server ping (every SERVER_INTERVAL seconds only) ──
+    # 3. Server ping (every SERVER_INTERVAL seconds only)
     if sync_server:
         pending = _session["pending_minutes"]
         if pending >= 0.5:   # at least 30 seconds accumulated
@@ -432,7 +432,7 @@ def start_telemetry():
     device_id = get_device_id()
     email     = get_email()
 
-    # ── Register in local DB immediately ──
+    # Register in local DB immediately
     try:
         conn = sqlite3.connect(TELEMETRY_DB)
         c    = conn.cursor()
@@ -448,7 +448,7 @@ def start_telemetry():
     except Exception:
         pass
 
-    # ── Read name from config BEFORE starting thread ──
+    # Read name from config BEFORE starting thread
     user_name = None
     try:
         import config as _cfg
@@ -456,7 +456,7 @@ def start_telemetry():
     except Exception:
         pass
 
-    # ── Register on Render server immediately (background, non-blocking) ──
+    # Register on Render server immediately (background, non-blocking)
     def _register(_name=user_name, _email=email, _device_id=device_id):
         try:
             import server_sync
@@ -499,18 +499,19 @@ def start_telemetry():
           f"Email: {email or 'Not set'} | "
           f"Total: {_format_time(total_min)}")
 
-    # ── Background loop ──
+    # Background loop
     def _ping_loop():
         while True:
             time.sleep(60)  # tick every 60 seconds = 1 minute
 
-            # Count this minute as active
-            log_activity()
+            # Add 60 seconds directly - app is open so user is active
+            _session["accumulated_seconds"] += 60
+            _session["last_activity"] = time.time()
+            if _session["start_time"] is None:
+                _session["start_time"] = time.time()
 
-            # Save locally every tick
-            # Ping server every SERVER_INTERVAL seconds (10 min)
-            if _session["accumulated_seconds"] > 0:
-                send_ping()
+            # Save locally and ping server every tick
+            send_ping()
 
     thread = threading.Thread(
         target=_ping_loop, daemon=True, name="Telemetry"
