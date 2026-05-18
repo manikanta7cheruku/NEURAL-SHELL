@@ -10,8 +10,8 @@ import threading
 # CONFIGURATION - UPDATE THIS AFTER DEPLOYING TO RAILWAY
 # =============================================================================
 
-SERVER_URL = "https://seven-server-u2rp.onrender.com/"  # Change to Railway URL after deployment
-# SERVER_URL = "https://your-app.railway.app"  # Uncomment after deployment
+# To switch servers in future: change only this line
+SERVER_URL = "https://seven-server-u2rp.onrender.com"
 
 ENABLED = True
 TIMEOUT = 5
