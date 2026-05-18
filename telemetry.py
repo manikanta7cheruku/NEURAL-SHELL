@@ -448,42 +448,51 @@ def start_telemetry():
     except Exception:
         pass
 
+    # ── Read name from config BEFORE starting thread ──
+    user_name = None
+    try:
+        import config as _cfg
+        user_name = _cfg.KEY.get("identity", {}).get("user_name", None)
+    except Exception:
+        pass
+
     # ── Register on Render server immediately (background, non-blocking) ──
-    def _register():
+    def _register(_name=user_name, _email=email, _device_id=device_id):
         try:
             import server_sync
 
-            # Get country separately with fallback
+            # Get country with fallback
             country = "Unknown"
             try:
                 country = get_country_from_ip()
             except Exception:
                 pass
 
-            # Get name from config
-            name = None
-            try:
-                import config
-                name = config.KEY.get("identity", {}).get("user_name", None)
-            except Exception:
-                pass
+            print(f"[TELEMETRY] Registering — "
+                  f"name={_name} email={_email} country={country}")
 
-            print(f"[TELEMETRY] Registering on server — "
-                  f"name={name} email={email} country={country}")
+            result = server_sync._post("/api/register", {
+                "device_id":    _device_id,
+                "email":        _email,
+                "name":         _name,
+                "country":      country,
+                "referral_code": None
+            })
 
-            server_sync.register_device(
-                device_id=device_id,
-                email=email,
-                name=name,
-                country=country,
-                referral_code=None
-            )
-            print(f"[TELEMETRY] Registered on server ✓")
+            if result and result.get("success"):
+                print(f"[TELEMETRY] Registered on server ✓ "
+                      f"name={_name} country={country}")
+            else:
+                print(f"[TELEMETRY] Register returned: {result}")
 
         except Exception as e:
-            print(f"[TELEMETRY] Server register failed (offline ok): {e}")
+            import traceback
+            print(f"[TELEMETRY] Register failed: {e}")
+            traceback.print_exc()
 
-    threading.Thread(target=_register, daemon=True, name="TelemetryRegister").start()
+    threading.Thread(
+        target=_register, daemon=True, name="TelemetryRegister"
+    ).start()
 
     total_min = _get_total_minutes()
     print(f"[TELEMETRY] Device: {device_id[:8]}... | "

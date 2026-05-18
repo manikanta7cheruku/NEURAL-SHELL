@@ -113,8 +113,9 @@ def _migrate_old_data():
             print(f"[CONFIG] Migration warning (config): {e}")
 
     # Migrate data/ folder contents
+    # Skip device_id.txt — never migrate this, always create fresh
     if os.path.exists(old_data):
-        for filename in ['device_id.txt', 'email.txt', 'license.db', 'telemetry.db']:
+        for filename in ['email.txt', 'license.db', 'telemetry.db']:
             old_file = os.path.join(old_data, filename)
             new_file = os.path.join(new_data, filename)
             if os.path.exists(old_file) and not os.path.exists(new_file):
