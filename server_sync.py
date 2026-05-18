@@ -66,6 +66,15 @@ def create_referral(device_id, email):
     return _post("/api/referral/create", {"device_id": device_id, "email": email})
 
 
+def keep_alive():
+    """Ping server to prevent Render free tier sleep."""
+    try:
+        import requests
+        requests.get(f"{SERVER_URL}/ping", timeout=5)
+    except Exception:
+        pass
+
+
 def get_referral_stats(email=None, device_id=None):
     """Get referral stats."""
     try:

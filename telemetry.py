@@ -507,9 +507,11 @@ def start_telemetry():
 
     # Background loop
     def _ping_loop():
+        tick_count = 0
         while True:
             try:
                 time.sleep(60)
+                tick_count += 1
 
                 # Add 60 seconds - app is open so user is active
                 _session["accumulated_seconds"] += 60
@@ -517,9 +519,13 @@ def start_telemetry():
                 if _session["start_time"] is None:
                     _session["start_time"] = time.time()
 
-                print(f"[TELEMETRY] Tick - accumulated: "
-                      f"{_session['accumulated_seconds']}s "
-                      f"pending: {_session['pending_minutes']}m")
+                # Keep Render server awake every 10 minutes
+                if tick_count % 10 == 0:
+                    try:
+                        import server_sync as _ss
+                        _ss.keep_alive()
+                    except Exception:
+                        pass
 
                 send_ping()
 
