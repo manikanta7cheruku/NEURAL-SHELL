@@ -31,7 +31,6 @@ LICENSE_DB     = os.path.join(DATA_DIR, "license.db")
 # ── Timing constants ──
 SESSION_TIMEOUT  = 600   # 10 min idle = session ends
 SAVE_INTERVAL    = 60    # Save to local DB every 60 seconds
-#SERVER_INTERVAL  = 600   # Ping server every 10 minutes
 SERVER_INTERVAL  = 120   # Ping server every 2 minutes
 
 # ── Session state ──
@@ -40,8 +39,9 @@ _session = {
     "last_activity":       None,
     "accumulated_seconds": 0,
     "last_save_time":      None,
-    "last_server_sync":    None,   # tracks last server ping separately
-    "pending_minutes":     0,      # minutes accumulated since last server ping
+    "last_server_sync":    None,
+    "pending_minutes":     0,      # minutes since last server sync ONLY
+    "total_synced_minutes": 0,     # total already sent to server
 }
 
 # =============================================================================
@@ -350,15 +350,22 @@ def _save_usage_time(seconds, sync_server=False):
     # ── 3. Server ping (every SERVER_INTERVAL seconds only) ──
     if sync_server:
         pending = _session["pending_minutes"]
-        if pending >= 1:
+        if pending >= 0.5:   # at least 30 seconds accumulated
             try:
                 import server_sync
-                server_sync.send_usage_ping(device_id, round(pending, 2), email)
-                _session["pending_minutes"]  = 0
-                _session["last_server_sync"] = time.time()
-                print(f"[TELEMETRY] Server synced: {round(pending, 2)} min sent")
-            except Exception:
-                pass  # Server offline — local data already saved, no data lost
+                result = server_sync.send_usage_ping(
+                    device_id, round(pending, 2), email
+                )
+                if result and result.get("success"):
+                    _session["pending_minutes"]    = 0
+                    _session["total_synced_minutes"] += pending
+                    _session["last_server_sync"]   = time.time()
+                    print(f"[TELEMETRY] Server synced: "
+                          f"{round(pending, 2)} min sent | "
+                          f"total synced: "
+                          f"{round(_session['total_synced_minutes'], 1)} min")
+            except Exception as e:
+                print(f"[TELEMETRY] Server sync failed (ok): {e}")
 
 
 def _get_total_minutes():
@@ -389,15 +396,19 @@ def get_active_minutes():
 # =============================================================================
 
 def send_ping(force_server=False):
-    """Save accumulated time locally. Ping server if interval reached."""
+    """
+    Save accumulated time locally.
+    Send ONLY new minutes (delta) to server every SERVER_INTERVAL.
+    Never sends total — always sends what accumulated since last sync.
+    """
     if _session["accumulated_seconds"] <= 0:
         return
 
-    now         = time.time()
-    last_sync   = _session["last_server_sync"] or 0
-    do_server   = force_server or (now - last_sync >= SERVER_INTERVAL)
+    now       = time.time()
+    last_sync = _session["last_server_sync"] or 0
+    do_server = force_server or (now - last_sync >= SERVER_INTERVAL)
 
-    # Add to pending minutes before saving
+    # pending_minutes = only what has NOT been sent to server yet
     pending_add = _session["accumulated_seconds"] / 60.0
     _session["pending_minutes"] += pending_add
 
@@ -441,16 +452,34 @@ def start_telemetry():
     def _register():
         try:
             import server_sync
-            country = get_country_from_ip()
-            # Correct arg order: device_id, email, name, country, referral_code
+
+            # Get country separately with fallback
+            country = "Unknown"
+            try:
+                country = get_country_from_ip()
+            except Exception:
+                pass
+
+            # Get name from config
+            name = None
+            try:
+                import config
+                name = config.KEY.get("identity", {}).get("user_name", None)
+            except Exception:
+                pass
+
+            print(f"[TELEMETRY] Registering on server — "
+                  f"name={name} email={email} country={country}")
+
             server_sync.register_device(
                 device_id=device_id,
                 email=email,
-                name=None,
+                name=name,
                 country=country,
                 referral_code=None
             )
-            print(f"[TELEMETRY] Registered on server — country: {country}")
+            print(f"[TELEMETRY] Registered on server ✓")
+
         except Exception as e:
             print(f"[TELEMETRY] Server register failed (offline ok): {e}")
 
