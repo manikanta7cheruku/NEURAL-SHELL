@@ -75,8 +75,5 @@ nsis:
   installerIcon: electron/icon.ico
   uninstallerIcon: electron/icon.ico
   installerHeaderIcon: electron/icon.ico
-  license: LICENSE.txt
-  include: installer/seven.nsh
   deleteAppDataOnUninstall: false
-  # ── Disable run on finish — user launches from desktop shortcut ──
   runAfterFinish: false
