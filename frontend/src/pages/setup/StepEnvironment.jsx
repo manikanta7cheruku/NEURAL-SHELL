@@ -140,12 +140,13 @@ export default function StepEnvironment() {
         const data = await r.json();
         setBState(data);
 
-        // All three steps done
+        // All three steps done OR overall_ready flag set
         const pkgDone    = data.packages?.status       === 'done' || data.packages?.status === 'skipped';
         const ollamaDone = data.ollama_install?.status === 'done' || data.ollama_install?.status === 'skipped';
         const startDone  = data.ollama_start?.status  === 'done';
+        const overallReady = data.overall_ready === true;
 
-        if (pkgDone && ollamaDone && startDone) {
+        if ((pkgDone && ollamaDone && startDone) || overallReady) {
           clearInterval(pollRef.current);
           pollRef.current = null;
           setAllDone(true);
@@ -362,14 +363,58 @@ export default function StepEnvironment() {
 
       {/* ── Error panel ── */}
       {errorStep && !retrying && (
-        <div className="px-5 py-4 rounded-xl bg-red-500/[0.05] border border-red-500/20">
-          <p className="text-xs text-red-400 font-medium mb-1">Setup encountered an error</p>
-          <p className="text-[11px] text-red-400/70 font-light font-mono break-all">
-            {errorMessage}
-          </p>
-          <p className="text-[11px] text-s-text-4 mt-2 font-light">
-            Check your internet connection and click Retry below.
-          </p>
+        <div className="px-5 py-4 rounded-xl bg-red-500/[0.05] border border-red-500/20 space-y-3">
+          <div>
+            <p className="text-xs text-red-400 font-medium mb-1">
+              Setup encountered an error
+            </p>
+            <p className="text-[11px] text-red-400/70 font-light font-mono break-all">
+              {errorMessage}
+            </p>
+          </div>
+
+          {/* Ollama specific error — show manual install instructions */}
+          {errorStep === 'ollama_install' && (
+            <div className="border-t border-red-500/10 pt-3 space-y-2">
+              <p className="text-[11px] text-s-text-2 font-medium">
+                Cannot download Ollama automatically
+              </p>
+              <p className="text-[11px] text-s-text-4 font-light">
+                This usually happens when your internet or firewall blocks the download.
+              </p>
+              <div className="bg-s-surface border border-s-border rounded-lg p-3 space-y-1.5">
+                <p className="text-[10px] text-s-text-3 font-medium">
+                  Install Ollama manually — then click Retry:
+                </p>
+                {[
+                  '1. Open your browser',
+                  '2. Go to: ollama.com/download',
+                  '3. Download OllamaSetup.exe',
+                  '4. Run it and complete installation',
+                  '5. Come back here and click Retry',
+                ].map(step => (
+                  <p key={step} className="text-[10px] text-s-text-4 font-light">
+                    {step}
+                  </p>
+                ))}
+              </div>
+              <button
+                onClick={() => window.open
+                  ? window.open('https://ollama.com/download', '_blank')
+                  : null}
+                className="text-[11px] text-s-accent underline hover:text-s-accent/80"
+              >
+                Open ollama.com/download →
+              </button>
+            </div>
+          )}
+
+          {/* Internet error */}
+          {errorStep !== 'ollama_install' && (
+            <p className="text-[11px] text-s-text-4 font-light">
+              Check your internet connection and click Retry below.
+            </p>
+          )}
         </div>
       )}
 

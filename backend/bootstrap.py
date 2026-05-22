@@ -623,40 +623,37 @@ def run_environment_setup(on_complete=None):
             _set('packages', status='done', progress=100,
                  current='Already installed')
 
-        # ── Step 2: Ollama install (optional — non-fatal) ──
-        ollama_ok = False
-        try:
-            ollama_ok = setup_ollama()
-            if not ollama_ok:
-                print("[BOOTSTRAP] Ollama install failed — continuing anyway")
-                print("[BOOTSTRAP] User can install Ollama manually from ollama.com")
-                _set('ollama_install',
-                     status='error',
-                     error='Download failed. Install Ollama manually from ollama.com/download')
-        except Exception as e:
-            print(f"[BOOTSTRAP] Ollama error (non-fatal): {e}")
-            _set('ollama_install',
-                 status='error',
-                 error=f'Ollama unavailable: {str(e)[:100]}')
+        # ── Step 2: Ollama install (REQUIRED) ──
+        ollama_ok = setup_ollama()
+        if not ollama_ok:
+            # Check if user already has Ollama installed manually
+            if is_ollama_installed():
+                print("[BOOTSTRAP] Ollama found via manual install")
+                _set('ollama_install', status='done', progress=100)
+            else:
+                print("[BOOTSTRAP] Ollama install failed")
+                if on_complete:
+                    on_complete(False)
+                return
 
-        # ── Step 3: Start Ollama (only if installed) ──
-        if ollama_ok:
-            try:
-                start_ollama()
-            except Exception as e:
-                print(f"[BOOTSTRAP] Ollama start error (non-fatal): {e}")
-        else:
-            _set('ollama_start', status='error',
-                 error='Skipped — Ollama not installed')
+        # ── Step 3: Start Ollama (REQUIRED) ──
+        ok = start_ollama()
+        if not ok:
+            # Try one more time
+            import time
+            time.sleep(3)
+            ok = start_ollama()
+            if not ok:
+                if on_complete:
+                    on_complete(False)
+                return
 
-        # ── Setup complete regardless of Ollama status ──
         with _state_lock:
             _bootstrap_state['overall_ready'] = True
 
         print("[BOOTSTRAP] Environment setup complete.")
-        print("[BOOTSTRAP] Note: If Ollama failed, install from ollama.com/download")
         if on_complete:
-            on_complete(True)  # Always succeed at package level
+            on_complete(True)
 
     t = threading.Thread(target=_run, daemon=True, name="Bootstrap")
     t.start()
