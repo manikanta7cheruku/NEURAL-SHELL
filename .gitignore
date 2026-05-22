@@ -52,3 +52,4 @@ frontend/dist/
 *.tmp
 OllamaSetup.exe
 SEVEN-Setup-*.exe
+data/
