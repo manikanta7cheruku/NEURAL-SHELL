@@ -17,11 +17,20 @@ def ensure_db():
         print("❌ No database found. Run Seven first to create it.")
         sys.exit(1)
 
-def generate_license(email: str, tier: str = "ultimate", plan_type: str = "lifetime"):
-    """Generate a license key."""
-    import license as lic
+def generate_license(email: str, tier: str = "ultimate",
+                     plan_type: str = "lifetime", custom_key: str = None):
+    """
+    Generate a license key.
     
-    key = lic.create_license(email, tier, plan_type)
+    custom_key examples:
+      LAUNCH-2025        → VII-LAUNCH-2025
+      BETA-FRIEND        → VII-BETA-FRIEND
+      VIP-MANIKANTA      → VII-VIP-MANIKANTA
+      EARLYBIRD          → VII-EARLYBIRD
+    """
+    import license as lic
+
+    key = lic.create_license(email, tier, plan_type, custom_key=custom_key)
     
     if plan_type == "monthly":
         expiry = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
@@ -524,6 +533,51 @@ Share more to earn more!
     print("=" * 70)
 
 
+def demote_user(email_or_key: str):
+    """
+    Remove plan from user. Reverts to free tier.
+    Can pass email or license key.
+    """
+    import sqlite3
+
+    ensure_db()
+    conn = sqlite3.connect("data/license.db")
+    c    = conn.cursor()
+
+    # Find by key or email
+    if email_or_key.startswith("VII-"):
+        c.execute("SELECT license_key, email, tier FROM licenses WHERE license_key = ?",
+                  (email_or_key,))
+    else:
+        c.execute("SELECT license_key, email, tier FROM licenses WHERE email = ? AND is_active = 1",
+                  (email_or_key,))
+
+    row = c.fetchone()
+    if not row:
+        print(f"No active license found for: {email_or_key}")
+        conn.close()
+        return
+
+    key, email, tier = row
+
+    # Deactivate
+    c.execute("UPDATE licenses SET is_active = 0 WHERE license_key = ?", (key,))
+    # Remove device activations
+    c.execute("DELETE FROM activations WHERE license_key = ?", (key,))
+    conn.commit()
+    conn.close()
+
+    print("=" * 50)
+    print(f"PLAN REMOVED")
+    print("=" * 50)
+    print(f"Email:  {email}")
+    print(f"Key:    {key}")
+    print(f"Was:    {tier.upper()}")
+    print(f"Now:    FREE")
+    print("=" * 50)
+    print("User will see FREE tier on next app restart.")
+
+
 def show_help():
     """Show all available commands."""
     print("""
@@ -607,13 +661,37 @@ if __name__ == "__main__":
     
     elif cmd == "gen":
         if len(sys.argv) < 3:
-            print("Usage: python admin_tools.py gen <email> [tier] [plan]")
-            print("Example: python admin_tools.py gen user@email.com pro monthly")
+            print("Usage: python admin_tools.py gen <email> [tier] [plan] [custom-key]")
+            print()
+            print("Examples:")
+            print("  python admin_tools.py gen user@email.com pro monthly")
+            print("  python admin_tools.py gen user@email.com ultimate lifetime")
+            print("  python admin_tools.py gen user@email.com ultimate monthly LAUNCH-2025")
+            print("  python admin_tools.py gen user@email.com ultimate lifetime VIP-MANIKANTA")
+            print("  python admin_tools.py gen user@email.com pro monthly BETA-FRIEND")
             sys.exit(1)
-        email = sys.argv[2]
-        tier = sys.argv[3] if len(sys.argv) > 3 else "ultimate"
-        plan = sys.argv[4] if len(sys.argv) > 4 else "lifetime"
-        generate_license(email, tier, plan)
+        email      = sys.argv[2]
+        tier       = sys.argv[3] if len(sys.argv) > 3 else "ultimate"
+        plan       = sys.argv[4] if len(sys.argv) > 4 else "lifetime"
+        custom_key = sys.argv[5] if len(sys.argv) > 5 else None
+        generate_license(email, tier, plan, custom_key=custom_key)
+
+    elif cmd == "custom":
+        # Quick custom key command
+        # python admin_tools.py custom LAUNCH-2025 ultimate monthly
+        if len(sys.argv) < 3:
+            print("Usage: python admin_tools.py custom <key-suffix> [email] [tier] [plan]")
+            print()
+            print("Examples:")
+            print("  python admin_tools.py custom LAUNCH-2025")
+            print("  python admin_tools.py custom BETA-FRIEND friend@gmail.com ultimate monthly")
+            print("  python admin_tools.py custom EARLYBIRD user@gmail.com pro yearly")
+            sys.exit(1)
+        custom_key = sys.argv[2]
+        email      = sys.argv[3] if len(sys.argv) > 3 else "manual@seven.app"
+        tier       = sys.argv[4] if len(sys.argv) > 4 else "ultimate"
+        plan       = sys.argv[5] if len(sys.argv) > 5 else "lifetime"
+        generate_license(email, tier, plan, custom_key=custom_key)
     
     elif cmd == "pro":
         if len(sys.argv) < 3:
@@ -635,6 +713,14 @@ if __name__ == "__main__":
             print("Usage: python admin_tools.py revoke <license_key>")
             sys.exit(1)
         revoke_license(sys.argv[2])
+
+    elif cmd == "demote":
+        if len(sys.argv) < 3:
+            print("Usage: python admin_tools.py demote <email or license_key>")
+            print("Example: python admin_tools.py demote friend@gmail.com")
+            print("Example: python admin_tools.py demote VII-XXXX-XXXX-XXXX")
+            sys.exit(1)
+        demote_user(sys.argv[2])
     
     elif cmd == "referrals":
         check_referrals()

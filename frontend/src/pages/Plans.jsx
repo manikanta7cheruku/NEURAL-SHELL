@@ -332,21 +332,66 @@ export default function Plans() {
         {/* ================================================================= */}
         {/* CURRENT STATUS (If Pro/Ultimate) */}
         {/* ================================================================= */}
-        {isPro && (
-          <div className="bg-gradient-to-br from-s-accent/5 to-s-accent/10 border border-s-accent/20 rounded p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-[13px] text-s-accent font-medium">
+                {isPro && (
+          <div className={`rounded p-4 border ${
+            daysUntilExpiry !== null && daysUntilExpiry <= 3
+              ? 'bg-red-500/5 border-red-500/20'
+              : daysUntilExpiry !== null && daysUntilExpiry <= 7
+              ? 'bg-yellow-500/5 border-yellow-500/20'
+              : 'bg-gradient-to-br from-s-accent/5 to-s-accent/10 border-s-accent/20'
+          }`}>
+            <div className="flex items-start justify-between gap-4">
+              <div className="space-y-1">
+                <div className={`text-[13px] font-medium ${
+                  daysUntilExpiry !== null && daysUntilExpiry <= 3
+                    ? 'text-red-400'
+                    : 'text-s-accent'
+                }`}>
                   Seven {tier.toUpperCase()} {isTrial && '(Trial)'}
                 </div>
-                <div className="text-[11px] text-s-text-3 mt-1 space-y-0.5">
-                  <div>Key: <span className="font-mono">{licenseKey?.slice(0, 12)}••••</span></div>
-                  {daysUntilExpiry !== null && (
-                    <div>{daysUntilExpiry} days remaining</div>
-                  )}
+                <div className="text-[11px] text-s-text-3 font-mono">
+                  {licenseKey?.slice(0, 12)}••••
                 </div>
+
+                {/* Expiry states */}
+                {daysUntilExpiry === null ? (
+                  <div className="text-[11px] text-s-green">
+                    Lifetime — never expires
+                  </div>
+                ) : daysUntilExpiry <= 0 ? (
+                  <div className="text-[11px] text-red-400 font-medium">
+                    Expired — activate a new key to continue
+                  </div>
+                ) : daysUntilExpiry <= 3 ? (
+                  <div className="space-y-1">
+                    <div className="text-[11px] text-red-400 font-medium">
+                      Expires in {daysUntilExpiry} day{daysUntilExpiry !== 1 ? 's' : ''}
+                    </div>
+                    <div className="text-[10px] text-s-text-4">
+                      Contact support or purchase to continue
+                    </div>
+                  </div>
+                ) : daysUntilExpiry <= 7 ? (
+                  <div className="space-y-1">
+                    <div className="text-[11px] text-yellow-400 font-medium">
+                      Expires in {daysUntilExpiry} days
+                    </div>
+                    <div className="text-[10px] text-s-text-4">
+                      Renew soon to keep your plan
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-[11px] text-s-text-3">
+                    {daysUntilExpiry} days remaining
+                  </div>
+                )}
               </div>
-              <div className="text-3xl">✨</div>
+
+              {/* Icon */}
+              <div className="text-2xl flex-shrink-0">
+                {daysUntilExpiry !== null && daysUntilExpiry <= 3 ? '⚠️' :
+                 daysUntilExpiry !== null && daysUntilExpiry <= 7 ? '🕐' : '✨'}
+              </div>
             </div>
           </div>
         )}

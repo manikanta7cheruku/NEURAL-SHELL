@@ -196,19 +196,52 @@ def get_device_fingerprint() -> str:
 # LICENSE KEY GENERATION
 # =============================================================================
 
-def generate_license_key(tier: str = "pro") -> str:
-    """Generate a unique license key: VII-XXXX-XXXX-XXXX"""
+def generate_license_key(tier: str = "pro", custom: str = None) -> str:
+    """
+    Generate a license key.
+    
+    Auto format:   VII-XXXX-XXXX-XXXX
+    Custom format: VII-LAUNCH-2025
+                   VII-BETA-FRIEND
+                   VII-VIP-MANIKANTA
+                   VII-EARLYBIRD
+    
+    Rules for custom:
+      - Must start with VII-
+      - Only A-Z, 0-9, hyphens
+      - Max 30 characters total
+    """
+    if custom:
+        # Clean and format custom key
+        clean = custom.upper().strip()
+        # Remove VII- prefix if user already included it
+        if clean.startswith("VII-"):
+            return clean
+        return f"VII-{clean}"
+    
+    # Auto generate
     segment1 = uuid.uuid4().hex[:4].upper()
     segment2 = uuid.uuid4().hex[:4].upper()
     segment3 = uuid.uuid4().hex[:4].upper()
-    
     return f"VII-{segment1}-{segment2}-{segment3}"
 
+
 def validate_key_format(key: str) -> bool:
-    """Check if key matches format."""
+    """
+    Accept both auto-generated and custom key formats.
+    Only rule: must start with VII- and be alphanumeric + hyphens.
+    """
     import re
-    pattern = r'^VII-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$'
-    return bool(re.match(pattern, key.upper()))
+    key = key.upper().strip()
+    # Must start with VII-
+    if not key.startswith("VII-"):
+        return False
+    # Rest must be alphanumeric + hyphens, min 4 chars after VII-
+    rest = key[4:]
+    if len(rest) < 4:
+        return False
+    pattern = r'^[A-Z0-9\-]+$'
+    return bool(re.match(pattern, rest))
 
 # =============================================================================
 # LICENSE ACTIVATION
@@ -857,19 +890,22 @@ def register_referral(referral_code: str, referred_email: str, referred_device_i
 # ADMIN FUNCTIONS (For generating licenses)
 # =============================================================================
 
-def create_license(email: str, tier: str, plan_type: str) -> str:
+def create_license(email: str, tier: str, plan_type: str,
+                   custom_key: str = None) -> str:
     """
     Create a new license (admin function).
     
     Args:
-        email: User email
-        tier: "pro" or "ultimate"
-        plan_type: "monthly", "yearly", or "lifetime"
+        email:      User email
+        tier:       "pro" or "ultimate"
+        plan_type:  "monthly", "yearly", or "lifetime"
+        custom_key: Optional custom key like "LAUNCH-2025"
+                    Will become "VII-LAUNCH-2025"
     
     Returns:
         license_key
     """
-    license_key = generate_license_key(tier)
+    license_key = generate_license_key(tier, custom=custom_key)
     
     # Calculate expiry
     if plan_type == "monthly":
