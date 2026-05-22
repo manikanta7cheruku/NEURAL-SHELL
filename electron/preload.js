@@ -15,5 +15,8 @@ contextBridge.exposeInMainWorld('electron', {
   // ── Update system (Phase 6) ──
   // Called when user clicks "Restart & Install"
   // Electron runs the installer exe silently then quits the app
-  runInstaller: (installerPath) => ipcRenderer.send('run-installer', installerPath),
+  // silent=true for auto mode (no wizard)
+  // silent=false for manual mode (shows Next/Finish wizard)
+  runInstaller: (installerPath, silent = false) =>
+    ipcRenderer.send('run-installer', { path: installerPath, silent }),
 });
