@@ -139,8 +139,8 @@ export default function StepAboutYou() {
                 type="text"
                 value={data.referralCode}
                 onChange={e => setField('referralCode', e.target.value.toUpperCase())}
-                placeholder="VII-REF-XXXX"
-                maxLength={20}
+                placeholder="REF-XXXXXXXX"
+                maxLength={16}
                 className="w-full px-4 py-3.5 rounded-xl bg-s-card border border-s-border text-s-text text-sm placeholder:text-s-text-4 font-mono tracking-[0.15em] hover:border-s-border-l focus:border-s-accent transition-all duration-150"
               />
               <p className="text-[10px] text-s-text-4 pl-1">

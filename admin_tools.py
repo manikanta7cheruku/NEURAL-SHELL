@@ -128,9 +128,75 @@ def revoke_license(license_key: str):
 
 
 def check_referrals():
-    """Check pending and completed referrals."""
+    """Check pending and completed referrals from server."""
+    import requests
+
+    SERVER_URL = "https://seven-server-u2rp.onrender.com"
+
+    print("\n" + "=" * 70)
+    print("REFERRAL STATUS (from server)")
+    print("=" * 70)
+
+    try:
+        # Get all referrals from server
+        r = requests.get(f"{SERVER_URL}/admin/referrals", timeout=10)
+        refs = r.json()
+
+        # Get pending rewards
+        p = requests.get(f"{SERVER_URL}/admin/rewards/pending", timeout=10)
+        pending_rewards = p.json()
+
+        if pending_rewards:
+            print(f"\n🎉 COMPLETED — SEND KEYS NOW ({len(pending_rewards)}):")
+            print("-" * 70)
+            for pr in pending_rewards:
+                print(f"  Referrer: {pr['referrer']} → Send ULTIMATE 1-month")
+                print(f"  Referred: {pr['referred']} → Send PRO 1-month")
+                print(f"\n  Command:")
+                print(f"  python admin_tools.py reward {pr['referred']} {pr['referrer']}")
+                print("-" * 70)
+        else:
+            print("\n✓ No pending rewards")
+
+        # Show all referrals
+        in_progress = [r for r in refs if not r['complete']]
+        completed   = [r for r in refs if r['complete']]
+
+        if in_progress:
+            print(f"\n⏳ IN PROGRESS ({len(in_progress)}):")
+            print("-" * 70)
+            for ref in in_progress:
+                hours = ref['hours']
+                pct   = min(100, int((hours / 7) * 100))
+                bar   = "█" * (pct // 10) + "░" * (10 - pct // 10)
+                print(f"  Referrer: {ref['referrer'] or '—'}")
+                print(f"  Referred: {ref['referred'] or '—'}")
+                print(f"  Progress: {hours}h/7h [{bar}] {pct}%")
+                print("-" * 70)
+
+        if completed:
+            print(f"\n✅ COMPLETED ({len(completed)}):")
+            print("-" * 70)
+            for ref in completed:
+                sent = "SENT" if ref['reward_sent'] else "PENDING"
+                print(f"  {ref['referrer']} → {ref['referred']} [{sent}]")
+            print("-" * 70)
+
+        print(f"\n📊 TOTAL: {len(refs)} referrals | "
+              f"{len(completed)} completed | "
+              f"{len(in_progress)} in progress")
+
+    except Exception as e:
+        print(f"❌ Could not reach server: {e}")
+        print("Check your internet connection or server URL")
+
+    print("=" * 70)
+
+
+def check_referrals_local():
+    """Check referrals from local SQLite (fallback)."""
     import sqlite3
-    
+
     ensure_db()
     
     conn = sqlite3.connect("data/license.db")

@@ -258,8 +258,19 @@ export default function Plans() {
   // Functions
   const loadReferralStats = async () => {
     try {
+      // Get stats first
       const r = await api.get('/referral/stats');
-      setReferralStats(r.data);
+      const stats = r.data;
+
+      // If no referral code yet, create one
+      if (!stats.referral_code) {
+        try {
+          const created = await api.post('/referral/create', {});
+          stats.referral_code = created.data.referral_code;
+        } catch {}
+      }
+
+      setReferralStats(stats);
     } catch {}
   };
 
@@ -293,8 +304,8 @@ export default function Plans() {
   };
 
   const copyReferral = () => {
-    if (referralStats) {
-      navigator.clipboard.writeText(`https://seven.app/ref/${referralStats.referral_code}`);
+    if (referralStats?.referral_code) {
+      navigator.clipboard.writeText(referralStats.referral_code);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     }
@@ -516,39 +527,84 @@ export default function Plans() {
         {/* ================================================================= */}
         {/* REFERRAL SECTION */}
         {/* ================================================================= */}
-       {/* Referral Section */}
-{referralStats && (
-  <div className="bg-gradient-to-r from-s-accent/5 to-s-accent/10 border border-s-accent/20 rounded p-4">
-    <div className="text-[9px] text-s-accent uppercase tracking-wider font-medium mb-2">🎁 Share Seven, Get Premium Free</div>
-    <p className="text-[11px] text-s-text-3 mb-3">
-      Share Seven with friends. When they use it for <strong className="text-s-accent">7 hours</strong>, 
-      you get <strong className="text-s-accent">Ultimate free for 1 month</strong> and 
-      they get <strong className="text-s-green">Pro free for 1 month!</strong>
-    </p>
-    <div className="flex gap-2 mb-3">
-      <input value={`https://seven.app/ref/${referralStats.referral_code}`} readOnly
-        className="flex-1 bg-s-bg border border-s-border rounded px-2.5 py-1.5 text-[11px] text-s-text font-mono" />
-      <button onClick={copyReferral} className="px-3 py-1.5 border border-s-accent/30 bg-s-accent/8 text-s-accent rounded text-[11px] font-medium">
-        {copied ? 'Copied!' : 'Copy'}
-      </button>
-    </div>
-    <div className="grid grid-cols-2 gap-2">
-      <div className="bg-s-bg rounded px-2 py-1.5 text-center">
-        <div className="text-[14px] font-mono font-medium text-s-green">{referralStats.completed_referrals}</div>
-        <div className="text-[8px] text-s-text-4">Friends Completed</div>
-      </div>
-      <div className="bg-s-bg rounded px-2 py-1.5 text-center">
-        <div className="text-[14px] font-mono font-medium text-s-orange">{referralStats.pending_referrals}</div>
-        <div className="text-[8px] text-s-text-4">In Progress</div>
-      </div>
-    </div>
-    {referralStats.next_milestone && (
-      <p className="text-[10px] text-s-text-4 mt-2">
-        Next: {referralStats.next_milestone - referralStats.completed_referrals} more friends for bonus rewards!
-      </p>
-    )}
-  </div>
-)}
+        {/* Referral Section */}
+        <div className="bg-gradient-to-r from-s-accent/5 to-s-accent/10 border border-s-accent/20 rounded p-4 space-y-3">
+          <div className="text-[9px] text-s-accent uppercase tracking-wider font-medium">
+            🎁 Refer Friends — Get Premium Free
+          </div>
+
+          <p className="text-[11px] text-s-text-3 leading-relaxed">
+            Share Seven with a friend. When they use it for{' '}
+            <strong className="text-s-accent">7 hours</strong>, you get{' '}
+            <strong className="text-s-accent">Ultimate free for 1 month</strong> and
+            they get <strong className="text-s-green">Pro free for 1 month</strong>.
+          </p>
+
+          {/* Referral Code Display */}
+          {referralStats?.referral_code ? (
+            <div className="space-y-2">
+              <div className="text-[10px] text-s-text-4 uppercase tracking-wider">
+                Your Referral Code
+              </div>
+              <div className="flex gap-2">
+                <div className="flex-1 bg-s-bg border border-s-border rounded px-3 py-2 font-mono text-sm text-s-text tracking-widest">
+                  {referralStats.referral_code}
+                </div>
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(referralStats.referral_code);
+                    setCopied(true);
+                    setTimeout(() => setCopied(false), 2000);
+                  }}
+                  className="px-3 py-2 border border-s-accent/30 bg-s-accent/10 text-s-accent rounded text-[11px] font-medium hover:bg-s-accent/20 transition-colors"
+                >
+                  {copied ? '✓ Copied' : 'Copy Code'}
+                </button>
+              </div>
+              <p className="text-[10px] text-s-text-4">
+                Tell your friend: Install Seven → Setup wizard → Enter code above
+              </p>
+            </div>
+          ) : (
+            <div className="bg-s-bg border border-s-border rounded px-3 py-2 text-[11px] text-s-text-4">
+              Complete setup with your email to get a referral code
+            </div>
+          )}
+
+          {/* Stats */}
+          <div className="grid grid-cols-2 gap-2 pt-1">
+            <div className="bg-s-bg rounded px-3 py-2 text-center border border-s-border">
+              <div className="text-[18px] font-mono font-bold text-s-green">
+                {referralStats?.completed_referrals ?? 0}
+              </div>
+              <div className="text-[9px] text-s-text-4 mt-0.5">Friends Completed</div>
+              <div className="text-[9px] text-s-accent mt-0.5">→ You got Ultimate</div>
+            </div>
+            <div className="bg-s-bg rounded px-3 py-2 text-center border border-s-border">
+              <div className="text-[18px] font-mono font-bold text-yellow-400">
+                {referralStats?.pending_referrals ?? 0}
+              </div>
+              <div className="text-[9px] text-s-text-4 mt-0.5">In Progress</div>
+              <div className="text-[9px] text-s-text-4 mt-0.5">Using Seven now</div>
+            </div>
+          </div>
+
+          {/* How it works */}
+          <div className="bg-s-bg border border-s-border rounded p-3 space-y-1.5">
+            <div className="text-[9px] text-s-text-4 uppercase tracking-wider mb-2">
+              How It Works
+            </div>
+            {[
+              '1. Copy your referral code above',
+              '2. Friend installs Seven → enters your code in setup',
+              '3. Friend uses Seven for 7 hours',
+              '4. You get Ultimate (1 month) + Friend gets Pro (1 month)',
+              '5. You receive the license key by email',
+            ].map(step => (
+              <div key={step} className="text-[10px] text-s-text-3">{step}</div>
+            ))}
+          </div>
+        </div>
 
       </div>
 

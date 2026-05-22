@@ -1402,19 +1402,24 @@ def complete_setup(req: SetupCompleteRequest):
         print(f"[SETUP] Server sync warning: {e}")
         # Don't fail setup if server is unreachable
 
-    # Register referral if provided
+    # Register referral on server if code provided
     if req.referral_code and req.referral_code.strip():
         try:
             import server_sync
-            import license as license_module
-            device_id = license_module.get_device_id()
-            server_sync.register_referral(
-                device_id=device_id,
-                referral_code=req.referral_code.strip(),
-                email=email
-            )
-        except Exception:
-            pass
+            import telemetry as tel
+            device_id = tel.get_device_id()
+            # Register device on server WITH referral code
+            # Server links this device to the referrer
+            server_sync._post("/api/register", {
+                "device_id":      device_id,
+                "email":          email,
+                "name":           name,
+                "country":        None,
+                "referral_code":  req.referral_code.strip()
+            })
+            print(f"[SETUP] Referral code registered: {req.referral_code}")
+        except Exception as e:
+            print(f"[SETUP] Referral register warning: {e}")
 
     return {
         "success": True,
