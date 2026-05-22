@@ -407,7 +407,6 @@ def download_ollama_installer():
 
     try:
         def _progress(block_num, block_size, total_size):
-            # No print here — avoids charmap encoding errors on Windows
             if total_size > 0:
                 pct = min(int((block_num * block_size / total_size) * 100), 99)
                 _set('ollama_install', progress=pct)
@@ -419,7 +418,17 @@ def download_ollama_installer():
 
     except Exception as e:
         error_msg = str(e).encode('ascii', errors='replace').decode('ascii')
-        _set('ollama_install', status='error', error=error_msg)
+
+        # Give user clear instructions
+        friendly = (
+            "Could not download Ollama automatically. "
+            "Please install it manually: "
+            "1. Visit ollama.com/download  "
+            "2. Download OllamaSetup.exe  "
+            "3. Run it  "
+            "4. Then restart Seven setup"
+        )
+        _set('ollama_install', status='error', error=friendly)
         print(f"[BOOTSTRAP] Ollama download failed: {error_msg}")
         return None
 
@@ -593,14 +602,19 @@ def pull_model(model_name: str):
 # ============================================================================
 
 def run_environment_setup(on_complete=None):
-    """Run full environment setup in background thread."""
+    """
+    Run full environment setup in background thread.
+    Ollama is optional — if download fails, setup continues.
+    User can install Ollama manually later.
+    """
     def _run():
         print("[BOOTSTRAP] Starting environment setup...")
 
-        # Packages
+        # ── Step 1: Python packages (required) ──
         if not check_packages_installed():
             ok = install_packages()
             if not ok:
+                print("[BOOTSTRAP] Package install failed — cannot continue")
                 if on_complete:
                     on_complete(False)
                 return
@@ -609,26 +623,40 @@ def run_environment_setup(on_complete=None):
             _set('packages', status='done', progress=100,
                  current='Already installed')
 
-        # Ollama install
-        ok = setup_ollama()
-        if not ok:
-            if on_complete:
-                on_complete(False)
-            return
+        # ── Step 2: Ollama install (optional — non-fatal) ──
+        ollama_ok = False
+        try:
+            ollama_ok = setup_ollama()
+            if not ollama_ok:
+                print("[BOOTSTRAP] Ollama install failed — continuing anyway")
+                print("[BOOTSTRAP] User can install Ollama manually from ollama.com")
+                _set('ollama_install',
+                     status='error',
+                     error='Download failed. Install Ollama manually from ollama.com/download')
+        except Exception as e:
+            print(f"[BOOTSTRAP] Ollama error (non-fatal): {e}")
+            _set('ollama_install',
+                 status='error',
+                 error=f'Ollama unavailable: {str(e)[:100]}')
 
-        # Ollama start
-        ok = start_ollama()
-        if not ok:
-            if on_complete:
-                on_complete(False)
-            return
+        # ── Step 3: Start Ollama (only if installed) ──
+        if ollama_ok:
+            try:
+                start_ollama()
+            except Exception as e:
+                print(f"[BOOTSTRAP] Ollama start error (non-fatal): {e}")
+        else:
+            _set('ollama_start', status='error',
+                 error='Skipped — Ollama not installed')
 
+        # ── Setup complete regardless of Ollama status ──
         with _state_lock:
             _bootstrap_state['overall_ready'] = True
 
-        print("[BOOTSTRAP] Environment ready.")
+        print("[BOOTSTRAP] Environment setup complete.")
+        print("[BOOTSTRAP] Note: If Ollama failed, install from ollama.com/download")
         if on_complete:
-            on_complete(True)
+            on_complete(True)  # Always succeed at package level
 
     t = threading.Thread(target=_run, daemon=True, name="Bootstrap")
     t.start()
