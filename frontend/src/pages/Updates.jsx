@@ -41,7 +41,9 @@ export default function Updates() {
   const isLifetime = !expiresAt;
   const isExpired  = expiresAt && new Date(expiresAt) < new Date();
   const isPaid     = tier === 'pro' || tier === 'ultimate';
-  const canUpdate  = isPaid && (!isExpired || isLifetime);
+  // Allow all users to receive updates
+  // Paid users get updates first, free users get updates for all tiers
+  const canUpdate  = true;
 
   // Poll every 2s while downloading or checking
   useEffect(() => {

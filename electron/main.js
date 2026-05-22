@@ -501,15 +501,18 @@ ipcMain.on('set-ignore-mouse', (_, ignore) => {
 });
 
 // ── Update installer ──
-ipcMain.on('run-installer', (_, installerPath) => {
-  console.log('[UPDATE] Running installer:', installerPath);
+ipcMain.on('run-installer', (_, { path: installerPath, silent }) => {
+  console.log('[UPDATE] Running installer:', installerPath, 'silent:', silent);
 
   if (!fs.existsSync(installerPath)) {
     console.error('[UPDATE] Installer not found:', installerPath);
     return;
   }
 
-  const child = exec(`"${installerPath}"`, { detached: true });
+  // silent=true → /S flag → no wizard, Seven restarts automatically
+  // silent=false → wizard shown → user clicks Next/Finish
+  const flags = silent ? '/S' : '';
+  const child  = exec(`"${installerPath}" ${flags}`, { detached: true });
   child.unref();
 
   setTimeout(() => {

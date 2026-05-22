@@ -19,7 +19,7 @@ import tempfile
 from packaging import version as pkg_version
 
 # ── Config ──
-SERVER_URL  = "https://seven-server-u2rp.onrender.com/"
+SERVER_URL  = "https://seven-server-u2rp.onrender.com"
 TIMEOUT     = 8
 CHECK_DELAY = 15   # seconds after app start before first check
 
@@ -75,11 +75,32 @@ def _is_lifetime():
         return False
 
 
+def _check_local_override():
+    """
+    Check for local update override file.
+    Used when server is down — admin sets update via terminal.
+    File: %APPDATA%\SEVEN\update_override.json
+    """
+    try:
+        import json
+        override = os.path.join(
+            os.environ.get("APPDATA", ""),
+            "SEVEN", "update_override.json"
+        )
+        if not os.path.exists(override):
+            return None
+        with open(override, "r") as f:
+            data = json.load(f)
+        print(f"[UPDATER] Local override found: v{data.get('version')}")
+        return data
+    except Exception:
+        return None
+
+
 def check_for_updates(force=False):
     """
-    Check Railway server for a new release.
-    Runs on a background thread automatically.
-    Returns result dict immediately if already checked (cached).
+    Check server for new release.
+    Falls back to local override file if server unavailable.
     """
     if _state["checking"] and not force:
         return get_state()
@@ -91,27 +112,48 @@ def check_for_updates(force=False):
         current = _read_current_version()
         tier    = _get_tier()
 
+        # Check local override first (works without server)
+        override = _check_local_override()
+        if override and override.get("update_available"):
+            from packaging import version as pv
+            try:
+                if pv.parse(override["version"]) > pv.parse(current):
+                    _state["update_available"] = True
+                    _state["info"]             = override
+                    _state["checking"]         = False
+                    print(f"[UPDATER] Override update: {override['version']}")
+                    return
+            except Exception:
+                pass
+
         try:
+            url = f"{SERVER_URL}/api/updates/latest"
+            print(f"[UPDATER] Checking {url} tier={tier} current={current}")
             r = requests.get(
-                f"{SERVER_URL}/api/updates/latest",
+                url,
                 params={"tier": tier, "current_version": current},
                 timeout=TIMEOUT
             )
+            print(f"[UPDATER] Response: {r.status_code}")
             if r.status_code == 200:
                 data = r.json()
+                print(f"[UPDATER] Data: {data}")
                 if data.get("update_available"):
                     _state["update_available"] = True
-                    _state["info"] = data
+                    _state["info"]             = data
+                    print(f"[UPDATER] Update available: {data.get('version')}")
                 else:
                     _state["update_available"] = False
-                    _state["info"] = None
+                    _state["info"]             = None
+                    print(f"[UPDATER] Already up to date")
             else:
                 _state["error"] = f"Server returned {r.status_code}"
+                print(f"[UPDATER] Error: {_state['error']}")
         except requests.exceptions.ConnectionError:
-            # Offline — not an error, just skip
-            pass
+            print("[UPDATER] Offline — skipping update check")
         except Exception as e:
             _state["error"] = str(e)
+            print(f"[UPDATER] Exception: {e}")
         finally:
             _state["checking"] = False
 
@@ -123,15 +165,32 @@ def check_for_updates(force=False):
 def start_auto_check():
     """
     Start background update checker.
-    Waits CHECK_DELAY seconds after app start, then checks.
-    Called once from main.py on startup.
+    Waits CHECK_DELAY seconds after startup then checks.
+    If update found and mode is auto → starts download automatically.
     """
     def _delayed():
         import time
         time.sleep(CHECK_DELAY)
         check_for_updates()
 
-    t = threading.Thread(target=_delayed, daemon=True, name="UpdateAutoCheck")
+        # Wait for check to complete
+        time.sleep(3)
+
+        # If auto download mode → start immediately
+        info = _state.get("info")
+        if (
+            _state.get("update_available")
+            and info
+            and info.get("download_mode") == "auto"
+            and not _state.get("downloading")
+            and not _state.get("download_path")
+        ):
+            print("[UPDATER] Auto download mode — starting download")
+            start_download_thread()
+
+    t = threading.Thread(
+        target=_delayed, daemon=True, name="UpdateAutoCheck"
+    )
     t.start()
 
 
