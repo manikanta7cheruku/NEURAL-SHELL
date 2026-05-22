@@ -438,6 +438,103 @@ def delete_conversation(conv_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/memory/export")
+def export_memory():
+    """Export all user data as JSON for backup."""
+    import sqlite3
+    import config as cfg
+
+    export = {
+        "exported_at": datetime.now().isoformat(),
+        "version": "1.1.0",
+        "identity": {
+            "name":  cfg.KEY.get("identity", {}).get("user_name", ""),
+            "email": cfg.KEY.get("email", ""),
+        },
+        "facts":         [],
+        "conversations": [],
+        "schedules":     [],
+        "usage": {}
+    }
+
+    # Facts + conversations from memory
+    try:
+        from memory import seven_memory
+        facts = seven_memory.get_facts()
+        export["facts"] = [
+            {"text": f.get("text",""), "category": f.get("category","")}
+            for f in (facts or [])
+        ]
+        convs = seven_memory.get_conversations(limit=500)
+        export["conversations"] = [
+            {"user": c.get("user",""), "seven": c.get("seven","")}
+            for c in (convs or [])
+        ]
+    except Exception as e:
+        export["memory_error"] = str(e)
+
+    # Schedules
+    try:
+        import hands.scheduler as sched
+        export["schedules"] = sched.get_all_schedules()
+    except Exception:
+        pass
+
+    # Usage stats
+    try:
+        db_path = os.path.join(
+            os.environ.get("APPDATA",""), "SEVEN","data","telemetry.db"
+        )
+        if os.path.exists(db_path):
+            conn = sqlite3.connect(db_path)
+            c    = conn.cursor()
+            c.execute("SELECT active_hours, last_seen FROM stats LIMIT 1")
+            row = c.fetchone()
+            if row:
+                mins = int((row[0] or 0) * 60)
+                export["usage"] = {
+                    "total_minutes": mins,
+                    "last_seen":     row[1]
+                }
+            conn.close()
+    except Exception:
+        pass
+
+    return export
+
+
+@app.post("/api/memory/import")
+async def import_memory(request: Request):
+    """Import user data from backup JSON."""
+    try:
+        data = await request.json()
+        from memory import seven_memory
+        imported = {"facts": 0, "conversations": 0}
+
+        for fact in data.get("facts", []):
+            if fact.get("text"):
+                seven_memory.store_fact(
+                    fact["text"],
+                    category=fact.get("category","imported")
+                )
+                imported["facts"] += 1
+
+        for conv in data.get("conversations", []):
+            if conv.get("user") and conv.get("seven"):
+                seven_memory.store_conversation(
+                    conv["user"], conv["seven"]
+                )
+                imported["conversations"] += 1
+
+        return {
+            "success": True,
+            "imported_facts":         imported["facts"],
+            "imported_conversations": imported["conversations"]
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @app.get("/api/memory/stats")
 def get_memory_stats():
     """Get memory statistics."""

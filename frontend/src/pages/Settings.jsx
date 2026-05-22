@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import useConfig from '../stores/useConfig';
 import api from '../api';
@@ -6,37 +6,56 @@ import PageHeader from '../components/PageHeader';
 import Spinner from '../components/Spinner';
 
 const TEMPS = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0];
-const TEMP_LABELS = { 0.1: 'Precise', 0.3: 'Focused', 0.5: 'Balanced', 0.7: 'Creative', 1.0: 'Wild' };
+const TEMP_LABELS = {
+  0.1: 'Precise', 0.3: 'Focused', 0.5: 'Balanced',
+  0.7: 'Creative', 1.0: 'Wild'
+};
 
 export default function Settings() {
   const { config, loading, fetch: fc, update } = useConfig();
-  const navigate = useNavigate();
-  const [hw, setHw] = useState(null);
-  const [speed, setSpeed] = useState(null);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [local, setLocal] = useState(null);
-  const [voiceWords, setVoiceWords] = useState(null);
-  const [voiceWordsEdited, setVoiceWordsEdited] = useState(false);
-  const [savingVoice, setSavingVoice] = useState(false);
-  const [referralStats, setReferralStats] = useState(null);
-  const [copied, setCopied] = useState(false);
-  
-  // Referral Setup State
-  const [referralEmail, setReferralEmail] = useState('');
-  const [referralSetupStep, setReferralSetupStep] = useState('email');
-  const [referralLinkCopied, setReferralLinkCopied] = useState(false);
-  const [savingReferralEmail, setSavingReferralEmail] = useState(false);
+  const navigate  = useNavigate();
+  const importRef = useRef();
 
-  useEffect(() => { 
-    fc(); 
-    api.get('/hardware').then(r => setHw(r.data)).catch(() => {}); 
+  // Config state
+  const [local,    setLocal]    = useState(null);
+  const [saving,   setSaving]   = useState(false);
+  const [saved,    setSaved]    = useState(false);
+
+  // Hardware
+  const [hw,    setHw]    = useState(null);
+  const [speed, setSpeed] = useState(null);
+
+  // Voice words
+  const [voiceWords,       setVoiceWords]       = useState(null);
+  const [voiceWordsEdited, setVoiceWordsEdited] = useState(false);
+  const [savingVoice,      setSavingVoice]      = useState(false);
+
+  // Identity editing
+  const [editName,    setEditName]    = useState('');
+  const [editEmail,   setEditEmail]   = useState('');
+  const [editingId,   setEditingId]   = useState(false);
+  const [savingId,    setSavingId]    = useState(false);
+  const [savedId,     setSavedId]     = useState(false);
+
+  // Referral
+  const [referralStats, setReferralStats] = useState(null);
+  const [copied,        setCopied]        = useState(false);
+
+  // Export / Import
+  const [exporting,    setExporting]    = useState(false);
+  const [importing,    setImporting]    = useState(false);
+  const [importResult, setImportResult] = useState(null);
+
+  // ── Load everything on mount ──
+  useEffect(() => {
+    fc();
+    api.get('/hardware').then(r => setHw(r.data)).catch(() => {});
     api.get('/speed').then(r => setSpeed(r.data)).catch(() => {});
     api.get('/voice-control/words').then(r => setVoiceWords(r.data)).catch(() => {
       setVoiceWords({
-        wake_words: ['seven', 'hey seven'],
-        pause_words: ['not you', 'hold on', 'wait'],
-        resume_words: ['wake up', 'seven', 'continue'],
+        wake_words:     ['seven', 'hey seven'],
+        pause_words:    ['not you', 'hold on', 'wait'],
+        resume_words:   ['wake up', 'seven', 'continue'],
         shutdown_words: ['go to sleep', 'goodbye', 'shutdown'],
         can_edit: false,
         tier: 'free'
@@ -44,196 +63,377 @@ export default function Settings() {
     });
     loadReferralStats();
   }, []);
-  
-  const loadReferralStats = async () => {
-    try {
-      const r = await api.get('/referral/stats');
-      setReferralStats(r.data);
-      setReferralSetupStep('stats');
-    } catch {
-      setReferralSetupStep('email');
-    }
-  };
-  
-  useEffect(() => { 
+
+  useEffect(() => {
     if (config) {
       setLocal(JSON.parse(JSON.stringify(config)));
-      if (config.email) {
-        setReferralEmail(config.email);
-      }
+      setEditName(config.identity?.user_name  || '');
+      setEditEmail(config.email || '');
     }
   }, [config]);
 
-  const save = async () => { 
-    setSaving(true); 
-    const ok = await update(local); 
-    setSaving(false); 
-    if (ok) { setSaved(true); setTimeout(() => setSaved(false), 2000); } 
-  };
-  
-  const set = (p, v) => { 
-    setLocal(pr => { 
-      const u = JSON.parse(JSON.stringify(pr)); 
-      const k = p.split('.'); 
-      let o = u; 
-      for (let i = 0; i < k.length - 1; i++) { if (!o[k[i]]) o[k[i]] = {}; o = o[k[i]]; } 
-      o[k[k.length - 1]] = v; 
-      return u; 
-    }); 
+  // ── Referral ──
+  const loadReferralStats = async () => {
+    try {
+      const r = await api.get('/referral/stats');
+      const stats = r.data;
+      if (!stats.referral_code) {
+        try {
+          const created = await api.post('/referral/create', {});
+          stats.referral_code = created.data.referral_code;
+        } catch {}
+      }
+      setReferralStats(stats);
+    } catch {}
   };
 
+  const copyMessage = () => {
+    if (!referralStats?.referral_code) return;
+    const msg =
+      `Hey! I use Seven AI — a private voice assistant that runs 100% on your PC. ` +
+      `No cloud, no data leaving your device.\n\n` +
+      `Download: https://github.com/manikanta7cheruku/seven-releases/releases/latest\n\n` +
+      `During setup, enter my referral code: ${referralStats.referral_code}\n\n` +
+      `Use it for 7 hours → you get Pro free for 1 month, I get Ultimate free!`;
+    navigator.clipboard.writeText(msg);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const shareWhatsApp = () => {
+    if (!referralStats?.referral_code) return;
+    const text =
+      `Hey! I use Seven AI — private voice assistant, 100% local.\n` +
+      `Download: https://github.com/manikanta7cheruku/seven-releases/releases/latest\n` +
+      `Use referral code: ${referralStats.referral_code}\n` +
+      `7 hours → we both get free premium!`;
+    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
+  };
+
+  const shareX = () => {
+    if (!referralStats?.referral_code) return;
+    const text =
+      `Just discovered Seven - AI voice assistant that runs 100% locally! ` +
+      `No cloud, full privacy. Use code ${referralStats.referral_code} during setup ` +
+      `https://github.com/manikanta7cheruku/seven-releases/releases/latest`;
+    window.open(`https://x.com/intent/tweet?text=${encodeURIComponent(text)}`, '_blank');
+  };
+
+  const shareNative = async () => {
+    if (!referralStats?.referral_code) return;
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: 'Seven - Local AI Assistant',
+          text:  `Use my referral code ${referralStats.referral_code} when you install Seven!`,
+          url:   'https://github.com/manikanta7cheruku/seven-releases/releases/latest'
+        });
+        return;
+      } catch {}
+    }
+    copyMessage();
+  };
+
+  // ── Config save ──
+  const save = async () => {
+    setSaving(true);
+    const ok = await update(local);
+    setSaving(false);
+    if (ok) { setSaved(true); setTimeout(() => setSaved(false), 2000); }
+  };
+
+  const set = (path, value) => {
+    setLocal(prev => {
+      const u = JSON.parse(JSON.stringify(prev));
+      const keys = path.split('.');
+      let o = u;
+      for (let i = 0; i < keys.length - 1; i++) {
+        if (!o[keys[i]]) o[keys[i]] = {};
+        o = o[keys[i]];
+      }
+      o[keys[keys.length - 1]] = value;
+      return u;
+    });
+  };
+
+  // ── Identity save ──
+  const saveIdentity = async () => {
+    if (!editName.trim()) return;
+    setSavingId(true);
+    try {
+      await api.put('/config', {
+        updates: {
+          email:    editEmail.trim(),
+          identity: { ...local?.identity, user_name: editName.trim() }
+        }
+      });
+      // Sync to server
+      try {
+        await api.post('/setup/complete', {
+          name:       editName.trim(),
+          email:      editEmail.trim(),
+          wake_word:  local?.identity?.wake_words?.[0] || 'seven',
+          voice_index: local?.voice?.voice_index || 0,
+          model_name: local?.brain?.model_name || ''
+        });
+      } catch {}
+      fc(); // refresh config
+      setEditingId(false);
+      setSavedId(true);
+      setTimeout(() => setSavedId(false), 2000);
+    } catch (e) {
+      alert('Failed to save');
+    }
+    setSavingId(false);
+  };
+
+  // ── Voice words ──
   const saveVoiceWords = async () => {
     setSavingVoice(true);
     try {
       await api.put('/voice-control/words', voiceWords);
       setVoiceWordsEdited(false);
-      alert('Voice commands saved!');
     } catch (e) {
       alert(e.response?.data?.detail || 'Failed to save');
     }
     setSavingVoice(false);
   };
 
-  const updateVoiceWord = (type, index, value) => {
+  const updateVoiceWord = (type, i, value) => {
     setVoiceWords(prev => {
-      const updated = { ...prev };
-      updated[type] = [...prev[type]];
-      updated[type][index] = value;
-      return updated;
+      const u = { ...prev };
+      u[type] = [...prev[type]];
+      u[type][i] = value;
+      return u;
     });
     setVoiceWordsEdited(true);
   };
 
-  const addVoiceWord = (type) => {
-    setVoiceWords(prev => ({ ...prev, [type]: [...prev[type], ''] }));
-    setVoiceWordsEdited(true);
-  };
+  const addVoiceWord    = t => { setVoiceWords(p => ({ ...p, [t]: [...p[t], ''] })); setVoiceWordsEdited(true); };
+  const removeVoiceWord = (t, i) => { setVoiceWords(p => ({ ...p, [t]: p[t].filter((_,j) => j!==i) })); setVoiceWordsEdited(true); };
 
-  const removeVoiceWord = (type, index) => {
-    setVoiceWords(prev => ({ ...prev, [type]: prev[type].filter((_, i) => i !== index) }));
-    setVoiceWordsEdited(true);
-  };
-
-  const copyReferralLink = () => {
-    if (referralStats) {
-      navigator.clipboard.writeText(`https://seven.app/ref/${referralStats.referral_code}`);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    }
-  };
-
-  const shareOnWhatsApp = () => {
-    if (referralStats) {
-      const text = `Hey! I'm using Seven, an AI voice assistant that runs 100% locally. When you use it for 7 hours, we both get free premium access! Try it: https://seven.app/ref/${referralStats.referral_code}`;
-      window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
-    }
-  };
-
-  const shareOnX = () => {
-    if (referralStats) {
-      const text = `Just discovered Seven - an AI voice assistant that runs 100% locally! No cloud, full privacy. Try it: https://seven.app/ref/${referralStats.referral_code}`;
-      window.open(`https://x.com/intent/tweet?text=${encodeURIComponent(text)}`, '_blank');
-    }
-  };
-
-  const shareNative = async () => {
-    if (referralStats && navigator.share) {
-      try {
-        await navigator.share({ 
-          title: 'Seven - Local AI Assistant', 
-          text: 'Try Seven - 100% local AI assistant. Use it for 7 hours and we both get premium free!', 
-          url: `https://seven.app/ref/${referralStats.referral_code}` 
-        });
-      } catch (e) {
-        // User cancelled or share failed
-        copyReferralLink();
-      }
-    } else {
-      copyReferralLink();
-    }
-  };
-
-  const saveReferralEmail = async () => {
-    if (!referralEmail || !referralEmail.includes('@')) {
-      alert('Please enter a valid email');
-      return;
-    }
-    setSavingReferralEmail(true);
+  // ── Export ──
+  const exportData = async () => {
+    setExporting(true);
     try {
-      await api.post('/email/save', { email: referralEmail });
-      await loadReferralStats();
-      setReferralSetupStep('share');
+      const r    = await api.get('/memory/export');
+      const blob = new Blob([JSON.stringify(r.data, null, 2)], { type: 'application/json' });
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href     = url;
+      a.download = `seven-backup-${new Date().toISOString().slice(0,10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
     } catch {
-      alert('Failed to save email');
+      alert('Export failed');
     }
-    setSavingReferralEmail(false);
+    setExporting(false);
   };
 
-  const handleReferralLinkCopy = () => {
-    if (referralStats) {
-      navigator.clipboard.writeText(`https://seven.app/ref/${referralStats.referral_code}`);
-      setReferralLinkCopied(true);
-      setTimeout(() => {
-        setReferralSetupStep('stats');
-      }, 2000);
+  // ── Import ──
+  const importData = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImporting(true);
+    setImportResult(null);
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      const r    = await api.post('/memory/import', data);
+      setImportResult({
+        success: true,
+        msg: `Imported ${r.data.imported_facts} facts and ${r.data.imported_conversations} conversations`
+      });
+    } catch (err) {
+      setImportResult({ success: false, msg: 'Import failed — invalid file' });
     }
+    setImporting(false);
+    e.target.value = '';
   };
 
-  // Format time
-  const formatTime = (hours) => {
-    if (!hours || hours === 0) return '0 min';
-    const totalMinutes = Math.round(hours * 60);
-    if (totalMinutes < 60) {
-      return `${totalMinutes} min`;
-    } else {
-      const hrs = Math.floor(totalMinutes / 60);
-      const mins = totalMinutes % 60;
-      if (mins === 0) return `${hrs} hr`;
-      return `${hrs} hr ${mins} min`;
-    }
+  // ── Format time ──
+  const fmt = (hours) => {
+    if (!hours) return '0 min';
+    const m = Math.round(hours * 60);
+    if (m < 60) return `${m} min`;
+    const h = Math.floor(m / 60), rem = m % 60;
+    return rem ? `${h} hr ${rem} min` : `${h} hr`;
   };
 
   if (loading || !local) return <Spinner />;
-  
-  const isPro = local.license?.tier === 'pro' || local.license?.tier === 'ultimate';
+
+  const isPro      = local.license?.tier === 'pro' || local.license?.tier === 'ultimate';
   const canEditVoice = voiceWords?.can_edit || isPro;
 
   return (
     <div className="h-full flex flex-col">
-      <PageHeader 
-        title="Settings" 
-        sub="Configure Seven's behavior"
+      <PageHeader
+        title="Settings"
+        sub="Configure Seven's behaviour"
         right={
           <button onClick={save} disabled={saving} className={`px-3 py-1.5 rounded text-[11px] font-medium ${
-            saved ? 'bg-s-green/8 text-s-green border border-s-green/20' : 'border border-s-accent/30 bg-s-accent/8 text-s-accent'
+            saved
+              ? 'bg-s-green/8 text-s-green border border-s-green/20'
+              : 'border border-s-accent/30 bg-s-accent/8 text-s-accent'
           }`}>
             {saved ? 'Saved' : saving ? 'Saving...' : 'Save Changes'}
           </button>
-        } 
+        }
       />
 
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
-        
-        {/* Brain Configuration */}
+
+        {/* ── ACCOUNT ── */}
         <div className="bg-s-card border border-s-border rounded p-4">
-          <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium mb-3">Brain Configuration</div>
+          <div className="flex items-center justify-between mb-3">
+            <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium">
+              Account
+            </div>
+            {!editingId ? (
+              <button
+                onClick={() => setEditingId(true)}
+                className="text-[10px] text-s-accent hover:text-s-accent/80 transition-colors"
+              >
+                Edit
+              </button>
+            ) : (
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    setEditingId(false);
+                    setEditName(config?.identity?.user_name || '');
+                    setEditEmail(config?.email || '');
+                  }}
+                  className="text-[10px] text-s-text-4 hover:text-s-text-3"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={saveIdentity}
+                  disabled={savingId}
+                  className="text-[10px] text-s-accent font-medium"
+                >
+                  {savingId ? 'Saving...' : savedId ? 'Saved ✓' : 'Save'}
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-3">
+            {/* Name */}
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] text-s-text-3">Name</span>
+              {editingId ? (
+                <input
+                  value={editName}
+                  onChange={e => setEditName(e.target.value)}
+                  className="bg-s-bg border border-s-accent/30 rounded px-2.5 py-1 text-[11px] text-s-text w-40 focus:border-s-accent outline-none"
+                  placeholder="Your name"
+                  autoFocus
+                />
+              ) : (
+                <span className="text-[11px] text-s-text font-medium">
+                  {local.identity?.user_name || '—'}
+                </span>
+              )}
+            </div>
+
+            {/* Email */}
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] text-s-text-3">Email</span>
+              {editingId ? (
+                <input
+                  value={editEmail}
+                  onChange={e => setEditEmail(e.target.value)}
+                  type="email"
+                  className="bg-s-bg border border-s-accent/30 rounded px-2.5 py-1 text-[11px] text-s-text w-48 focus:border-s-accent outline-none font-mono"
+                  placeholder="you@email.com"
+                />
+              ) : (
+                <span className="text-[11px] text-s-text font-mono truncate max-w-[200px]">
+                  {local.email || '—'}
+                </span>
+              )}
+            </div>
+
+            {/* Plan */}
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] text-s-text-3">Plan</span>
+              <div className="flex items-center gap-2">
+                <span className={`text-[10px] font-medium px-2 py-0.5 rounded ${
+                  isPro
+                    ? 'bg-s-accent/10 text-s-accent'
+                    : 'bg-s-border text-s-text-4'
+                }`}>
+                  {local.license?.tier?.toUpperCase() || 'FREE'}
+                </span>
+                {!isPro && (
+                  <button
+                    onClick={() => navigate('/plans')}
+                    className="text-[10px] text-s-accent hover:underline"
+                  >
+                    Upgrade
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* License key */}
+            {isPro && local.license?.key && (
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] text-s-text-3">License</span>
+                <span className="text-[10px] font-mono text-s-text-2">
+                  {local.license.key.slice(0, 12)}••••
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* ── BRAIN ── */}
+        <div className="bg-s-card border border-s-border rounded p-4">
+          <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium mb-3">
+            Brain Configuration
+          </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="text-[10px] text-s-text-3 mb-1 block">Model</label>
-              <input value={local.brain?.model_name || ''} onChange={e => set('brain.model_name', e.target.value)}
-                className="w-full bg-s-bg border border-s-border rounded px-2.5 py-2 text-[12px] text-s-text font-mono" />
-              {hw && <p className="text-[9px] text-s-text-4 mt-1">Recommended: <span className="text-s-accent font-mono">{hw.recommended_model}</span></p>}
+              <input
+                value={local.brain?.model_name || ''}
+                onChange={e => set('brain.model_name', e.target.value)}
+                className="w-full bg-s-bg border border-s-border rounded px-2.5 py-2 text-[12px] text-s-text font-mono"
+              />
+              {hw && (
+                <p className="text-[9px] text-s-text-4 mt-1">
+                  Recommended:{' '}
+                  <span className="text-s-accent font-mono">{hw.recommended_model}</span>
+                </p>
+              )}
             </div>
             <div>
-              <label className="text-[10px] text-s-text-3 mb-1 block">Temperature — <span className="text-s-accent font-mono">{local.brain?.temperature}</span></label>
+              <label className="text-[10px] text-s-text-3 mb-1 block">
+                Temperature —{' '}
+                <span className="text-s-accent font-mono">{local.brain?.temperature}</span>
+              </label>
               <div className="flex gap-px mt-1">
                 {TEMPS.map(t => (
-                  <button key={t} onClick={() => set('brain.temperature', t)}
-                    className={`flex-1 py-1.5 text-[9px] font-mono rounded-sm ${local.brain?.temperature === t ? 'bg-s-accent text-white' : 'bg-s-bg text-s-text-4 hover:text-s-text-3 hover:bg-s-card-h'}`}>{t}</button>
+                  <button
+                    key={t}
+                    onClick={() => set('brain.temperature', t)}
+                    className={`flex-1 py-1.5 text-[9px] font-mono rounded-sm ${
+                      local.brain?.temperature === t
+                        ? 'bg-s-accent text-white'
+                        : 'bg-s-bg text-s-text-4 hover:text-s-text-3 hover:bg-s-card-h'
+                    }`}
+                  >
+                    {t}
+                  </button>
                 ))}
               </div>
               <div className="flex justify-between mt-1 px-1">
-                {Object.entries(TEMP_LABELS).map(([v, l]) => <span key={v} className="text-[8px] text-s-text-4">{l}</span>)}
+                {Object.entries(TEMP_LABELS).map(([v, l]) => (
+                  <span key={v} className="text-[8px] text-s-text-4">{l}</span>
+                ))}
               </div>
             </div>
           </div>
@@ -242,37 +442,56 @@ export default function Settings() {
               <div className="text-[12px] text-s-text-2">Streaming</div>
               <p className="text-[9px] text-s-text-4 mt-0.5">Speak as sentences generate</p>
             </div>
-            <button onClick={() => set('brain.streaming', !local.brain?.streaming)}
-              className={`w-8 h-[18px] rounded-full relative ${local.brain?.streaming ? 'bg-s-accent' : 'bg-s-border'}`}>
-              <div className={`absolute top-[2px] w-[14px] h-[14px] rounded-full bg-white ${local.brain?.streaming ? 'left-[14px]' : 'left-[2px]'}`} />
+            <button
+              onClick={() => set('brain.streaming', !local.brain?.streaming)}
+              className={`w-8 h-[18px] rounded-full relative transition-colors ${
+                local.brain?.streaming ? 'bg-s-accent' : 'bg-s-border'
+              }`}
+            >
+              <div className={`absolute top-[2px] w-[14px] h-[14px] rounded-full bg-white transition-all ${
+                local.brain?.streaming ? 'left-[14px]' : 'left-[2px]'
+              }`} />
             </button>
           </div>
         </div>
 
-        {/* Voice Control Words */}
-        <div className={`bg-s-card border rounded p-4 ${canEditVoice ? 'border-s-border' : 'border-s-accent/30'}`}>
+        {/* ── VOICE CONTROL ── */}
+        <div className={`bg-s-card border rounded p-4 ${
+          canEditVoice ? 'border-s-border' : 'border-s-accent/30'
+        }`}>
           <div className="flex items-center justify-between mb-3">
-            <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium">Voice Control Commands</div>
+            <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium">
+              Voice Control Commands
+            </div>
             {!canEditVoice && (
-              <span className="text-[9px] px-2 py-0.5 bg-s-accent/10 text-s-accent rounded font-medium">PRO to Edit</span>
+              <span className="text-[9px] px-2 py-0.5 bg-s-accent/10 text-s-accent rounded font-medium">
+                PRO to Edit
+              </span>
             )}
           </div>
-          
+
           {!canEditVoice && (
             <div className="mb-3 p-2 bg-s-accent/5 border border-s-accent/20 rounded">
-              <p className="text-[10px] text-s-text-3">🔒 Upgrade to Pro to customize these commands</p>
-              <button onClick={() => navigate('/plans')} className="mt-1 text-[10px] text-s-accent underline">Upgrade →</button>
+              <p className="text-[10px] text-s-text-3">
+                Upgrade to Pro to customize wake words, pause words, and more.
+              </p>
+              <button
+                onClick={() => navigate('/plans')}
+                className="mt-1 text-[10px] text-s-accent underline"
+              >
+                Upgrade →
+              </button>
             </div>
           )}
 
           {voiceWords && (
             <div className="grid grid-cols-2 gap-4">
               {[
-                { key: 'wake_words', label: 'Wake Words', desc: 'Say these to activate Seven', icon: '🎤', color: 'text-s-green' },
-                { key: 'pause_words', label: 'Pause Words', desc: 'Temporarily pause listening', icon: '⏸', color: 'text-s-orange' },
-                { key: 'resume_words', label: 'Resume Words', desc: 'Resume after pausing', icon: '▶', color: 'text-s-blue' },
-                { key: 'shutdown_words', label: 'Shutdown Words', desc: 'Completely close Seven', icon: '⏹', color: 'text-s-red' },
-              ].map(({ key, label, desc, icon, color }) => (
+                { key: 'wake_words',     label: 'Wake Words',     desc: 'Activate Seven',       color: 'text-s-green'  },
+                { key: 'pause_words',    label: 'Pause Words',    desc: 'Pause listening',       color: 'text-yellow-400' },
+                { key: 'resume_words',   label: 'Resume Words',   desc: 'Resume after pause',    color: 'text-blue-400' },
+                { key: 'shutdown_words', label: 'Shutdown Words', desc: 'Close Seven',           color: 'text-s-red'    },
+              ].map(({ key, label, desc, color }) => (
                 <div key={key}>
                   <div className="flex items-center justify-between mb-1">
                     <div>
@@ -280,36 +499,53 @@ export default function Settings() {
                       <p className="text-[8px] text-s-text-4">{desc}</p>
                     </div>
                     {canEditVoice && (
-                      <button onClick={() => addVoiceWord(key)} className="text-[9px] text-s-accent hover:text-s-accent/80">+ Add</button>
+                      <button
+                        onClick={() => addVoiceWord(key)}
+                        className="text-[9px] text-s-accent hover:text-s-accent/80"
+                      >
+                        + Add
+                      </button>
                     )}
                   </div>
                   <div className="flex flex-wrap gap-1">
                     {voiceWords[key]?.map((word, i) => (
-                      <div key={i} className={`flex items-center gap-1 bg-s-bg border border-s-border rounded px-1.5 py-0.5 ${!canEditVoice ? 'opacity-70' : ''}`}>
-                        <span className={`${color} text-[9px]`}>{icon}</span>
+                      <div
+                        key={i}
+                        className={`flex items-center gap-1 bg-s-bg border border-s-border rounded px-1.5 py-0.5 ${
+                          !canEditVoice ? 'opacity-70' : ''
+                        }`}
+                      >
                         {canEditVoice ? (
-                          <input 
-                            value={word} 
+                          <input
+                            value={word}
                             onChange={e => updateVoiceWord(key, i, e.target.value)}
-                            className="bg-transparent text-[10px] text-s-text font-mono w-16 focus:outline-none" 
-                            placeholder="word" 
+                            className={`bg-transparent text-[10px] ${color} font-mono w-16 focus:outline-none`}
+                            placeholder="word"
                           />
                         ) : (
-                          <span className="text-[10px] text-s-text font-mono">{word}</span>
+                          <span className={`text-[10px] ${color} font-mono`}>{word}</span>
                         )}
                         {canEditVoice && voiceWords[key].length > 1 && (
-                          <button onClick={() => removeVoiceWord(key, i)} className="text-s-red text-[9px] hover:text-s-red/80">✕</button>
+                          <button
+                            onClick={() => removeVoiceWord(key, i)}
+                            className="text-s-red text-[9px] hover:opacity-70 ml-0.5"
+                          >
+                            ✕
+                          </button>
                         )}
                       </div>
                     ))}
                   </div>
                 </div>
               ))}
-              
+
               {canEditVoice && voiceWordsEdited && (
                 <div className="col-span-2">
-                  <button onClick={saveVoiceWords} disabled={savingVoice}
-                    className="w-full py-2 border border-s-accent/30 bg-s-accent/8 text-s-accent rounded text-[11px] font-medium hover:bg-s-accent/20">
+                  <button
+                    onClick={saveVoiceWords}
+                    disabled={savingVoice}
+                    className="w-full py-2 border border-s-accent/30 bg-s-accent/8 text-s-accent rounded text-[11px] font-medium hover:bg-s-accent/20"
+                  >
                     {savingVoice ? 'Saving...' : 'Save Voice Commands'}
                   </button>
                 </div>
@@ -318,28 +554,39 @@ export default function Settings() {
           )}
         </div>
 
-        {/* Hardware + Latency */}
+        {/* ── HARDWARE + LATENCY ── */}
         <div className="grid grid-cols-2 gap-3">
           {hw && (
             <div className="bg-s-card border border-s-border rounded p-4">
-              <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium mb-2">Hardware</div>
-              <div className="space-y-1.5 text-[11px]">
-                {[['GPU', hw.gpu?.name || 'None'], ['VRAM', `${hw.gpu?.vram_gb || 0} GB`], ['RAM', `${hw.ram_gb} GB`], 
-                  ['CPU', `${hw.cpu?.cores} cores`], ['Models', hw.installed_models?.join(', ') || 'None']].map(([k, v]) => (
-                  <div key={k} className="flex justify-between">
+              <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium mb-2">
+                Hardware
+              </div>
+              <div className="space-y-1.5">
+                {[
+                  ['GPU',    hw.gpu?.name || 'None'],
+                  ['VRAM',   `${hw.gpu?.vram_gb || 0} GB`],
+                  ['RAM',    `${hw.ram_gb} GB`],
+                  ['CPU',    `${hw.cpu?.cores} cores`],
+                  ['Models', hw.installed_models?.join(', ') || 'None'],
+                ].map(([k, v]) => (
+                  <div key={k} className="flex justify-between text-[11px]">
                     <span className="text-s-text-3">{k}</span>
-                    <span className="text-s-text-2 font-mono text-[10px]">{v}</span>
+                    <span className="text-s-text-2 font-mono text-[10px] truncate max-w-[120px]">{v}</span>
                   </div>
                 ))}
               </div>
             </div>
           )}
-          
+
           <div className="bg-s-card border border-s-border rounded p-4">
-            <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium mb-2">Latency</div>
+            <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium mb-2">
+              Response Latency
+            </div>
             <div className="grid grid-cols-2 gap-2">
-              {(speed?.count > 0 ? [['Avg', `${speed.avg}ms`], ['Min', `${speed.min}ms`], ['Max', `${speed.max}ms`], ['N', speed.count]]
-                : [['Avg', '—'], ['Min', '—'], ['Max', '—'], ['N', '0']]).map(([k, v]) => (
+              {(speed?.count > 0
+                ? [['Avg', `${speed.avg}ms`], ['Min', `${speed.min}ms`], ['Max', `${speed.max}ms`], ['Samples', speed.count]]
+                : [['Avg', '—'], ['Min', '—'], ['Max', '—'], ['Samples', '0']]
+              ).map(([k, v]) => (
                 <div key={k} className="bg-s-bg rounded px-2 py-1.5 text-center">
                   <div className="text-[12px] font-mono font-medium text-s-text">{v}</div>
                   <div className="text-[8px] text-s-text-4">{k}</div>
@@ -349,295 +596,189 @@ export default function Settings() {
           </div>
         </div>
 
-        {/* Referral System */}
-        <div className="bg-gradient-to-br from-s-accent/5 to-s-accent/10 border border-s-accent/20 rounded p-4">
-          <div className="text-[9px] text-s-accent uppercase tracking-wider font-medium mb-3">🎁 Share Seven, Get Premium Free</div>
-          
-          {/* How it works */}
-          <div className="bg-s-bg/50 border border-s-border rounded p-3 mb-4">
-            <div className="text-[11px] font-medium text-s-text mb-2">How It Works</div>
-            <div className="space-y-2">
-              <div className="flex items-start gap-2">
-                <span className="w-5 h-5 bg-s-accent/20 text-s-accent rounded-full flex items-center justify-center text-[9px] font-bold shrink-0">1</span>
-                <div>
-                  <div className="text-[10px] text-s-text-2">Share your unique link</div>
-                  <div className="text-[8px] text-s-text-4">Send to friends via WhatsApp, X, or any platform</div>
-                </div>
-              </div>
-              <div className="flex items-start gap-2">
-                <span className="w-5 h-5 bg-s-accent/20 text-s-accent rounded-full flex items-center justify-center text-[9px] font-bold shrink-0">2</span>
-                <div>
-                  <div className="text-[10px] text-s-text-2">Friend downloads Seven</div>
-                  <div className="text-[8px] text-s-text-4">They install and start using Seven on their PC</div>
-                </div>
-              </div>
-              <div className="flex items-start gap-2">
-                <span className="w-5 h-5 bg-s-accent/20 text-s-accent rounded-full flex items-center justify-center text-[9px] font-bold shrink-0">3</span>
-                <div>
-                  <div className="text-[10px] text-s-text-2">Friend uses Seven for 7 hours</div>
-                  <div className="text-[8px] text-s-text-4">Total usage time, not consecutive</div>
-                </div>
-              </div>
-              <div className="flex items-start gap-2">
-                <span className="w-5 h-5 bg-s-green/20 text-s-green rounded-full flex items-center justify-center text-[9px] font-bold shrink-0">✓</span>
-                <div>
-                  <div className="text-[10px] text-s-green font-medium">Both of you win!</div>
-                  <div className="text-[8px] text-s-text-4">
-                    You get <strong className="text-s-accent">Ultimate free for 1 month</strong> • 
-                    Friend gets <strong className="text-s-green">Pro free for 1 month</strong>
-                  </div>
-                </div>
-              </div>
-            </div>
+        {/* ── REFERRAL ── */}
+        <div className="bg-gradient-to-br from-s-accent/5 to-s-accent/10 border border-s-accent/20 rounded p-4 space-y-4">
+          <div className="text-[9px] text-s-accent uppercase tracking-wider font-medium">
+            Refer Friends — Get Premium Free
           </div>
 
-          {/* Step 1: Email Input */}
-          {referralSetupStep === 'email' && (
-            <div className="bg-s-bg border border-s-border rounded p-3">
-              <div className="text-[11px] font-medium text-s-text mb-2">Enter Your Email to Start</div>
-              
-              {/* Privacy Notice */}
-              <div className="bg-s-accent/5 border border-s-accent/20 rounded p-2 mb-3">
-                <div className="flex items-start gap-2">
-                  <span className="text-[12px]">🔒</span>
-                  <div className="text-[9px] text-s-text-3 leading-relaxed">
-                    <strong>Privacy First:</strong> We only use your email to send updates and your license key. 
-                    No spam, no selling data. Your data never leaves your device.
-                  </div>
-                </div>
-              </div>
-              
-              <div className="flex gap-2">
-                <input 
-                  type="email"
-                  value={referralEmail} 
-                  onChange={e => setReferralEmail(e.target.value)}
-                  placeholder="your@email.com"
-                  className="flex-1 bg-s-bg border border-s-border rounded px-2.5 py-2 text-[11px] text-s-text" 
-                />
-                <button 
-                  onClick={saveReferralEmail}
-                  disabled={savingReferralEmail}
-                  className="px-4 py-2 bg-s-accent text-white rounded text-[10px] font-medium hover:bg-s-accent/90 disabled:opacity-50"
-                >
-                  {savingReferralEmail ? 'Saving...' : 'Continue →'}
-                </button>
-              </div>
-            </div>
-          )}
+          <p className="text-[11px] text-s-text-3 leading-relaxed">
+            Share Seven with friends. When they use it for{' '}
+            <strong className="text-s-accent">7 hours</strong>, you get{' '}
+            <strong className="text-s-accent">Ultimate free for 1 month</strong> and
+            they get <strong className="text-s-green">Pro free for 1 month</strong>.
+          </p>
 
-          {/* Step 2: Share Link */}
-          {referralSetupStep === 'share' && referralStats && (
-            <div className="bg-s-bg border border-s-border rounded p-3">
-              <div className="text-[11px] font-medium text-s-text mb-2">Share Your Unique Link</div>
-              
-              <div className="bg-s-card border border-s-accent/30 rounded p-3 mb-3">
-                <div className="text-[10px] text-s-text-3 mb-1">Your Referral Link</div>
+          {/* Code display */}
+          {referralStats?.referral_code ? (
+            <div className="space-y-3">
+              <div>
+                <div className="text-[10px] text-s-text-4 mb-1">Your Referral Code</div>
                 <div className="flex gap-2">
-                  <input 
-                    value={`https://seven.app/ref/${referralStats.referral_code}`} 
-                    readOnly
-                    className="flex-1 bg-s-bg border border-s-border rounded px-2.5 py-1.5 text-[11px] text-s-text font-mono" 
-                  />
-                  <button 
-                    onClick={handleReferralLinkCopy}
-                    className={`px-3 py-1.5 rounded text-[10px] font-medium ${
-                      referralLinkCopied 
-                        ? 'bg-s-green/10 text-s-green border border-s-green/30' 
-                        : 'bg-s-accent text-white hover:bg-s-accent/90'
-                    }`}
+                  <div className="flex-1 bg-s-bg border border-s-border rounded px-3 py-2 font-mono text-sm text-s-text tracking-widest">
+                    {referralStats.referral_code}
+                  </div>
+                  <button
+                    onClick={copyMessage}
+                    className="px-3 py-2 border border-s-accent/30 bg-s-accent/10 text-s-accent rounded text-[11px] font-medium hover:bg-s-accent/20 transition-colors"
                   >
-                    {referralLinkCopied ? '✓ Copied!' : '📋 Copy'}
+                    {copied ? '✓ Copied' : 'Copy Message'}
                   </button>
                 </div>
+                <p className="text-[10px] text-s-text-4 mt-1">
+                  Tell friend: Install Seven → Setup wizard Step 2 → Enter code
+                </p>
               </div>
 
-              {referralLinkCopied && (
-                <div className="bg-s-green/10 border border-s-green/30 rounded p-2 mb-3">
-                  <p className="text-[10px] text-s-green">
-                    ✓ Link copied! Share it with your friends now.
-                  </p>
-                </div>
-              )}
-
+              {/* Share buttons */}
               <div className="flex gap-2">
-                <button onClick={shareOnWhatsApp}
-                  className="flex-1 py-2 bg-[#25D366]/10 border border-[#25D366]/30 text-[#25D366] rounded text-[10px] font-medium hover:bg-[#25D366]/20">
-                  📱 WhatsApp
-                </button>
-                <button onClick={shareOnX}
-                  className="flex-1 py-2 bg-[#000]/10 border border-[#333]/30 text-s-text rounded text-[10px] font-medium hover:bg-[#000]/20">
-                  𝕏 Post
-                </button>
-                <button onClick={shareNative}
-                  className="flex-1 py-2 bg-s-accent/10 border border-s-accent/30 text-s-accent rounded text-[10px] font-medium hover:bg-s-accent/20">
-                  📤 Share
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Step 3: Stats */}
-          {referralSetupStep === 'stats' && referralStats && (
-            <>
-              {/* Quick Share */}
-              <div className="flex gap-2 mb-3">
-                <input 
-                  value={`https://seven.app/ref/${referralStats.referral_code}`} 
-                  readOnly
-                  className="flex-1 bg-s-bg border border-s-border rounded px-2.5 py-1.5 text-[10px] text-s-text font-mono" 
-                />
-                <button onClick={copyReferralLink}
-                  className="px-3 py-1.5 border border-s-accent/30 bg-s-accent/8 text-s-accent rounded text-[10px] font-medium hover:bg-s-accent/20">
-                  {copied ? '✓ Copied' : 'Copy'}
-                </button>
-              </div>
-
-              {/* Share Buttons */}
-              <div className="flex gap-2 mb-4">
-                <button onClick={shareOnWhatsApp}
-                  className="flex-1 py-1.5 bg-[#25D366]/10 border border-[#25D366]/30 text-[#25D366] rounded text-[9px] font-medium hover:bg-[#25D366]/20">
+                <button
+                  onClick={shareWhatsApp}
+                  className="flex-1 py-2 bg-[#25D366]/10 border border-[#25D366]/30 text-[#25D366] rounded text-[10px] font-medium hover:bg-[#25D366]/20 transition-colors"
+                >
                   WhatsApp
                 </button>
-                <button onClick={shareOnX}
-                  className="flex-1 py-1.5 bg-[#000]/10 border border-[#333]/30 text-s-text rounded text-[9px] font-medium hover:bg-[#000]/20">
+                <button
+                  onClick={shareX}
+                  className="flex-1 py-2 bg-zinc-800/50 border border-zinc-700/50 text-s-text-2 rounded text-[10px] font-medium hover:bg-zinc-800 transition-colors"
+                >
                   𝕏 Post
                 </button>
-                <button onClick={shareNative}
-                  className="flex-1 py-1.5 bg-s-accent/10 border border-s-accent/30 text-s-accent rounded text-[9px] font-medium hover:bg-s-accent/20">
-                  📤 Share
+                <button
+                  onClick={shareNative}
+                  className="flex-1 py-2 bg-s-accent/10 border border-s-accent/30 text-s-accent rounded text-[10px] font-medium hover:bg-s-accent/20 transition-colors"
+                >
+                  Share
                 </button>
               </div>
 
               {/* Stats */}
-              <div className="grid grid-cols-2 gap-2 mb-3">
-                <div className="bg-s-bg rounded px-2 py-2 text-center">
-                  <div className="text-[16px] font-mono font-bold text-s-green">{referralStats.completed_referrals}</div>
-                  <div className="text-[8px] text-s-text-4">Friends Completed</div>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="bg-s-bg border border-s-border rounded px-3 py-2 text-center">
+                  <div className="text-[18px] font-mono font-bold text-s-green">
+                    {referralStats.completed_referrals ?? 0}
+                  </div>
+                  <div className="text-[9px] text-s-text-4">Friends Completed</div>
+                  <div className="text-[9px] text-s-accent">→ You got Ultimate</div>
                 </div>
-                <div className="bg-s-bg rounded px-2 py-2 text-center">
-                  <div className="text-[16px] font-mono font-bold text-s-orange">{referralStats.pending_referrals}</div>
-                  <div className="text-[8px] text-s-text-4">In Progress</div>
+                <div className="bg-s-bg border border-s-border rounded px-3 py-2 text-center">
+                  <div className="text-[18px] font-mono font-bold text-yellow-400">
+                    {referralStats.pending_referrals ?? 0}
+                  </div>
+                  <div className="text-[9px] text-s-text-4">In Progress</div>
+                  <div className="text-[9px] text-s-text-4">Using Seven now</div>
                 </div>
               </div>
 
-              {/* Pending Referrals */}
+              {/* Pending details */}
               {referralStats.pending_details?.length > 0 && (
-                <div className="mb-3">
-                  <div className="text-[10px] text-s-text-3 mb-2">Friends In Progress</div>
-                  <div className="space-y-2 max-h-[120px] overflow-y-auto">
-                    {referralStats.pending_details.map((ref, i) => (
-                      <div key={i} className="bg-s-bg rounded p-2 border border-s-border">
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="text-[10px] text-s-text-2 font-mono">{ref.email}</span>
-                          <span className="text-[8px] text-s-text-4">{ref.created_at}</span>
-                        </div>
-                        <div className="w-full bg-s-border rounded-full h-1.5 mb-1">
-                          <div className="bg-s-accent h-1.5 rounded-full" style={{ width: `${ref.progress_percent}%` }} />
-                        </div>
-                        <div className="flex justify-between text-[8px] text-s-text-4">
-                          <span>{formatTime(ref.usage_hours)} used</span>
-                          <span>{formatTime(ref.hours_left)} to go</span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Completed */}
-              {referralStats.completed_details?.length > 0 && (
-                <div className="mb-3">
-                  <div className="text-[10px] text-s-text-3 mb-2">Completed ✅</div>
-                  <div className="space-y-1 max-h-[80px] overflow-y-auto">
-                    {referralStats.completed_details.map((ref, i) => (
-                      <div key={i} className="bg-s-bg rounded p-2 border border-s-border flex justify-between items-center">
+                <div className="space-y-2">
+                  <div className="text-[10px] text-s-text-3">Friends In Progress</div>
+                  {referralStats.pending_details.map((ref, i) => (
+                    <div key={i} className="bg-s-bg border border-s-border rounded p-2">
+                      <div className="flex justify-between mb-1">
                         <span className="text-[10px] text-s-text-2 font-mono">{ref.email}</span>
-                        <span className="text-[9px] text-s-green font-medium">+1 month Ultimate</span>
+                        <span className="text-[9px] text-s-text-4">{ref.progress_percent}%</span>
                       </div>
-                    ))}
-                  </div>
+                      <div className="w-full bg-s-border rounded-full h-1">
+                        <div
+                          className="bg-s-accent h-1 rounded-full transition-all"
+                          style={{ width: `${ref.progress_percent}%` }}
+                        />
+                      </div>
+                      <div className="flex justify-between mt-1 text-[8px] text-s-text-4">
+                        <span>{fmt(ref.usage_hours)} used</span>
+                        <span>{fmt(ref.hours_left)} remaining</span>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
-
-              {/* Refer Another */}
-             <button 
-  onClick={() => {
-    if (referralStats && navigator.share) {
-      navigator.share({ 
-        title: 'Seven - Local AI Assistant', 
-        text: 'Try Seven - 100% local AI assistant. Use it for 7 hours and we both get premium free!', 
-        url: `https://seven.app/ref/${referralStats.referral_code}` 
-      }).catch(() => {
-        copyReferralLink();
-      });
-    } else {
-      copyReferralLink();
-    }
-  }}
-  className="w-full py-2 bg-s-accent text-white rounded text-[11px] font-medium hover:bg-s-accent/90"
->
-  🔗 Share With Another Friend
-</button>
-            </>
+            </div>
+          ) : (
+            <div className="bg-s-bg border border-s-border rounded px-3 py-2 text-[11px] text-s-text-4">
+              Complete setup with your email to get a referral code
+            </div>
           )}
         </div>
 
-        {/* License + Account */}
-        <div className="grid grid-cols-2 gap-3">
-          <div className="bg-s-card border border-s-border rounded p-4">
-            <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium mb-3">License</div>
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] text-s-text-3">Current Plan</span>
-                <span className={`text-[11px] font-medium px-2 py-0.5 rounded ${isPro ? 'bg-s-accent/10 text-s-accent' : 'bg-s-border text-s-text-4'}`}>
-                  {local.license?.tier?.toUpperCase() || 'FREE'}
-                </span>
-              </div>
-              {isPro && local.license?.key && (
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] text-s-text-3">License Key</span>
-                  <span className="text-[10px] font-mono text-s-text-2">{local.license.key.slice(0, 12)}••••</span>
-                </div>
-              )}
-            </div>
-            {!isPro && (
-              <button onClick={() => navigate('/plans')}
-                className="w-full mt-3 py-1.5 border border-s-accent/30 bg-s-accent/8 text-s-accent rounded text-[11px] font-medium hover:bg-s-accent/20">
-                Upgrade to Pro
-              </button>
-            )}
+        {/* ── EXPORT / IMPORT ── */}
+        <div className="bg-s-card border border-s-border rounded p-4 space-y-3">
+          <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium">
+            Data Backup
           </div>
+          <p className="text-[11px] text-s-text-3">
+            Export your facts, conversations, and schedules as a backup file.
+            Import to restore on the same or a new device.
+          </p>
 
-          <div className="bg-s-card border border-s-border rounded p-4">
-            <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium mb-3">Account</div>
-            {local.email && (
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-[11px] text-s-text-3">Email</span>
-                <span className="text-[10px] text-s-text font-mono truncate max-w-[120px]">{local.email}</span>
-              </div>
-            )}
-            <div>
-              <label className="text-[10px] text-s-text-3 mb-1 block">Assistant Name</label>
-              <input value={local.identity?.name || 'Seven'} onChange={e => set('identity.name', e.target.value)}
-                className="w-full bg-s-bg border border-s-border rounded px-2.5 py-1.5 text-[11px] text-s-text" />
+          <div className="grid grid-cols-2 gap-3">
+            {/* Export */}
+            <div className="bg-s-bg border border-s-border rounded p-3 space-y-2">
+              <div className="text-[11px] font-medium text-s-text-2">Export Data</div>
+              <p className="text-[10px] text-s-text-4 leading-relaxed">
+                Downloads a JSON file with all your facts, conversations, and schedules.
+              </p>
+              <button
+                onClick={exportData}
+                disabled={exporting}
+                className="w-full py-2 border border-s-accent/30 bg-s-accent/8 text-s-accent rounded text-[11px] font-medium hover:bg-s-accent/20 transition-colors disabled:opacity-50"
+              >
+                {exporting ? 'Exporting...' : 'Download Backup'}
+              </button>
+            </div>
+
+            {/* Import */}
+            <div className="bg-s-bg border border-s-border rounded p-3 space-y-2">
+              <div className="text-[11px] font-medium text-s-text-2">Import Data</div>
+              <p className="text-[10px] text-s-text-4 leading-relaxed">
+                Restore from a backup file. Adds to existing data, does not replace.
+              </p>
+              <button
+                onClick={() => importRef.current?.click()}
+                disabled={importing}
+                className="w-full py-2 border border-s-border bg-s-bg text-s-text-3 rounded text-[11px] font-medium hover:bg-s-card-h transition-colors disabled:opacity-50"
+              >
+                {importing ? 'Importing...' : 'Choose Backup File'}
+              </button>
+              <input
+                ref={importRef}
+                type="file"
+                accept=".json"
+                onChange={importData}
+                className="hidden"
+              />
+              {importResult && (
+                <p className={`text-[10px] ${importResult.success ? 'text-s-green' : 'text-s-red'}`}>
+                  {importResult.msg}
+                </p>
+              )}
             </div>
           </div>
         </div>
 
-        {/* Danger Zone */}
+        {/* ── DANGER ZONE ── */}
         <div className="bg-s-card border border-s-red/20 rounded p-4">
-          <div className="text-[9px] text-s-red uppercase tracking-wider font-medium mb-3">Danger Zone</div>
+          <div className="text-[9px] text-s-red uppercase tracking-wider font-medium mb-3">
+            Danger Zone
+          </div>
           <div className="flex items-center justify-between">
             <div>
               <div className="text-[11px] text-s-text-2">Clear All Memory</div>
-              <p className="text-[9px] text-s-text-4">Delete all facts and conversations</p>
+              <p className="text-[9px] text-s-text-4">
+                Permanently delete all facts and conversations. Export first if needed.
+              </p>
             </div>
-            <button onClick={() => {
-              if (confirm('Delete ALL facts and conversations?')) {
-                api.delete('/memory/clear').then(() => alert('Memory cleared')).catch(() => alert('Failed'));
-              }
-            }} className="px-3 py-1.5 border border-s-red/30 bg-s-red/8 text-s-red rounded text-[10px] font-medium hover:bg-s-red/15">
+            <button
+              onClick={() => {
+                if (confirm('Delete ALL facts and conversations? This cannot be undone.\n\nTip: Export your data first from Data Backup above.')) {
+                  api.delete('/memory/clear')
+                    .then(() => alert('Memory cleared'))
+                    .catch(() => alert('Failed'));
+                }
+              }}
+              className="px-3 py-1.5 border border-s-red/30 bg-s-red/8 text-s-red rounded text-[10px] font-medium hover:bg-s-red/15 transition-colors"
+            >
               Clear Memory
             </button>
           </div>
