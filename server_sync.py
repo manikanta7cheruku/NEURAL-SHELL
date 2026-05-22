@@ -75,6 +75,23 @@ def keep_alive():
         pass
 
 
+def get_or_create_referral_code(device_id, email):
+    """
+    Get existing referral code or create new one.
+    Called on startup so user always has a code to share.
+    Returns referral code string or None.
+    """
+    if not email:
+        return None
+    result = _post("/api/referral/create", {
+        "device_id": device_id,
+        "email":     email
+    })
+    if result:
+        return result.get("referral_code")
+    return None
+
+
 def get_referral_stats(email=None, device_id=None):
     """Get referral stats."""
     try:

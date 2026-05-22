@@ -505,6 +505,27 @@ def start_telemetry():
           f"Email: {email or 'Not set'} | "
           f"Total: {_format_time(total_min)}")
 
+    # Auto-create referral code for this user
+    def _create_referral():
+        try:
+            if email:
+                import server_sync as _ss
+                code = _ss.get_or_create_referral_code(device_id, email)
+                if code:
+                    print(f"[TELEMETRY] Referral code: {code}")
+                    # Save to config for UI to read
+                    try:
+                        import config as _cfg
+                        _cfg.update_config({"referral_code": code})
+                    except Exception:
+                        pass
+        except Exception as e:
+            print(f"[TELEMETRY] Referral code fetch failed: {e}")
+
+    threading.Thread(
+        target=_create_referral, daemon=True, name="ReferralInit"
+    ).start()
+
     # Background loop
     def _ping_loop():
         tick_count = 0
