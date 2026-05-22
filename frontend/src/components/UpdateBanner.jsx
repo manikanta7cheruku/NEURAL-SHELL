@@ -19,12 +19,14 @@ export default function UpdateBanner() {
   }, []);
 
   // Don't show if: dismissed, no update, free tier, expired paid
-  const isLifetime = !expiresAt;
-  const isExpired  = expiresAt && new Date(expiresAt) < new Date();
-  const isPaid     = tier === 'pro' || tier === 'ultimate';
-  const canUpdate  = isPaid && (!isExpired || isLifetime);
+  // const isLifetime = !expiresAt;
+  // const isExpired  = expiresAt && new Date(expiresAt) < new Date();
+  // const isPaid     = tier === 'pro' || tier === 'ultimate';
+  // const canUpdate  = isPaid && (!isExpired || isLifetime);
 
-  if (!updateAvailable || dismissed || !canUpdate) return null;
+  // if (!updateAvailable || dismissed || !canUpdate) return null;
+
+  if (!updateAvailable || dismissed) return null;
 
   const downloadReady = !!downloadPath && downloadProgress === 100;
 
