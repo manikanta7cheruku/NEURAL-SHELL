@@ -578,6 +578,64 @@ def demote_user(email_or_key: str):
     print("User will see FREE tier on next app restart.")
 
 
+def force_update(version, download_url, size_mb=0, changelog=""):
+    """
+    Force Seven to show update available WITHOUT server.
+    Use when Render server is down.
+    Creates a local update state file that Seven reads.
+    
+    Usage:
+      python admin_tools.py update 1.2.0 https://github.com/.../SEVEN.Setup.1.2.0.exe
+    """
+    import json
+    import os
+
+    # Write update info to a file Seven checks on startup
+    update_info = {
+        "update_available":  True,
+        "version":           version,
+        "download_url":      download_url,
+        "size_mb":           float(size_mb),
+        "changelog":         [changelog] if changelog else [f"Seven {version} update"],
+        "target_tier":       "all",
+        "is_critical":       False,
+        "download_mode":     "manual",
+        "auto_deliver":      True,
+        "published_at":      __import__('datetime').datetime.now().isoformat(),
+        "source":            "local_override"
+    }
+
+    # Save to APPDATA so Seven reads it
+    app_data = os.path.join(os.environ.get("APPDATA", ""), "SEVEN")
+    os.makedirs(app_data, exist_ok=True)
+    override_path = os.path.join(app_data, "update_override.json")
+
+    with open(override_path, "w") as f:
+        json.dump(update_info, f, indent=2)
+
+    print("=" * 60)
+    print(f"UPDATE OVERRIDE SAVED")
+    print("=" * 60)
+    print(f"Version:  {version}")
+    print(f"URL:      {download_url}")
+    print(f"File:     {override_path}")
+    print()
+    print("Restart Seven — update banner will appear immediately.")
+    print("No server needed.")
+    print("=" * 60)
+
+
+def clear_update_override():
+    """Remove local update override."""
+    import os
+    path = os.path.join(os.environ.get("APPDATA",""), "SEVEN", "update_override.json")
+    if os.path.exists(path):
+        os.remove(path)
+        print("Update override cleared.")
+    else:
+        print("No override found.")
+
+
 def show_help():
     """Show all available commands."""
     print("""
@@ -677,20 +735,30 @@ if __name__ == "__main__":
         generate_license(email, tier, plan, custom_key=custom_key)
 
     elif cmd == "custom":
-        # Quick custom key command
-        # python admin_tools.py custom LAUNCH-2025 ultimate monthly
+        """
+        Generate a custom key without needing email.
+        Anyone who has the key can activate it.
+        
+        Usage:
+          python admin_tools.py custom LAUNCH-2025
+          python admin_tools.py custom BETA-FRIEND pro monthly
+          python admin_tools.py custom EARLYBIRD ultimate yearly
+          python admin_tools.py custom VIP-MK ultimate lifetime
+        """
         if len(sys.argv) < 3:
-            print("Usage: python admin_tools.py custom <key-suffix> [email] [tier] [plan]")
+            print("Usage: python admin_tools.py custom <key-name> [tier] [plan]")
             print()
             print("Examples:")
             print("  python admin_tools.py custom LAUNCH-2025")
-            print("  python admin_tools.py custom BETA-FRIEND friend@gmail.com ultimate monthly")
-            print("  python admin_tools.py custom EARLYBIRD user@gmail.com pro yearly")
+            print("  python admin_tools.py custom BETA-FRIEND pro monthly")
+            print("  python admin_tools.py custom EARLYBIRD ultimate yearly")
+            print("  python admin_tools.py custom VIP-MK ultimate lifetime")
             sys.exit(1)
         custom_key = sys.argv[2]
-        email      = sys.argv[3] if len(sys.argv) > 3 else "manual@seven.app"
-        tier       = sys.argv[4] if len(sys.argv) > 4 else "ultimate"
-        plan       = sys.argv[5] if len(sys.argv) > 5 else "lifetime"
+        tier       = sys.argv[3] if len(sys.argv) > 3 else "ultimate"
+        plan       = sys.argv[4] if len(sys.argv) > 4 else "lifetime"
+        # Use generic placeholder — no email needed
+        email      = f"key-{custom_key.lower()}@seven.app"
         generate_license(email, tier, plan, custom_key=custom_key)
     
     elif cmd == "pro":
@@ -741,6 +809,22 @@ if __name__ == "__main__":
             print("Usage: python admin_tools.py reward <referred_email> <referrer_email>")
             sys.exit(1)
         send_referral_reward(sys.argv[2], sys.argv[3])
+
+    elif cmd == "update":
+        if len(sys.argv) < 4:
+            print("Usage: python admin_tools.py update <version> <download_url> [size_mb] [changelog]")
+            print()
+            print("Example:")
+            print("  python admin_tools.py update 1.2.0 https://github.com/.../SEVEN.Setup.1.2.0.exe 145")
+            sys.exit(1)
+        version      = sys.argv[2]
+        url          = sys.argv[3]
+        size         = sys.argv[4] if len(sys.argv) > 4 else "0"
+        changelog    = sys.argv[5] if len(sys.argv) > 5 else ""
+        force_update(version, url, size, changelog)
+
+    elif cmd == "clear-update":
+        clear_update_override()
     
     else:
         print(f"❌ Unknown command: {cmd}")
