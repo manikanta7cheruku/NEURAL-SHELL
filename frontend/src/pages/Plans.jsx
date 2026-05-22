@@ -597,18 +597,40 @@ export default function Plans() {
                 </div>
                 <button
                   onClick={() => {
-                    navigator.clipboard.writeText(referralStats.referral_code);
+                    const msg =
+                      `Hey! I use Seven AI — a private voice assistant that runs 100% on your PC. No cloud, no data leaving your device.\n\n` +
+                      `Download: https://github.com/manikanta7cheruku/seven-releases/releases/latest\n\n` +
+                      `During setup, enter my referral code: ${referralStats.referral_code}\n\n` +
+                      `Use it for 7 hours → you get Pro free for 1 month, I get Ultimate free!`;
+                    navigator.clipboard.writeText(msg);
                     setCopied(true);
                     setTimeout(() => setCopied(false), 2000);
                   }}
                   className="px-3 py-2 border border-s-accent/30 bg-s-accent/10 text-s-accent rounded text-[11px] font-medium hover:bg-s-accent/20 transition-colors"
                 >
-                  {copied ? '✓ Copied' : 'Copy Code'}
+                  {copied ? '✓ Copied!' : 'Copy Message'}
                 </button>
               </div>
-              <p className="text-[10px] text-s-text-4">
-                Tell your friend: Install Seven → Setup wizard → Enter code above
-              </p>
+
+              {/* Share message preview */}
+              <div className="bg-s-bg border border-s-border rounded p-3 space-y-1">
+                <div className="text-[9px] text-s-text-4 uppercase tracking-wider mb-2">
+                  Message that gets copied
+                </div>
+                <p className="text-[10px] text-s-text-3 leading-relaxed">
+                  Hey! I use Seven AI — a private voice assistant that runs 100% on your PC.
+                  No cloud, no data leaving your device.
+                </p>
+                <p className="text-[10px] text-s-accent font-mono">
+                  Download: github.com/manikanta7cheruku/seven-releases/releases/latest
+                </p>
+                <p className="text-[10px] text-s-text-2 font-medium">
+                  Referral code: {referralStats.referral_code}
+                </p>
+                <p className="text-[10px] text-s-text-4">
+                  Use 7 hours → you get Pro free, I get Ultimate free!
+                </p>
+              </div>
             </div>
           ) : (
             <div className="bg-s-bg border border-s-border rounded px-3 py-2 text-[11px] text-s-text-4">
