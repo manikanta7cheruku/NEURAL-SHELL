@@ -29,7 +29,7 @@ from memory.mood import mood_engine
 
 colorama.init(autoreset=True)
 
-OLLAMA_URL = "http://localhost:11434/api/generate"
+OLLAMA_URL = "http://127.0.0.1:11434/api/generate"
 import time as _time
 
 def _stream_sentences(prompt, payload):
