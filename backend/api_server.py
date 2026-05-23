@@ -310,31 +310,37 @@ def _execute_actions(action_list, full_response, speaker_id):
             system_mod.manage_system(params)
     
     # Scheduler commands
-            # Scheduler commands
-            sched_cmds = re.findall(r"###SCHED:\s*(.*?)(?=###|$)", full_response)
-            for param_str in sched_cmds:
-                params = {}
-                for pair in param_str.strip().split():
-                    if "=" in pair:
-                        key, val = pair.split("=", 1)
-                        params[key.strip()] = val.strip()
-                params["speaker_id"] = speaker_id
-                if params:
-                    scheduler_mod.manage_schedule(params)
-                    telemetry.log_activity()  # Track schedule creation
-    
+    sched_cmds = re.findall(r"###SCHED:\s*(.*?)(?=###|$)", full_response)
+    for param_str in sched_cmds:
+        params = {}
+        for pair in param_str.strip().split():
+            if "=" in pair:
+                key, val = pair.split("=", 1)
+                params[key.strip()] = val.strip()
+        params["speaker_id"] = speaker_id
+        if params:
+            try:
+                scheduler_mod.manage_schedule(params)
+                if telemetry:
+                    telemetry.log_activity()
+            except Exception as e:
+                print(f"[API] Scheduler error: {e}")
+
     # App commands
     app_cmds = re.findall(r"###(OPEN|CLOSE):\s*(.*?)(?=###|$)", full_response)
     for cmd_type, arg in app_cmds:
         clean_arg = arg.replace('"', '').replace("'", "").replace(",", "").replace(".", "").strip()
         if not clean_arg:
             continue
-        if cmd_type == "OPEN":
-            core.open_app(clean_arg)
-            telemetry.log_activity()  # Track app open
-        elif cmd_type == "CLOSE":
-            core.close_app(clean_arg)
-            telemetry.log_activity()  # Track app close
+        try:
+            if cmd_type == "OPEN":
+                core.open_app(clean_arg)
+            elif cmd_type == "CLOSE":
+                core.close_app(clean_arg)
+            if telemetry:
+                telemetry.log_activity()
+        except Exception as e:
+            print(f"[API] App command error: {e}")
 
 
 # =========================================================================
