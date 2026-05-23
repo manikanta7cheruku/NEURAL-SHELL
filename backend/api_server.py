@@ -142,50 +142,68 @@ def root():
 
 @app.get("/api/status")
 def get_status():
-    """Get current Seven system status."""
-    # Safe import — during bootstrap, memory may not be initialized yet
+    """Get current Seven system status. Bulletproof — never 500s."""
     try:
-        import config
-        model = config.KEY.get("brain", {}).get("model_name", "unknown")
-        version = config.KEY.get("version", "1.1.0")
-    except Exception:
-        model = "unknown"
-        version = "1.1.0"
+        try:
+            import config
+            model = config.KEY.get("brain", {}).get("model_name", "unknown")
+            version = config.KEY.get("version", "1.1.0")
+        except Exception as e:
+            print(f"[API] /status config error: {e}")
+            model = "unknown"
+            version = "1.1.0"
 
-    try:
-        import telemetry
-        telemetry.log_activity()
-    except Exception:
-        pass
+        try:
+            import telemetry as _tel
+            _tel.log_activity()
+        except Exception as e:
+            print(f"[API] /status telemetry error: {e}")
 
-    uptime_secs = int(time.time() - _start_time)
-    hours = uptime_secs // 3600
-    minutes = (uptime_secs % 3600) // 60
+        uptime_secs = int(time.time() - _start_time)
+        hours = uptime_secs // 3600
+        minutes = (uptime_secs % 3600) // 60
 
-    # Safe mood import
-    mood_label = "neutral"
-    mood_value = 0.5
-    try:
-        from memory.mood import mood_engine
-        mood_status = mood_engine.get_status()
-        mood_label = mood_status["label"]
-        mood_value = mood_status["mood_value"]
-    except Exception:
-        pass
+        mood_label = "neutral"
+        mood_value = 0.5
+        try:
+            from memory.mood import mood_engine
+            mood_status = mood_engine.get_status()
+            mood_label = mood_status.get("label", "neutral")
+            mood_value = mood_status.get("mood_value", 0.5)
+        except Exception as e:
+            print(f"[API] /status mood error: {e}")
 
-    return {
-        "listening": _state.get("listening", False),
-        "speaking": _state.get("speaking", False),
-        "thinking": _state.get("thinking", False),
-        "mood": mood_label,
-        "mood_value": mood_value,
-        "model": model,
-        "streaming": False,
-        "uptime": f"{hours}h {minutes}m",
-        "uptime_seconds": uptime_secs,
-        "speaker": _state.get("current_speaker", "default"),
-        "version": version
-    }
+        return {
+            "listening": _state.get("listening", False),
+            "speaking": _state.get("speaking", False),
+            "thinking": _state.get("thinking", False),
+            "mood": mood_label,
+            "mood_value": mood_value,
+            "model": model,
+            "streaming": False,
+            "uptime": f"{hours}h {minutes}m",
+            "uptime_seconds": uptime_secs,
+            "speaker": _state.get("current_speaker", "default"),
+            "version": version
+        }
+    except Exception as e:
+        import traceback
+        print(f"[API] /status CATASTROPHIC error: {e}")
+        traceback.print_exc()
+        return {
+            "listening": False,
+            "speaking": False,
+            "thinking": False,
+            "mood": "neutral",
+            "mood_value": 0.5,
+            "model": "unknown",
+            "streaming": False,
+            "uptime": "0h 0m",
+            "uptime_seconds": 0,
+            "speaker": "default",
+            "version": "1.1.0",
+            "error_debug": str(e)
+        }
 
 
 @app.get("/api/version")
@@ -976,30 +994,36 @@ def activate_license_endpoint(req: LicenseActivate):
 
 @app.get("/api/license/status")
 def get_license_status():
-    """Get current license status."""
+    """Get current license status. Never 500s — always returns safe defaults on error."""
     try:
         validation = license_module.validate_license()
-        features = license_module.get_features(validation["tier"])
-        device_id = license_module.get_device_id()
+        if not isinstance(validation, dict):
+            raise ValueError(f"validate_license returned {type(validation)}, expected dict")
+
+        tier = validation.get("tier", "free")
+        features = license_module.get_features(tier)
+        device_id = license_module.get_device_id() or "unknown"
 
         import config
         license_key = config.KEY.get("license", {}).get("key", "")
         is_trial = config.KEY.get("license", {}).get("is_trial", False)
 
         return {
-            "tier": validation["tier"],
-            "valid": validation["valid"],
+            "tier": tier,
+            "valid": validation.get("valid", True),
             "expires_at": validation.get("expires_at"),
             "days_until_expiry": validation.get("days_until_expiry"),
             "offline_mode": validation.get("offline_mode", False),
             "offline_days": validation.get("offline_days", 0),
-            "features": features,
+            "features": features or {},
             "license_key": license_key,
             "is_trial": is_trial,
-            "device_id": device_id[:8] + "..."
+            "device_id": (device_id[:8] + "...") if len(device_id) > 8 else device_id
         }
     except Exception as e:
-        # Return safe defaults if license system not ready yet
+        import traceback
+        print(f"[API] /api/license/status error: {e}")
+        traceback.print_exc()
         return {
             "tier": "free",
             "valid": True,
@@ -1010,7 +1034,8 @@ def get_license_status():
             "features": {},
             "license_key": "",
             "is_trial": False,
-            "device_id": "unknown"
+            "device_id": "unknown",
+            "error_debug": str(e)
         }
 
 
