@@ -73,11 +73,19 @@ export default function Home() {
     }
   }, [config]);
 
+  const [referralCopied, setReferralCopied] = useState(false);
+
   const copyReferralLink = () => {
-    if (referralStats) {
-      navigator.clipboard.writeText(`https://seven.app/ref/${referralStats.referral_code}`);
-      alert('Referral link copied!');
-    }
+    if (!referralStats?.referral_code) return;
+    const msg =
+      `Hey! I use Seven AI — a private voice assistant that runs 100% on your PC. ` +
+      `No cloud, no data leaving your device.\n\n` +
+      `Download: https://github.com/manikanta7cheruku/seven-releases/releases/latest\n\n` +
+      `During setup, enter my referral code: ${referralStats.referral_code}\n\n` +
+      `Use it for 7 hours → you get Pro free for 1 month, I get Ultimate free!`;
+    navigator.clipboard.writeText(msg);
+    setReferralCopied(true);
+    setTimeout(() => setReferralCopied(false), 2000);
   };
 
   if (st.loading) return <Spinner t="Connecting to Seven..." />;
@@ -270,11 +278,11 @@ export default function Home() {
             <div className="flex flex-col gap-2">
               {referralStats ? (
                 <>
-                  <button 
+                  <button
                     onClick={copyReferralLink}
-                    className="px-4 py-2 bg-s-accent text-white rounded text-[10px] font-medium hover:bg-s-accent/90"
+                    className="px-4 py-2 bg-s-accent text-white rounded text-[10px] font-medium hover:bg-s-accent/90 transition-colors"
                   >
-                    📋 Copy Link
+                    {referralCopied ? '✓ Copied!' : '📋 Copy Message'}
                   </button>
                   <button 
                     onClick={() => navigate('/settings')}
@@ -300,22 +308,27 @@ export default function Home() {
           {hw && (
             <div className="bg-s-card border border-s-border rounded p-3">
               <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium mb-2">Hardware</div>
-              <div className="space-y-1.5 text-[12px]">
+              <div className="space-y-1.5">
                 {[
-                  ['GPU', hw.gpu?.name || 'None'],
-                  ['VRAM', `${hw.gpu?.vram_gb || 0} GB`],
-                  ['RAM', `${hw.ram_gb} GB`],
-                  ['CPU', `${hw.cpu?.cores} cores`],
+                  ['GPU',         hw.gpu?.name || 'None'],
+                  ['VRAM',        `${hw.gpu?.vram_gb || 0} GB`],
+                  ['RAM',         `${hw.ram_gb} GB`],
+                  ['CPU',         `${hw.cpu?.cores} cores`],
                   ['Recommended', hw.recommended_model],
                 ].map(([k, v]) => (
-                  <div key={k} className="flex justify-between">
-                    <span className="text-s-text-3">{k}</span>
-                    <span className="text-s-text-2 font-mono text-[11px]">{v}</span>
+                  <div key={k} className="flex justify-between gap-2">
+                    <span className="text-[10px] text-s-text-3 flex-shrink-0">{k}</span>
+                    <span
+                      className="text-[10px] text-s-text-2 font-mono text-right"
+                      title={v}
+                    >
+                      {v}
+                    </span>
                   </div>
                 ))}
               </div>
             </div>
-          )}
+          )}  
 
           <div className="bg-s-card border border-s-border rounded p-3">
             <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium mb-2">Latency</div>

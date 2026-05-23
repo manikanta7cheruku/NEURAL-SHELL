@@ -457,21 +457,33 @@ def export_memory():
         "usage": {}
     }
 
-    # Facts + conversations from memory
+    # Facts from ChromaDB
     try:
         from memory import seven_memory
-        facts = seven_memory.get_facts()
-        export["facts"] = [
-            {"text": f.get("text",""), "category": f.get("category","")}
-            for f in (facts or [])
-        ]
-        convs = seven_memory.get_conversations(limit=500)
-        export["conversations"] = [
-            {"user": c.get("user",""), "seven": c.get("seven","")}
-            for c in (convs or [])
-        ]
+        all_facts = seven_memory.user_facts.get()
+        if all_facts and all_facts.get('documents'):
+            for i, doc in enumerate(all_facts['documents']):
+                meta = all_facts['metadatas'][i] if all_facts.get('metadatas') else {}
+                export["facts"].append({
+                    "text":     doc,
+                    "category": meta.get("category", "general")
+                })
     except Exception as e:
-        export["memory_error"] = str(e)
+        export["facts_error"] = str(e)
+
+    # Conversations from ChromaDB
+    try:
+        from memory import seven_memory
+        all_convos = seven_memory.conversations.get()
+        if all_convos and all_convos.get('documents'):
+            for i, doc in enumerate(all_convos['documents']):
+                meta = all_convos['metadatas'][i] if all_convos.get('metadatas') else {}
+                export["conversations"].append({
+                    "user":  meta.get("user_input", ""),
+                    "seven": doc
+                })
+    except Exception as e:
+        export["conversations_error"] = str(e)
 
     # Schedules
     try:

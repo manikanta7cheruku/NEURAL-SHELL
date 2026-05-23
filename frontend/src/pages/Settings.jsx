@@ -161,23 +161,36 @@ export default function Settings() {
     if (!editName.trim()) return;
     setSavingId(true);
     try {
+      // 1. Save to local config
       await api.put('/config', {
         updates: {
           email:    editEmail.trim(),
           identity: { ...local?.identity, user_name: editName.trim() }
         }
       });
-      // Sync to server
+
+      // 2. Save email locally
       try {
-        await api.post('/setup/complete', {
-          name:       editName.trim(),
-          email:      editEmail.trim(),
-          wake_word:  local?.identity?.wake_words?.[0] || 'seven',
-          voice_index: local?.voice?.voice_index || 0,
-          model_name: local?.brain?.model_name || ''
+        await api.post('/email/save', { email: editEmail.trim() });
+      } catch {}
+
+      // 3. Sync name+email to server using register endpoint directly
+      // This updates EXISTING row, does not create new one
+      try {
+        const deviceRes = await api.get('/usage/stats');
+        await fetch('https://seven-server-u2rp.onrender.com/api/register', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            device_id: deviceRes.data?.device_id || '',
+            name:      editName.trim(),
+            email:     editEmail.trim(),
+            country:   null
+          })
         });
       } catch {}
-      fc(); // refresh config
+
+      fc();
       setEditingId(false);
       setSavedId(true);
       setTimeout(() => setSavedId(false), 2000);
