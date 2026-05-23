@@ -27,7 +27,7 @@ import platform
 from colorama import Fore
 import config
 
-OLLAMA_API = "http://localhost:11434/api"
+OLLAMA_API = "http://127.0.0.1:11434/api"
 
 
 # =========================================================================
@@ -253,12 +253,22 @@ def unload_model(model_name):
 
 def switch_to_vision():
     """Unloads Chat, Loads Vision."""
-    unload_model(config.KEY['brain']['model_name'])
+    try:
+        model = config.KEY.get('brain', {}).get('model_name')
+        if model:
+            unload_model(model)
+    except Exception as e:
+        print(Fore.YELLOW + f"[MODEL] switch_to_vision skipped: {e}")
 
 
 def switch_to_chat():
     """Unloads Vision, Loads Chat."""
-    unload_model(config.KEY['vision']['model_name'])
+    try:
+        model = config.KEY.get('vision', {}).get('model_name')
+        if model:
+            unload_model(model)
+    except Exception as e:
+        print(Fore.YELLOW + f"[MODEL] switch_to_chat skipped: {e}")
 
 
 # =========================================================================
