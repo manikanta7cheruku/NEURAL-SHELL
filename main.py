@@ -140,7 +140,36 @@ def _packages_ready():
     return True
 
 
-IS_ELECTRON_MODE = os.environ.get('SEVEN_ELECTRON_MODE') == '1'
+# ── Detect Electron mode ──
+# Multiple signals because env var alone is unreliable in packaged apps:
+#   1. SEVEN_ELECTRON_MODE explicitly set (preferred)
+#   2. SEVEN_APP_PATH set AND embedded python311.dll exists (packaged install)
+#   3. Running under embedded python.exe (not system Python)
+# If ANY signal says we're in Electron, skip tkinter entirely.
+def _detect_electron_mode():
+    if os.environ.get('SEVEN_ELECTRON_MODE') == '1':
+        return True
+    app_path = os.environ.get('SEVEN_APP_PATH', '')
+    if app_path:
+        # Embedded Python distribution always has python311.dll alongside python.exe
+        if os.path.exists(os.path.join(app_path, 'python', 'python311.dll')):
+            return True
+        if os.path.exists(os.path.join(app_path, 'python', 'python3.dll')):
+            return True
+    # Last resort: check if we're running embedded python.exe
+    if 'resources' in sys.executable.replace('\\', '/').lower() and 'app' in sys.executable.replace('\\', '/').lower():
+        return True
+    # Final check: tkinter not importable = treat as Electron mode (safe default)
+    try:
+        import tkinter as _tk_test
+        _tk_test  # silence unused
+        return False
+    except ImportError:
+        print("[SYSTEM] tkinter not available — forcing Electron mode")
+        return True
+
+IS_ELECTRON_MODE = _detect_electron_mode()
+print(f"[SYSTEM] Electron mode: {IS_ELECTRON_MODE}")
 
 if not _packages_ready():
     print("[SYSTEM] Core packages not installed — starting in pre-setup mode")
@@ -671,16 +700,40 @@ def start_app():
             os._exit(0)
 
     else:
-        import tkinter as tk
-        import gui as gui_module
+        # Try standalone tkinter mode. If tkinter is missing, fall back to headless.
+        try:
+            import tkinter as tk
+            import gui as gui_module
 
-        root   = tk.Tk()
-        app_ui = gui_module.SevenGUI(root)
+            root   = tk.Tk()
+            app_ui = gui_module.SevenGUI(root)
 
-        logic_thread = threading.Thread(target=seven_logic, daemon=True)
-        logic_thread.start()
+            logic_thread = threading.Thread(target=seven_logic, daemon=True)
+            logic_thread.start()
 
-        root.mainloop()
+            root.mainloop()
+        except ImportError as e:
+            print(Fore.YELLOW + f"[SYSTEM] tkinter unavailable ({e}) — running headless")
+
+            class DummyUI:
+                def update_status(self, text, color):
+                    pass
+                def close(self):
+                    print(Fore.RED + "[SYSTEM] Shutdown requested")
+                    os._exit(0)
+
+            app_ui = DummyUI()
+            logic_thread = threading.Thread(target=seven_logic, daemon=True)
+            logic_thread.start()
+
+            print(Fore.GREEN + "[SYSTEM] Headless mode active — API server running")
+            try:
+                import time
+                while True:
+                    time.sleep(1)
+            except KeyboardInterrupt:
+                print(Fore.RED + "\n[SYSTEM] Interrupted by user")
+                os._exit(0)
 
 
 if __name__ == "__main__":
