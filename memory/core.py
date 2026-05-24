@@ -12,8 +12,8 @@ import shutil
 # OFFLINE FLAGS - MUST be set before ALL other imports
 # =============================================================================
 os.environ["ANONYMIZED_TELEMETRY"]          = "False"
-os.environ["HF_HUB_OFFLINE"]               = "1"
-os.environ["TRANSFORMERS_OFFLINE"]          = "1"
+# NOTE: HF_HUB_OFFLINE is set to "1" only AFTER model is confirmed cached.
+# Do NOT set it here — it blocks first-time download on new machines.
 os.environ["HF_HUB_DISABLE_TELEMETRY"]     = "1"
 os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
 os.environ["HF_HUB_DISABLE_IMPLICIT_TOKEN"]= "1"
@@ -52,6 +52,24 @@ EMBEDDING_MODEL = "all-MiniLM-L6-v2"
 # OFFLINE EMBEDDER
 # =============================================================================
 
+def _is_model_cached(model_name: str) -> bool:
+    """Check if embedding model is already downloaded on this machine."""
+    home = os.path.expanduser("~")
+    check_paths = [
+        os.path.join(home, ".cache", "huggingface", "hub",
+                     f"models--sentence-transformers--{model_name}", "snapshots"),
+        os.path.join(home, ".cache", "torch", "sentence_transformers",
+                     f"sentence-transformers_{model_name}"),
+        os.path.join(home, ".cache", "sentence_transformers",
+                     f"sentence-transformers_{model_name}"),
+        os.path.join(".", "seven_data", "models", model_name),
+    ]
+    for p in check_paths:
+        if os.path.exists(p):
+            return True
+    return False
+
+
 def _load_offline_embedder_standalone(model_name: str):
     from sentence_transformers import SentenceTransformer
 
@@ -74,6 +92,7 @@ def _load_offline_embedder_standalone(model_name: str):
 
     model = None
 
+    # ── Try loading from local cache first ──
     for path in search_paths:
         if not os.path.exists(path):
             continue
@@ -94,24 +113,47 @@ def _load_offline_embedder_standalone(model_name: str):
             print(Fore.YELLOW + f"[MEMORY] Path failed ({path}): {e}")
             continue
 
+    # ── If not cached — download it (first time only) ──
     if model is None:
-        print(Fore.YELLOW + "[MEMORY] Trying local_files_only fallback...")
+        print(Fore.YELLOW + "[MEMORY] Embedding model not cached on this machine.")
+        print(Fore.YELLOW + "[MEMORY] Downloading all-MiniLM-L6-v2 (~90MB) — one time only...")
+
+        # Temporarily clear offline env vars so download can proceed
+        _hf_offline   = os.environ.pop("HF_HUB_OFFLINE", None)
+        _tf_offline    = os.environ.pop("TRANSFORMERS_OFFLINE", None)
+
         try:
-            model = SentenceTransformer(model_name, local_files_only=True)
-            print(Fore.GREEN + "[MEMORY] ✓ Model loaded (local_files_only)")
-        except Exception as e:
-            print(Fore.RED + f"[MEMORY] ✗ All offline methods failed: {e}")
-            print(Fore.YELLOW + "[MEMORY] Downloading model (one time only)...")
             model = SentenceTransformer(model_name)
-            print(Fore.GREEN + "[MEMORY] ✓ Model downloaded and cached")
+            print(Fore.GREEN + "[MEMORY] ✓ Model downloaded and cached. Will work offline from now on.")
+        except Exception as e:
+            print(Fore.RED + f"[MEMORY] ✗ Download failed: {e}")
+            print(Fore.RED + "[MEMORY] Memory features disabled. Brain will still work.")
+            model = None
+        finally:
+            # Restore offline flags after download attempt
+            if _hf_offline is not None:
+                os.environ["HF_HUB_OFFLINE"] = _hf_offline
+            if _tf_offline is not None:
+                os.environ["TRANSFORMERS_OFFLINE"] = _tf_offline
+
+    # ── After model is confirmed cached, enforce offline mode ──
+    if model is not None and _is_model_cached(model_name):
+        os.environ["HF_HUB_OFFLINE"]     = "1"
+        os.environ["TRANSFORMERS_OFFLINE"] = "1"
+        print(Fore.CYAN + "[MEMORY] Offline mode enabled — model cached locally.")
 
     class _OfflineEmbedder:
         def __init__(self, m):
             self._model = m
+
         def __call__(self, input: list) -> list:
+            if self._model is None:
+                # Return zero vectors if model failed — brain still works
+                return [[0.0] * 384 for _ in input]
             return self._model.encode(
                 input, show_progress_bar=False, batch_size=32
             ).tolist()
+
         def name(self) -> str:
             return "seven_offline_embedder"
 
