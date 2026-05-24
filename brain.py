@@ -99,7 +99,11 @@ def _stream_sentences(prompt, payload):
     except Exception as e:
         print(Fore.RED + f"[BRAIN] Stream error: {e}")
         yield "Something went wrong with my thinking."
-MODEL_NAME = config.KEY['brain']['model_name']
+try:
+    MODEL_NAME = config.KEY['brain']['model_name']
+except Exception:
+    MODEL_NAME = "phi3:mini"
+    print("[BRAIN] Warning: Could not read model_name from config. Using phi3:mini.")
 CONVO_HISTORY = {}
 USER_NAME = "Admin"
 LAST_USER_INPUT = ""
