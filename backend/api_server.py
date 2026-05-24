@@ -1647,20 +1647,47 @@ def get_update_status():
     Current update state — polled by React frontend every 3 seconds
     when update panel is open or download is in progress.
     """
-    from backend.updater import get_state, _read_current_version
-    state = get_state()
-    return {
-        **state,
-        "current_version": _read_current_version(),
-    }
+    try:
+        try:
+            from backend.updater import get_state, _read_current_version
+        except ModuleNotFoundError:
+            import sys, os
+            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+            from updater import get_state, _read_current_version
+        state = get_state()
+        return {
+            **state,
+            "current_version": _read_current_version(),
+        }
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {
+            "update_available": False,
+            "checking": False,
+            "downloading": False,
+            "download_progress": 0,
+            "download_path": None,
+            "error": str(e),
+            "info": None,
+            "current_version": "1.1.0"
+        }
 
 
 @app.post("/api/update/check")
 def trigger_update_check():
     """Force an immediate update check (user clicked 'Check Now')."""
-    from backend.updater import check_for_updates
-    check_for_updates(force=True)
-    return {"success": True, "message": "Check started"}
+    try:
+        try:
+            from backend.updater import check_for_updates
+        except ModuleNotFoundError:
+            import sys, os
+            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+            from updater import check_for_updates
+        check_for_updates(force=True)
+        return {"success": True, "message": "Check started"}
+    except Exception as e:
+        return {"success": False, "message": str(e)}
 
 
 @app.post("/api/update/download")
@@ -1669,16 +1696,27 @@ def trigger_download():
     Start downloading the update in background.
     Only valid when update_available is True and download_mode is 'manual'.
     """
-    from backend import updater
-    state = updater.get_state()
+    try:
+        try:
+            from backend import updater
+        except ModuleNotFoundError:
+            import sys, os
+            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+            import updater
 
-    if not state["update_available"]:
-        raise HTTPException(status_code=400, detail="No update available")
-    if state["downloading"]:
-        raise HTTPException(status_code=400, detail="Download already in progress")
+        state = updater.get_state()
 
-    updater.start_download_thread()
-    return {"success": True, "message": "Download started"}
+        if not state["update_available"]:
+            raise HTTPException(status_code=400, detail="No update available")
+        if state["downloading"]:
+            raise HTTPException(status_code=400, detail="Download already in progress")
+
+        updater.start_download_thread()
+        return {"success": True, "message": "Download started"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/api/update/install")
@@ -1687,16 +1725,24 @@ def trigger_install():
     Signal Electron to run the downloaded installer and quit the app.
     Only valid when download_path exists.
     """
-    from backend import updater
-    state = updater.get_state()
+    try:
+        try:
+            from backend import updater
+        except ModuleNotFoundError:
+            import sys, os
+            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+            import updater
 
-    path = state.get("download_path")
-    if not path or not os.path.exists(path):
-        raise HTTPException(status_code=400, detail="Installer not downloaded yet")
+        state = updater.get_state()
+        path = state.get("download_path")
+        if not path or not os.path.exists(path):
+            raise HTTPException(status_code=400, detail="Installer not downloaded yet")
 
-    # We return the path — Electron picks it up via IPC
-    # The React frontend calls window.electron.runInstaller(path)
-    return {"success": True, "installer_path": path}
+        return {"success": True, "installer_path": path}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 # =========================================================================
 # BOOTSTRAP ENDPOINTS (Phase 7 — First Launch Setup)
@@ -1708,8 +1754,16 @@ def get_bootstrap_status():
     Poll this endpoint to get live environment setup progress.
     React wizard Step 4 polls this every 500ms.
     """
-    from backend.bootstrap import get_state
-    return get_state()
+    try:
+        try:
+            from backend.bootstrap import get_state
+        except ModuleNotFoundError:
+            import sys, os
+            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+            from bootstrap import get_state
+        return get_state()
+    except Exception as e:
+        return {"error": str(e), "overall_ready": False}
 
 
 @app.post("/api/bootstrap/start")
@@ -1719,9 +1773,17 @@ def start_bootstrap():
     Runs: pip install → Ollama download → Ollama start
     Returns immediately. Poll /api/bootstrap/status for progress.
     """
-    from backend import bootstrap
-    bootstrap.run_environment_setup()
-    return {"success": True, "message": "Bootstrap started"}
+    try:
+        try:
+            from backend import bootstrap
+        except ModuleNotFoundError:
+            import sys, os
+            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+            import bootstrap
+        bootstrap.run_environment_setup()
+        return {"success": True, "message": "Bootstrap started"}
+    except Exception as e:
+        return {"success": False, "message": str(e)}
 
 
 @app.post("/api/bootstrap/pull-model")
@@ -1731,13 +1793,22 @@ def pull_model_endpoint(data: dict):
     Body: {"model": "llama3"}
     Poll /api/bootstrap/status for progress under model_pull key.
     """
-    from backend import bootstrap
-    model = data.get("model", "").strip()
-    if not model:
-        raise HTTPException(status_code=400, detail="model name required")
-
-    bootstrap.run_model_pull(model)
-    return {"success": True, "model": model, "message": "Pull started"}
+    try:
+        try:
+            from backend import bootstrap
+        except ModuleNotFoundError:
+            import sys, os
+            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+            import bootstrap
+        model = data.get("model", "").strip()
+        if not model:
+            raise HTTPException(status_code=400, detail="model name required")
+        bootstrap.run_model_pull(model)
+        return {"success": True, "model": model, "message": "Pull started"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/bootstrap/check")
@@ -1747,33 +1818,57 @@ def check_environment():
     Returns what is installed and what is missing.
     Called when wizard Step 4 mounts to see if setup is needed.
     """
-    from backend.bootstrap import (
-        check_packages_installed, is_ollama_installed, is_ollama_running
-    )
+    try:
+        try:
+            from backend.bootstrap import (
+                check_packages_installed, is_ollama_installed, is_ollama_running
+            )
+        except ModuleNotFoundError:
+            import sys, os
+            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+            from bootstrap import (
+                check_packages_installed, is_ollama_installed, is_ollama_running
+            )
 
-    packages_ok = check_packages_installed()
-    ollama_installed = is_ollama_installed()
-    ollama_running = is_ollama_running()
+        packages_ok = check_packages_installed()
+        ollama_installed = is_ollama_installed()
+        ollama_running = is_ollama_running()
 
-    return {
-        "packages_installed": packages_ok,
-        "ollama_installed": ollama_installed,
-        "ollama_running": ollama_running,
-        "needs_setup": not (packages_ok and ollama_installed)
-    }
+        return {
+            "packages_installed": packages_ok,
+            "ollama_installed": ollama_installed,
+            "ollama_running": ollama_running,
+            "needs_setup": not (packages_ok and ollama_installed)
+        }
+    except Exception as e:
+        return {
+            "packages_installed": False,
+            "ollama_installed": False,
+            "ollama_running": False,
+            "needs_setup": True,
+            "error": str(e)
+        }
 
 
 @app.post("/api/bootstrap/start-ollama")
 def start_ollama_endpoint():
     """Start Ollama service if not already running."""
-    from backend import bootstrap
-    import threading
+    try:
+        try:
+            from backend import bootstrap
+        except ModuleNotFoundError:
+            import sys, os
+            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+            import bootstrap
+        import threading
 
-    def _start():
-        bootstrap.start_ollama()
+        def _start():
+            bootstrap.start_ollama()
 
-    threading.Thread(target=_start, daemon=True).start()
-    return {"success": True, "message": "Starting Ollama"}
+        threading.Thread(target=_start, daemon=True).start()
+        return {"success": True, "message": "Starting Ollama"}
+    except Exception as e:
+        return {"success": False, "message": str(e)}
     
 # =========================================================================
 # SERVER LAUNCHER — Called from main.py
