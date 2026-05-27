@@ -374,20 +374,16 @@ export default function Settings() {
               <span className="text-[11px] text-s-text-3">Plan</span>
               <div className="flex items-center gap-2">
                 <span className={`text-[10px] font-medium px-2 py-0.5 rounded ${
-                  isPro
-                    ? 'bg-s-accent/10 text-s-accent'
-                    : 'bg-s-border text-s-text-4'
+                  isPro ? 'bg-s-accent/10 text-s-accent' : 'bg-s-border text-s-text-4'
                 }`}>
                   {local.license?.tier?.toUpperCase() || 'FREE'}
                 </span>
-                {!isPro && (
-                  <button
-                    onClick={() => navigate('/plans')}
-                    className="text-[10px] text-s-accent hover:underline"
-                  >
-                    Upgrade
-                  </button>
-                )}
+                <button
+                  onClick={() => navigate('/plans')}
+                  className="text-[10px] text-s-accent hover:underline"
+                >
+                  {isPro ? 'Manage' : 'Upgrade'}
+                </button>
               </div>
             </div>
 
@@ -400,6 +396,41 @@ export default function Settings() {
                 </span>
               </div>
             )}
+
+            {/* Plan features summary */}
+            <div className="mt-2 pt-2 border-t border-s-border/50">
+              {(() => {
+                const t = local.license?.tier || 'free';
+                const featureMap = {
+                  free:     ['7 facts · 7 conversations · 1 file · 7 schedules · 3 aliases'],
+                  pro:      ['77 facts · 77 conversations · 7 files · 17 schedules · 7 aliases'],
+                  ultimate: ['Unlimited everything · Voice ID · Memory export · 3 devices'],
+                };
+                return (
+                  <div className="space-y-1.5">
+                    <div className="text-[10px] text-s-text-3 leading-relaxed">
+                      {featureMap[t]?.[0]}
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => navigate('/guide')}
+                        className="text-[10px] px-2 py-1 border border-s-accent/30 bg-s-accent/8 text-s-accent rounded hover:bg-s-accent/20"
+                      >
+                        How to use →
+                      </button>
+                      {t !== 'ultimate' && (
+                        <button
+                          onClick={() => navigate('/plans')}
+                          className="text-[10px] px-2 py-1 border border-s-border text-s-text-3 rounded hover:bg-s-card-h"
+                        >
+                          {t === 'free' ? 'Upgrade to Pro ↗' : 'Upgrade to Ultimate ↗'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
           </div>
         </div>
 
