@@ -247,103 +247,205 @@ def validate_key_format(key: str) -> bool:
 # LICENSE ACTIVATION
 # =============================================================================
 
+SERVER_URL = "https://seven-server-u2rp.onrender.com"
+
+
 def activate_license(license_key: str, email: str = None) -> Tuple[bool, str, Optional[Dict]]:
     """
     Activate a license key on this device.
-    
+
+    Flow:
+      1. Try server validation first (works on any machine)
+      2. Fall back to local license.db (developer machine only)
+      3. Save tier to config.json + local cache
+
     Returns:
         (success, message, license_data)
     """
     if not validate_key_format(license_key):
-        return False, "Invalid license key format", None
-    
-    license_key = license_key.upper()
-    device_id = get_device_id()
-    
+        return False, "Invalid license key format. Must start with VII-", None
+
+    license_key = license_key.upper().strip()
+    device_id   = get_device_id()
+
+    # ── STEP 1: Try server validation ──────────────────────────────
+    try:
+        import urllib.request
+        import urllib.error
+
+        payload = json.dumps({
+            "license_key": license_key,
+            "device_id":   device_id
+        }).encode("utf-8")
+
+        req = urllib.request.Request(
+            f"{SERVER_URL}/api/license/validate",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
+
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode())
+
+        if data.get("valid"):
+            tier       = data["tier"]
+            expires_at = data.get("expires_at")
+
+            # Save locally
+            _save_local_activation(license_key, tier, expires_at, device_id)
+            _update_cache(tier, expires_at, license_key)
+
+            import config
+            config.update_config({
+                "license": {
+                    "key":          license_key,
+                    "tier":         tier,
+                    "verified":     True,
+                    "activated_at": datetime.now().isoformat(),
+                    "expires_at":   expires_at
+                }
+            })
+
+            days_left = data.get("days_until_expiry")
+            if days_left is None:
+                expiry_msg = "Lifetime"
+            else:
+                expiry_msg = f"{days_left} days remaining"
+
+            print(f"[LICENSE] ✅ Server validated: {tier.upper()} ({expiry_msg})")
+            return True, f"License activated successfully ({tier.upper()})", {
+                "tier":       tier,
+                "expires_at": expires_at,
+                "source":     "server"
+            }
+
+    except urllib.error.HTTPError as e:
+        # 404 = key not found on server, 400 = expired/revoked
+        body = e.read().decode() if e.fp else ""
+        try:
+            err = json.loads(body)
+            reason = err.get("detail", str(e))
+        except Exception:
+            reason = str(e)
+        print(f"[LICENSE] Server rejected key: {reason}")
+        # Don't fall back to local for these — key genuinely invalid
+        if e.code in (400, 404):
+            # Still try local as last resort (developer machine)
+            pass
+
+    except Exception as e:
+        print(f"[LICENSE] Server unreachable, trying local: {e}")
+
+    # ── STEP 2: Fall back to local license.db ──────────────────────
     init_db()
-    conn = sqlite3.connect(LICENSE_DB)
-    c = conn.cursor()
-    
-    # Check if license exists
-    c.execute("SELECT tier, device_ids, max_devices, is_active, expires_at FROM licenses WHERE license_key = ?", 
-              (license_key,))
+
+    # Use full path from config
+    import config as _config
+    _appdata  = os.environ.get("APPDATA", os.path.expanduser("~"))
+    _data_dir = os.path.join(_appdata, "SEVEN", "data")
+    _lic_db   = os.path.join(_data_dir, "license.db")
+
+    conn = sqlite3.connect(_lic_db)
+    c    = conn.cursor()
+
+    c.execute("""
+        SELECT tier, device_ids, max_devices, is_active, expires_at
+        FROM licenses WHERE license_key = ?
+    """, (license_key,))
     row = c.fetchone()
-    
+
     if not row:
         conn.close()
-        return False, "License key not found", None
-    
+        return False, "License key not found. Make sure you are connected to the internet.", None
+
     tier, device_ids_json, max_devices, is_active, expires_at = row
-    
+
     if not is_active:
         conn.close()
-        return False, "License has been deactivated", None
-    
-    # Check expiry
+        return False, "This license has been deactivated.", None
+
     if expires_at:
         expiry = datetime.fromisoformat(expires_at)
         if datetime.now() > expiry:
             conn.close()
-            return False, "License has expired", None
-    
-    # Parse device IDs
+            return False, "This license has expired.", None
+
     device_ids = json.loads(device_ids_json) if device_ids_json else []
-    
-    # Check if already activated on this device
-    if device_id in device_ids:
-        # Update last validation
-        c.execute("UPDATE activations SET last_validated = ? WHERE license_key = ? AND device_id = ?",
-                  (datetime.now().isoformat(), license_key, device_id))
-        conn.commit()
-        conn.close()
-        
-        # Update cache
-        _update_cache(tier, expires_at, license_key)
-        
-        return True, "License already activated on this device", {
-            "tier": tier,
-            "expires_at": expires_at,
-            "devices_used": len(device_ids),
-            "max_devices": max_devices
-        }
-    
-    # Check device limit
-    if len(device_ids) >= max_devices:
-        conn.close()
-        return False, f"Device limit reached ({max_devices} devices)", None
-    
-    # Add device
-    device_ids.append(device_id)
-    c.execute("UPDATE licenses SET device_ids = ? WHERE license_key = ?",
-              (json.dumps(device_ids), license_key))
-    
-    # Create activation record
-    c.execute("INSERT INTO activations (license_key, device_id, activated_at, last_validated) VALUES (?, ?, ?, ?)",
-              (license_key, device_id, datetime.now().isoformat(), datetime.now().isoformat()))
-    
+
+    if device_id not in device_ids:
+        if len(device_ids) >= max_devices:
+            conn.close()
+            return False, f"Device limit reached ({max_devices} devices).", None
+        device_ids.append(device_id)
+        c.execute("UPDATE licenses SET device_ids = ? WHERE license_key = ?",
+                  (json.dumps(device_ids), license_key))
+
+    c.execute("""
+        INSERT OR REPLACE INTO activations
+            (license_key, device_id, activated_at, last_validated)
+        VALUES (?, ?, ?, ?)
+    """, (license_key, device_id, datetime.now().isoformat(), datetime.now().isoformat()))
+
     conn.commit()
     conn.close()
-    
-    # Update cache
+
     _update_cache(tier, expires_at, license_key)
-    
-    # Update config
+
     import config
     config.update_config({
         "license": {
-            "key": license_key,
-            "tier": tier,
-            "verified": True,
-            "activated_at": datetime.now().isoformat()
+            "key":          license_key,
+            "tier":         tier,
+            "verified":     True,
+            "activated_at": datetime.now().isoformat(),
+            "expires_at":   expires_at
         }
     })
-    
+
+    print(f"[LICENSE] ✅ Local validated: {tier.upper()}")
     return True, f"License activated successfully ({tier.upper()})", {
-        "tier": tier,
+        "tier":       tier,
         "expires_at": expires_at,
-        "devices_used": len(device_ids),
-        "max_devices": max_devices
+        "source":     "local"
     }
+
+
+def _save_local_activation(license_key, tier, expires_at, device_id):
+    """Save server-validated license to local DB for offline use."""
+    try:
+        _appdata  = os.environ.get("APPDATA", os.path.expanduser("~"))
+        _data_dir = os.path.join(_appdata, "SEVEN", "data")
+        _lic_db   = os.path.join(_data_dir, "license.db")
+
+        os.makedirs(_data_dir, exist_ok=True)
+        init_db()
+
+        conn = sqlite3.connect(_lic_db)
+        c    = conn.cursor()
+
+        # Upsert license
+        c.execute("""
+            INSERT OR REPLACE INTO licenses
+                (license_key, email, tier, plan_type, device_ids,
+                 max_devices, created_at, expires_at, is_active, is_trial)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 0)
+        """, (license_key, "server-validated@seven.app", tier, "server",
+              json.dumps([device_id]), 3,
+              datetime.now().isoformat(), expires_at))
+
+        # Upsert activation
+        c.execute("""
+            INSERT OR REPLACE INTO activations
+                (license_key, device_id, activated_at, last_validated)
+            VALUES (?, ?, ?, ?)
+        """, (license_key, device_id,
+              datetime.now().isoformat(), datetime.now().isoformat()))
+
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"[LICENSE] Local save warning: {e}")
 
 # =============================================================================
 # LICENSE VALIDATION

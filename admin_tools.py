@@ -17,36 +17,76 @@ def ensure_db():
         print("❌ No database found. Run Seven first to create it.")
         sys.exit(1)
 
+SERVER_URL = "https://seven-server-u2rp.onrender.com"
+
+
 def generate_license(email: str, tier: str = "ultimate",
                      plan_type: str = "lifetime", custom_key: str = None):
     """
-    Generate a license key.
-    
+    Generate a license key and save to Render PostgreSQL server.
+    Works on ANY machine — not just developer machine.
+
     custom_key examples:
-      LAUNCH-2025        → VII-LAUNCH-2025
-      BETA-FRIEND        → VII-BETA-FRIEND
-      VIP-MANIKANTA      → VII-VIP-MANIKANTA
-      EARLYBIRD          → VII-EARLYBIRD
+      LAUNCH-2025   → VII-LAUNCH-2025
+      BETA-FRIEND   → VII-BETA-FRIEND
     """
+    import requests
     import license as lic
 
-    key = lic.create_license(email, tier, plan_type, custom_key=custom_key)
-    
+    # Build the key
+    built_key = lic.generate_license_key(tier, custom=custom_key)
+
+    # Calculate expiry
     if plan_type == "monthly":
-        expiry = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
+        expires_at   = (datetime.now() + timedelta(days=30)).isoformat()
+        expiry_print = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
     elif plan_type == "yearly":
-        expiry = (datetime.now() + timedelta(days=365)).strftime("%Y-%m-%d")
+        expires_at   = (datetime.now() + timedelta(days=365)).isoformat()
+        expiry_print = (datetime.now() + timedelta(days=365)).strftime("%Y-%m-%d")
     else:
-        expiry = "Never (Lifetime)"
-    
+        expires_at   = None
+        expiry_print = "Never (Lifetime)"
+
+    # ── Save to server (PostgreSQL — works on any machine) ──
+    server_ok = False
+    try:
+        r = requests.post(
+            f"{SERVER_URL}/admin/license/create",
+            json={
+                "license_key": built_key,
+                "email":       email,
+                "tier":        tier,
+                "plan_type":   plan_type,
+                "expires_at":  expires_at
+            },
+            timeout=15
+        )
+        if r.status_code == 200:
+            server_ok = True
+            print(f"✅ Key saved to server (PostgreSQL)")
+        else:
+            print(f"⚠️  Server returned {r.status_code}: {r.text}")
+    except Exception as e:
+        print(f"⚠️  Could not reach server: {e}")
+        print(f"   Key NOT saved to server. User cannot activate on other machines.")
+
+    # ── Also save locally as backup ──
+    try:
+        lic.create_license(email, tier, plan_type, custom_key=custom_key)
+        print(f"✅ Key saved locally  (this machine only)")
+    except Exception as e:
+        print(f"   Local save skipped: {e}")
+
+    print()
     print("=" * 60)
     print(f"🎁 LICENSE GENERATED")
     print("=" * 60)
     print(f"Email:       {email}")
     print(f"Tier:        {tier.upper()}")
     print(f"Type:        {plan_type}")
-    print(f"Expires:     {expiry}")
-    print(f"License Key: {key}")
+    print(f"Expires:     {expiry_print}")
+    print(f"License Key: {built_key}")
+    print(f"Server:      {'✅ Saved (works anywhere)' if server_ok else '❌ Not saved (local only)'}")
     print("=" * 60)
     print(f"\n📧 EMAIL TO SEND:")
     print("-" * 60)
@@ -57,20 +97,20 @@ Hi!
 
 Here's your Seven {tier.upper()} license key:
 
-License Key: {key}
-Valid Until: {expiry}
+  {built_key}
+
+Valid Until: {expiry_print}
 
 To activate:
 1. Open Seven
 2. Go to Plans page
-3. Paste the key and click Activate
+3. Paste the key → click Activate
 
 Enjoy Seven!
-
-— Seven Team
+— Manikanta
 """)
     print("=" * 60)
-    return key
+    return built_key
 
 
 def list_licenses():
