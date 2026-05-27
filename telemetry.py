@@ -545,6 +545,43 @@ def start_telemetry():
         target=_create_referral, daemon=True, name="ReferralInit"
     ).start()
 
+    # One-time correction ping on startup
+    # Sends local total to server so server catches up immediately
+    def _sync_total_on_startup(_device_id=device_id, _email=email,
+                               _setup=setup_complete):
+        try:
+            if not _setup:
+                return
+            if not _email and not user_name:
+                return
+
+            import time as _t
+            _t.sleep(5)  # Wait for server register to complete first
+
+            total_min = _get_total_minutes()
+            if total_min < 1:
+                return
+
+            import server_sync as _ss
+            print(f"[TELEMETRY] Startup sync — sending total: "
+                  f"{round(total_min, 1)} min to server")
+            result = _ss.send_usage_ping(
+                _device_id,
+                minutes_delta=0,
+                email=_email,
+                total_minutes=round(total_min, 2)
+            )
+            if result and result.get("success"):
+                print(f"[TELEMETRY] Server total corrected ✓")
+            else:
+                print(f"[TELEMETRY] Server correction result: {result}")
+        except Exception as e:
+            print(f"[TELEMETRY] Startup sync failed: {e}")
+
+    threading.Thread(
+        target=_sync_total_on_startup, daemon=True, name="TelemetryStartupSync"
+    ).start()
+
     # Background loop
     def _ping_loop():
         tick_count = 0
