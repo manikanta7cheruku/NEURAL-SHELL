@@ -353,9 +353,12 @@ def _save_usage_time(seconds, sync_server=False):
         if pending >= 0.5:   # at least 30 seconds accumulated
             try:
                 import server_sync
+                # Also send total so server can correct if behind
+                total_min = _get_total_minutes()
                 result = server_sync.send_usage_ping(
-                    device_id, round(pending, 2), email
-                )
+                        device_id, round(pending, 2), email,
+                        total_minutes=round(total_min, 2)
+                    )
                 if result and result.get("success"):
                     _session["pending_minutes"]    = 0
                     _session["total_synced_minutes"] += pending
@@ -456,23 +459,39 @@ def start_telemetry():
 
     # Read name from config BEFORE starting thread
     user_name = None
+    setup_complete = False
     try:
         import config as _cfg
         user_name = _cfg.KEY.get("identity", {}).get("user_name", None)
+        setup_complete = _cfg.KEY.get("setup_complete", False)
     except Exception:
         pass
 
-    # Register on Render server immediately (background, non-blocking)
-    def _register(_name=user_name, _email=email, _device_id=device_id):
+    # Only register on server if setup is complete AND we have identity
+    # This prevents ghost rows from pre-setup pings
+    def _register(_name=user_name, _email=email, _device_id=device_id,
+                  _setup=setup_complete):
         try:
+            # Skip if setup not done or no identity at all
+            if not _setup:
+                print("[TELEMETRY] Setup not complete — skipping server register")
+                return
+            if not _name and not _email:
+                print("[TELEMETRY] No name or email — skipping server register")
+                return
+
             import server_sync
 
             # Get country with fallback
             country = "Unknown"
             try:
                 country = get_country_from_ip()
+                # Validate country is ASCII-safe
+                country.encode('ascii')
+            except (UnicodeEncodeError, UnicodeDecodeError):
+                country = "Unknown"
             except Exception:
-                pass
+                country = "Unknown"
 
             print(f"[TELEMETRY] Registering — "
                   f"name={_name} email={_email} country={country}")
