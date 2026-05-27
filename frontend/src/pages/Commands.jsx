@@ -3,6 +3,24 @@ import api from '../api';
 import PageHeader from '../components/PageHeader';
 import Spinner from '../components/Spinner';
 
+function PlanLimitBanner({ error, onDismiss }) {
+  if (!error) return null;
+  const detail = error?.response?.data?.detail;
+  if (!detail || detail.error !== 'plan_limit_reached') return null;
+  return (
+    <div className="bg-s-yellow/8 border border-s-yellow/30 rounded p-3 flex items-start justify-between gap-3">
+      <div>
+        <div className="text-[11px] text-s-yellow font-medium">Plan Limit Reached</div>
+        <div className="text-[11px] text-s-text-2 mt-0.5">{detail.message}</div>
+        <div className="text-[10px] text-s-text-4 mt-1">
+          {detail.upgrade_message} Current plan: <span className="text-s-accent">{detail.tier?.toUpperCase()}</span>
+        </div>
+      </div>
+      <button onClick={onDismiss} className="text-[10px] text-s-text-4 hover:text-s-text-2 shrink-0">✕</button>
+    </div>
+  );
+}
+
 export default function Commands() {
   const [tab, setTab] = useState('aliases');
   const [aliases, setAliases] = useState({});
@@ -16,13 +34,42 @@ export default function Commands() {
   const [fixing, setFixing] = useState(null);
   const [fixVal, setFixVal] = useState('');
   const [search, setSearch] = useState('');
+  const [limitError, setLimitError] = useState(null);
+  const [tier, setTier] = useState('free');
+
+  useEffect(() => {
+    api.get('/license/status').then(r => setTier(r.data.tier || 'free')).catch(() => {});
+  }, []);
 
   useEffect(() => { api.get('/config/commands').then(r => { setAliases(r.data.app_aliases || {}); setPaths(r.data.app_paths || {}); setFailed(r.data.failed_apps || []); }).finally(() => setLoading(false)); }, []);
 
-  const saveA = async (n, t) => { await api.post('/commands/app-aliases', { name: n, target: t }); setAliases(p => ({ ...p, [n.toLowerCase()]: t.toLowerCase() })); };
+  const saveA = async (n, t) => {
+    try {
+      setLimitError(null);
+      await api.post('/commands/app-aliases', { name: n, target: t });
+      setAliases(p => ({ ...p, [n.toLowerCase()]: t.toLowerCase() }));
+    } catch (e) {
+      setLimitError(e);
+    }
+  };
   const delA = async (n) => { await api.delete(`/commands/app-aliases/${n}`); setAliases(p => { const u = { ...p }; delete u[n]; return u; }); };
   const saveEdit = async (n) => { if (!editVal.trim()) return; await delA(n); await saveA(n, editVal.trim()); setEditing(null); };
-  const saveP = async () => { if (!nP.n || !nP.p) return; try { await api.post('/commands/app-paths', { name: nP.n, path: nP.p }); setPaths(p => ({ ...p, [nP.n.toLowerCase()]: nP.p })); setNP({ n: '', p: '' }); } catch (e) { alert(e.response?.data?.detail || 'Invalid path'); } };
+  const saveP = async () => {
+    if (!nP.n || !nP.p) return;
+    try {
+      setLimitError(null);
+      await api.post('/commands/app-paths', { name: nP.n, path: nP.p });
+      setPaths(p => ({ ...p, [nP.n.toLowerCase()]: nP.p }));
+      setNP({ n: '', p: '' });
+    } catch (e) {
+      const detail = e.response?.data?.detail;
+      if (detail?.error === 'plan_limit_reached') {
+        setLimitError(e);
+      } else {
+        alert(detail || 'Invalid path');
+      }
+    }
+  };
   const delP = async (n) => { await api.delete(`/commands/app-paths/${n}`); setPaths(p => { const u = { ...p }; delete u[n]; return u; }); };
   const fix = async (ph) => { if (!fixVal) return; await saveA(ph, fixVal); setFailed(p => p.filter(f => f.phrase !== ph)); setFixing(null); setFixVal(''); };
 
@@ -35,6 +82,8 @@ export default function Commands() {
       <PageHeader title="Commands" sub="Control how Seven finds and launches applications. You can also add website URLs as targets." />
 
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
+        <PlanLimitBanner error={limitError} onDismiss={() => setLimitError(null)} />
+
         <div className="flex items-center gap-1.5">
           {[{ id: 'aliases', l: 'Aliases', c: Object.keys(aliases).length }, { id: 'paths', l: 'Paths', c: Object.keys(paths).length }, { id: 'failed', l: 'Failed', c: failed.length, r: true }].map(t => (
             <button key={t.id} onClick={() => setTab(t.id)}
@@ -49,7 +98,15 @@ export default function Commands() {
           <div className="space-y-2">
             {/* ADD FORM — NOW FIRST */}
             <div className="bg-s-card border border-s-border rounded p-3">
-              <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium mb-2">Add — enter an app name or a URL like https://youtube.com</div>
+              <div className="flex items-center justify-between mb-2">
+                <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium">Add — enter an app name or a URL like https://youtube.com</div>
+                <div className={`text-[9px] font-mono ${
+                  tier === 'ultimate' ? 'text-s-text-4' :
+                  Object.keys(aliases).length >= (tier === 'pro' ? 7 : 3) ? 'text-s-red' : 'text-s-text-4'
+                }`}>
+                  {tier === 'ultimate' ? `${Object.keys(aliases).length} / ∞` : `${Object.keys(aliases).length} / ${tier === 'pro' ? 7 : 3}`}
+                </div>
+              </div>
               <div className="flex gap-2">
                 <input value={nA.n} onChange={e => setNA({ ...nA, n: e.target.value })} placeholder="You say..." className="flex-1 bg-s-bg border border-s-border rounded px-2 py-1.5 text-[11px] text-s-text placeholder-s-text-4 font-mono" />
                 <input value={nA.t} onChange={e => setNA({ ...nA, t: e.target.value })} placeholder="Opens (app or URL)..." className="flex-1 bg-s-bg border border-s-border rounded px-2 py-1.5 text-[11px] text-s-text placeholder-s-text-4 font-mono" />

@@ -117,6 +117,106 @@ class AppPath(BaseModel):
 
 
 # =========================================================================
+# PLAN LIMIT ENFORCEMENT
+# =========================================================================
+
+def get_current_tier() -> str:
+    """Get the current user's license tier. Always safe — returns 'free' on error."""
+    try:
+        import config
+        tier = config.KEY.get("license", {}).get("tier", "free")
+        if tier not in ("free", "pro", "ultimate"):
+            return "free"
+        return tier
+    except Exception:
+        return "free"
+
+
+def check_limit(feature: str, current_count: int) -> dict:
+    """
+    Check if user can create more of a feature based on their plan.
+
+    Args:
+        feature:       Key from TIER_FEATURES (e.g. 'facts_limit')
+        current_count: How many they already have
+
+    Returns:
+        {
+            "allowed": bool,
+            "current": int,
+            "limit": int or -1,
+            "tier": str,
+            "upgrade_needed": str or None   <- which tier unlocks this
+        }
+    """
+    tier = get_current_tier()
+    features = license_module.TIER_FEATURES.get(tier, license_module.TIER_FEATURES["free"])
+    limit = features.get(feature, 0)
+
+    if limit == -1:
+        # Unlimited
+        return {
+            "allowed": True,
+            "current": current_count,
+            "limit": -1,
+            "tier": tier,
+            "upgrade_needed": None
+        }
+
+    allowed = current_count < limit
+
+    # Figure out which tier unlocks more
+    upgrade_needed = None
+    if not allowed:
+        if tier == "free":
+            upgrade_needed = "pro"
+        elif tier == "pro":
+            upgrade_needed = "ultimate"
+
+    return {
+        "allowed": allowed,
+        "current": current_count,
+        "limit": limit,
+        "tier": tier,
+        "upgrade_needed": upgrade_needed
+    }
+
+
+def plan_limit_error(feature_name: str, limit_check: dict) -> HTTPException:
+    """
+    Build a clean 403 error when user hits their plan limit.
+    Frontend reads this and shows upgrade prompt.
+    """
+    tier = limit_check["tier"]
+    limit = limit_check["limit"]
+    current = limit_check["current"]
+    upgrade = limit_check.get("upgrade_needed", "pro")
+
+        messages = {
+        "facts_limit":           "facts",
+        "conversation_history":  "saved conversations",
+        "knowledge_files":       "knowledge files",
+        "schedules":             "schedules",
+        "app_aliases":           "app aliases / URL shortcuts",
+        "custom_paths":          "custom app paths",
+        "web_searches_per_day":  "web searches today",
+    }
+    item_name = messages.get(feature_name, feature_name)
+
+    detail = {
+        "error": "plan_limit_reached",
+        "message": f"You have reached the {tier.upper()} plan limit of {limit} {item_name}. You currently have {current}.",
+        "current": current,
+        "limit": limit,
+        "tier": tier,
+        "upgrade_to": upgrade,
+        "upgrade_message": f"Upgrade to {upgrade.upper()} to get more {item_name}."
+    }
+
+    return HTTPException(status_code=403, detail=detail)
+
+
+# =========================================================================
 # ROOT ENDPOINT
 # =========================================================================
 
@@ -270,14 +370,29 @@ def chat(req: ChatRequest):
         # Execute commands if present
         _execute_actions(action_list, full_response, req.speaker_id)
         
-        # Store conversation in memory
+        # Store conversation in memory (enforce plan limit)
         try:
             from memory import seven_memory
             if len(req.text.strip()) > 3 and not full_response.strip().startswith("###"):
                 clean_for_memory = re.sub(r'###\w+:\s*\S+', '', full_response).strip()
                 if clean_for_memory:
-                    seven_memory.store_conversation(req.text.strip(), clean_for_memory,
-                                                     user_id=req.speaker_id)
+                    # Count current conversations
+                    try:
+                        all_convos = seven_memory.conversations.get()
+                        convo_count = len(all_convos["documents"]) if all_convos and all_convos.get("documents") else 0
+                    except Exception:
+                        convo_count = 0
+
+                    limit_check = check_limit("conversation_history", convo_count)
+                    if limit_check["allowed"]:
+                        seven_memory.store_conversation(
+                            req.text.strip(), clean_for_memory,
+                            user_id=req.speaker_id
+                        )
+                    else:
+                        # Silent limit — chat still works, just not saved
+                        # Frontend can show "memory full" from /api/memory/stats
+                        print(f"[API] Conversation memory full ({convo_count}/{limit_check['limit']}) — tier: {limit_check['tier']}")
         except Exception:
             pass
         
@@ -367,18 +482,38 @@ def _execute_actions(action_list, full_response, speaker_id):
 
 @app.post("/api/memory/facts")
 def add_manual_fact(data: dict):
-    """Manually add a fact."""
+    """Manually add a fact. Enforces plan limit."""
     from memory import seven_memory
-    
+
     text = data.get("text", "").strip()
     category = data.get("category", "manual")
-    
+
     if not text:
         raise HTTPException(status_code=400, detail="Empty fact text")
-    
+
+    # Count current facts
+    try:
+        all_facts = seven_memory.user_facts.get()
+        current_count = len(all_facts["documents"]) if all_facts and all_facts.get("documents") else 0
+    except Exception:
+        current_count = 0
+
+    # Check plan limit
+    limit_check = check_limit("facts_limit", current_count)
+    if not limit_check["allowed"]:
+        raise plan_limit_error("facts_limit", limit_check)
+
     try:
         seven_memory.store_fact(text, category=category)
-        return {"success": True, "fact": text}
+        return {
+            "success": True,
+            "fact": text,
+            "usage": {
+                "current": current_count + 1,
+                "limit": limit_check["limit"],
+                "tier": limit_check["tier"]
+            }
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     
@@ -464,9 +599,23 @@ def delete_conversation(conv_id: str):
 
 @app.get("/api/memory/export")
 def export_memory():
-    """Export all user data as JSON for backup."""
+    """Export all user data as JSON for backup. Ultimate plan only."""
     import sqlite3
     import config as cfg
+
+    # Check ultimate plan
+    tier = get_current_tier()
+    features = license_module.TIER_FEATURES.get(tier, license_module.TIER_FEATURES["free"])
+    if not features.get("memory_export", False):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "feature_not_available",
+                "message": "Memory export is available on Ultimate plan only.",
+                "tier": tier,
+                "upgrade_to": "ultimate"
+            }
+        )
 
     export = {
         "exported_at": datetime.now().isoformat(),
@@ -614,26 +763,60 @@ def get_schedules():
 
 @app.post("/api/schedules")
 def create_schedule(sched: ScheduleCreate):
-    """Create a new schedule."""
+    """Create a new schedule. Enforces plan limit."""
     import hands.scheduler as scheduler_mod
-    
+
+    # Count current schedules
+    try:
+        current_schedules = scheduler_mod.get_all_schedules()
+        schedule_count = len(current_schedules) if current_schedules else 0
+    except Exception:
+        schedule_count = 0
+
+    # Check plan limit
+    limit_check = check_limit("schedules", schedule_count)
+    if not limit_check["allowed"]:
+        raise plan_limit_error("schedules", limit_check)
+
+    # Check recurring schedule permission (pro+ only)
+    if sched.recur and sched.recur.strip():
+        features = license_module.TIER_FEATURES.get(get_current_tier(), {})
+        if not features.get("recurring_schedules", False):
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "error": "feature_not_available",
+                    "message": "Recurring schedules require Pro plan or higher.",
+                    "tier": get_current_tier(),
+                    "upgrade_to": "pro"
+                }
+            )
+
     params = {
         "action": sched.type,
         "message": sched.message,
         "speaker_id": sched.speaker_id
     }
-    
+
     if sched.time:
         params["time"] = sched.time
     if sched.duration is not None:
         params["duration"] = str(sched.duration)
     if sched.recur:
         params["recur"] = sched.recur
-    
+
     success, msg = scheduler_mod.manage_schedule(params)
-    
+
     if success:
-        return {"success": True, "message": msg}
+        return {
+            "success": True,
+            "message": msg,
+            "usage": {
+                "current": schedule_count + 1,
+                "limit": limit_check["limit"],
+                "tier": limit_check["tier"]
+            }
+        }
     else:
         raise HTTPException(status_code=400, detail=msg)
 
@@ -681,10 +864,30 @@ def _make_upload_endpoint():
 
         @app.post("/api/knowledge/upload")
         async def upload_knowledge(file: UploadFile = FastAPIFile(...)):
-            """Upload a file to the knowledge base."""
+            """Upload a file to the knowledge base. Enforces plan limit."""
             try:
+                # Count current knowledge files
+                try:
+                    _appdata = os.environ.get("APPDATA", os.path.expanduser("~"))
+                    _know_dir = os.path.join(_appdata, "SEVEN", "seven_data", "knowledge")
+                    if os.path.exists(_know_dir):
+                        file_count = len([
+                            f for f in os.listdir(_know_dir)
+                            if os.path.isfile(os.path.join(_know_dir, f))
+                        ])
+                    else:
+                        file_count = 0
+                except Exception:
+                    file_count = 0
+
+                # Check plan limit
+                limit_check = check_limit("knowledge_files", file_count)
+                if not limit_check["allowed"]:
+                    raise plan_limit_error("knowledge_files", limit_check)
+
                 from knowledge.indexer import index_file
-                sources_dir = "seven_data/knowledge"
+                _appdata = os.environ.get("APPDATA", os.path.expanduser("~"))
+                sources_dir = os.path.join(_appdata, "SEVEN", "seven_data", "knowledge")
                 os.makedirs(sources_dir, exist_ok=True)
                 file_path = os.path.join(sources_dir, file.filename)
                 content = await file.read()
@@ -694,7 +897,12 @@ def _make_upload_endpoint():
                 return {
                     "success": True,
                     "filename": file.filename,
-                    "chunks_indexed": chunks
+                    "chunks_indexed": chunks,
+                    "usage": {
+                        "current": file_count + 1,
+                        "limit": limit_check["limit"],
+                        "tier": limit_check["tier"]
+                    }
                 }
             except HTTPException:
                 raise
@@ -800,18 +1008,38 @@ def get_failed_apps():
 
 @app.post("/api/commands/app-aliases")
 def add_app_alias(alias: AppAlias):
-    """Add or update an app alias."""
+    """Add or update an app alias. Enforces plan limit."""
     import config
-    
+
+    current_aliases = config.KEY.get("commands", {}).get("app_aliases", {})
+    alias_key = alias.name.lower().strip()
+
+    # If editing existing alias — not a new one, skip limit check
+    is_new = alias_key not in current_aliases
+
+    if is_new:
+        limit_check = check_limit("app_aliases", len(current_aliases))
+        if not limit_check["allowed"]:
+            raise plan_limit_error("app_aliases", limit_check)
+
     if "commands" not in config.KEY:
         config.KEY["commands"] = {}
     if "app_aliases" not in config.KEY["commands"]:
         config.KEY["commands"]["app_aliases"] = {}
-    
-    config.KEY["commands"]["app_aliases"][alias.name.lower().strip()] = alias.target.lower().strip()
+
+    config.KEY["commands"]["app_aliases"][alias_key] = alias.target.lower().strip()
     config.save_config()
-    
-    return {"success": True, "alias": alias.name, "target": alias.target}
+
+    return {
+        "success": True,
+        "alias": alias.name,
+        "target": alias.target,
+        "usage": {
+            "current": len(config.KEY["commands"]["app_aliases"]),
+            "limit":   limit_check["limit"] if is_new else -1,
+            "tier":    get_current_tier()
+        } if is_new else {}
+    }
 
 
 @app.delete("/api/commands/app-aliases/{alias_name}")
@@ -830,22 +1058,41 @@ def delete_app_alias(alias_name: str):
 
 @app.post("/api/commands/app-paths")
 def add_app_path(app_path: AppPath):
-    """Add or update a custom app path."""
+    """Add or update a custom app path. Enforces plan limit."""
     import config
-    
+
+    current_paths = config.KEY.get("commands", {}).get("app_paths", {})
+    path_key = app_path.name.lower().strip()
+
+    # Only check limit for new entries
+    is_new = path_key not in current_paths
+
+    if is_new:
+        limit_check = check_limit("custom_paths", len(current_paths))
+        if not limit_check["allowed"]:
+            raise plan_limit_error("custom_paths", limit_check)
+
+    if not os.path.exists(app_path.path):
+        raise HTTPException(status_code=400, detail=f"Path does not exist: {app_path.path}")
+
     if "commands" not in config.KEY:
         config.KEY["commands"] = {}
     if "app_paths" not in config.KEY["commands"]:
         config.KEY["commands"]["app_paths"] = {}
-    
-    # Validate path exists
-    if not os.path.exists(app_path.path):
-        raise HTTPException(status_code=400, detail=f"Path does not exist: {app_path.path}")
-    
-    config.KEY["commands"]["app_paths"][app_path.name.lower().strip()] = app_path.path
+
+    config.KEY["commands"]["app_paths"][path_key] = app_path.path
     config.save_config()
-    
-    return {"success": True, "name": app_path.name, "path": app_path.path}
+
+    return {
+        "success": True,
+        "name": app_path.name,
+        "path": app_path.path,
+        "usage": {
+            "current": len(config.KEY["commands"]["app_paths"]),
+            "limit":   limit_check["limit"] if is_new else -1,
+            "tier":    get_current_tier()
+        } if is_new else {}
+    }
 
 
 @app.delete("/api/commands/app-paths/{app_name}")
@@ -1082,6 +1329,72 @@ def get_pricing():
     return {
         "tiers": license_module.TIER_FEATURES,
         "pricing": license_module.PRICING
+    }
+
+
+@app.get("/api/plan/usage")
+def get_plan_usage():
+    """
+    Get current usage vs plan limits for all features.
+    Used by Plans page and dashboard to show upgrade prompts.
+    """
+    tier = get_current_tier()
+    features = license_module.TIER_FEATURES.get(tier, license_module.TIER_FEATURES["free"])
+
+    # Count facts
+    try:
+        from memory import seven_memory
+        all_facts = seven_memory.user_facts.get()
+        facts_count = len(all_facts["documents"]) if all_facts and all_facts.get("documents") else 0
+    except Exception:
+        facts_count = 0
+
+    # Count conversations
+    try:
+        from memory import seven_memory
+        all_convos = seven_memory.conversations.get()
+        convo_count = len(all_convos["documents"]) if all_convos and all_convos.get("documents") else 0
+    except Exception:
+        convo_count = 0
+
+    # Count knowledge files
+    try:
+        _appdata = os.environ.get("APPDATA", os.path.expanduser("~"))
+        _know_dir = os.path.join(_appdata, "SEVEN", "seven_data", "knowledge")
+        file_count = len([
+            f for f in os.listdir(_know_dir)
+            if os.path.isfile(os.path.join(_know_dir, f))
+        ]) if os.path.exists(_know_dir) else 0
+    except Exception:
+        file_count = 0
+
+    # Count schedules
+    try:
+        import hands.scheduler as scheduler_mod
+        all_schedules = scheduler_mod.get_all_schedules()
+        schedule_count = len(all_schedules) if all_schedules else 0
+    except Exception:
+        schedule_count = 0
+
+    def usage_item(current, limit):
+        if limit == -1:
+            return {"current": current, "limit": -1, "percent": 0, "full": False}
+        percent = int((current / limit) * 100) if limit > 0 else 100
+        return {"current": current, "limit": limit, "percent": percent, "full": current >= limit}
+
+    return {
+        "tier": tier,
+        "features": {
+            "facts":         usage_item(facts_count,    features.get("facts_limit", 7)),
+            "conversations": usage_item(convo_count,    features.get("conversation_history", 7)),
+            "knowledge":     usage_item(file_count,     features.get("knowledge_files", 1)),
+            "schedules":     usage_item(schedule_count, features.get("schedules", 7)),
+        },
+        "capabilities": {
+            "memory_export":       features.get("memory_export", False),
+            "voice_recognition":   features.get("voice_recognition", False),
+            "recurring_schedules": features.get("recurring_schedules", False),
+        }
     }
 
 
