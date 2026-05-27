@@ -55,28 +55,43 @@ def _resolve_alias(app_name):
 
 def _try_custom_path(app_name):
     """
-    Try launching an app via custom .exe path.
+    Try launching an app via custom path.
+    Handles: .exe, .png, .pdf, .mp4, paths with spaces, any file type.
     Returns True if successful, False if not found or failed.
     """
     paths = _get_custom_paths()
     clean = app_name.lower().strip()
-    
-    if clean in paths:
-        exe_path = paths[clean]
-        if os.path.exists(exe_path):
-            try:
-                subprocess.Popen(exe_path, shell=False)
-                print(Fore.GREEN + f"   -> Launched via custom path: {exe_path}")
-                command_log.log_command("OPEN", clean, True, f"Custom path: {exe_path}")
-                mood_engine.on_command_result(True)
-                return True
-            except Exception as e:
-                print(Fore.RED + f"   -> Custom path launch failed: {e}")
-                return False
+
+    if clean not in paths:
+        return False
+
+    exe_path = paths[clean]
+
+    if not os.path.exists(exe_path):
+        print(Fore.RED + f"   -> Custom path not found: {exe_path}")
+        return False
+
+    try:
+        ext = os.path.splitext(exe_path)[1].lower()
+
+        if ext == '.exe':
+            # Use shell=True to handle spaces in path
+            subprocess.Popen(f'"{exe_path}"', shell=True)
         else:
-            print(Fore.RED + f"   -> Custom path not found: {exe_path}")
-            return False
-    return False
+            # For ALL other file types (.png, .pdf, .mp4, .docx etc)
+            # os.startfile handles spaces and non-exe files natively
+            os.startfile(exe_path)
+
+        print(Fore.GREEN + f"   -> Launched via custom path: {exe_path}")
+        command_log.log_command("OPEN", clean, True, f"Custom path: {exe_path}")
+        mood_engine.on_command_result(True)
+        return True
+
+    except Exception as e:
+        print(Fore.RED + f"   -> Custom path launch failed: {e}")
+        command_log.log_command("OPEN", clean, False, f"Custom path failed: {e}")
+        mood_engine.on_command_result(False)
+        return False
 
 
 def _log_failed_app(user_phrase, attempted_name, error_detail):

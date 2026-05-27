@@ -48,8 +48,15 @@ export default function Commands() {
       setLimitError(null);
       await api.post('/commands/app-aliases', { name: n, target: t });
       setAliases(p => ({ ...p, [n.toLowerCase()]: t.toLowerCase() }));
+      return true;
     } catch (e) {
-      setLimitError(e);
+      const detail = e?.response?.data?.detail;
+      if (detail?.error === 'plan_limit_reached') {
+        setLimitError(e);
+      } else {
+        alert(detail || 'Failed to save alias');
+      }
+      return false;
     }
   };
   const delA = async (n) => { await api.delete(`/commands/app-aliases/${n}`); setAliases(p => { const u = { ...p }; delete u[n]; return u; }); };
@@ -79,7 +86,7 @@ export default function Commands() {
 
   return (
     <div className="h-full flex flex-col">
-      <PageHeader title="Commands" sub="Control how Seven finds and launches applications. You can also add website URLs as targets." />
+      <PageHeader title="Commands" sub="Control how Seven finds and launches apps, URLs, files, and folders. Say an alias name — Seven opens it instantly." />
 
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
         <PlanLimitBanner error={limitError} onDismiss={() => setLimitError(null)} />
@@ -99,7 +106,7 @@ export default function Commands() {
             {/* ADD FORM — NOW FIRST */}
             <div className="bg-s-card border border-s-border rounded p-3">
               <div className="flex items-center justify-between mb-2">
-                <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium">Add — enter an app name or a URL like https://youtube.com</div>
+                <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium">Add alias — app name, URL, file path, or folder</div>
                 <div className={`text-[9px] font-mono ${
                   tier === 'ultimate' ? 'text-s-text-4' :
                   Object.keys(aliases).length >= (tier === 'pro' ? 7 : 3) ? 'text-s-red' : 'text-s-text-4'
@@ -110,7 +117,16 @@ export default function Commands() {
               <div className="flex gap-2">
                 <input value={nA.n} onChange={e => setNA({ ...nA, n: e.target.value })} placeholder="You say..." className="flex-1 bg-s-bg border border-s-border rounded px-2 py-1.5 text-[11px] text-s-text placeholder-s-text-4 font-mono" />
                 <input value={nA.t} onChange={e => setNA({ ...nA, t: e.target.value })} placeholder="Opens (app or URL)..." className="flex-1 bg-s-bg border border-s-border rounded px-2 py-1.5 text-[11px] text-s-text placeholder-s-text-4 font-mono" />
-                <button onClick={() => { if (nA.n && nA.t) { saveA(nA.n, nA.t); setNA({ n: '', t: '' }); } }} disabled={!nA.n || !nA.t}
+                <button
+                  onClick={async () => {
+                    if (!nA.n || !nA.t) return;
+                    const atLimit = tier !== 'ultimate' && Object.keys(aliases).length >= (tier === 'pro' ? 7 : 3);
+                    if (atLimit) return;
+                    await saveA(nA.n, nA.t);
+                    // Only clear if no error was set
+                    setNA(prev => limitError ? prev : { n: '', t: '' });
+                  }}
+                  disabled={!nA.n || !nA.t || (tier !== 'ultimate' && Object.keys(aliases).length >= (tier === 'pro' ? 7 : 3))}
                   className="px-3 py-1.5 border border-s-accent/30 bg-s-accent/8 text-s-accent hover:bg-s-accent/15 disabled:border-s-border disabled:bg-transparent disabled:text-s-text-4 rounded text-[11px] font-medium">Save</button>
               </div>
             </div>
@@ -142,7 +158,7 @@ export default function Commands() {
           <div className="space-y-2">
             {/* ADD PATH FORM — NOW FIRST */}
             <div className="bg-s-card border border-s-border rounded p-3">
-              <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium mb-2">Add Path</div>
+              <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium mb-2">Add Path — .exe, .png, .pdf, .mp4, any file or folder</div>
               <div className="flex gap-2">
                 <input value={nP.n} onChange={e => setNP({ ...nP, n: e.target.value })} placeholder="Name..." className="w-28 bg-s-bg border border-s-border rounded px-2 py-1.5 text-[11px] text-s-text placeholder-s-text-4 font-mono" />
                 <input value={nP.p} onChange={e => setNP({ ...nP, p: e.target.value })} placeholder="C:\path\to\app.exe" className="flex-1 bg-s-bg border border-s-border rounded px-2 py-1.5 text-[11px] text-s-text placeholder-s-text-4 font-mono" />

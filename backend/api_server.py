@@ -192,7 +192,7 @@ def plan_limit_error(feature_name: str, limit_check: dict) -> HTTPException:
     current = limit_check["current"]
     upgrade = limit_check.get("upgrade_needed", "pro")
 
-        messages = {
+    messages = {
         "facts_limit":           "facts",
         "conversation_history":  "saved conversations",
         "knowledge_files":       "knowledge files",
@@ -1072,8 +1072,11 @@ def add_app_path(app_path: AppPath):
         if not limit_check["allowed"]:
             raise plan_limit_error("custom_paths", limit_check)
 
-    if not os.path.exists(app_path.path):
-        raise HTTPException(status_code=400, detail=f"Path does not exist: {app_path.path}")
+    # Strip surrounding quotes if user pasted path with quotes
+    clean_path = app_path.path.strip().strip('"').strip("'")
+    if not os.path.exists(clean_path):
+        raise HTTPException(status_code=400, detail=f"Path does not exist: {clean_path}")
+    app_path = AppPath(name=app_path.name, path=clean_path)
 
     if "commands" not in config.KEY:
         config.KEY["commands"] = {}
