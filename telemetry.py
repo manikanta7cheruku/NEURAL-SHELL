@@ -585,6 +585,8 @@ def start_telemetry():
     # Background loop
     def _ping_loop():
         tick_count = 0
+        _total_synced_once = False  # flag — sync total once on first tick
+
         while True:
             try:
                 time.sleep(60)
@@ -603,6 +605,24 @@ def start_telemetry():
                         _ss.keep_alive()
                     except Exception:
                         pass
+
+                # On first tick — push local total to server to correct any gap
+                if not _total_synced_once and setup_complete and (email or user_name):
+                    try:
+                        import server_sync as _ss
+                        total_min = _get_total_minutes()
+                        if total_min > 0:
+                            print(f"[TELEMETRY] First-tick total sync: "
+                                  f"{round(total_min,1)} min → server")
+                            _ss.send_usage_ping(
+                                device_id,
+                                minutes_delta=0,
+                                email=email,
+                                total_minutes=round(total_min, 2)
+                            )
+                            _total_synced_once = True
+                    except Exception as e:
+                        print(f"[TELEMETRY] First-tick sync failed: {e}")
 
                 send_ping()
 
