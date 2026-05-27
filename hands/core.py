@@ -75,12 +75,21 @@ def _try_custom_path(app_name):
         ext = os.path.splitext(exe_path)[1].lower()
 
         if ext == '.exe':
-            # Use shell=True to handle spaces in path
             subprocess.Popen(f'"{exe_path}"', shell=True)
         else:
-            # For ALL other file types (.png, .pdf, .mp4, .docx etc)
-            # os.startfile handles spaces and non-exe files natively
             os.startfile(exe_path)
+
+        # Force window to foreground after short delay
+        import threading
+        import time
+        def _bring_to_front():
+            time.sleep(1.5)
+            try:
+                import pyautogui
+                pyautogui.hotkey('alt', 'tab')
+            except Exception:
+                pass
+        threading.Thread(target=_bring_to_front, daemon=True).start()
 
         print(Fore.GREEN + f"   -> Launched via custom path: {exe_path}")
         command_log.log_command("OPEN", clean, True, f"Custom path: {exe_path}")
@@ -91,7 +100,7 @@ def _try_custom_path(app_name):
         print(Fore.RED + f"   -> Custom path launch failed: {e}")
         command_log.log_command("OPEN", clean, False, f"Custom path failed: {e}")
         mood_engine.on_command_result(False)
-        return False
+        return False    
 
 
 def _log_failed_app(user_phrase, attempted_name, error_detail):
