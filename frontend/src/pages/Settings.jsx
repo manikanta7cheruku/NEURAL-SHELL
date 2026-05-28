@@ -159,6 +159,24 @@ export default function Settings() {
   // ── Identity save ──
   const saveIdentity = async () => {
     if (!editName.trim()) return;
+
+    // Check if email is being changed
+    const originalEmail = config?.email || '';
+    const emailChanged  = editEmail.trim() !== originalEmail.trim();
+    const hasLicense    = config?.license?.key && config?.license?.tier !== 'free';
+
+    // Warn if email changed AND user has a license
+    if (emailChanged && hasLicense) {
+      const confirmed = window.confirm(
+        `⚠️ License Notice\n\n` +
+        `You're changing your email from:\n${originalEmail}\nto:\n${editEmail.trim()}\n\n` +
+        `Your current license is linked to your account. ` +
+        `If you change your email, you may need to re-enter your license key.\n\n` +
+        `Do you want to continue?`
+      );
+      if (!confirmed) return;
+    }
+
     setSavingId(true);
     try {
       // 1. Save to local config
@@ -174,21 +192,27 @@ export default function Settings() {
         await api.post('/email/save', { email: editEmail.trim() });
       } catch {}
 
-      // 3. Sync name+email to server using register endpoint directly
-      // This updates EXISTING row, does not create new one
+      // 3. Sync name+email to server — sends FULL device_id so server
+      //    updates existing row and logs change history correctly
       try {
         const deviceRes = await api.get('/usage/stats');
+        const fullDeviceId = deviceRes.data?.device_id || '';
+
         await fetch('https://seven-server-u2rp.onrender.com/api/register', {
           method:  'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            device_id: deviceRes.data?.device_id || '',
+            device_id: fullDeviceId,
             name:      editName.trim(),
             email:     editEmail.trim(),
             country:   null
           })
         });
-      } catch {}
+
+        console.log('[SETTINGS] Identity synced to server:', fullDeviceId.slice(0,8));
+      } catch (e) {
+        console.warn('[SETTINGS] Server sync failed (ok):', e);
+      }
 
       fc();
       setEditingId(false);

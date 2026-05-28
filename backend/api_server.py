@@ -1603,7 +1603,7 @@ def get_usage_stats_fixed():
         "total_minutes": total_minutes,
         "display":       time_str,
         "email":         email,
-        "device_id":     device_id[:8] + "..." if device_id else None,
+        "device_id":     device_id,
         "last_seen":     last_seen
     }
 
