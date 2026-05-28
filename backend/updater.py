@@ -96,18 +96,18 @@ def _check_local_override():
     File: %APPDATA%\SEVEN\update_override.json
     """
     try:
-        import json
-        override = os.path.join(
+        override = os.path.normpath(os.path.join(
             os.environ.get("APPDATA", ""),
             "SEVEN", "update_override.json"
-        )
+        ))
         if not os.path.exists(override):
             return None
-        with open(override, "r") as f:
+        with open(override, "r", encoding="utf-8") as f:
             data = json.load(f)
         print(f"[UPDATER] Local override found: v{data.get('version')}")
         return data
-    except Exception:
+    except Exception as e:
+        print(f"[UPDATER] Override read error: {e}")
         return None
 
 

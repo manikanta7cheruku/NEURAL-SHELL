@@ -650,7 +650,7 @@ def force_update(version, download_url, size_mb=0, changelog=""):
     os.makedirs(app_data, exist_ok=True)
     override_path = os.path.join(app_data, "update_override.json")
 
-    with open(override_path, "w") as f:
+    with open(override_path, "w", encoding="utf-8") as f:
         json.dump(update_info, f, indent=2)
 
     print("=" * 60)
