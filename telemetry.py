@@ -49,17 +49,50 @@ _session = {
 # =============================================================================
 
 def get_device_id():
-    """Get or create unique device ID."""
+    """
+    Get permanent device ID.
+    Priority:
+      1. Cached file (fastest)
+      2. Windows MachineGuid registry (survives reinstall)
+      3. Generated UUID (fallback for non-Windows)
+    """
     os.makedirs(DATA_DIR, exist_ok=True)
-    
+
+    # Return cached if exists
     if os.path.exists(DEVICE_ID_FILE):
         with open(DEVICE_ID_FILE, "r") as f:
-            return f.read().strip()
+            did = f.read().strip()
+            if did:
+                return did
+
+    # Try Windows registry MachineGuid — survives uninstall/reinstall
+    machine_guid = None
+    try:
+        import winreg
+        key = winreg.OpenKey(
+            winreg.HKEY_LOCAL_MACHINE,
+            r"SOFTWARE\Microsoft\Cryptography",
+            0,
+            winreg.KEY_READ | winreg.KEY_WOW64_64KEY
+        )
+        machine_guid, _ = winreg.QueryValueEx(key, "MachineGuid")
+        winreg.CloseKey(key)
+        print(f"[TELEMETRY] Using Windows MachineGuid as device ID")
+    except Exception:
+        pass
+
+    if machine_guid:
+        device_id = machine_guid.strip()
     else:
+        # Fallback — generate UUID (non-Windows or registry unavailable)
         device_id = str(uuid.uuid4())
-        with open(DEVICE_ID_FILE, "w") as f:
-            f.write(device_id)
-        return device_id
+        print(f"[TELEMETRY] Generated new device ID (registry unavailable)")
+
+    # Cache it
+    with open(DEVICE_ID_FILE, "w") as f:
+        f.write(device_id)
+
+    return device_id
 
 # =============================================================================
 # EMAIL MANAGEMENT

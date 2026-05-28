@@ -1790,6 +1790,36 @@ class VoicePreviewRequest(BaseModel):
     voice_index: Optional[int] = 0
 
 
+@app.get("/api/setup/existing-identity")
+def get_existing_identity():
+    """
+    Check if this device has previously registered identity on server.
+    Called on wizard Step 1 mount — auto-fills name and email if found.
+    """
+    try:
+        import telemetry as tel
+        import requests as _req
+
+        device_id = tel.get_device_id()
+
+        # Ask server if this device is known
+        SERVER_URL = "https://seven-server-u2rp.onrender.com"
+        r = _req.get(
+            f"{SERVER_URL}/api/device/{device_id}",
+            timeout=5
+        )
+        if r.status_code == 200:
+            data = r.json()
+            return {
+                "found": True,
+                "name":  data.get("name"),
+                "email": data.get("email"),
+            }
+        return {"found": False}
+    except Exception:
+        return {"found": False}
+
+
 @app.post("/api/setup/complete")
 def complete_setup(req: SetupCompleteRequest):
     """
