@@ -40,15 +40,29 @@ def get_state():
 
 
 def _read_current_version():
-    """Read version from root package.json."""
+    """Read version from root package.json. Handles Windows path encoding."""
     try:
-        pkg_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "package.json"
-        )
-        with open(pkg_path, "r") as f:
-            return json.load(f).get("version", "1.1.0")
-    except Exception:
+        # Try multiple locations — works in both dev and packaged app
+        base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        candidates = [
+            os.path.join(base, "package.json"),
+            os.path.join(os.path.dirname(base), "package.json"),
+            os.path.join(
+                os.environ.get("SEVEN_APP_PATH", ""),
+                "..", "package.json"
+            ),
+        ]
+        for pkg_path in candidates:
+            pkg_path = os.path.normpath(pkg_path)
+            if os.path.exists(pkg_path):
+                with open(pkg_path, "r", encoding="utf-8") as f:
+                    version = json.load(f).get("version", "1.1.0")
+                    print(f"[UPDATER] Version {version} from {pkg_path}")
+                    return version
+        print("[UPDATER] package.json not found — using default version")
+        return "1.1.0"
+    except Exception as e:
+        print(f"[UPDATER] Version read error: {e}")
         return "1.1.0"
 
 
