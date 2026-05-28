@@ -163,7 +163,7 @@ export default function Settings() {
     // Check if email is being changed
     const originalEmail = config?.email || '';
     const emailChanged  = editEmail.trim() !== originalEmail.trim();
-    const hasLicense    = config?.license?.key && config?.license?.tier !== 'free';
+    const hasLicense    = config?.license?.tier && config?.license?.tier !== 'free';
 
     // Warn if email changed AND user has a license
     if (emailChanged && hasLicense) {
@@ -437,9 +437,8 @@ export default function Settings() {
                     </div>
                     <div className="flex gap-2">
                       <button
-                        onClick={() => navigate('/guide')}
-                        className="text-[10px] px-2 py-1 border border-s-accent/30 bg-s-accent/8 text-s-accent rounded hover:bg-s-accent/20"
-                      >
+                        onClick={() => navigate('/blog')}
+                        className="text-[10px] px-2 py-1 border border-s-accent/30 bg-s-accent/8 text-s-accent rounded hover:bg-s-accent/20">
                         How to use →
                       </button>
                       {t !== 'ultimate' && (
