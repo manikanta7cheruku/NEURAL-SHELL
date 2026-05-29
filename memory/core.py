@@ -292,7 +292,7 @@ class SevenMemory:
             }],
             ids=[fact_id]
         )
-        print(Fore.GREEN + f"[MEMORY] Stored fact: '{fact_text}'")
+        print(Fore.GREEN + f"[MEMORY] Stored fact: '{fact_text}'")  
 
     # =========================================================================
     # SEARCH
