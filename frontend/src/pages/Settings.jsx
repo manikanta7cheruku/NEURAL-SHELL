@@ -168,10 +168,10 @@ export default function Settings() {
     // Warn if email changed AND user has a license
     if (emailChanged && hasLicense) {
       const confirmed = window.confirm(
-        `⚠️ License Notice\n\n` +
-        `You're changing your email from:\n${originalEmail}\nto:\n${editEmail.trim()}\n\n` +
-        `Your current license is linked to your account. ` +
-        `If you change your email, you may need to re-enter your license key.\n\n` +
+        `License Notice\n\n` +
+        `You are changing your email from:\n${originalEmail}\nto:\n${editEmail.trim()}\n\n` +
+        `Your license will remain active on this device. ` +
+        `Future license keys and renewal emails will be sent to your new email address.\n\n` +
         `Do you want to continue?`
       );
       if (!confirmed) return;
