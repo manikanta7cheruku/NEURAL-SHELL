@@ -603,19 +603,8 @@ def export_memory():
     import sqlite3
     import config as cfg
 
-    # Check ultimate plan
+    # Export allowed for all tiers — it's your own data
     tier = get_current_tier()
-    features = license_module.TIER_FEATURES.get(tier, license_module.TIER_FEATURES["free"])
-    if not features.get("memory_export", False):
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "error": "feature_not_available",
-                "message": "Memory export is available on Ultimate plan only.",
-                "tier": tier,
-                "upgrade_to": "ultimate"
-            }
-        )
 
     export = {
         "exported_at": datetime.datetime.now().isoformat(),
@@ -793,10 +782,11 @@ def create_schedule(sched: ScheduleCreate):
     """Create a new schedule. Enforces plan limit."""
     import hands.scheduler as scheduler_mod
 
-    # Count current schedules
+    # Count only ACTIVE schedules (not fired/cancelled)
     try:
-        current_schedules = scheduler_mod.get_all_schedules()
-        schedule_count = len(current_schedules) if current_schedules else 0
+        all_schedules = scheduler_mod.get_all_schedules()
+        current_schedules = [s for s in (all_schedules or []) if s.get("status") == "active"]
+        schedule_count = len(current_schedules)
     except Exception:
         schedule_count = 0
 
@@ -1941,24 +1931,86 @@ def complete_setup(req: SetupCompleteRequest):
 
 
 @app.post("/api/setup/preview-voice")
-def preview_voice(req: VoicePreviewRequest):
+def preview_voice(req: dict):
     """
-    Plays a short TTS sample using selected voice index.
-    Runs in a daemon thread — API returns immediately.
+    Preview a voice by engine + voice_id.
+    Runs in daemon thread — returns immediately.
+    Accepts: { engine: "piper"|"sapi", voice_id: "en_US-ryan-high"|"0" }
     """
     import threading
+    import sys
+
+    engine_name = req.get("engine", "piper")
+    voice_id    = req.get("voice_id", "en_US-ryan-high")
+    sample_text = "Hello. I am Seven. Your private AI assistant. How can I help you today?"
 
     def _speak():
         try:
-            import pyttsx3
-            engine = pyttsx3.init()
-            voices = engine.getProperty('voices')
-            if voices and req.voice_index < len(voices):
-                engine.setProperty('voice', voices[req.voice_index].id)
-            engine.setProperty('rate', 185)
-            engine.setProperty('volume', 1.0)
-            engine.say("Hello. I am Seven. Your private AI assistant.")
-            engine.runAndWait()
+            if engine_name == "piper":
+                # Find piper dir
+                here      = os.path.dirname(os.path.abspath(__file__))
+                root      = os.path.dirname(here)
+                app_path  = os.environ.get("SEVEN_APP_PATH", "")
+
+                piper_dir = None
+                for c in [
+                    os.path.join(app_path, "mouth", "piper"),
+                    os.path.join(root,     "mouth", "piper"),
+                ]:
+                    if os.path.isdir(c) and os.path.exists(os.path.join(c, "piper.exe")):
+                        piper_dir = c
+                        break
+
+                if not piper_dir:
+                    raise Exception("Piper not installed")
+
+                model_path = os.path.join(piper_dir, "voices", f"{voice_id}.onnx")
+                if not os.path.exists(model_path):
+                    raise Exception(f"Model not found: {voice_id}")
+
+                import tempfile, subprocess as sp
+                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+                    tmp_path = tmp.name
+
+                result = sp.run(
+                    [os.path.join(piper_dir, "piper.exe"),
+                     "--model",       model_path,
+                     "--output_file", tmp_path],
+                    input=sample_text.encode("utf-8"),
+                    capture_output=True,
+                    timeout=15,
+                    cwd=piper_dir,
+                )
+
+                if result.returncode == 0:
+                    ps_script = (
+                        f"$p = New-Object System.Media.SoundPlayer('{tmp_path}'); "
+                        f"$p.PlaySync();"
+                    )
+                    sp.run(
+                        ["powershell", "-NoProfile", "-Command", ps_script],
+                        capture_output=True, timeout=30
+                    )
+                    try:
+                        os.unlink(tmp_path)
+                    except Exception:
+                        pass
+                else:
+                    raise Exception(result.stderr.decode("utf-8", errors="replace"))
+
+            else:
+                # SAPI fallback
+                import pyttsx3
+                eng    = pyttsx3.init()
+                sapi_v = eng.getProperty('voices')
+                idx    = int(voice_id) if voice_id.isdigit() else 0
+                if sapi_v and idx < len(sapi_v):
+                    eng.setProperty('voice', sapi_v[idx].id)
+                eng.setProperty('rate', 165)
+                eng.setProperty('volume', 1.0)
+                eng.say(sample_text)
+                eng.runAndWait()
+
         except Exception as e:
             print(f"[SETUP] Voice preview error: {e}")
 
@@ -1969,46 +2021,122 @@ def preview_voice(req: VoicePreviewRequest):
 @app.get("/api/setup/voices")
 def get_available_voices():
     """
-    Returns all available Windows TTS voices.
-    Called on Step 3 (Personalize) mount.
+    Returns Piper TTS voices + Windows SAPI voices.
+    Piper voices shown first (higher quality).
     """
+    import config as cfg
+
+    result = []
+
+    # ── 1. Piper voices (hardcoded catalogue — these are the bundled voices) ──
+    PIPER_VOICES = [
+        {
+            "engine":   "piper",
+            "voice_id": "en_US-ryan-high",
+            "name":     "Ryan",
+            "gender":   "Male",
+            "language": "American English",
+            "quality":  "Natural",
+            "flag":     "🇺🇸",
+        },
+        {
+            "engine":   "piper",
+            "voice_id": "en_US-amy-medium",
+            "name":     "Amy",
+            "gender":   "Female",
+            "language": "American English",
+            "quality":  "Natural",
+            "flag":     "🇺🇸",
+        },
+        {
+            "engine":   "piper",
+            "voice_id": "en_GB-alan-medium",
+            "name":     "Alan",
+            "gender":   "Male",
+            "language": "British English",
+            "quality":  "Natural",
+            "flag":     "🇬🇧",
+        },
+        {
+            "engine":   "piper",
+            "voice_id": "en_IN-maya-medium",
+            "name":     "Maya",
+            "gender":   "Female",
+            "language": "Indian English",
+            "quality":  "Natural",
+            "flag":     "🇮🇳",
+        },
+    ]
+
+    # Check which Piper voices are actually installed
+    try:
+        app_path  = os.environ.get("SEVEN_APP_PATH", "")
+        here      = os.path.dirname(os.path.abspath(__file__))
+        root      = os.path.dirname(here)
+
+        # Find piper voices directory
+        piper_voices_dir = None
+        candidates = [
+            os.path.join(app_path, "mouth", "piper", "voices"),
+            os.path.join(root, "mouth", "piper", "voices"),
+        ]
+        for c in candidates:
+            if os.path.isdir(c):
+                piper_voices_dir = c
+                break
+
+        for i, v in enumerate(PIPER_VOICES):
+            installed = False
+            if piper_voices_dir:
+                onnx = os.path.join(piper_voices_dir, f"{v['voice_id']}.onnx")
+                installed = os.path.exists(onnx)
+            result.append({
+                "index":     i,
+                "engine":    "piper",
+                "voice_id":  v["voice_id"],
+                "name":      v["name"],
+                "gender":    v["gender"],
+                "language":  v["language"],
+                "quality":   v["quality"],
+                "flag":      v["flag"],
+                "installed": installed,
+            })
+    except Exception as e:
+        print(f"[VOICES] Piper scan error: {e}")
+
+    # ── 2. Windows SAPI voices (fallback) ──
     try:
         import pyttsx3
         engine = pyttsx3.init()
-        voices = engine.getProperty('voices')
+        sapi_voices = engine.getProperty('voices')
+        engine.stop()
 
-        result = []
-        for i, v in enumerate(voices):
-            raw = v.name or f"Voice {i}"
-            # Strip Microsoft prefix and Desktop suffix
-            # "Microsoft Zira Desktop - English (United States)" → "Zira"
-            clean = raw.replace("Microsoft ", "")
-            clean = clean.split(" Desktop")[0].split(" -")[0].strip()
+        female_names = ["zira", "hazel", "helena", "linda", "susan",
+                        "eva", "aria", "jenny", "michelle", "emma"]
 
-            # Detect gender by common name patterns
-            female_names = ["zira", "hazel", "helena", "linda", "susan", "eva",
-                            "aria", "jenny", "michelle", "emma"]
+        for i, v in enumerate(sapi_voices or []):
+            raw   = v.name or f"Voice {i}"
+            clean = raw.replace("Microsoft ", "").split(" Desktop")[0].split(" -")[0].strip()
             gender = "Female" if any(n in clean.lower() for n in female_names) else "Male"
-
-            # Detect language
-            lang = "English"
+            lang   = "English"
             if "(" in raw and ")" in raw:
-                lang_raw = raw.split("(")[-1].split(")")[0]
-                lang = lang_raw.strip()
+                lang = raw.split("(")[-1].split(")")[0].strip()
 
             result.append({
-                "index": i,
-                "name": clean,
-                "full_name": raw,
-                "gender": gender,
-                "language": lang,
+                "index":     len(result),
+                "engine":    "sapi",
+                "voice_id":  str(i),
+                "name":      clean,
+                "gender":    gender,
+                "language":  lang,
+                "quality":   "Standard",
+                "flag":      "🪟",
+                "installed": True,
             })
-
-        engine.stop()
-        return {"voices": result, "count": len(result)}
-
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"[VOICES] SAPI scan error: {e}")
+
+    return {"voices": result, "count": len(result)}
     
 # =========================================================================
 # UPDATE SYSTEM ENDPOINTS (Phase 6)

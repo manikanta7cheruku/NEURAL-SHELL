@@ -30,6 +30,7 @@ export default function Schedules() {
   const [saving,   setSaving]   = useState(false);
   const [tier,     setTier]     = useState('free');
   const [limitMsg, setLimitMsg] = useState('');
+  const [createError,  setCreateError]  = useState('');
 
   const SCHEDULE_LIMITS = { free: 7, pro: 17, ultimate: Infinity };
 
@@ -45,7 +46,8 @@ export default function Schedules() {
   const limit  = SCHEDULE_LIMITS[tier] ?? 7;
   const atLimit = active.length >= limit;
 
-  const submit = async () => {
+    const submit = async () => {
+    setCreateError('');
     if (atLimit) {
       setLimitMsg(
         tier === 'free'
@@ -54,16 +56,31 @@ export default function Schedules() {
       );
       return;
     }
+    if (!form.message.trim()) {
+      setCreateError('Please enter a message.');
+      return;
+    }
+    if (form.type !== 'timer' && !form.time.trim()) {
+      setCreateError('Please enter a time — e.g. 5pm, tomorrow, in 30 min.');
+      return;
+    }
+    if (form.type === 'timer' && !form.duration) {
+      setCreateError('Please enter duration in minutes.');
+      return;
+    }
     setSaving(true);
-    const d = { type: form.type, message: form.message };
+    const d = { type: form.type, message: form.message.trim() };
     if (form.type === 'timer') d.duration = parseInt(form.duration || 0) * 60;
-    else if (form.time) d.time = form.time;
+    else d.time = form.time.trim();
     const r = await add(d);
     setSaving(false);
     if (r.ok) {
       setShow(false);
       setForm({ type: 'reminder', message: '', time: '', duration: '' });
       setLimitMsg('');
+      setCreateError('');
+    } else {
+      setCreateError(r.msg || 'Failed to create. Check time format and try again.');
     }
   };
 
@@ -178,16 +195,21 @@ export default function Schedules() {
               placeholder="Message..."
               className="w-full bg-s-bg border border-s-border rounded px-2 py-1.5 text-[11px] text-s-text placeholder-s-text-4"
             />
+            {createError && (
+              <div className="text-[10px] text-s-red bg-s-red/8 border border-s-red/20 rounded px-2 py-1.5">
+                {createError}
+              </div>
+            )}
             <div className="flex justify-end gap-2">
               <button
-                onClick={() => { setShow(false); setLimitMsg(''); }}
+                onClick={() => { setShow(false); setLimitMsg(''); setCreateError(''); }}
                 className="text-[10px] text-s-text-4 px-2 py-1 hover:text-s-text-3"
               >
                 Cancel
               </button>
               <button
                 onClick={submit}
-                disabled={!form.message || saving}
+                disabled={saving}
                 className="px-3 py-1 border border-s-accent/30 bg-s-accent/8 text-s-accent rounded text-[10px] font-medium disabled:opacity-40 hover:bg-s-accent/20"
               >
                 {saving ? 'Creating...' : 'Create'}

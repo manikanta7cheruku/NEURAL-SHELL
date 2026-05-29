@@ -34,6 +34,8 @@ export default function Settings() {
   // Voice selector
   const [voices,           setVoices]           = useState([]);
   const [selectedVoice,    setSelectedVoice]    = useState(0);
+  const [selectedVoiceId,  setSelectedVoiceId]  = useState('en_US-ryan-high');
+  const [selectedEngine,   setSelectedEngine]   = useState('piper');
   const [previewingVoice,  setPreviewingVoice]  = useState(null);
 
   // Identity editing
@@ -61,7 +63,10 @@ export default function Settings() {
       setVoices(r.data.voices || []);
     }).catch(() => {});
     api.get('/config').then(r => {
-      setSelectedVoice(r.data?.voice?.voice_index || 0);
+      const v = r.data?.voice || {};
+      setSelectedVoice(v.voice_index ?? 0);
+      setSelectedVoiceId(v.voice_id || 'en_US-ryan-high');
+      setSelectedEngine(v.engine || 'piper');
     }).catch(() => {});
     api.get('/voice-control/words').then(r => setVoiceWords(r.data)).catch(() => {
       setVoiceWords({
@@ -261,18 +266,31 @@ export default function Settings() {
   const addVoiceWord    = t => { setVoiceWords(p => ({ ...p, [t]: [...p[t], ''] })); setVoiceWordsEdited(true); };
   const removeVoiceWord = (t, i) => { setVoiceWords(p => ({ ...p, [t]: p[t].filter((_,j) => j!==i) })); setVoiceWordsEdited(true); };
 
-  const previewVoice = async (index) => {
-    setPreviewingVoice(index);
+  const previewVoice = async (voice) => {
+    setPreviewingVoice(voice.index);
     try {
-      await api.post('/setup/preview-voice', { voice_index: index });
+      await api.post('/setup/preview-voice', {
+        engine:   voice.engine,
+        voice_id: voice.voice_id,
+      });
     } catch {}
-    setTimeout(() => setPreviewingVoice(null), 3000);
+    setTimeout(() => setPreviewingVoice(null), 5000);
   };
 
-  const saveVoiceIndex = async (index) => {
-    setSelectedVoice(index);
+  const saveVoice = async (voice) => {
+    setSelectedVoice(voice.index);
+    setSelectedVoiceId(voice.voice_id);
+    setSelectedEngine(voice.engine);
     try {
-      await api.put('/config', { updates: { voice: { voice_index: index } } });
+      await api.put('/config', {
+        updates: {
+          voice: {
+            voice_index: voice.index,
+            voice_id:    voice.voice_id,
+            engine:      voice.engine,
+          }
+        }
+      });
     } catch {}
   };
 
@@ -551,111 +569,144 @@ export default function Settings() {
 
         {/* ── SEVEN'S VOICE ── */}
         <div className="bg-s-card border border-s-border rounded p-4">
-          <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium mb-3">
-            Seven's Voice
+          <div className="flex items-center justify-between mb-3">
+            <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium">
+              Seven's Voice
+            </div>
+            <span className="text-[8px] text-s-accent bg-s-accent/8 border border-s-accent/20 px-1.5 py-0.5 rounded font-medium">
+              Piper TTS · Human Quality
+            </span>
           </div>
-          <p className="text-[10px] text-s-text-4 mb-3">
-            Select the voice Seven speaks with. Click Preview to hear it.
-          </p>
 
           {voices.length === 0 ? (
-            <div className="text-[11px] text-s-text-4">Loading voices...</div>
+            <div className="text-[11px] text-s-text-4 py-2">Loading voices...</div>
           ) : (
-            <div className="space-y-2">
-              {/* Male voices */}
-              {voices.filter(v => v.gender === 'Male').length > 0 && (
-                <div>
-                  <div className="text-[9px] text-s-text-4 mb-1.5 flex items-center gap-1.5">
-                    <span className="w-3 h-px bg-s-border inline-block" />
-                    Male
-                    <span className="w-full h-px bg-s-border inline-block" />
-                  </div>
-                  <div className="grid grid-cols-2 gap-1.5">
-                    {voices.filter(v => v.gender === 'Male').map(v => (
-                      <div
-                        key={v.index}
-                        onClick={() => saveVoiceIndex(v.index)}
-                        className={`flex items-center justify-between px-3 py-2 rounded border cursor-pointer transition-all ${
-                          selectedVoice === v.index
-                            ? 'border-s-accent bg-s-accent/8'
-                            : 'border-s-border bg-s-bg hover:border-s-accent/40'
-                        }`}
-                      >
-                        <div>
-                          <div className="text-[11px] text-s-text-2 font-medium">{v.name}</div>
-                          <div className="text-[9px] text-s-text-4">{v.language}</div>
-                        </div>
-                        <div className="flex items-center gap-1.5">
-                          {selectedVoice === v.index && (
-                            <span className="text-[8px] text-s-accent font-medium">ACTIVE</span>
-                          )}
+            <div className="space-y-1">
+
+              {/* Group: Piper (Natural) */}
+              {voices.filter(v => v.engine === 'piper').length > 0 && (
+                <div className="space-y-px">
+                  {['Female','Male'].map(gender => {
+                    const gVoices = voices.filter(v => v.engine === 'piper' && v.gender === gender);
+                    if (!gVoices.length) return null;
+                    return gVoices.map(v => {
+                      const isActive = selectedVoice === v.index;
+                      const isPreviewing = previewingVoice === v.index;
+                      return (
+                        <div
+                          key={v.index}
+                          onClick={() => saveVoice(v)}
+                          className={`flex items-center gap-2.5 px-3 py-2 rounded border cursor-pointer transition-all ${
+                            isActive
+                              ? 'border-s-accent bg-s-accent/8'
+                              : 'border-s-border bg-s-bg hover:border-s-accent/30 hover:bg-s-card-h'
+                          }`}
+                        >
+                          {/* Flag */}
+                          <span className="text-base leading-none shrink-0">{v.flag}</span>
+
+                          {/* Info */}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[11px] text-s-text font-medium">{v.name}</span>
+                              <span className={`text-[8px] px-1 py-px rounded font-medium ${
+                                gender === 'Female'
+                                  ? 'text-pink-400 bg-pink-400/10'
+                                  : 'text-blue-400 bg-blue-400/10'
+                              }`}>{gender}</span>
+                              {isActive && (
+                                <span className="text-[8px] text-s-accent font-bold">● ACTIVE</span>
+                              )}
+                            </div>
+                            <div className="text-[9px] text-s-text-4">{v.language}</div>
+                          </div>
+
+                          {/* Quality badge */}
+                          <span className="text-[8px] text-s-green bg-s-green/10 border border-s-green/20 px-1.5 py-0.5 rounded shrink-0">
+                            Natural
+                          </span>
+
+                          {/* Preview */}
                           <button
-                            onClick={e => { e.stopPropagation(); previewVoice(v.index); }}
-                            className={`text-[9px] px-2 py-0.5 rounded border transition-colors ${
-                              previewingVoice === v.index
-                                ? 'border-s-accent bg-s-accent/15 text-s-accent'
+                            onClick={e => { e.stopPropagation(); previewVoice(v); }}
+                            disabled={!v.installed}
+                            className={`shrink-0 text-[9px] px-2 py-0.5 rounded border transition-colors ${
+                              isPreviewing
+                                ? 'border-s-accent bg-s-accent/20 text-s-accent'
+                                : v.installed
+                                  ? 'border-s-border text-s-text-4 hover:border-s-accent/40 hover:text-s-accent'
+                                  : 'border-s-border/30 text-s-text-4/40 cursor-not-allowed'
+                            }`}
+                          >
+                            {isPreviewing ? '▶ Playing' : v.installed ? 'Preview' : 'N/A'}
+                          </button>
+                        </div>
+                      );
+                    });
+                  })}
+                </div>
+              )}
+
+              {/* Divider: SAPI fallback voices */}
+              {voices.filter(v => v.engine === 'sapi').length > 0 && (
+                <div className="pt-1">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-[8px] text-s-text-4 uppercase tracking-wider">Windows Built-in</span>
+                    <div className="flex-1 h-px bg-s-border" />
+                    <span className="text-[8px] text-s-text-4">Standard quality</span>
+                  </div>
+                  <div className="space-y-px">
+                    {voices.filter(v => v.engine === 'sapi').map(v => {
+                      const isActive = selectedVoice === v.index;
+                      const isPreviewing = previewingVoice === v.index;
+                      return (
+                        <div
+                          key={v.index}
+                          onClick={() => saveVoice(v)}
+                          className={`flex items-center gap-2.5 px-3 py-1.5 rounded border cursor-pointer transition-all ${
+                            isActive
+                              ? 'border-s-accent bg-s-accent/8'
+                              : 'border-s-border/50 bg-s-bg/50 hover:border-s-accent/30'
+                          }`}
+                        >
+                          <span className="text-base leading-none shrink-0">{v.flag}</span>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[10px] text-s-text-3 font-medium">{v.name}</span>
+                              {isActive && (
+                                <span className="text-[8px] text-s-accent font-bold">● ACTIVE</span>
+                              )}
+                            </div>
+                            <div className="text-[9px] text-s-text-4">{v.language}</div>
+                          </div>
+                          <button
+                            onClick={e => { e.stopPropagation(); previewVoice(v); }}
+                            className={`shrink-0 text-[9px] px-2 py-0.5 rounded border transition-colors ${
+                              isPreviewing
+                                ? 'border-s-accent bg-s-accent/20 text-s-accent'
                                 : 'border-s-border text-s-text-4 hover:border-s-accent/40 hover:text-s-accent'
                             }`}
                           >
-                            {previewingVoice === v.index ? '▶ Playing' : 'Preview'}
+                            {isPreviewing ? '▶ Playing' : 'Preview'}
                           </button>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               )}
 
-              {/* Female voices */}
-              {voices.filter(v => v.gender === 'Female').length > 0 && (
-                <div>
-                  <div className="text-[9px] text-s-text-4 mb-1.5 flex items-center gap-1.5">
-                    <span className="w-3 h-px bg-s-border inline-block" />
-                    Female
-                    <span className="w-full h-px bg-s-border inline-block" />
-                  </div>
-                  <div className="grid grid-cols-2 gap-1.5">
-                    {voices.filter(v => v.gender === 'Female').map(v => (
-                      <div
-                        key={v.index}
-                        onClick={() => saveVoiceIndex(v.index)}
-                        className={`flex items-center justify-between px-3 py-2 rounded border cursor-pointer transition-all ${
-                          selectedVoice === v.index
-                            ? 'border-s-accent bg-s-accent/8'
-                            : 'border-s-border bg-s-bg hover:border-s-accent/40'
-                        }`}
-                      >
-                        <div>
-                          <div className="text-[11px] text-s-text-2 font-medium">{v.name}</div>
-                          <div className="text-[9px] text-s-text-4">{v.language}</div>
-                        </div>
-                        <div className="flex items-center gap-1.5">
-                          {selectedVoice === v.index && (
-                            <span className="text-[8px] text-s-accent font-medium">ACTIVE</span>
-                          )}
-                          <button
-                            onClick={e => { e.stopPropagation(); previewVoice(v.index); }}
-                            className={`text-[9px] px-2 py-0.5 rounded border transition-colors ${
-                              previewingVoice === v.index
-                                ? 'border-s-accent bg-s-accent/15 text-s-accent'
-                                : 'border-s-border text-s-text-4 hover:border-s-accent/40 hover:text-s-accent'
-                            }`}
-                          >
-                            {previewingVoice === v.index ? '▶ Playing' : 'Preview'}
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+              {/* Download tip for missing Piper voices */}
+              {voices.some(v => v.engine === 'piper' && !v.installed) && (
+                <div className="mt-1 px-3 py-2 bg-s-yellow/5 border border-s-yellow/20 rounded flex items-start gap-2">
+                  <span className="text-[10px] shrink-0">⚠️</span>
+                  <p className="text-[9px] text-s-text-4 leading-relaxed">
+                    Some Piper voices are not installed. Download voice models into{' '}
+                    <span className="font-mono text-s-accent">mouth/piper/voices/</span>.
+                    See docs for instructions.
+                  </p>
                 </div>
               )}
-
-              <div className="mt-2 bg-s-bg border border-s-border rounded px-3 py-2">
-                <p className="text-[9px] text-s-text-4">
-                  💡 Windows has 2–3 built-in voices. For more natural voices install
-                  additional Windows TTS voices from Settings → Time & Language → Speech.
-                </p>
-              </div>
             </div>
           )}
         </div>

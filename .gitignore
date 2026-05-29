@@ -56,3 +56,10 @@ data/
 
 # Cline
 .cline/
+
+# Piper TTS — binaries and voice models (large files, bundled with installer separately)
+mouth/piper/piper.exe
+mouth/piper/*.dll
+mouth/piper/espeak-ng-data/
+mouth/piper/voices/*.onnx
+mouth/piper/voices/*.onnx.json
