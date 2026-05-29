@@ -257,11 +257,30 @@ class SevenMemory:
         print(Fore.CYAN + f"[MEMORY] Stored conversation: '{user_input[:50]}...'")
 
     def store_fact(self, fact_text, category="general", user_id="mani"):
+        # ── Plan limit check ──
+        try:
+            import voice_limits
+            current = self.user_facts.count()
+            allowed, _ = voice_limits.check("facts_limit", current)
+            if not allowed:
+                print(Fore.YELLOW +
+                      f"[LIMIT] Fact limit reached ({current}) "
+                      f"tier={voice_limits.get_tier()} — not storing")
+                # Raise so API can catch and return 403
+                raise PermissionError(
+                    f"facts_limit|{voice_limits.get_tier()}|{current}"
+                )
+        except PermissionError:
+            raise
+        except ImportError:
+            pass  # voice_limits not available — allow
+
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         fact_id   = f"fact_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
         existing  = self._search_collection(self.user_facts, fact_text, n_results=1)
         if existing and existing[0]["relevance"] > 0.85:
-            print(Fore.YELLOW + f"[MEMORY] Updating existing fact: '{fact_text[:50]}...'")
+            print(Fore.YELLOW +
+                  f"[MEMORY] Updating existing fact: '{fact_text[:50]}...'")
             self.user_facts.delete(ids=[existing[0]["id"]])
         self.user_facts.add(
             documents=[fact_text],

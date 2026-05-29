@@ -447,6 +447,38 @@ def seven_logic():
             api_set_state("thinking", True)
             api_set_state("listening", False)
 
+            # ── Pre-check fact limit before brain thinks ──
+            # If user is trying to store a fact and they're at limit,
+            # tell them immediately without wasting LLM call
+            _fact_triggers = [
+                "remember that", "remember this", "my name is",
+                "call me", "i love", "i like", "i prefer",
+                "i am a", "i work at", "i study at",
+                "my favorite", "my favourite"
+            ]
+            _is_fact_intent = any(
+                t in user_input.lower() for t in _fact_triggers
+            )
+            if _is_fact_intent:
+                try:
+                    import voice_limits
+                    _current_facts = seven_memory.user_facts.count()
+                    _fact_ok, _fact_msg = voice_limits.check(
+                        "facts_limit", _current_facts
+                    )
+                    if not _fact_ok:
+                        api_set_state("speaking", True)
+                        mouth.speak(_fact_msg)
+                        api_set_state("speaking", False)
+                        app_ui.update_status("PLAN LIMIT", "#ffaa00")
+                        print(Fore.YELLOW +
+                              f"[LIMIT] Fact limit pre-check blocked "
+                              f"({_current_facts}) "
+                              f"tier={voice_limits.get_tier()}")
+                        continue
+                except Exception:
+                    pass
+
             response = brain.think(user_input, speaker_id=speaker_id)
             telemetry.log_activity()
 
@@ -504,18 +536,28 @@ def seven_logic():
             api_set_state("speaking", False)
             api_set_state("thinking", False)
 
-            # ── Store conversation ──
+            # ── Store conversation (enforce plan limit) ──
             if should_store and isinstance(response, str):
                 try:
-                    clean_response = re.sub(r'###\w+:\s*\S+', '', response).strip()
-                    if not completed and clean_response:
-                        clean_response = f"[INTERRUPTED] {clean_response}"
-                    if clean_response:
-                        seven_memory.store_conversation(
-                            user_input, clean_response,
-                            user_id=speaker_id if speaker_id not in ("default", "unknown")
-                                   else "default"
-                        )
+                    import voice_limits
+                    current_convos = seven_memory.conversations.count()
+                    allowed, limit_msg = voice_limits.check(
+                        "conversation_history", current_convos
+                    )
+                    if allowed:
+                        clean_response = re.sub(r'###\w+:\s*\S+', '', response).strip()
+                        if not completed and clean_response:
+                            clean_response = f"[INTERRUPTED] {clean_response}"
+                        if clean_response:
+                            seven_memory.store_conversation(
+                                user_input, clean_response,
+                                user_id=speaker_id if speaker_id not in
+                                        ("default", "unknown") else "default"
+                            )
+                    else:
+                        # Don't block the conversation — just stop saving
+                        print(Fore.YELLOW + f"[LIMIT] Conversation memory full "
+                              f"({current_convos}) tier={voice_limits.get_tier()}")
                 except Exception as e:
                     print(Fore.RED + f"[MEMORY ERROR] {e}")
 
@@ -546,7 +588,7 @@ def seven_logic():
                     except Exception as e:
                         print(Fore.RED + f"[WINDOW CMD ERROR] {e}")
 
-            # Scheduler commands
+            # Scheduler commands (enforce plan limit)
             sched_cmds = re.findall(r"###SCHED:\s*(.*?)(?=###|$)", response)
             for param_str in sched_cmds:
                 params = {"speaker_id": speaker_id}
@@ -555,6 +597,45 @@ def seven_logic():
                         k, v = pair.split("=", 1)
                         params[k.strip()] = v.strip()
                 if params:
+                    action = params.get("action", "")
+
+                    # Only check limits for CREATE actions
+                    if action in ("alarm", "reminder", "timer", "event"):
+                        import voice_limits
+
+                        # Check recurring schedule permission
+                        recur = params.get("recur", "")
+                        if recur and recur not in ("", "none"):
+                            rec_ok, rec_msg = voice_limits.check_bool(
+                                "recurring_schedules"
+                            )
+                            if not rec_ok:
+                                api_set_state("speaking", True)
+                                mouth.speak(rec_msg)
+                                api_set_state("speaking", False)
+                                app_ui.update_status(
+                                    "📅 PLAN LIMIT", "#ffaa00"
+                                )
+                                continue
+
+                        # Check schedule count limit
+                        current_scheds = scheduler_mod.get_active_count()
+                        sched_ok, sched_msg = voice_limits.check(
+                            "schedules", current_scheds
+                        )
+                        if not sched_ok:
+                            api_set_state("speaking", True)
+                            mouth.speak(sched_msg)
+                            api_set_state("speaking", False)
+                            app_ui.update_status(
+                                "📅 PLAN LIMIT", "#ffaa00"
+                            )
+                            print(Fore.YELLOW +
+                                  f"[LIMIT] Schedule limit hit "
+                                  f"({current_scheds}) "
+                                  f"tier={voice_limits.get_tier()}")
+                            continue
+
                     success, msg = scheduler_mod.manage_schedule(params)
                     telemetry.log_activity()
                     if success:

@@ -29,6 +29,12 @@ export default function Settings() {
   const [voiceWords,       setVoiceWords]       = useState(null);
   const [voiceWordsEdited, setVoiceWordsEdited] = useState(false);
   const [savingVoice,      setSavingVoice]      = useState(false);
+  const [editingVoice,     setEditingVoice]     = useState(false);
+
+  // Voice selector
+  const [voices,           setVoices]           = useState([]);
+  const [selectedVoice,    setSelectedVoice]    = useState(0);
+  const [previewingVoice,  setPreviewingVoice]  = useState(null);
 
   // Identity editing
   const [editName,    setEditName]    = useState('');
@@ -51,6 +57,12 @@ export default function Settings() {
     fc();
     api.get('/hardware').then(r => setHw(r.data)).catch(() => {});
     api.get('/speed').then(r => setSpeed(r.data)).catch(() => {});
+    api.get('/setup/voices').then(r => {
+      setVoices(r.data.voices || []);
+    }).catch(() => {});
+    api.get('/config').then(r => {
+      setSelectedVoice(r.data?.voice?.voice_index || 0);
+    }).catch(() => {});
     api.get('/voice-control/words').then(r => setVoiceWords(r.data)).catch(() => {
       setVoiceWords({
         wake_words:     ['seven', 'hey seven'],
@@ -248,6 +260,21 @@ export default function Settings() {
 
   const addVoiceWord    = t => { setVoiceWords(p => ({ ...p, [t]: [...p[t], ''] })); setVoiceWordsEdited(true); };
   const removeVoiceWord = (t, i) => { setVoiceWords(p => ({ ...p, [t]: p[t].filter((_,j) => j!==i) })); setVoiceWordsEdited(true); };
+
+  const previewVoice = async (index) => {
+    setPreviewingVoice(index);
+    try {
+      await api.post('/setup/preview-voice', { voice_index: index });
+    } catch {}
+    setTimeout(() => setPreviewingVoice(null), 3000);
+  };
+
+  const saveVoiceIndex = async (index) => {
+    setSelectedVoice(index);
+    try {
+      await api.put('/config', { updates: { voice: { voice_index: index } } });
+    } catch {}
+  };
 
   // ── Export ──
   const exportData = async () => {
@@ -522,29 +549,162 @@ export default function Settings() {
           </div>
         </div>
 
-        {/* ── VOICE CONTROL ── */}
+        {/* ── SEVEN'S VOICE ── */}
+        <div className="bg-s-card border border-s-border rounded p-4">
+          <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium mb-3">
+            Seven's Voice
+          </div>
+          <p className="text-[10px] text-s-text-4 mb-3">
+            Select the voice Seven speaks with. Click Preview to hear it.
+          </p>
+
+          {voices.length === 0 ? (
+            <div className="text-[11px] text-s-text-4">Loading voices...</div>
+          ) : (
+            <div className="space-y-2">
+              {/* Male voices */}
+              {voices.filter(v => v.gender === 'Male').length > 0 && (
+                <div>
+                  <div className="text-[9px] text-s-text-4 mb-1.5 flex items-center gap-1.5">
+                    <span className="w-3 h-px bg-s-border inline-block" />
+                    Male
+                    <span className="w-full h-px bg-s-border inline-block" />
+                  </div>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {voices.filter(v => v.gender === 'Male').map(v => (
+                      <div
+                        key={v.index}
+                        onClick={() => saveVoiceIndex(v.index)}
+                        className={`flex items-center justify-between px-3 py-2 rounded border cursor-pointer transition-all ${
+                          selectedVoice === v.index
+                            ? 'border-s-accent bg-s-accent/8'
+                            : 'border-s-border bg-s-bg hover:border-s-accent/40'
+                        }`}
+                      >
+                        <div>
+                          <div className="text-[11px] text-s-text-2 font-medium">{v.name}</div>
+                          <div className="text-[9px] text-s-text-4">{v.language}</div>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          {selectedVoice === v.index && (
+                            <span className="text-[8px] text-s-accent font-medium">ACTIVE</span>
+                          )}
+                          <button
+                            onClick={e => { e.stopPropagation(); previewVoice(v.index); }}
+                            className={`text-[9px] px-2 py-0.5 rounded border transition-colors ${
+                              previewingVoice === v.index
+                                ? 'border-s-accent bg-s-accent/15 text-s-accent'
+                                : 'border-s-border text-s-text-4 hover:border-s-accent/40 hover:text-s-accent'
+                            }`}
+                          >
+                            {previewingVoice === v.index ? '▶ Playing' : 'Preview'}
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Female voices */}
+              {voices.filter(v => v.gender === 'Female').length > 0 && (
+                <div>
+                  <div className="text-[9px] text-s-text-4 mb-1.5 flex items-center gap-1.5">
+                    <span className="w-3 h-px bg-s-border inline-block" />
+                    Female
+                    <span className="w-full h-px bg-s-border inline-block" />
+                  </div>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {voices.filter(v => v.gender === 'Female').map(v => (
+                      <div
+                        key={v.index}
+                        onClick={() => saveVoiceIndex(v.index)}
+                        className={`flex items-center justify-between px-3 py-2 rounded border cursor-pointer transition-all ${
+                          selectedVoice === v.index
+                            ? 'border-s-accent bg-s-accent/8'
+                            : 'border-s-border bg-s-bg hover:border-s-accent/40'
+                        }`}
+                      >
+                        <div>
+                          <div className="text-[11px] text-s-text-2 font-medium">{v.name}</div>
+                          <div className="text-[9px] text-s-text-4">{v.language}</div>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          {selectedVoice === v.index && (
+                            <span className="text-[8px] text-s-accent font-medium">ACTIVE</span>
+                          )}
+                          <button
+                            onClick={e => { e.stopPropagation(); previewVoice(v.index); }}
+                            className={`text-[9px] px-2 py-0.5 rounded border transition-colors ${
+                              previewingVoice === v.index
+                                ? 'border-s-accent bg-s-accent/15 text-s-accent'
+                                : 'border-s-border text-s-text-4 hover:border-s-accent/40 hover:text-s-accent'
+                            }`}
+                          >
+                            {previewingVoice === v.index ? '▶ Playing' : 'Preview'}
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="mt-2 bg-s-bg border border-s-border rounded px-3 py-2">
+                <p className="text-[9px] text-s-text-4">
+                  💡 Windows has 2–3 built-in voices. For more natural voices install
+                  additional Windows TTS voices from Settings → Time & Language → Speech.
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* ── VOICE CONTROL COMMANDS ── */}
         <div className={`bg-s-card border rounded p-4 ${
-          canEditVoice ? 'border-s-border' : 'border-s-accent/30'
+          canEditVoice ? 'border-s-border' : 'border-s-border/50'
         }`}>
           <div className="flex items-center justify-between mb-3">
-            <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium">
-              Voice Control Commands
+            <div>
+              <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium">
+                Voice Control Commands
+              </div>
+              <div className="text-[9px] text-s-text-4 mt-0.5">
+                Words that control Seven's listening behavior
+              </div>
             </div>
-            {!canEditVoice && (
-              <span className="text-[9px] px-2 py-0.5 bg-s-accent/10 text-s-accent rounded font-medium">
-                PRO to Edit
-              </span>
-            )}
+            <div className="flex items-center gap-2">
+              {!canEditVoice && (
+                <span className="text-[9px] px-2 py-0.5 bg-s-accent/10 text-s-accent rounded font-medium">
+                  PRO
+                </span>
+              )}
+              {canEditVoice && (
+                <button
+                  onClick={() => {
+                    if (editingVoice && voiceWordsEdited) saveVoiceWords();
+                    setEditingVoice(p => !p);
+                  }}
+                  className={`text-[10px] px-2.5 py-1 rounded border font-medium transition-colors ${
+                    editingVoice
+                      ? 'border-s-accent bg-s-accent/8 text-s-accent'
+                      : 'border-s-border text-s-text-3 hover:border-s-accent/40 hover:text-s-accent'
+                  }`}
+                >
+                  {editingVoice ? (savingVoice ? 'Saving...' : 'Done') : 'Edit'}
+                </button>
+              )}
+            </div>
           </div>
 
           {!canEditVoice && (
-            <div className="mb-3 p-2 bg-s-accent/5 border border-s-accent/20 rounded">
+            <div className="mb-3 p-2.5 bg-s-accent/5 border border-s-accent/20 rounded flex items-center justify-between">
               <p className="text-[10px] text-s-text-3">
-                Upgrade to Pro to customize wake words, pause words, and more.
+                Customize wake words, pause words, and more with Pro.
               </p>
               <button
                 onClick={() => navigate('/plans')}
-                className="mt-1 text-[10px] text-s-accent underline"
+                className="text-[10px] text-s-accent font-medium hover:underline ml-3 shrink-0"
               >
                 Upgrade →
               </button>
@@ -552,23 +712,23 @@ export default function Settings() {
           )}
 
           {voiceWords && (
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-2 gap-3">
               {[
-                { key: 'wake_words',     label: 'Wake Words',     desc: 'Activate Seven',       color: 'text-s-green'  },
-                { key: 'pause_words',    label: 'Pause Words',    desc: 'Pause listening',       color: 'text-yellow-400' },
-                { key: 'resume_words',   label: 'Resume Words',   desc: 'Resume after pause',    color: 'text-blue-400' },
-                { key: 'shutdown_words', label: 'Shutdown Words', desc: 'Close Seven',           color: 'text-s-red'    },
+                { key: 'wake_words',     label: 'Wake Words',     desc: 'Activate Seven',    color: 'text-s-green'    },
+                { key: 'pause_words',    label: 'Pause Words',    desc: 'Pause listening',   color: 'text-yellow-400' },
+                { key: 'resume_words',   label: 'Resume Words',   desc: 'Resume after pause',color: 'text-blue-400'   },
+                { key: 'shutdown_words', label: 'Shutdown Words', desc: 'Close Seven',       color: 'text-s-red'      },
               ].map(({ key, label, desc, color }) => (
                 <div key={key}>
-                  <div className="flex items-center justify-between mb-1">
+                  <div className="flex items-center justify-between mb-1.5">
                     <div>
-                      <label className="text-[10px] text-s-text-2 font-medium">{label}</label>
-                      <p className="text-[8px] text-s-text-4">{desc}</p>
+                      <div className="text-[10px] text-s-text-2 font-medium">{label}</div>
+                      <div className="text-[8px] text-s-text-4">{desc}</div>
                     </div>
-                    {canEditVoice && (
+                    {canEditVoice && editingVoice && (
                       <button
                         onClick={() => addVoiceWord(key)}
-                        className="text-[9px] text-s-accent hover:text-s-accent/80"
+                        className="text-[9px] text-s-accent hover:text-s-accent/80 font-medium"
                       >
                         + Add
                       </button>
@@ -578,45 +738,33 @@ export default function Settings() {
                     {voiceWords[key]?.map((word, i) => (
                       <div
                         key={i}
-                        className={`flex items-center gap-1 bg-s-bg border border-s-border rounded px-1.5 py-0.5 ${
-                          !canEditVoice ? 'opacity-70' : ''
-                        }`}
+                        className="flex items-center gap-1 bg-s-bg border border-s-border rounded px-1.5 py-0.5"
                       >
-                        {canEditVoice ? (
-                          <input
-                            value={word}
-                            onChange={e => updateVoiceWord(key, i, e.target.value)}
-                            className={`bg-transparent text-[10px] ${color} font-mono w-16 focus:outline-none`}
-                            placeholder="word"
-                          />
+                        {canEditVoice && editingVoice ? (
+                          <>
+                            <input
+                              value={word}
+                              onChange={e => updateVoiceWord(key, i, e.target.value)}
+                              className={`bg-transparent text-[10px] ${color} font-mono w-16 focus:outline-none`}
+                              placeholder="word"
+                            />
+                            {voiceWords[key].length > 1 && (
+                              <button
+                                onClick={() => removeVoiceWord(key, i)}
+                                className="text-s-red/60 hover:text-s-red text-[9px] ml-0.5"
+                              >
+                                ✕
+                              </button>
+                            )}
+                          </>
                         ) : (
                           <span className={`text-[10px] ${color} font-mono`}>{word}</span>
-                        )}
-                        {canEditVoice && voiceWords[key].length > 1 && (
-                          <button
-                            onClick={() => removeVoiceWord(key, i)}
-                            className="text-s-red text-[9px] hover:opacity-70 ml-0.5"
-                          >
-                            ✕
-                          </button>
                         )}
                       </div>
                     ))}
                   </div>
                 </div>
               ))}
-
-              {canEditVoice && voiceWordsEdited && (
-                <div className="col-span-2">
-                  <button
-                    onClick={saveVoiceWords}
-                    disabled={savingVoice}
-                    className="w-full py-2 border border-s-accent/30 bg-s-accent/8 text-s-accent rounded text-[11px] font-medium hover:bg-s-accent/20"
-                  >
-                    {savingVoice ? 'Saving...' : 'Save Voice Commands'}
-                  </button>
-                </div>
-              )}
             </div>
           )}
         </div>

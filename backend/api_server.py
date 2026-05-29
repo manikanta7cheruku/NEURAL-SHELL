@@ -247,11 +247,11 @@ def get_status():
         try:
             import config
             model = config.KEY.get("brain", {}).get("model_name", "unknown")
-            version = config.KEY.get("version", "1.1.0")
+            version = config.KEY.get("version", "1.1.3")
         except Exception as e:
             print(f"[API] /status config error: {e}")
             model = "unknown"
-            version = "1.1.0"
+            version = "1.1.3"
 
         try:
             import telemetry as _tel
@@ -301,7 +301,7 @@ def get_status():
             "uptime": "0h 0m",
             "uptime_seconds": 0,
             "speaker": "default",
-            "version": "1.1.0",
+            "version": "1.1.3",
             "error_debug": str(e)
         }
 
@@ -618,8 +618,8 @@ def export_memory():
         )
 
     export = {
-        "exported_at": datetime.now().isoformat(),
-        "version": "1.1.0",
+        "exported_at": datetime.datetime.now().isoformat(),
+        "version": "1.1.3",
         "identity": {
             "name":  cfg.KEY.get("identity", {}).get("user_name", ""),
             "email": cfg.KEY.get("email", ""),
@@ -690,30 +690,57 @@ def export_memory():
 
 @app.post("/api/memory/import")
 async def import_memory(request: Request):
-    """Import user data from backup JSON."""
+    """Import user data from backup JSON. Bypasses plan limits — restoring your own data."""
     try:
         data = await request.json()
         from memory import seven_memory
+        from memory.core import SevenMemory
         imported = {"facts": 0, "conversations": 0}
 
         for fact in data.get("facts", []):
             if fact.get("text"):
-                seven_memory.store_fact(
-                    fact["text"],
-                    category=fact.get("category","imported")
-                )
-                imported["facts"] += 1
+                try:
+                    # Call ChromaDB directly — bypass plan limit check
+                    import datetime as _dt
+                    fact_id = f"fact_import_{_dt.datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
+                    seven_memory.user_facts.add(
+                        documents=[fact["text"]],
+                        metadatas=[{
+                            "category":  fact.get("category", "imported"),
+                            "timestamp": _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            "user_id":   "default",
+                            "type":      "fact"
+                        }],
+                        ids=[fact_id]
+                    )
+                    imported["facts"] += 1
+                except Exception:
+                    pass
 
         for conv in data.get("conversations", []):
             if conv.get("user") and conv.get("seven"):
-                seven_memory.store_conversation(
-                    conv["user"], conv["seven"]
-                )
-                imported["conversations"] += 1
+                try:
+                    import datetime as _dt
+                    conv_id = f"conv_import_{_dt.datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
+                    combined = f"User said: {conv['user']} | Seven replied: {conv['seven']}"
+                    seven_memory.conversations.add(
+                        documents=[combined],
+                        metadatas=[{
+                            "user_input":     conv["user"],
+                            "seven_response": conv["seven"],
+                            "timestamp":      _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            "user_id":        "default",
+                            "type":           "conversation"
+                        }],
+                        ids=[conv_id]
+                    )
+                    imported["conversations"] += 1
+                except Exception:
+                    pass
 
         return {
-            "success": True,
-            "imported_facts":         imported["facts"],
+            "success":               True,
+            "imported_facts":        imported["facts"],
             "imported_conversations": imported["conversations"]
         }
     except Exception as e:
@@ -2016,7 +2043,7 @@ def get_update_status():
             "download_path": None,
             "error": str(e),
             "info": None,
-            "current_version": "1.1.0"
+            "current_version": "1.1.3"
         }
 
 

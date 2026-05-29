@@ -256,7 +256,7 @@ export default function Home() {
         <div className="bg-gradient-to-r from-s-accent/5 to-s-accent/10 border border-s-accent/20 rounded p-3">
           <div className="flex items-start justify-between">
             <div className="flex-1">
-              <div className="text-[12px] font-medium text-s-text mb-1">🎁 Share Seven, Unlock Premium</div>
+              <div className="text-[12px] font-medium text-s-text mb-1">Share Seven, Unlock Premium</div>
               <p className="text-[10px] text-s-text-3 mb-2">
                 When your friend uses Seven for 7 hours, <strong className="text-s-accent">you get Ultimate free for 1 month</strong> and <strong className="text-s-green">they get Pro free for 1 month!</strong>
               </p>
