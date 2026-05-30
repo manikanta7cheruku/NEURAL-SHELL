@@ -8,6 +8,11 @@ SERVER_URL  = "https://seven-server-u2rp.onrender.com"
 TIMEOUT     = 8
 CHECK_DELAY = 15
 
+_DOWNLOAD_CACHE_FILE = os.path.normpath(os.path.join(
+    os.environ.get("APPDATA", ""),
+    "SEVEN", "pending_update.json"
+))
+
 _state = {
     "update_available":  False,
     "checking":          False,
@@ -17,6 +22,50 @@ _state = {
     "error":             None,
     "info":              None,
 }
+
+
+def _load_pending_download():
+    """On startup — check if a download was completed before restart."""
+    try:
+        if not os.path.exists(_DOWNLOAD_CACHE_FILE):
+            return
+        with open(_DOWNLOAD_CACHE_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        path = data.get("download_path", "")
+        if path and os.path.exists(path):
+            _state["download_path"]     = path
+            _state["download_progress"] = 100
+            _state["update_available"]  = True
+            _state["info"]              = data.get("info")
+            print("[UPDATER] Pending download restored: " + path)
+        else:
+            # File gone — clean up
+            os.remove(_DOWNLOAD_CACHE_FILE)
+    except Exception:
+        pass
+
+
+def _save_pending_download(path, info):
+    """Save download path so it survives app restart."""
+    try:
+        os.makedirs(os.path.dirname(_DOWNLOAD_CACHE_FILE), exist_ok=True)
+        with open(_DOWNLOAD_CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump({"download_path": path, "info": info}, f)
+    except Exception:
+        pass
+
+
+def _clear_pending_download():
+    """Clear after successful install."""
+    try:
+        if os.path.exists(_DOWNLOAD_CACHE_FILE):
+            os.remove(_DOWNLOAD_CACHE_FILE)
+    except Exception:
+        pass
+
+
+# Load on module import
+_load_pending_download()
 
 
 def get_state():
@@ -185,6 +234,7 @@ def download_update(progress_callback=None):
         _state["download_progress"] = 100
         _state["download_path"]     = dest
         _state["downloading"]       = False
+        _save_pending_download(dest, _state.get("info"))
         return True, dest, None
 
     except Exception as e:

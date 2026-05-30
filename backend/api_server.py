@@ -2226,19 +2226,30 @@ def trigger_install():
     Signal Electron to run the downloaded installer and quit the app.
     Only valid when download_path exists.
     """
-    import os as _os
+    import os
+    import sys
     try:
         try:
-            from backend import updater
+            from backend import updater as _updater
         except ModuleNotFoundError:
-            import sys
-            sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
-            import updater
+            _backend_dir = os.path.dirname(os.path.abspath(__file__))
+            if _backend_dir not in sys.path:
+                sys.path.insert(0, _backend_dir)
+            import updater as _updater
 
-        state = updater.get_state()
-        path = state.get("download_path")
-        if not path or not _os.path.exists(path):
-            raise HTTPException(status_code=400, detail="Installer not downloaded yet")
+        state = _updater.get_state()
+        path  = state.get("download_path")
+
+        if not path:
+            raise HTTPException(status_code=400, detail="No download in progress")
+        if not os.path.exists(path):
+            raise HTTPException(status_code=400, detail="Downloaded file not found. Please download again.")
+
+        # Clear pending cache after install triggered
+        try:
+            _updater._clear_pending_download()
+        except Exception:
+            pass
 
         return {"success": True, "installer_path": path}
     except HTTPException:

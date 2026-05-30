@@ -28,11 +28,9 @@ export default function UpdateBanner() {
 
   return (
     <div className={`flex-shrink-0 flex items-center justify-between px-5 py-2.5 border-b ${
-      downloadReady
-        ? 'bg-s-green/5 border-s-green/15'
-        : info?.is_critical
+      info?.is_critical
         ? 'bg-s-red/5 border-s-red/15'
-        : 'bg-s-accent/5 border-s-accent/10'
+        : 'bg-s-card border-s-border'
     }`}>
 
       {/* Left — status text */}
@@ -78,12 +76,11 @@ export default function UpdateBanner() {
       <div className="flex items-center gap-2 flex-shrink-0 ml-4">
 
         {downloadReady ? (
-          /* Download ready — show Restart & Install, no dismiss */
           <button
             onClick={installUpdate}
-            className="text-[11px] px-4 py-1.5 rounded-lg bg-s-green text-white font-medium tracking-wide hover:bg-s-green/90 transition-colors"
+            className="text-[11px] px-4 py-1.5 rounded-lg border border-s-border bg-s-card text-s-text-2 font-medium tracking-wide hover:border-s-border-l hover:text-s-text transition-colors"
           >
-            Restart & Install
+            Restart & install
           </button>
         ) : downloading ? (
           /* Downloading — show progress only, no buttons */
