@@ -17,40 +17,19 @@ function VersionBadge({ label, version, accent }) {
   );
 }
 
-function HoverButton({ onClick, disabled, children, variant = 'primary', className = '' }) {
-  const [hovered, setHovered] = useState(false);
-
-  const base = "relative overflow-hidden flex-1 py-3.5 text-sm font-medium tracking-wide transition-all duration-200 flex items-center justify-center gap-2";
-
-  const variants = {
-    primary: `text-white border ${hovered ? 'border-s-accent bg-s-accent/10' : 'border-s-accent/40 bg-s-accent'}`,
-    install: `text-s-text border ${hovered ? 'border-s-text-2 bg-s-card-h' : 'border-s-border bg-s-card'}`,
-    ghost:   `text-s-text-3 border ${hovered ? 'border-s-border-l text-s-text-2' : 'border-s-border'}`,
-  };
-
+function HoverButton({ onClick, disabled, children, className = '' }) {
   return (
     <button
       onClick={onClick}
       disabled={disabled}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      className={`${base} ${variants[variant]} rounded-xl disabled:opacity-40 disabled:cursor-not-allowed ${className}`}
+      className={`group relative overflow-hidden py-3.5 rounded-xl border border-s-border bg-s-card text-[13px] font-medium tracking-wide text-s-text-2 hover:text-s-text hover:border-s-border-l transition-all duration-200 flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed ${className}`}
     >
-      {/* Hover line animation — left and right lines meet in center */}
-      <span
-        className="absolute top-0 h-px bg-s-accent/60 transition-all duration-300"
-        style={{
-          left:  hovered ? '0%'  : '50%',
-          right: hovered ? '0%'  : '50%',
-        }}
-      />
-      <span
-        className="absolute bottom-0 h-px bg-s-accent/60 transition-all duration-300"
-        style={{
-          left:  hovered ? '0%'  : '50%',
-          right: hovered ? '0%'  : '50%',
-        }}
-      />
+      {/* Top line — expands from center on hover, retracts on hover out */}
+      <span className="absolute top-0 left-1/2 h-px bg-s-text-3/50 w-0 group-hover:w-full group-hover:left-0 transition-all duration-300 ease-out" />
+
+      {/* Bottom line — expands from center on hover, retracts on hover out */}
+      <span className="absolute bottom-0 left-1/2 h-px bg-s-text-3/50 w-0 group-hover:w-full group-hover:left-0 transition-all duration-300 ease-out" />
+
       {children}
     </button>
   );
@@ -122,26 +101,28 @@ export default function Updates() {
             )}
 
             {/* Check button */}
-            <HoverButton
-              onClick={checkNow}
-              disabled={checking}
-              variant="ghost"
-            >
-              {checking ? (
-                <>
-                  <div className="w-3 h-3 rounded-full border border-s-text-3/30 border-t-s-text-3 animate-spin" />
-                  Checking...
-                </>
-              ) : (
-                <>
-                  <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
-                    <path d="M11 6.5A4.5 4.5 0 112 6.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
-                    <path d="M11 3.5V6.5H8" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
-                  </svg>
-                  Check for updates
-                </>
-              )}
-            </HoverButton>
+            <div className="w-full flex justify-center">
+              <HoverButton
+                onClick={checkNow}
+                disabled={checking}
+                className="w-full max-w-xs"
+              >
+                {checking ? (
+                  <>
+                    <div className="w-3 h-3 rounded-full border border-s-text-3/30 border-t-s-text-3 animate-spin" />
+                    Checking...
+                  </>
+                ) : (
+                  <>
+                    <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+                      <path d="M11 6.5A4.5 4.5 0 112 6.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+                      <path d="M11 3.5V6.5H8" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                    Check for updates
+                  </>
+                )}
+              </HoverButton>
+            </div>
 
           </div>
         </div>
@@ -178,7 +159,7 @@ export default function Updates() {
       />
 
       <div className="flex-1 overflow-y-auto">
-        <div className="p-5 space-y-4 max-w-xl">
+        <div className="p-5 space-y-4 max-w-lg mx-auto">
 
           {/* Critical notice */}
           {info?.is_critical && (
@@ -282,10 +263,10 @@ export default function Updates() {
           )}
 
           {/* Action buttons */}
-          <div className="flex gap-3">
+          <div className="flex gap-3 w-full">
             {downloadReady ? (
               <>
-                <HoverButton onClick={installUpdate} variant="install">
+                  <HoverButton onClick={installUpdate} variant="install">
                   <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
                     <path d="M2 11L11 2M11 2H5M11 2V8"
                       stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
@@ -294,15 +275,12 @@ export default function Updates() {
                 </HoverButton>
               </>
             ) : downloading ? (
-              <button
-                disabled
-                className="flex-1 py-3.5 rounded-xl bg-s-card border border-s-border text-s-text-4 text-[13px] font-light flex items-center justify-center gap-2"
-              >
+              <HoverButton disabled className="flex-1">
                 <div className="w-3 h-3 rounded-full border border-s-text-4/30 border-t-s-text-4 animate-spin" />
                 Downloading...
-              </button>
+              </HoverButton>
             ) : (
-              <HoverButton onClick={startDownload} variant="primary">
+                <HoverButton onClick={startDownload} className="flex-1">
                 <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
                   <path d="M6.5 2V9M6.5 9L3 5.5M6.5 9L10 5.5M1.5 11H11.5"
                     stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
