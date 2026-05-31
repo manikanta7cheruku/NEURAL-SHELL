@@ -247,11 +247,11 @@ def get_status():
         try:
             import config
             model = config.KEY.get("brain", {}).get("model_name", "unknown")
-            version = config.KEY.get("version", "1.1.3")
+            version = config.KEY.get("version", "1.1.4")
         except Exception as e:
             print(f"[API] /status config error: {e}")
             model = "unknown"
-            version = "1.1.3"
+            version = "1.1.4"
 
         try:
             import telemetry as _tel
@@ -301,7 +301,7 @@ def get_status():
             "uptime": "0h 0m",
             "uptime_seconds": 0,
             "speaker": "default",
-            "version": "1.1.3",
+            "version": "1.1.4",
             "error_debug": str(e)
         }
 
@@ -608,7 +608,7 @@ def export_memory():
 
     export = {
         "exported_at": datetime.datetime.now().isoformat(),
-        "version": "1.1.3",
+        "version": "1.1.4",
         "identity": {
             "name":  cfg.KEY.get("identity", {}).get("user_name", ""),
             "email": cfg.KEY.get("email", ""),
@@ -2171,7 +2171,7 @@ def get_update_status():
             "download_path": None,
             "error": str(e),
             "info": None,
-            "current_version": "1.1.3"
+            "current_version": "1.1.4"
         }
 
 
@@ -2245,9 +2245,13 @@ def trigger_install():
         if not os.path.exists(path):
             raise HTTPException(status_code=400, detail="Downloaded file not found. Please download again.")
 
-        # Clear pending cache after install triggered
+        # Clear pending cache AND in-memory state after install triggered
         try:
             _updater._clear_pending_download()
+            _updater._state["download_path"]     = None
+            _updater._state["download_progress"] = 0
+            _updater._state["update_available"]  = False
+            _updater._state["info"]              = None
         except Exception:
             pass
 
