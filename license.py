@@ -313,8 +313,15 @@ def activate_license(license_key: str, email: str = None) -> Tuple[bool, str, Op
             else:
                 expiry_msg = f"{days_left} days remaining"
 
-            print(f"[LICENSE] ✅ Server validated: {tier.upper()} ({expiry_msg})")
-            return True, f"License activated successfully ({tier.upper()})", {
+            print("[LICENSE] Activated: " + tier.upper() + " (" + expiry_msg + ")")
+
+            # Tell server to update license_tier in users table
+            try:
+                _sync_tier_to_server(device_id, tier, license_key)
+            except Exception as _e:
+                print("[LICENSE] Tier sync warning: " + str(_e))
+
+            return True, "License activated successfully (" + tier.upper() + ")", {
                 "tier":       tier,
                 "expires_at": expires_at,
                 "source":     "server"
@@ -403,12 +410,47 @@ def activate_license(license_key: str, email: str = None) -> Tuple[bool, str, Op
         }
     })
 
-    print(f"[LICENSE] ✅ Local validated: {tier.upper()}")
-    return True, f"License activated successfully ({tier.upper()})", {
+    print("[LICENSE] Local validated: " + tier.upper())
+
+    # Tell server to update license_tier in users table
+    try:
+        _sync_tier_to_server(device_id, tier, license_key)
+    except Exception as _e:
+        print("[LICENSE] Tier sync warning: " + str(_e))
+
+    return True, "License activated successfully (" + tier.upper() + ")", {
         "tier":       tier,
         "expires_at": expires_at,
         "source":     "local"
     }
+
+
+def _sync_tier_to_server(device_id, tier, license_key):
+    """
+    Update license_tier in server users table after activation.
+    This makes admin dashboard show correct tier.
+    """
+    try:
+        import urllib.request
+        payload = json.dumps({
+            "device_id":     device_id,
+            "license_key":   license_key,
+            "license_tier":  tier
+        }).encode("utf-8")
+
+        req = urllib.request.Request(
+            SERVER_URL + "/api/license/sync-tier",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            result = json.loads(resp.read().decode())
+            print("[LICENSE] Tier synced to server: " + tier)
+            return result
+    except Exception as e:
+        print("[LICENSE] Tier sync failed (ok): " + str(e))
+        return None
 
 
 def _save_local_activation(license_key, tier, expires_at, device_id):
