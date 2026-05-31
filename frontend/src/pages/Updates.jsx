@@ -22,15 +22,15 @@ function HoverButton({ onClick, disabled, children, className = '' }) {
     <button
       onClick={onClick}
       disabled={disabled}
-      className={`group relative overflow-hidden py-3.5 rounded-xl border border-s-border bg-s-card text-[13px] font-medium tracking-wide text-s-text-2 hover:text-s-text hover:border-s-border-l transition-all duration-200 flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed ${className}`}
+      className={`group relative py-3.5 rounded-xl border border-s-border bg-s-card text-[13px] font-medium tracking-wide text-s-text-2 hover:text-s-text transition-all duration-500 flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed ${className}`}
     >
-      {/* Top line — expands from center on hover, retracts on hover out */}
-      <span className="absolute top-0 left-1/2 h-px bg-s-text-3/50 w-0 group-hover:w-full group-hover:left-0 transition-all duration-300 ease-out" />
+      {/* The Wrapper Border Effect */}
+      <span className="absolute inset-[-1px] rounded-xl border border-s-text-3/50 scale-x-0 transition-transform duration-500 ease-out group-hover:scale-x-100 pointer-events-none" />
 
-      {/* Bottom line — expands from center on hover, retracts on hover out */}
-      <span className="absolute bottom-0 left-1/2 h-px bg-s-text-3/50 w-0 group-hover:w-full group-hover:left-0 transition-all duration-300 ease-out" />
-
-      {children}
+      {/* Button content needs to stay on top of the absolute border */}
+      <span className="relative z-10 flex items-center justify-center gap-2">
+        {children}
+      </span>
     </button>
   );
 }
