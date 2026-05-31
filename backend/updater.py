@@ -64,7 +64,7 @@ def _clear_pending_download():
         pass
 
 
-# Load on module import
+# Load pending download state on startup
 _load_pending_download()
 
 
