@@ -263,9 +263,44 @@ def get_defaults():
             "expires_at": None
         },
         "setup_complete": False,
-        "version": "1.1.0"
+        "version": "1.1.4"
     }
 
 
 # ── Load immediately on import ──
 KEY = load_config()
+
+
+def sync_version():
+    """
+    Read version from package.json and update config.json.
+    Called on startup so home page always shows correct version.
+    """
+    try:
+        import json as _json
+        base = os.path.dirname(os.path.abspath(__file__))
+        candidates = [
+            os.path.join(base, "package.json"),
+            os.path.join(os.path.dirname(base), "package.json"),
+        ]
+        app_path = os.environ.get("SEVEN_APP_PATH", "")
+        if app_path:
+            candidates.append(
+                os.path.normpath(os.path.join(app_path, "..", "package.json"))
+            )
+
+        for pkg_path in candidates:
+            pkg_path = os.path.normpath(pkg_path)
+            if os.path.exists(pkg_path):
+                with open(pkg_path, "r", encoding="utf-8") as f:
+                    pkg_version = _json.load(f).get("version", "")
+                if pkg_version and pkg_version != KEY.get("version", ""):
+                    KEY["version"] = pkg_version
+                    save_config()
+                    print("[CONFIG] Version synced: " + pkg_version)
+                return
+    except Exception as e:
+        print("[CONFIG] Version sync skipped: " + str(e))
+
+
+sync_version()
