@@ -26,9 +26,16 @@ from typing import Dict, Optional, Tuple
 # CONFIGURATION
 # =============================================================================
 
-DATA_DIR = "data"
-LICENSE_DB = os.path.join(DATA_DIR, "license.db")
-CACHE_FILE = os.path.join(DATA_DIR, "license_cache.json")
+def _get_data_dir():
+    """Always use %APPDATA%\SEVEN\data — works in dev and packaged."""
+    appdata = os.environ.get('APPDATA', os.path.expanduser('~'))
+    d = os.path.join(appdata, 'SEVEN', 'data')
+    os.makedirs(d, exist_ok=True)
+    return d
+
+DATA_DIR       = _get_data_dir()
+LICENSE_DB     = os.path.join(DATA_DIR, "license.db")
+CACHE_FILE     = os.path.join(DATA_DIR, "license_cache.json")
 DEVICE_ID_FILE = os.path.join(DATA_DIR, "device_id.txt")
 
 OFFLINE_GRACE_DAYS = 30
@@ -596,8 +603,56 @@ def validate_license(online: bool = True) -> Dict:
         except:
             pass
     
-    # No license found
-    return {"tier": "free", "valid": True, "expires_at": None, 
+    # No license in DB — check config.json as fallback
+    try:
+        import config as _cfg
+        cfg_tier = _cfg.KEY.get("license", {}).get("tier", "free")
+        cfg_key  = _cfg.KEY.get("license", {}).get("key", "")
+        cfg_exp  = _cfg.KEY.get("license", {}).get("expires_at", None)
+        cfg_ver  = _cfg.KEY.get("license", {}).get("verified", False)
+
+        if cfg_tier != "free" and cfg_ver and cfg_key:
+            # Config says PRO/Ultimate — trust it
+            # Also fix the DB so it's consistent next time
+            try:
+                _appdata  = os.environ.get("APPDATA", os.path.expanduser("~"))
+                _db       = os.path.join(_appdata, "SEVEN", "data", "license.db")
+                _conn     = sqlite3.connect(_db)
+                _c        = _conn.cursor()
+                _c.execute("""
+                    UPDATE activations SET license_key = ?
+                    WHERE device_id = ?
+                """, (cfg_key, device_id))
+                _conn.commit()
+                _conn.close()
+                print("[LICENSE] Fixed DB from config fallback")
+            except Exception:
+                pass
+
+            days_left = None
+            if cfg_exp:
+                try:
+                    expiry = datetime.fromisoformat(cfg_exp)
+                    if datetime.now() > expiry:
+                        return {"tier": "free", "valid": False,
+                                "expires_at": cfg_exp, "days_until_expiry": 0,
+                                "offline_mode": False}
+                    days_left = (expiry - datetime.now()).days
+                except Exception:
+                    pass
+
+            _update_cache(cfg_tier, cfg_exp, cfg_key)
+            return {
+                "tier":              cfg_tier,
+                "valid":             True,
+                "expires_at":        cfg_exp,
+                "days_until_expiry": days_left,
+                "offline_mode":      False
+            }
+    except Exception as _e:
+        print("[LICENSE] Config fallback error: " + str(_e))
+
+    return {"tier": "free", "valid": True, "expires_at": None,
             "days_until_expiry": None, "offline_mode": False}
 
 def _update_cache(tier: str, expires_at: Optional[str], license_key: str):
