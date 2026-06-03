@@ -73,6 +73,58 @@ def get_state():
 
 
 def _read_current_version():
+    """
+    Read app version.
+    Priority:
+      1. version.txt (written by Electron on startup — most reliable)
+      2. package.json (dev mode fallback)
+    """
+    try:
+        import sys
+        base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        app_path = os.environ.get("SEVEN_APP_PATH", "")
+
+        # All places to look for version.txt
+        version_txt_candidates = [
+            os.path.join(app_path, "version.txt") if app_path else None,
+            os.path.join(base, "version.txt"),
+            os.path.join(os.path.dirname(base), "version.txt"),
+        ]
+
+        for vp in version_txt_candidates:
+            if not vp:
+                continue
+            vp = os.path.normpath(vp)
+            if os.path.exists(vp):
+                with open(vp, "r", encoding="utf-8") as f:
+                    v = f.read().strip().lstrip("\ufeff")
+                if v:
+                    print("[UPDATER] Version " + v + " (from version.txt)")
+                    return v
+
+        # Fallback: package.json for dev mode
+        pkg_candidates = [
+            os.path.join(app_path, "package.json") if app_path else None,
+            os.path.join(base, "package.json"),
+            os.path.join(os.path.dirname(base), "package.json"),
+        ]
+
+        for p in pkg_candidates:
+            if not p:
+                continue
+            p = os.path.normpath(p)
+            if os.path.exists(p):
+                with open(p, "r", encoding="utf-8") as f:
+                    content = f.read().lstrip("\ufeff")
+                    v = json.loads(content).get("version", "1.1.0")
+                print("[UPDATER] Version " + v + " (from package.json)")
+                return v
+
+        print("[UPDATER] No version source found")
+        return "1.1.0"
+    except Exception as e:
+        print("[UPDATER] Version read error: " + str(e))
+        return "1.1.0"
     try:
         import sys
         base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

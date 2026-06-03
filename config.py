@@ -273,13 +273,63 @@ KEY = load_config()
 
 def sync_version():
     """
-    Read version from package.json and update config.json.
-    Searches multiple locations — works in dev and packaged app.
+    Read version from version.txt (written by Electron) or package.json.
+    Updates config.json so home page shows correct version.
     """
     try:
         import json as _json
-        base = os.path.dirname(os.path.abspath(__file__))
+        base     = os.path.dirname(os.path.abspath(__file__))
         app_path = os.environ.get("SEVEN_APP_PATH", "")
+
+        version_found = None
+
+        # Priority 1: version.txt (Electron writes this on startup)
+        version_txt_candidates = [
+            os.path.join(app_path, "version.txt") if app_path else None,
+            os.path.join(base, "version.txt"),
+            os.path.join(os.path.dirname(base), "version.txt"),
+        ]
+        for vp in version_txt_candidates:
+            if not vp:
+                continue
+            vp = os.path.normpath(vp)
+            if os.path.exists(vp):
+                with open(vp, "r", encoding="utf-8") as f:
+                    v = f.read().strip().lstrip("\ufeff")
+                if v:
+                    version_found = v
+                    print("[CONFIG] Version " + v + " from version.txt")
+                    break
+
+        # Priority 2: package.json (dev mode)
+        if not version_found:
+            pkg_candidates = [
+                os.path.join(app_path, "package.json") if app_path else None,
+                os.path.join(base, "package.json"),
+                os.path.join(os.path.dirname(base), "package.json"),
+            ]
+            for p in pkg_candidates:
+                if not p:
+                    continue
+                p = os.path.normpath(p)
+                if os.path.exists(p):
+                    with open(p, "r", encoding="utf-8") as f:
+                        content = f.read().lstrip("\ufeff")
+                        version_found = _json.loads(content).get("version", "")
+                    if version_found:
+                        print("[CONFIG] Version " + version_found + " from package.json")
+                        break
+
+        if version_found and version_found != KEY.get("version", ""):
+            KEY["version"] = version_found
+            save_config()
+            print("[CONFIG] Version updated to " + version_found)
+
+    except Exception as e:
+        print("[CONFIG] Version sync error: " + str(e))
+
+
+        sync_version()
 
         candidates = [
             # Dev mode — project root
