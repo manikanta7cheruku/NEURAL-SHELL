@@ -274,33 +274,48 @@ KEY = load_config()
 def sync_version():
     """
     Read version from package.json and update config.json.
-    Called on startup so home page always shows correct version.
+    Searches multiple locations — works in dev and packaged app.
     """
     try:
         import json as _json
         base = os.path.dirname(os.path.abspath(__file__))
+        app_path = os.environ.get("SEVEN_APP_PATH", "")
+
         candidates = [
+            # Dev mode — project root
             os.path.join(base, "package.json"),
             os.path.join(os.path.dirname(base), "package.json"),
+            # Packaged app — SEVEN_APP_PATH points to resources/app/
+            os.path.join(app_path, "package.json") if app_path else None,
+            os.path.join(app_path, "..", "package.json") if app_path else None,
+            # Packaged app — relative to Python executable
+            os.path.join(os.path.dirname(os.path.abspath(
+                __import__("sys").executable)), "package.json"),
+            os.path.join(os.path.dirname(os.path.abspath(
+                __import__("sys").executable)), "..", "app", "package.json"),
         ]
-        app_path = os.environ.get("SEVEN_APP_PATH", "")
-        if app_path:
-            candidates.append(
-                os.path.normpath(os.path.join(app_path, "..", "package.json"))
-            )
+
+        # Remove None entries
+        candidates = [os.path.normpath(c) for c in candidates if c]
 
         for pkg_path in candidates:
-            pkg_path = os.path.normpath(pkg_path)
             if os.path.exists(pkg_path):
                 with open(pkg_path, "r", encoding="utf-8") as f:
-                    pkg_version = _json.load(f).get("version", "")
-                if pkg_version and pkg_version != KEY.get("version", ""):
-                    KEY["version"] = pkg_version
-                    save_config()
-                    print("[CONFIG] Version synced: " + pkg_version)
-                return
+                    content = f.read().lstrip("\ufeff")  # Remove BOM
+                    pkg_version = _json.loads(content).get("version", "")
+                if pkg_version:
+                    if pkg_version != KEY.get("version", ""):
+                        KEY["version"] = pkg_version
+                        save_config()
+                        print("[CONFIG] Version synced to " + pkg_version)
+                    else:
+                        print("[CONFIG] Version already current: " + pkg_version)
+                    return
+
+        print("[CONFIG] package.json not found in any location")
+
     except Exception as e:
-        print("[CONFIG] Version sync skipped: " + str(e))
+        print("[CONFIG] Version sync error: " + str(e))
 
 
 sync_version()

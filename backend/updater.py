@@ -74,25 +74,38 @@ def get_state():
 
 def _read_current_version():
     try:
+        import sys
         base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        app_path = os.environ.get("SEVEN_APP_PATH", "")
+        exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+
         candidates = [
+            # Dev mode
             os.path.join(base, "package.json"),
             os.path.join(os.path.dirname(base), "package.json"),
+            # Packaged — SEVEN_APP_PATH
+            os.path.join(app_path, "package.json") if app_path else None,
+            os.path.join(app_path, "..", "package.json") if app_path else None,
+            # Packaged — relative to Python exe
+            os.path.join(exe_dir, "package.json"),
+            os.path.join(exe_dir, "..", "app", "package.json"),
+            os.path.join(exe_dir, "..", "..", "app", "package.json"),
         ]
-        app_path = os.environ.get("SEVEN_APP_PATH", "")
-        if app_path:
-            candidates.append(os.path.join(app_path, "..", "package.json"))
+
+        candidates = [os.path.normpath(c) for c in candidates if c]
 
         for p in candidates:
-            p = os.path.normpath(p)
             if os.path.exists(p):
                 with open(p, "r", encoding="utf-8") as f:
-                    v = json.load(f).get("version", "1.1.0")
-                print("[UPDATER] Version: " + v)
+                    content = f.read().lstrip("\ufeff")
+                    v = json.loads(content).get("version", "1.1.0")
+                print("[UPDATER] Version " + v + " from " + p)
                 return v
 
+        print("[UPDATER] package.json not found anywhere")
         return "1.1.0"
-    except Exception:
+    except Exception as e:
+        print("[UPDATER] Version read error: " + str(e))
         return "1.1.0"
 
 
