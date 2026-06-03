@@ -171,11 +171,15 @@ def init_db():
 # =============================================================================
 
 def get_device_id() -> str:
-    """Get device ID from telemetry system."""
-    if os.path.exists(DEVICE_ID_FILE):
-        with open(DEVICE_ID_FILE, "r") as f:
-            return f.read().strip()
-    else:
+    """Get device ID — delegates to telemetry for consistency."""
+    try:
+        import telemetry as _tel
+        return _tel.get_device_id()
+    except Exception:
+        # Fallback
+        if os.path.exists(DEVICE_ID_FILE):
+            with open(DEVICE_ID_FILE, "r") as f:
+                return f.read().strip()
         device_id = str(uuid.uuid4())
         with open(DEVICE_ID_FILE, "w") as f:
             f.write(device_id)

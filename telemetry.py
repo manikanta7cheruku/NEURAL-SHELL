@@ -53,8 +53,8 @@ def get_device_id():
     Get permanent device ID.
     Priority:
       1. Cached file (fastest)
-      2. Windows MachineGuid registry (survives reinstall)
-      3. Generated UUID (fallback for non-Windows)
+      2. Windows MachineGuid (survives reinstall)
+      3. Generated UUID (fallback)
     """
     os.makedirs(DATA_DIR, exist_ok=True)
 
@@ -65,7 +65,7 @@ def get_device_id():
             if did:
                 return did
 
-    # Try Windows registry MachineGuid — survives uninstall/reinstall
+    # Try Windows registry MachineGuid
     machine_guid = None
     try:
         import winreg
@@ -77,16 +77,11 @@ def get_device_id():
         )
         machine_guid, _ = winreg.QueryValueEx(key, "MachineGuid")
         winreg.CloseKey(key)
-        print(f"[TELEMETRY] Using Windows MachineGuid as device ID")
+        print("[TELEMETRY] Using Windows MachineGuid as device ID")
     except Exception:
         pass
 
-    if machine_guid:
-        device_id = machine_guid.strip()
-    else:
-        # Fallback — generate UUID (non-Windows or registry unavailable)
-        device_id = str(uuid.uuid4())
-        print(f"[TELEMETRY] Generated new device ID (registry unavailable)")
+    device_id = machine_guid.strip() if machine_guid else str(uuid.uuid4())
 
     # Cache it
     with open(DEVICE_ID_FILE, "w") as f:
