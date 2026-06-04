@@ -436,6 +436,9 @@ def seven_logic():
                 is_active = False
                 mouth.speak("Standing by.")
                 app_ui.update_status("PAUSED", "#555555")
+                # Clear conversation panel when paused
+                api_set_state("user_text",  "")
+                api_set_state("seven_text", "")
                 continue
 
             if not is_active:
@@ -542,6 +545,8 @@ def seven_logic():
 
             api_set_state("speaking", False)
             api_set_state("thinking", False)
+            # Text stays visible — scheduleHide in status.html fades it after 5s
+            # No need to clear here — the orb window handles the fade timer
 
             # ── Store conversation (enforce plan limit) ──
             if should_store and isinstance(response, str):
