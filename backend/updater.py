@@ -8,10 +8,15 @@ SERVER_URL  = "https://seven-server-u2rp.onrender.com"
 TIMEOUT     = 8
 CHECK_DELAY = 15
 
-_DOWNLOAD_CACHE_FILE = os.path.normpath(os.path.join(
-    os.environ.get("APPDATA", ""),
-    "SEVEN", "pending_update.json"
-))
+def _get_cache_file():
+    appdata = os.environ.get("APPDATA", "")
+    if appdata:
+        path = os.path.normpath(os.path.join(appdata, "SEVEN", "pending_update.json"))
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        return path
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "pending_update.json")
+
+_DOWNLOAD_CACHE_FILE = _get_cache_file()
 
 _state = {
     "update_available":  False,
@@ -24,12 +29,27 @@ _state = {
 }
 
 
+def _get_cache_file():
+    """Get pending_update.json path — always uses APPDATA."""
+    appdata = os.environ.get("APPDATA", "")
+    if appdata:
+        folder = os.path.normpath(os.path.join(appdata, "SEVEN"))
+        os.makedirs(folder, exist_ok=True)
+        return os.path.join(folder, "pending_update.json")
+    # Fallback
+    here = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(here, "pending_update.json")
+
+
 def _load_pending_download():
     """On startup — check if a download was completed before restart."""
     try:
-        if not os.path.exists(_DOWNLOAD_CACHE_FILE):
+        cache_file = _get_cache_file()
+        print("[UPDATER] Cache file: " + cache_file)
+        if not os.path.exists(cache_file):
+            print("[UPDATER] No pending download found")
             return
-        with open(_DOWNLOAD_CACHE_FILE, "r", encoding="utf-8") as f:
+        with open(cache_file, "r", encoding="utf-8") as f:
             data = json.load(f)
         path = data.get("download_path", "")
         if path and os.path.exists(path):
@@ -39,29 +59,32 @@ def _load_pending_download():
             _state["info"]              = data.get("info")
             print("[UPDATER] Pending download restored: " + path)
         else:
-            # File gone — clean up
-            os.remove(_DOWNLOAD_CACHE_FILE)
-    except Exception:
-        pass
+            print("[UPDATER] Cached path gone: " + path)
+            os.remove(cache_file)
+    except Exception as e:
+        print("[UPDATER] Load pending error: " + str(e))
 
 
 def _save_pending_download(path, info):
     """Save download path so it survives app restart."""
     try:
-        os.makedirs(os.path.dirname(_DOWNLOAD_CACHE_FILE), exist_ok=True)
-        with open(_DOWNLOAD_CACHE_FILE, "w", encoding="utf-8") as f:
-            json.dump({"download_path": path, "info": info}, f)
-    except Exception:
-        pass
+        cache_file = _get_cache_file()
+        with open(cache_file, "w", encoding="utf-8") as f:
+            json.dump({"download_path": path, "info": info}, f, indent=2)
+        print("[UPDATER] Saved pending download: " + cache_file)
+    except Exception as e:
+        print("[UPDATER] Save pending error: " + str(e))
 
 
 def _clear_pending_download():
     """Clear after successful install."""
     try:
-        if os.path.exists(_DOWNLOAD_CACHE_FILE):
-            os.remove(_DOWNLOAD_CACHE_FILE)
-    except Exception:
-        pass
+        cache_file = _get_cache_file()
+        if os.path.exists(cache_file):
+            os.remove(cache_file)
+            print("[UPDATER] Cleared pending download cache")
+    except Exception as e:
+        print("[UPDATER] Clear pending error: " + str(e))
 
 
 # Load pending download state on startup
