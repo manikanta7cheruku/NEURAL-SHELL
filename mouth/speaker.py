@@ -39,18 +39,41 @@ def _get_config():
 
 def _get_voice_setting():
     """
-    Returns (engine, voice_id) where:
-      engine   = "piper" or "sapi"
-      voice_id = piper model filename (e.g. "en_US-ryan-high")
-                 OR sapi voice index (int)
+    Returns (engine, voice_id, sapi_idx).
+    
+    Reads config.json voice section.
+    Handles both old format (voice_index only) and new format (engine + voice_id).
+    
+    Old format: { "voice_index": 1 }
+                → engine=sapi, sapi_idx=1
+    New format: { "engine": "piper", "voice_id": "en_US-ryan-high", "voice_index": 0 }
+                → engine=piper, voice_id=en_US-ryan-high
     """
     cfg   = _get_config()
     voice = cfg.get("voice", {})
-    
-    engine   = voice.get("engine", "piper")        # default to piper
-    voice_id = voice.get("voice_id", "en_US-ryan-high")  # default voice
+
+    # If no engine field → old config format → use SAPI with voice_index
+    # This handles existing installs that haven't been updated yet
+    if "engine" not in voice:
+        sapi_idx = voice.get("voice_index", 0)
+        print(f"[SPEAKER] Old config format detected → SAPI index {sapi_idx}", file=sys.stderr)
+        return "sapi", str(sapi_idx), sapi_idx
+
+    engine   = voice.get("engine", "sapi")
+    voice_id = voice.get("voice_id", "en_US-ryan-high")
     sapi_idx = voice.get("voice_index", 0)
-    
+
+    # Validate piper setup — if engine=piper but piper not found, fall back to SAPI
+    if engine == "piper":
+        piper_dir = _get_piper_dir()
+        if not piper_dir:
+            print(f"[SPEAKER] engine=piper in config but piper.exe not found → falling back to SAPI", file=sys.stderr)
+            return "sapi", str(sapi_idx), sapi_idx
+        model = _get_voice_model_path(voice_id)
+        if not model:
+            print(f"[SPEAKER] Piper model '{voice_id}' not found → falling back to SAPI", file=sys.stderr)
+            return "sapi", str(sapi_idx), sapi_idx
+
     return engine, voice_id, sapi_idx
 
 
@@ -58,23 +81,38 @@ def _get_voice_setting():
 
 def _get_piper_dir():
     """
-    Find piper.exe location.
-    Works both in dev (relative path) and packaged Electron app.
+    Find piper.exe location. Checks 4 locations in priority order.
+    Uses absolute paths only — never depends on cwd.
     """
-    # 1. Env var set by Electron (packaged)
+    candidates = []
+
+    # 1. SEVEN_APP_PATH set by Electron (packaged app)
     app_path = os.environ.get("SEVEN_APP_PATH", "")
     if app_path:
-        p = os.path.join(app_path, "mouth", "piper", "piper.exe")
-        if os.path.exists(p):
-            return os.path.join(app_path, "mouth", "piper")
+        candidates.append(os.path.join(app_path, "mouth", "piper"))
 
-    # 2. Relative to this file (dev mode)
-    here     = os.path.dirname(os.path.abspath(__file__))
-    piper_dir = os.path.join(here, "piper")
-    exe      = os.path.join(piper_dir, "piper.exe")
-    if os.path.exists(exe):
-        return piper_dir
+    # 2. Relative to THIS FILE — always works regardless of cwd
+    #    speaker.py is at mouth/speaker.py
+    #    piper.exe  is at mouth/piper/piper.exe
+    here = os.path.dirname(os.path.abspath(__file__))
+    candidates.append(os.path.join(here, "piper"))
 
+    # 3. Project root detection — walk up from this file
+    root = os.path.dirname(here)  # SEVEN/
+    candidates.append(os.path.join(root, "mouth", "piper"))
+
+    # 4. CWD fallback
+    candidates.append(os.path.join(os.getcwd(), "mouth", "piper"))
+
+    for c in candidates:
+        exe = os.path.join(c, "piper.exe")
+        if os.path.exists(exe):
+            print(f"[SPEAKER] Piper found at: {c}", file=sys.stderr)
+            return c
+
+    print(f"[SPEAKER] Piper NOT found. Searched:", file=sys.stderr)
+    for c in candidates:
+        print(f"[SPEAKER]   {c}", file=sys.stderr)
     return None
 
 
@@ -199,7 +237,9 @@ def _speak_sapi(text, voice_index=0):
             voice_index = 0
 
         engine.setProperty('voice',  voices[voice_index].id)
-        engine.setProperty('rate',   165)
+        cfg   = _get_config()
+        speed = cfg.get("voice", {}).get("speed", 165)
+        engine.setProperty('rate', speed)
         engine.setProperty('volume', 1.0)
         engine.say(text)
         engine.runAndWait()
