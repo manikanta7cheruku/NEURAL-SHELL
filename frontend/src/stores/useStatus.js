@@ -2,9 +2,12 @@ import { create } from 'zustand';
 import api from '../api';
 
 const useStatus = create((set, get) => ({
-  listening: false,
-  speaking: false,
-  thinking: false,
+  listening:  false,
+  speaking:   false,
+  thinking:   false,
+  userText:   '',
+  sevenText:  '',
+  statusText: '',
   mood: 'neutral',
   moodValue: 0,
   model: 'unknown',
@@ -21,7 +24,10 @@ const useStatus = create((set, get) => ({
       const r = await api.get('/status');
       set({
         ...r.data,
-        moodValue: r.data.mood_value,
+        moodValue:  r.data.mood_value,
+        userText:   r.data.user_text  || '',
+        sevenText:  r.data.seven_text || '',
+        statusText: r.data.status_text || '',
         loading: false,
         error: null,
         connected: true
@@ -32,9 +38,12 @@ const useStatus = create((set, get) => ({
   },
 
   setLive: (data) => set({
-    listening: data.listening ?? false,
-    thinking:  data.thinking  ?? false,
-    speaking:  data.speaking  ?? false,
+    listening:  data.listening  ?? false,
+    thinking:   data.thinking   ?? false,
+    speaking:   data.speaking   ?? false,
+    userText:   data.user_text  ?? '',
+    sevenText:  data.seven_text ?? '',
+    statusText: data.status_text ?? '',
   }),
 
   label: () => {
