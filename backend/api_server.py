@@ -1936,8 +1936,188 @@ def complete_setup(req: SetupCompleteRequest):
     }
 
 
+# Global preview state — track and interrupt between previews
+_preview_process = None
+_preview_lock    = threading.Lock()
+
 @app.post("/api/setup/preview-voice")
 async def preview_voice(request: Request):
+    """
+    Preview a voice. Interrupts any currently playing preview first.
+    Piper → subprocess (interruptible).
+    SAPI  → pyttsx3 in subprocess via speaker.py (interruptible).
+    """
+    global _preview_process
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    engine_name = body.get("engine", "sapi")
+    voice_id    = body.get("voice_id", "0")
+    sample_text = "Hello. I am Seven, your private AI assistant."
+
+    print(f"[PREVIEW] engine={engine_name} voice_id={voice_id}")
+
+    def _stop_current():
+        """Kill any running preview process."""
+        global _preview_process
+        with _preview_lock:
+            if _preview_process and _preview_process.poll() is None:
+                try:
+                    _preview_process.kill()
+                    _preview_process.wait(timeout=2)
+                    print("[PREVIEW] Stopped previous preview")
+                except Exception as e:
+                    print(f"[PREVIEW] Stop error: {e}")
+            _preview_process = None
+
+    def _speak():
+        global _preview_process
+
+        _stop_current()
+
+        try:
+            if engine_name == "piper":
+                # Find piper dir
+                here     = os.path.dirname(os.path.abspath(__file__))
+                root     = os.path.dirname(here)
+                app_path = os.environ.get("SEVEN_APP_PATH", "")
+
+                piper_dir = None
+                for c in [
+                    os.path.join(app_path, "mouth", "piper"),
+                    os.path.join(root,     "mouth", "piper"),
+                ]:
+                    if os.path.isdir(c) and os.path.exists(os.path.join(c, "piper.exe")):
+                        piper_dir = c
+                        break
+
+                if not piper_dir:
+                    print("[PREVIEW] Piper not found — falling back to SAPI")
+                    _speak_sapi_preview(voice_id)
+                    return
+
+                model_path = os.path.join(piper_dir, "voices", f"{voice_id}.onnx")
+                if not os.path.exists(model_path):
+                    print(f"[PREVIEW] Model not found: {model_path} — falling back to SAPI")
+                    _speak_sapi_preview(voice_id)
+                    return
+
+                import tempfile, subprocess as sp
+                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+                    tmp_path = tmp.name
+
+                # Run piper — this process we can kill
+                with _preview_lock:
+                    _preview_process = sp.Popen(
+                        [os.path.join(piper_dir, "piper.exe"),
+                         "--model", model_path,
+                         "--output_file", tmp_path],
+                        stdin=sp.PIPE,
+                        stdout=sp.PIPE,
+                        stderr=sp.PIPE,
+                        cwd=piper_dir,
+                    )
+                    proc = _preview_process
+
+                try:
+                    proc.stdin.write(sample_text.encode("utf-8"))
+                    proc.stdin.close()
+                    proc.wait(timeout=15)
+                except Exception as e:
+                    print(f"[PREVIEW] Piper wait error: {e}")
+                    return
+
+                if proc.returncode == 0 and os.path.exists(tmp_path):
+                    # Play via PowerShell — can be killed if needed
+                    ps_script = (
+                        f"$p = New-Object System.Media.SoundPlayer('{tmp_path}');"
+                        f"$p.PlaySync();"
+                    )
+                    with _preview_lock:
+                        _preview_process = sp.Popen(
+                            ["powershell", "-NoProfile", "-Command", ps_script],
+                            stdout=sp.PIPE, stderr=sp.PIPE
+                        )
+                        play_proc = _preview_process
+
+                    play_proc.wait(timeout=30)
+                    try:
+                        os.unlink(tmp_path)
+                    except Exception:
+                        pass
+                else:
+                    err = proc.stderr.read().decode("utf-8", errors="replace") if proc.stderr else ""
+                    print(f"[PREVIEW] Piper error: {err}")
+                    # Fall back to SAPI
+                    _speak_sapi_preview(voice_id)
+
+            else:
+                _speak_sapi_preview(voice_id)
+
+        except Exception as e:
+            print(f"[PREVIEW] Error: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def _speak_sapi_preview(vid):
+        """SAPI preview via speaker.py subprocess — interruptible."""
+        global _preview_process
+        import subprocess as sp
+
+        here     = os.path.dirname(os.path.abspath(__file__))
+        root     = os.path.dirname(here)
+        app_path = os.environ.get("SEVEN_APP_PATH", "")
+
+        # Find speaker.py
+        speaker_candidates = [
+            os.path.join(app_path, "mouth", "speaker.py"),
+            os.path.join(root,     "mouth", "speaker.py"),
+        ]
+        speaker_path = None
+        for c in speaker_candidates:
+            if os.path.exists(c):
+                speaker_path = c
+                break
+
+        if not speaker_path:
+            print("[PREVIEW] speaker.py not found")
+            return
+
+        # Temporarily override voice_index via env
+        env = os.environ.copy()
+        # We pass voice index via command line
+        idx = vid if vid.isdigit() else "0"
+
+        import sys as _sys
+        python = _sys.executable
+
+        with _preview_lock:
+            _preview_process = sp.Popen(
+                [python, "-c",
+                 f"""
+import pyttsx3, sys
+engine = pyttsx3.init()
+voices = engine.getProperty('voices')
+idx = {idx}
+if voices and idx < len(voices):
+    engine.setProperty('voice', voices[idx].id)
+engine.setProperty('rate', 165)
+engine.setProperty('volume', 1.0)
+engine.say('{sample_text}')
+engine.runAndWait()
+"""],
+                stdout=sp.PIPE,
+                stderr=sp.PIPE,
+            )
+            proc = _preview_process
+
+        proc.wait(timeout=15)
+
+    threading.Thread(target=_speak, daemon=True).start()
+    return {"success": True}
     """
     Preview a voice by engine + voice_id.
     Runs in daemon thread — returns immediately.
