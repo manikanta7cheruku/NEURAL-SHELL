@@ -4,12 +4,7 @@
   <meta charset="UTF-8">
   <title>VII</title>
   <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-      user-select: none;
-    }
+    * { margin:0; padding:0; box-sizing:border-box; user-select:none; }
 
     html, body {
       width: 420px;
@@ -22,150 +17,179 @@
       display: flex;
       align-items: center;
       justify-content: flex-end;
-      gap: 0;
     }
 
     /* ══════════════════════════════════════
        CONVERSATION PANEL
-       Sits to the LEFT of the orb
-       ══════════════════════════════════════ */
+    ══════════════════════════════════════ */
     #conv-panel {
       flex: 1;
       height: 72px;
-      margin-right: 8px;
-      border-radius: 12px;
-      padding: 10px 14px;
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-      gap: 5px;
+      margin-right: 10px;
+      border-radius: 14px;
+      padding: 0;
       opacity: 0;
-      transform: translateX(8px);
-      transition: opacity 0.4s ease, transform 0.4s ease;
+      transform: translateX(16px);
+      transition:
+        opacity 0.45s cubic-bezier(0.4, 0, 0.2, 1),
+        transform 0.45s cubic-bezier(0.4, 0, 0.2, 1);
       pointer-events: none;
       overflow: hidden;
-      background: rgba(9, 9, 11, 0.72);
-      border: 1px solid rgba(255, 255, 255, 0.06);
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
+      background: rgba(8, 8, 12, 0.78);
+      border: 1px solid rgba(255, 255, 255, 0.055);
       box-shadow:
-        0 8px 32px rgba(0, 0, 0, 0.5),
-        inset 0 1px 0 rgba(255, 255, 255, 0.04);
+        0 12px 40px rgba(0, 0, 0, 0.55),
+        0 2px 8px rgba(0, 0, 0, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.035);
     }
 
+    /* Blur handled by Electron transparent window */
     #conv-panel.visible {
       opacity: 1;
       transform: translateX(0);
       pointer-events: auto;
     }
 
-    /* User line */
-    #user-line {
+    /* Inner scroll area */
+    #conv-scroll {
+      height: 100%;
+      overflow-y: auto;
+      padding: 10px 12px;
       display: flex;
-      align-items: center;
+      flex-direction: column;
       gap: 6px;
-      min-height: 14px;
     }
 
-    #user-dot {
-      width: 4px;
-      height: 4px;
-      border-radius: 50%;
+    /* Minimal scrollbar */
+    #conv-scroll::-webkit-scrollbar {
+      width: 2px;
+    }
+    #conv-scroll::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    #conv-scroll::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 1px;
+    }
+    #conv-scroll::-webkit-scrollbar-thumb:hover {
       background: rgba(255, 255, 255, 0.2);
+    }
+
+    /* ── User row ── */
+    #user-row {
+      display: none;
+      align-items: center;
+      gap: 6px;
+    }
+
+    #user-label {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      font-size: 8px;
+      font-weight: 600;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: rgba(255, 255, 255, 0.2);
       flex-shrink: 0;
+      width: 18px;
     }
 
     #user-text {
       font-family: 'Segoe UI', system-ui, sans-serif;
       font-size: 10px;
-      color: rgba(255, 255, 255, 0.38);
+      color: rgba(255, 255, 255, 0.35);
       font-weight: 400;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      max-width: 280px;
+      line-height: 1.4;
       letter-spacing: 0.01em;
+      flex: 1;
     }
 
-    /* Divider */
-    #conv-divider {
+    /* ── Separator ── */
+    #conv-sep {
+      display: none;
       height: 1px;
-      background: rgba(255, 255, 255, 0.04);
-      margin: 0 0;
+      background: linear-gradient(
+        90deg,
+        transparent,
+        rgba(255,255,255,0.05) 30%,
+        rgba(255,255,255,0.05) 70%,
+        transparent
+      );
+      margin: 0 2px;
     }
 
-    /* Seven line */
-    #seven-line {
+    /* ── Seven row ── */
+    #seven-row {
       display: flex;
       align-items: flex-start;
       gap: 6px;
     }
 
-    #seven-dot {
-      width: 4px;
-      height: 4px;
-      border-radius: 50%;
-      background: #6366f1;
-      flex-shrink: 0;
-      margin-top: 4px;
-      transition: background 0.4s ease;
-    }
-
-    #seven-dot.speaking {
-      animation: dotPulse 1s ease-in-out infinite;
-    }
-
-    #seven-text {
+    #seven-label {
       font-family: 'Segoe UI', system-ui, sans-serif;
-      font-size: 11px;
-      color: rgba(255, 255, 255, 0.82);
-      font-weight: 400;
-      line-height: 1.45;
-      max-width: 280px;
+      font-size: 8px;
+      font-weight: 600;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: rgba(99, 102, 241, 0.6);
+      flex-shrink: 0;
+      width: 18px;
+      padding-top: 1px;
+      transition: color 0.4s ease;
+    }
+
+    #seven-content {
+      flex: 1;
       overflow: hidden;
-      display: -webkit-box;
-      -webkit-line-clamp: 2;
-      -webkit-box-orient: vertical;
-      letter-spacing: 0.01em;
     }
 
     /* Thinking dots */
-    #thinking-dots {
+    #thinking {
       display: none;
-      gap: 3px;
       align-items: center;
-      margin-top: 2px;
+      gap: 3px;
+      padding: 3px 0;
     }
 
-    #thinking-dots span {
+    #thinking span {
       width: 3px;
       height: 3px;
       border-radius: 50%;
-      background: #a855f7;
+      background: rgba(168, 85, 247, 0.7);
       display: inline-block;
     }
 
-    #thinking-dots span:nth-child(1) { animation: dotBounce 1.2s ease-in-out 0s infinite; }
-    #thinking-dots span:nth-child(2) { animation: dotBounce 1.2s ease-in-out 0.2s infinite; }
-    #thinking-dots span:nth-child(3) { animation: dotBounce 1.2s ease-in-out 0.4s infinite; }
+    #thinking span:nth-child(1) { animation: tBounce 1.2s ease-in-out 0s infinite; }
+    #thinking span:nth-child(2) { animation: tBounce 1.2s ease-in-out 0.15s infinite; }
+    #thinking span:nth-child(3) { animation: tBounce 1.2s ease-in-out 0.3s infinite; }
 
-    /* Cursor blink while speaking */
+    /* Seven response text */
+    #seven-text {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      font-size: 11.5px;
+      color: rgba(255, 255, 255, 0.88);
+      font-weight: 300;
+      line-height: 1.55;
+      letter-spacing: 0.012em;
+      display: none;
+    }
+
+    /* Cursor blink */
     #cursor {
       display: inline-block;
       width: 1.5px;
       height: 11px;
       background: #6366f1;
-      margin-left: 1px;
+      margin-left: 1.5px;
       vertical-align: middle;
-      animation: cursorBlink 1s ease-in-out infinite;
+      border-radius: 1px;
+      animation: cursorBlink 0.9s ease-in-out infinite;
       opacity: 0;
+      transition: opacity 0.2s;
     }
-
-    #cursor.active { opacity: 1; }
 
     /* ══════════════════════════════════════
        ORB CONTAINER
-       ══════════════════════════════════════ */
+    ══════════════════════════════════════ */
     #orb-container {
       width: 80px;
       height: 80px;
@@ -180,13 +204,8 @@
       width: 42px;
       height: 42px;
       border-radius: 50%;
-      background: radial-gradient(
-        ellipse at 35% 30%,
-        #1a1a2e 0%,
-        #12121c 40%,
-        #0a0a12 100%
-      );
-      border: 1px solid rgba(255, 255, 255, 0.04);
+      background: radial-gradient(ellipse at 35% 30%, #1a1a2e 0%, #12121c 40%, #0a0a12 100%);
+      border: 1px solid rgba(255,255,255,0.04);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -199,10 +218,8 @@
     #orb::before {
       content: '';
       position: absolute;
-      top: 4px;
-      left: 8px;
-      width: 18px;
-      height: 8px;
+      top: 4px; left: 8px;
+      width: 18px; height: 8px;
       border-radius: 50%;
       background: linear-gradient(180deg, rgba(255,255,255,0.07) 0%, transparent 100%);
       z-index: 5;
@@ -212,7 +229,7 @@
       font-family: 'Georgia', 'Times New Roman', serif;
       font-size: 11px;
       font-weight: bold;
-      color: rgba(255, 255, 255, 0.35);
+      color: rgba(255,255,255,0.35);
       letter-spacing: 2px;
       z-index: 4;
       transition: color 0.6s ease, text-shadow 0.6s ease;
@@ -220,156 +237,149 @@
 
     #orb-glow {
       position: absolute;
-      top: 50%; left: 50%;
-      transform: translate(-50%, -50%);
-      width: 42px; height: 42px;
-      border-radius: 50%;
-      pointer-events: none;
-      z-index: 0;
+      top:50%; left:50%;
+      transform: translate(-50%,-50%);
+      width:42px; height:42px;
+      border-radius:50%;
+      pointer-events:none;
+      z-index:0;
       transition: box-shadow 0.8s ease;
     }
 
     #pulse-ring {
       position: absolute;
-      top: 50%; left: 50%;
-      transform: translate(-50%, -50%);
-      width: 50px; height: 50px;
-      border-radius: 50%;
+      top:50%; left:50%;
+      transform: translate(-50%,-50%);
+      width:50px; height:50px;
+      border-radius:50%;
       border: 1.5px solid transparent;
-      pointer-events: none;
-      z-index: 1;
+      pointer-events:none;
+      z-index:1;
       transition: border-color 0.6s ease;
     }
 
     #ghost-ring {
       position: absolute;
-      top: 50%; left: 50%;
-      transform: translate(-50%, -50%);
-      width: 50px; height: 50px;
-      border-radius: 50%;
+      top:50%; left:50%;
+      transform: translate(-50%,-50%);
+      width:50px; height:50px;
+      border-radius:50%;
       border: 1px solid transparent;
-      pointer-events: none;
-      z-index: 0;
-      opacity: 0;
+      pointer-events:none;
+      z-index:0;
+      opacity:0;
     }
 
     #interaction-layer {
       position: absolute;
-      top: 0; left: 0;
-      width: 80px; height: 80px;
-      z-index: 10;
-      cursor: grab;
-      border-radius: 50%;
+      top:0; left:0;
+      width:80px; height:80px;
+      z-index:10;
+      cursor:grab;
+      border-radius:50%;
     }
-
-    #interaction-layer:active { cursor: grabbing; }
+    #interaction-layer:active { cursor:grabbing; }
 
     #tooltip {
-      position: fixed;
-      top: -26px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: #0e0e18;
-      color: rgba(255,255,255,0.4);
-      padding: 3px 10px;
-      border-radius: 3px;
-      border: 1px solid rgba(255,255,255,0.04);
-      font-family: 'Segoe UI', system-ui, sans-serif;
-      font-size: 9px;
-      font-weight: 600;
-      letter-spacing: 1.2px;
-      text-transform: uppercase;
-      white-space: nowrap;
-      opacity: 0;
-      pointer-events: none;
-      transition: opacity 0.15s ease;
-      z-index: 100;
+      position:fixed;
+      top:-26px; left:50%;
+      transform:translateX(-50%);
+      background:#0e0e18;
+      color:rgba(255,255,255,0.4);
+      padding:3px 10px;
+      border-radius:3px;
+      border:1px solid rgba(255,255,255,0.04);
+      font-family:'Segoe UI',system-ui,sans-serif;
+      font-size:9px; font-weight:600;
+      letter-spacing:1.2px;
+      text-transform:uppercase;
+      white-space:nowrap;
+      opacity:0;
+      pointer-events:none;
+      transition:opacity 0.15s ease;
+      z-index:100;
     }
-
-    #orb-container:hover #tooltip { opacity: 1; }
+    #orb-container:hover #tooltip { opacity:1; }
 
     /* ── State styles ── */
-    .idle     #orb          { border-color: rgba(40,40,55,0.3); }
-    .idle     #orb-text     { color: rgba(255,255,255,0.2); }
-    .idle     #orb-glow     { box-shadow: 0 0 8px rgba(40,40,60,0.08); }
-    .idle     #pulse-ring   { border-color: rgba(40,40,60,0.08); }
-    .idle     #seven-dot    { background: rgba(255,255,255,0.2); }
+    .idle     #orb        { border-color:rgba(40,40,55,0.3); }
+    .idle     #orb-text   { color:rgba(255,255,255,0.2); }
+    .idle     #orb-glow   { box-shadow:0 0 8px rgba(40,40,60,0.08); }
+    .idle     #pulse-ring { border-color:rgba(40,40,60,0.08); }
+    .idle     #seven-label{ color:rgba(255,255,255,0.15); }
 
-    .listening #orb         { border-color: rgba(34,197,94,0.1); }
-    .listening #orb-text    { color: rgba(255,255,255,0.45); text-shadow: 0 0 8px rgba(34,197,94,0.15); }
-    .listening #orb-glow    { box-shadow: 0 0 20px rgba(34,197,94,0.12), 0 0 40px rgba(34,197,94,0.06); }
-    .listening #pulse-ring  { border-color: rgba(34,197,94,0.4); animation: pulse 2.4s cubic-bezier(0.4,0,0.2,1) infinite; }
-    .listening #ghost-ring  { border-color: rgba(34,197,94,0.15); opacity: 1; animation: pulse 2.4s cubic-bezier(0.4,0,0.2,1) infinite 0.6s; }
-    .listening #seven-dot   { background: #22c55e; }
+    .listening #orb         { border-color:rgba(34,197,94,0.1); }
+    .listening #orb-text    { color:rgba(255,255,255,0.45); text-shadow:0 0 8px rgba(34,197,94,0.15); }
+    .listening #orb-glow    { box-shadow:0 0 20px rgba(34,197,94,0.12),0 0 40px rgba(34,197,94,0.06); }
+    .listening #pulse-ring  { border-color:rgba(34,197,94,0.4); animation:pulse 2.4s cubic-bezier(0.4,0,0.2,1) infinite; }
+    .listening #ghost-ring  { border-color:rgba(34,197,94,0.15); opacity:1; animation:pulse 2.4s cubic-bezier(0.4,0,0.2,1) infinite 0.6s; }
+    .listening #seven-label { color:rgba(34,197,94,0.5); }
 
-    .thinking #orb          { border-color: rgba(168,85,247,0.1); }
-    .thinking #orb-text     { color: rgba(255,255,255,0.45); text-shadow: 0 0 8px rgba(168,85,247,0.15); }
-    .thinking #orb-glow     { box-shadow: 0 0 22px rgba(168,85,247,0.15), 0 0 40px rgba(168,85,247,0.06); }
-    .thinking #pulse-ring   { border-color: rgba(168,85,247,0.4); border-style: dashed; border-width: 1.5px; animation: spin 2s linear infinite; }
-    .thinking #seven-dot    { background: #a855f7; }
+    .thinking #orb         { border-color:rgba(168,85,247,0.1); }
+    .thinking #orb-text    { color:rgba(255,255,255,0.45); text-shadow:0 0 8px rgba(168,85,247,0.15); }
+    .thinking #orb-glow    { box-shadow:0 0 22px rgba(168,85,247,0.15),0 0 40px rgba(168,85,247,0.06); }
+    .thinking #pulse-ring  { border-color:rgba(168,85,247,0.4); border-style:dashed; border-width:1.5px; animation:spin 2s linear infinite; }
+    .thinking #seven-label { color:rgba(168,85,247,0.6); }
 
-    .speaking #orb          { border-color: rgba(59,130,246,0.1); }
-    .speaking #orb-text     { color: rgba(255,255,255,0.45); text-shadow: 0 0 8px rgba(59,130,246,0.15); }
-    .speaking #orb-glow     { box-shadow: 0 0 20px rgba(59,130,246,0.12), 0 0 40px rgba(59,130,246,0.06); }
-    .speaking #pulse-ring   { border-color: rgba(59,130,246,0.4); animation: breathe 1s ease-in-out infinite; }
-    .speaking #ghost-ring   { border-color: rgba(59,130,246,0.12); opacity: 1; animation: breathe 1s ease-in-out infinite 0.2s; }
-    .speaking #seven-dot    { background: #6366f1; }
+    .speaking #orb         { border-color:rgba(99,102,241,0.15); }
+    .speaking #orb-text    { color:rgba(255,255,255,0.45); text-shadow:0 0 8px rgba(99,102,241,0.2); }
+    .speaking #orb-glow    { box-shadow:0 0 20px rgba(99,102,241,0.15),0 0 40px rgba(99,102,241,0.07); }
+    .speaking #pulse-ring  { border-color:rgba(99,102,241,0.4); animation:breathe 1s ease-in-out infinite; }
+    .speaking #ghost-ring  { border-color:rgba(99,102,241,0.12); opacity:1; animation:breathe 1s ease-in-out infinite 0.2s; }
+    .speaking #seven-label { color:rgba(99,102,241,0.7); }
 
     /* ── Animations ── */
     @keyframes pulse {
-      0%   { transform: translate(-50%,-50%) scale(1); opacity: 0.6; }
-      70%  { transform: translate(-50%,-50%) scale(1.35); opacity: 0; }
-      100% { transform: translate(-50%,-50%) scale(1.35); opacity: 0; }
+      0%   { transform:translate(-50%,-50%) scale(1); opacity:0.6; }
+      70%  { transform:translate(-50%,-50%) scale(1.35); opacity:0; }
+      100% { transform:translate(-50%,-50%) scale(1.35); opacity:0; }
     }
-
     @keyframes spin {
-      from { transform: translate(-50%,-50%) rotate(0deg); }
-      to   { transform: translate(-50%,-50%) rotate(360deg); }
+      from { transform:translate(-50%,-50%) rotate(0deg); }
+      to   { transform:translate(-50%,-50%) rotate(360deg); }
     }
-
     @keyframes breathe {
-      0%,100% { transform: translate(-50%,-50%) scale(1); opacity: 0.5; }
-      50%     { transform: translate(-50%,-50%) scale(1.12); opacity: 0.25; }
+      0%,100% { transform:translate(-50%,-50%) scale(1); opacity:0.5; }
+      50%     { transform:translate(-50%,-50%) scale(1.12); opacity:0.25; }
     }
-
-    @keyframes dotBounce {
-      0%,80%,100% { transform: scale(0.6); opacity: 0.4; }
-      40%         { transform: scale(1);   opacity: 1;   }
+    @keyframes tBounce {
+      0%,80%,100% { transform:scale(0.6); opacity:0.4; }
+      40%         { transform:scale(1); opacity:1; }
     }
-
-    @keyframes dotPulse {
-      0%,100% { opacity: 1; }
-      50%     { opacity: 0.4; }
-    }
-
     @keyframes cursorBlink {
-      0%,100% { opacity: 1; }
-      50%     { opacity: 0; }
+      0%,45% { opacity:1; }
+      55%,100%{ opacity:0; }
     }
   </style>
 </head>
 <body class="listening">
 
-  <!-- Conversation panel — LEFT of orb -->
+  <!-- Conversation panel -->
   <div id="conv-panel">
-    <div id="user-line">
-      <div id="user-dot"></div>
-      <div id="user-text"></div>
-    </div>
-    <div id="conv-divider"></div>
-    <div id="seven-line">
-      <div id="seven-dot"></div>
-      <div style="flex:1;overflow:hidden">
-        <div id="thinking-dots">
-          <span></span><span></span><span></span>
+    <div id="conv-scroll">
+      <!-- User -->
+      <div id="user-row">
+        <span id="user-label">You</span>
+        <span id="user-text"></span>
+      </div>
+
+      <!-- Separator -->
+      <div id="conv-sep"></div>
+
+      <!-- Seven -->
+      <div id="seven-row">
+        <span id="seven-label">VII</span>
+        <div id="seven-content">
+          <div id="thinking">
+            <span></span><span></span><span></span>
+          </div>
+          <div id="seven-text"></div>
         </div>
-        <div id="seven-text"></div>
-        <span id="cursor"></span>
       </div>
     </div>
   </div>
 
-  <!-- Orb — RIGHT side -->
+  <!-- Orb -->
   <div id="orb-container">
     <div id="orb-glow"></div>
     <div id="ghost-ring"></div>
@@ -382,179 +392,167 @@
   </div>
 
   <script>
-    const body          = document.body;
-    const convPanel     = document.getElementById('conv-panel');
-    const userTextEl    = document.getElementById('user-text');
-    const sevenTextEl   = document.getElementById('seven-text');
-    const thinkingDots  = document.getElementById('thinking-dots');
-    const cursor        = document.getElementById('cursor');
-    const sevenDot      = document.getElementById('seven-dot');
-    const tooltip       = document.getElementById('tooltip');
-    const interactionLayer = document.getElementById('interaction-layer');
+    const body         = document.body;
+    const convPanel    = document.getElementById('conv-panel');
+    const convScroll   = document.getElementById('conv-scroll');
+    const userRow      = document.getElementById('user-row');
+    const userTextEl   = document.getElementById('user-text');
+    const convSep      = document.getElementById('conv-sep');
+    const thinkingEl   = document.getElementById('thinking');
+    const sevenTextEl  = document.getElementById('seven-text');
+    const sevenLabel   = document.getElementById('seven-label');
+    const cursor       = document.getElementById('cursor');
+    const tooltip      = document.getElementById('tooltip');
+    const iLayer       = document.getElementById('interaction-layer');
 
-    let currentStatus   = 'listening';
-    let ws              = null;
-    let reconnectCount  = 0;
-    let fadeTimer       = null;
+    let currentStatus = 'listening';
+    let ws            = null;
+    let reconnects    = 0;
+    let fadeTimer     = null;
 
-    const statusLabels = {
-      idle:      'Offline',
-      listening: 'Listening',
-      thinking:  'Processing',
-      speaking:  'Speaking'
+    const labels = {
+      idle: 'Offline', listening: 'Listening',
+      thinking: 'Processing', speaking: 'Speaking'
     };
 
-    // ── Conversation panel logic ──
+    // ── Panel show/hide ──
     function showPanel() {
       convPanel.classList.add('visible');
       if (fadeTimer) { clearTimeout(fadeTimer); fadeTimer = null; }
     }
 
-    function scheduleHide() {
+    function scheduleHide(delay) {
       if (fadeTimer) clearTimeout(fadeTimer);
       fadeTimer = setTimeout(() => {
         convPanel.classList.remove('visible');
         fadeTimer = null;
-      }, 5000);
+      }, delay || 5000);
     }
 
+    // ── Update conversation ──
     function updateConversation(userText, sevenText, isThinking, isSpeaking) {
-      // User text
+      // User line
       if (userText) {
         userTextEl.textContent = userText;
-        document.getElementById('user-line').style.display = 'flex';
-        document.getElementById('conv-divider').style.display = 'block';
+        userRow.style.display  = 'flex';
+        convSep.style.display  = 'block';
       } else {
-        document.getElementById('user-line').style.display = 'none';
-        document.getElementById('conv-divider').style.display = 'none';
+        userRow.style.display  = 'none';
+        convSep.style.display  = 'none';
       }
 
-      // Seven text or thinking dots
+      // Seven line
       if (isThinking && !sevenText) {
-        thinkingDots.style.display = 'flex';
-        sevenTextEl.textContent = '';
-        cursor.classList.remove('active');
+        thinkingEl.style.display  = 'flex';
+        sevenTextEl.style.display = 'none';
+        cursor.style.opacity      = '0';
         showPanel();
       } else if (sevenText) {
-        thinkingDots.style.display = 'none';
-        sevenTextEl.textContent = sevenText;
-        cursor.classList.toggle('active', isSpeaking);
-        sevenDot.classList.toggle('speaking', isSpeaking);
-        showPanel();
-      } else if (!userText) {
-        scheduleHide();
-      }
+        thinkingEl.style.display  = 'none';
+        sevenTextEl.style.display = 'block';
+        sevenTextEl.innerHTML     = sevenText + (isSpeaking
+          ? '<span id="cursor" style="display:inline-block;width:1.5px;height:11px;background:#6366f1;margin-left:1.5px;vertical-align:middle;border-radius:1px;animation:cursorBlink 0.9s ease-in-out infinite;"></span>'
+          : '');
 
-      // Auto-hide when fully idle
-      if (!isThinking && !isSpeaking && sevenText) {
-        scheduleHide();
+        // Auto scroll to bottom as text streams in
+        convScroll.scrollTop = convScroll.scrollHeight;
+        showPanel();
+
+        // Schedule hide only when fully idle
+        if (!isThinking && !isSpeaking) {
+          scheduleHide(5000);
+        }
+      } else if (!userText) {
+        // Nothing to show — hide immediately
+        scheduleHide(500);
       }
     }
 
     // ── WebSocket ──
     function connect() {
-      if (reconnectCount > 60) return;
+      if (reconnects > 60) return;
       try {
         ws = new WebSocket('ws://127.0.0.1:7777/ws/status');
 
         ws.onopen = () => {
-          reconnectCount = 0;
+          reconnects = 0;
           setStatus('listening');
         };
 
-        ws.onmessage = (event) => {
+        ws.onmessage = (e) => {
           try {
-            const data = JSON.parse(event.data);
-
-            // Determine orb state
-            let s = 'listening';
-            if (data.speaking)        s = 'speaking';
-            else if (data.thinking)   s = 'thinking';
-            else if (data.listening)  s = 'listening';
-            else                      s = 'idle';
+            const d = JSON.parse(e.data);
+            let s = 'idle';
+            if      (d.speaking)  s = 'speaking';
+            else if (d.thinking)  s = 'thinking';
+            else if (d.listening) s = 'listening';
             setStatus(s);
-
-            // Update conversation panel
             updateConversation(
-              data.user_text  || '',
-              data.seven_text || '',
-              data.thinking   || false,
-              data.speaking   || false
+              d.user_text  || '',
+              d.seven_text || '',
+              d.thinking   || false,
+              d.speaking   || false
             );
-          } catch (e) {}
+          } catch {}
         };
 
-        ws.onclose = () => {
-          reconnectCount++;
-          setTimeout(connect, 2000);
-        };
-
+        ws.onclose = () => { reconnects++; setTimeout(connect, 2000); };
         ws.onerror = () => ws && ws.close();
-
-      } catch (e) {
-        reconnectCount++;
+      } catch {
+        reconnects++;
         setTimeout(connect, 2000);
       }
     }
 
-    function setStatus(status) {
-      if (currentStatus === status) return;
-      currentStatus = status;
-      body.className = status;
-      tooltip.textContent = statusLabels[status] || '';
+    function setStatus(s) {
+      if (currentStatus === s) return;
+      currentStatus = s;
+      body.className = s;
+      tooltip.textContent = labels[s] || '';
     }
 
-    // ── Drag + Click ──
-    let isMouseDown = false;
-    let startX = 0, startY = 0;
-    let hasDragged = false;
-    const DRAG_THRESHOLD = 5;
+    // ── Drag + click ──
+    let isDown = false, startX = 0, startY = 0, dragged = false;
+    const THRESH = 5;
 
-    interactionLayer.addEventListener('mousedown', (e) => {
+    iLayer.addEventListener('mousedown', (e) => {
       if (e.button !== 0) return;
-      isMouseDown = true;
-      hasDragged = false;
-      startX = e.screenX;
-      startY = e.screenY;
+      isDown = true; dragged = false;
+      startX = e.screenX; startY = e.screenY;
       window.orbAPI?.dragStart(e.screenX, e.screenY);
       e.preventDefault();
     });
 
     document.addEventListener('mousemove', (e) => {
-      if (!isMouseDown) return;
-      if (Math.abs(e.screenX - startX) > DRAG_THRESHOLD ||
-          Math.abs(e.screenY - startY) > DRAG_THRESHOLD) {
-        hasDragged = true;
-      }
+      if (!isDown) return;
+      if (Math.abs(e.screenX-startX) > THRESH || Math.abs(e.screenY-startY) > THRESH)
+        dragged = true;
       window.orbAPI?.dragMove(e.screenX, e.screenY);
     });
 
     document.addEventListener('mouseup', (e) => {
-      if (!isMouseDown) return;
-      isMouseDown = false;
-      if (e.button === 0 && !hasDragged) {
-        window.orbAPI?.toggleDashboard();
-      }
+      if (!isDown) return;
+      isDown = false;
+      if (e.button === 0 && !dragged) window.orbAPI?.toggleDashboard();
     });
 
-    interactionLayer.addEventListener('contextmenu', (e) => {
+    iLayer.addEventListener('contextmenu', (e) => {
       e.preventDefault();
       window.orbAPI?.showMenu();
     });
 
-    // ── Click-through transparent areas ──
+    // ── Click-through ──
     document.addEventListener('mousemove', (e) => {
       const el = document.elementFromPoint(e.clientX, e.clientY);
-      const isOrb = el && ['interaction-layer','orb','orb-text','orb-container'].includes(el.id);
-      const isPanel = el && (el === convPanel || convPanel.contains(el));
-      window.orbAPI?.setIgnoreMouseEvents(!(isOrb || isPanel));
+      const onOrb   = el && ['interaction-layer','orb','orb-text','orb-container'].includes(el.id);
+      const onPanel = el && (el === convPanel || convPanel.contains(el));
+      window.orbAPI?.setIgnoreMouseEvents(!(onOrb || onPanel));
     });
 
     document.addEventListener('mouseleave', () => {
       window.orbAPI?.setIgnoreMouseEvents(true);
     });
 
-    // ── Init ──
     setStatus('listening');
     setTimeout(connect, 1200);
   </script>
