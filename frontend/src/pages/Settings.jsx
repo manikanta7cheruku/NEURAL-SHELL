@@ -31,13 +31,14 @@ export default function Settings() {
   const [savingVoice,      setSavingVoice]      = useState(false);
   const [editingVoice,     setEditingVoice]     = useState(false);
 
-  // Voice selector — track by voice_id string (unique), not integer index
+  // Voice selector
   const [voices,          setVoices]          = useState([]);
-  const [selectedVoiceId, setSelectedVoiceId] = useState('en_US-ryan-high');
-  const [selectedEngine,  setSelectedEngine]  = useState('piper');
+  const [selectedVoiceId, setSelectedVoiceId] = useState(null); // null = not loaded yet
+  const [selectedEngine,  setSelectedEngine]  = useState(null);
   const [previewingVoice, setPreviewingVoice] = useState(null);
-  const [voiceSpeed,      setVoiceSpeed]      = useState(175);
+  const [voiceSpeed,      setVoiceSpeed]      = useState(165);
   const [savingSpeed,     setSavingSpeed]     = useState(false);
+  const [voiceConfigLoaded, setVoiceConfigLoaded] = useState(false);
 
   // Identity editing
   const [editName,    setEditName]    = useState('');
@@ -60,15 +61,28 @@ export default function Settings() {
     fc();
     api.get('/hardware').then(r => setHw(r.data)).catch(() => {});
     api.get('/speed').then(r => setSpeed(r.data)).catch(() => {});
-    api.get('/setup/voices').then(r => {
-      setVoices(r.data.voices || []);
-    }).catch(() => {});
+    // Load config FIRST, then voices — prevents race condition
     api.get('/config').then(r => {
       const v = r.data?.voice || {};
-      setSelectedVoiceId(v.voice_id || 'en_US-ryan-high');
-      setSelectedEngine(v.engine   || 'piper');
-      setVoiceSpeed(v.speed || 175);
-    }).catch(() => {});
+      const savedId     = v.voice_id || null;
+      const savedEngine = v.engine   || null;
+      const savedSpeed  = v.speed    || 165;
+      setSelectedVoiceId(savedId);
+      setSelectedEngine(savedEngine);
+      setVoiceSpeed(savedSpeed);
+      setVoiceConfigLoaded(true);
+      // Now load voices — config is ready
+      api.get('/setup/voices').then(r2 => {
+        setVoices(r2.data.voices || []);
+      }).catch(() => {
+        setVoices([]);
+      });
+    }).catch(() => {
+      setVoiceConfigLoaded(true);
+      api.get('/setup/voices').then(r2 => {
+        setVoices(r2.data.voices || []);
+      }).catch(() => {});
+    });
     api.get('/voice-control/words').then(r => setVoiceWords(r.data)).catch(() => {
       setVoiceWords({
         wake_words:     ['seven', 'hey seven'],
@@ -583,113 +597,169 @@ export default function Settings() {
           </div>
         </div>
 
-        {/* ── SEVEN'S VOICE ── */}
+               {/* ── SEVEN'S VOICE ── */}
         <div className="bg-s-card border border-s-border rounded p-4">
-          <div className="flex items-center justify-between mb-3">
-            <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium">
-              Seven's Voice
+
+          {/* Header */}
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium">
+                Voice Engine
+              </div>
+              <div className="text-[10px] text-s-text-3 mt-0.5">
+                {selectedVoiceId
+                  ? voices.find(v => v.voice_id === selectedVoiceId)?.name || 'Select a voice'
+                  : 'Loading...'}
+              </div>
             </div>
-            <span className="text-[8px] text-s-accent bg-s-accent/8 border border-s-accent/20 px-1.5 py-0.5 rounded font-medium">
-              Natural · Offline
-            </span>
+            <div className="flex items-center gap-1.5">
+              <div className="w-1.5 h-1.5 rounded-full bg-s-green animate-pulse" />
+              <span className="text-[8px] text-s-text-4 font-medium">Offline</span>
+            </div>
           </div>
 
-          {voices.length === 0 ? (
-            <div className="text-[11px] text-s-text-4 py-2">Loading voices...</div>
+          {!voiceConfigLoaded || voices.length === 0 ? (
+            <div className="flex items-center gap-2 py-4 text-s-text-4">
+              <div className="w-3 h-3 border border-s-border border-t-s-accent rounded-full animate-spin" />
+              <span className="text-[11px]">Loading voices...</span>
+            </div>
           ) : (
-            <div className="space-y-2">
+            <div className="space-y-3">
 
-              {/* Voice list — compact rows */}
-              <div className="rounded-lg border border-s-border overflow-hidden divide-y divide-s-border/50">
-                {voices.map((v, idx) => {
-                  const isActive     = selectedVoiceId === v.voice_id;
-                  const isPreviewing = previewingVoice === v.voice_id;
-                  const isPiper      = v.engine === 'piper';
-
-                  return (
-                    <div
-                      key={idx}
-                      onClick={() => v.installed !== false && saveVoice(v)}
-                      className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer transition-all ${
-                        isActive
-                          ? 'bg-s-accent/8'
-                          : v.installed === false
-                          ? 'opacity-40 cursor-not-allowed bg-s-bg/30'
-                          : 'bg-s-bg hover:bg-s-card-h'
-                      }`}
-                    >
-                      {/* Active indicator */}
-                      <div className={`w-1 h-6 rounded-full shrink-0 transition-all ${
-                        isActive ? 'bg-s-accent' : 'bg-transparent'
-                      }`} />
-
-                      {/* Flag */}
-                      <span className="text-sm leading-none shrink-0">{v.flag}</span>
-
-                      {/* Name + details */}
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-1.5">
-                          <span className={`text-[11px] font-medium ${
-                            isActive ? 'text-s-accent' : 'text-s-text-2'
-                          }`}>
-                            {v.name}
-                          </span>
-                          <span className={`text-[8px] px-1 rounded font-medium ${
-                            v.gender === 'Female'
-                              ? 'text-pink-400/80 bg-pink-400/8'
-                              : 'text-blue-400/80 bg-blue-400/8'
-                          }`}>
-                            {v.gender}
-                          </span>
-                          {isPiper && v.installed && (
-                            <span className="text-[8px] text-s-green/80 bg-s-green/8 px-1 rounded">
-                              Natural
-                            </span>
+              {/* ── Piper voices — 2 column grid ── */}
+              {voices.filter(v => v.engine === 'piper').length > 0 && (
+                <div>
+                  <div className="text-[8px] text-s-text-4 uppercase tracking-widest mb-1.5 px-0.5">
+                    Neural · Human Quality
+                  </div>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {voices.filter(v => v.engine === 'piper').map((v) => {
+                      const isActive     = selectedVoiceId === v.voice_id;
+                      const isPreviewing = previewingVoice === v.voice_id;
+                      return (
+                        <div
+                          key={v.voice_id}
+                          onClick={() => v.installed && saveVoice(v)}
+                          className={`relative rounded-lg border p-2.5 transition-all cursor-pointer ${
+                            !v.installed
+                              ? 'border-s-border/30 opacity-40 cursor-not-allowed'
+                              : isActive
+                              ? 'border-s-accent bg-s-accent/6'
+                              : 'border-s-border bg-s-bg hover:border-s-accent/40 hover:bg-s-card-h'
+                          }`}
+                        >
+                          {/* Active dot */}
+                          {isActive && (
+                            <div className="absolute top-2 right-2 w-1.5 h-1.5 rounded-full bg-s-accent" />
                           )}
-                          {!v.installed && (
-                            <span className="text-[8px] text-s-text-4 bg-s-border/40 px-1 rounded">
-                              Not installed
+
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="text-base leading-none">{v.flag}</span>
+                            <span className={`text-[11px] font-semibold tracking-wide ${
+                              isActive ? 'text-s-accent' : 'text-s-text'
+                            }`}>
+                              {v.name}
                             </span>
+                          </div>
+
+                          <div className="text-[9px] text-s-text-4 mb-2">{v.language}</div>
+
+                          <div className="flex items-center justify-between">
+                            <span className={`text-[8px] px-1.5 py-0.5 rounded font-medium ${
+                              v.gender === 'Female'
+                                ? 'text-pink-400/70 bg-pink-400/8'
+                                : 'text-blue-400/70 bg-blue-400/8'
+                            }`}>
+                              {v.gender}
+                            </span>
+                            <button
+                              onClick={e => { e.stopPropagation(); if (v.installed) previewVoice(v); }}
+                              disabled={!v.installed}
+                              className={`text-[8px] px-1.5 py-0.5 rounded border transition-all ${
+                                isPreviewing
+                                  ? 'border-s-accent/60 bg-s-accent/15 text-s-accent'
+                                  : 'border-s-border/60 text-s-text-4 hover:border-s-accent/40 hover:text-s-accent'
+                              }`}
+                            >
+                              {isPreviewing ? '▶' : '▷ Play'}
+                            </button>
+                          </div>
+
+                          {!v.installed && (
+                            <div className="mt-1 text-[8px] text-s-text-4 text-center">
+                              Not installed
+                            </div>
                           )}
                         </div>
-                        <div className="text-[9px] text-s-text-4 mt-0.5">{v.language}</div>
-                      </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
-                      {/* Preview button */}
-                      <button
-                        onClick={e => { e.stopPropagation(); if (v.installed !== false) previewVoice(v); }}
-                        disabled={v.installed === false || isPreviewing}
-                        className={`shrink-0 text-[9px] px-2 py-1 rounded border transition-all ${
-                          isPreviewing
-                            ? 'border-s-accent bg-s-accent/15 text-s-accent'
-                            : v.installed === false
-                            ? 'border-s-border/30 text-s-text-4/30 cursor-not-allowed'
-                            : 'border-s-border text-s-text-4 hover:border-s-accent/50 hover:text-s-accent'
-                        }`}
-                      >
-                        {isPreviewing ? '▶ Playing' : 'Preview'}
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
+              {/* ── SAPI voices — compact list ── */}
+              {voices.filter(v => v.engine === 'sapi').length > 0 && (
+                <div>
+                  <div className="text-[8px] text-s-text-4 uppercase tracking-widest mb-1.5 px-0.5">
+                    Windows Built-in
+                  </div>
+                  <div className="rounded-lg border border-s-border/50 overflow-hidden divide-y divide-s-border/30">
+                    {voices.filter(v => v.engine === 'sapi').map((v) => {
+                      const isActive     = selectedVoiceId === v.voice_id;
+                      const isPreviewing = previewingVoice === v.voice_id;
+                      return (
+                        <div
+                          key={v.voice_id}
+                          onClick={() => saveVoice(v)}
+                          className={`flex items-center gap-2.5 px-3 py-2 cursor-pointer transition-all ${
+                            isActive ? 'bg-s-accent/6' : 'bg-s-bg/60 hover:bg-s-card-h'
+                          }`}
+                        >
+                          <div className={`w-1 h-4 rounded-full shrink-0 ${
+                            isActive ? 'bg-s-accent' : 'bg-s-border'
+                          }`} />
+                          <span className="text-sm leading-none shrink-0">{v.flag}</span>
+                          <div className="flex-1 min-w-0">
+                            <div className={`text-[10px] font-medium ${
+                              isActive ? 'text-s-accent' : 'text-s-text-3'
+                            }`}>
+                              {v.name}
+                            </div>
+                            <div className="text-[8px] text-s-text-4">{v.language}</div>
+                          </div>
+                          <button
+                            onClick={e => { e.stopPropagation(); previewVoice(v); }}
+                            className={`shrink-0 text-[8px] px-2 py-0.5 rounded border transition-all ${
+                              isPreviewing
+                                ? 'border-s-accent/60 bg-s-accent/15 text-s-accent'
+                                : 'border-s-border/50 text-s-text-4 hover:border-s-accent/40 hover:text-s-accent'
+                            }`}
+                          >
+                            {isPreviewing ? '▶' : '▷'}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
-              {/* ── Voice Speed ── */}
-              <div className="flex items-center justify-between px-1 pt-1">
-                <span className="text-[10px] text-s-text-3">Speaking Speed</span>
-                <div className="flex rounded border border-s-border overflow-hidden">
+              {/* ── Speed ── */}
+              <div className="flex items-center justify-between pt-1 border-t border-s-border/40">
+                <span className="text-[9px] text-s-text-4 uppercase tracking-wider">Speed</span>
+                <div className="flex rounded-md border border-s-border overflow-hidden">
                   {[
-                    { label: 'Slow',      value: 130 },
-                    { label: 'Normal',    value: 165 },
-                    { label: 'Fast',      value: 190 },
-                    { label: 'Very Fast', value: 220 },
+                    { label: 'Slow',   value: 130 },
+                    { label: 'Normal', value: 165 },
+                    { label: 'Fast',   value: 190 },
+                    { label: 'Max',    value: 220 },
                   ].map(({ label, value }) => {
                     const isActive = Math.abs(voiceSpeed - value) < 20;
                     return (
                       <button
                         key={label}
                         onClick={() => { setVoiceSpeed(value); saveSpeed(value); }}
-                        className={`px-2.5 py-1.5 text-[9px] font-medium transition-all border-r border-s-border last:border-r-0 ${
+                        className={`px-2.5 py-1.5 text-[9px] font-medium transition-all border-r border-s-border/50 last:border-r-0 ${
                           isActive
                             ? 'bg-s-accent text-white'
                             : 'bg-s-bg text-s-text-4 hover:bg-s-card-h hover:text-s-text-3'
@@ -704,7 +774,6 @@ export default function Settings() {
 
             </div>
           )}
-
         </div>
 
         {/* ── VOICE CONTROL COMMANDS ── */}
@@ -1018,6 +1087,56 @@ export default function Settings() {
               )}
             </div>
           </div>
+        </div>
+
+        {/* ── AMBIENT PANEL ── */}
+        <div className="bg-s-card border border-s-border rounded p-4">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium">
+                Ambient Panel
+              </div>
+              <div className="text-[9px] text-s-text-4 mt-0.5">
+                The conversation overlay near the orb
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-[11px] text-s-text-2">Background Opacity</div>
+              <div className="text-[9px] text-s-text-4 mt-0.5">
+                How transparent the panel appears
+              </div>
+            </div>
+            <div className="flex rounded-md border border-s-border overflow-hidden">
+              {[
+                { label: 'Ghost',  value: 0.4 },
+                { label: 'Dim',    value: 0.65 },
+                { label: 'Solid',  value: 0.85 },
+              ].map(({ label, value }) => {
+                const current = local?.ambient_panel?.opacity ?? 0.78;
+                const isActive = Math.abs(current - value) < 0.15;
+                return (
+                  <button
+                    key={label}
+                    onClick={() => {
+                      set('ambient_panel.opacity', value);
+                    }}
+                    className={`px-3 py-1.5 text-[9px] font-medium transition-all border-r border-s-border/50 last:border-r-0 ${
+                      isActive
+                        ? 'bg-s-accent text-white'
+                        : 'bg-s-bg text-s-text-4 hover:bg-s-card-h hover:text-s-text-3'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <p className="text-[9px] text-s-text-4 mt-2">
+            Changes apply after Save Changes.
+          </p>
         </div>
 
         {/* ── DANGER ZONE ── */}
