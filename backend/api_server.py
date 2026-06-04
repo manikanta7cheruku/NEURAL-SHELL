@@ -2499,7 +2499,7 @@ def start_api_server(host="127.0.0.1", port=7777):
     Called from main.py AFTER all modules are initialized.
     """
     import uvicorn
-    
+
     def _run():
         uvicorn.run(
             app,
@@ -2508,9 +2508,23 @@ def start_api_server(host="127.0.0.1", port=7777):
             log_level="warning",
             access_log=False
         )
-    
+
     thread = threading.Thread(target=_run, daemon=True, name="SevenAPI")
     thread.start()
     print(f"[API] Seven API server started on http://{host}:{port}")
     print(f"[API] Dashboard docs: http://{host}:{port}/api/docs")
+
+    # Start background update checker — runs 15s after startup
+    try:
+        try:
+            from backend.updater import start_auto_check
+        except ModuleNotFoundError:
+            import sys
+            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+            from updater import start_auto_check
+        start_auto_check()
+        print("[API] Update auto-check scheduled")
+    except Exception as e:
+        print(f"[API] Update auto-check failed to start: {e}")
+
     return thread
