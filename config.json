@@ -152,6 +152,9 @@
     "version": "1.10",
     "email": "jacksonnote24@gmail.com",
     "voice": {
-        "voice_index": 1
-    }
+        "engine": "sapi",
+        "voice_id": "1",
+        "voice_index": 1,
+        "speed": 165
+}
 }

@@ -29,11 +29,15 @@ def _get_config():
     try:
         appdata     = os.environ.get("APPDATA", os.path.expanduser("~"))
         config_path = os.path.join(appdata, "SEVEN", "config.json")
+        print(f"[SPEAKER] Reading config: {config_path}", file=sys.stderr)
+        print(f"[SPEAKER] Config exists: {os.path.exists(config_path)}", file=sys.stderr)
         if os.path.exists(config_path):
             with open(config_path, "r") as f:
-                return json.load(f)
-    except Exception:
-        pass
+                data = json.load(f)
+            print(f"[SPEAKER] Voice config: {data.get('voice', 'NOT FOUND')}", file=sys.stderr)
+            return data
+    except Exception as e:
+        print(f"[SPEAKER] Config read error: {e}", file=sys.stderr)
     return {}
 
 
