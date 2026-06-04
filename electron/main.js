@@ -285,14 +285,16 @@ function createStatusWindow() {
   if (statusWindow) return;
 
   const { width, height } = screen.getPrimaryDisplay().workAreaSize;
-  const size   = 80;
-  const margin = 20;
+  const orbSize = 80;
+  const panelW  = 340;
+  const margin  = 20;
+  const totalW  = orbSize + panelW;
 
   statusWindow = new BrowserWindow({
-    width:      size,
-    height:     size,
-    x:          width  - size - margin,
-    y:          height - size - margin,
+    width:      totalW,
+    height:     orbSize,
+    x:          width  - totalW - margin,
+    y:          height - orbSize - margin,
     frame:      false,
     transparent: true,
     alwaysOnTop: true,

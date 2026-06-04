@@ -12,7 +12,7 @@
     }
 
     html, body {
-      width: 80px;
+      width: 420px;
       height: 80px;
       background: transparent !important;
       overflow: hidden;
@@ -21,8 +21,147 @@
     body {
       display: flex;
       align-items: center;
-      justify-content: center;
+      justify-content: flex-end;
+      gap: 0;
     }
+
+    /* ══════════════════════════════════════
+       CONVERSATION PANEL
+       Sits to the LEFT of the orb
+       ══════════════════════════════════════ */
+    #conv-panel {
+      flex: 1;
+      height: 72px;
+      margin-right: 8px;
+      border-radius: 12px;
+      padding: 10px 14px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 5px;
+      opacity: 0;
+      transform: translateX(8px);
+      transition: opacity 0.4s ease, transform 0.4s ease;
+      pointer-events: none;
+      overflow: hidden;
+      background: rgba(9, 9, 11, 0.72);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      box-shadow:
+        0 8px 32px rgba(0, 0, 0, 0.5),
+        inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    }
+
+    #conv-panel.visible {
+      opacity: 1;
+      transform: translateX(0);
+      pointer-events: auto;
+    }
+
+    /* User line */
+    #user-line {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 14px;
+    }
+
+    #user-dot {
+      width: 4px;
+      height: 4px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.2);
+      flex-shrink: 0;
+    }
+
+    #user-text {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      font-size: 10px;
+      color: rgba(255, 255, 255, 0.38);
+      font-weight: 400;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 280px;
+      letter-spacing: 0.01em;
+    }
+
+    /* Divider */
+    #conv-divider {
+      height: 1px;
+      background: rgba(255, 255, 255, 0.04);
+      margin: 0 0;
+    }
+
+    /* Seven line */
+    #seven-line {
+      display: flex;
+      align-items: flex-start;
+      gap: 6px;
+    }
+
+    #seven-dot {
+      width: 4px;
+      height: 4px;
+      border-radius: 50%;
+      background: #6366f1;
+      flex-shrink: 0;
+      margin-top: 4px;
+      transition: background 0.4s ease;
+    }
+
+    #seven-dot.speaking {
+      animation: dotPulse 1s ease-in-out infinite;
+    }
+
+    #seven-text {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      font-size: 11px;
+      color: rgba(255, 255, 255, 0.82);
+      font-weight: 400;
+      line-height: 1.45;
+      max-width: 280px;
+      overflow: hidden;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      letter-spacing: 0.01em;
+    }
+
+    /* Thinking dots */
+    #thinking-dots {
+      display: none;
+      gap: 3px;
+      align-items: center;
+      margin-top: 2px;
+    }
+
+    #thinking-dots span {
+      width: 3px;
+      height: 3px;
+      border-radius: 50%;
+      background: #a855f7;
+      display: inline-block;
+    }
+
+    #thinking-dots span:nth-child(1) { animation: dotBounce 1.2s ease-in-out 0s infinite; }
+    #thinking-dots span:nth-child(2) { animation: dotBounce 1.2s ease-in-out 0.2s infinite; }
+    #thinking-dots span:nth-child(3) { animation: dotBounce 1.2s ease-in-out 0.4s infinite; }
+
+    /* Cursor blink while speaking */
+    #cursor {
+      display: inline-block;
+      width: 1.5px;
+      height: 11px;
+      background: #6366f1;
+      margin-left: 1px;
+      vertical-align: middle;
+      animation: cursorBlink 1s ease-in-out infinite;
+      opacity: 0;
+    }
+
+    #cursor.active { opacity: 1; }
 
     /* ══════════════════════════════════════
        ORB CONTAINER
@@ -30,15 +169,13 @@
     #orb-container {
       width: 80px;
       height: 80px;
+      flex-shrink: 0;
       position: relative;
       display: flex;
       align-items: center;
       justify-content: center;
     }
 
-    /* ══════════════════════════════════════
-       THE ORB - Always dark, glass-like
-       ══════════════════════════════════════ */
     #orb {
       width: 42px;
       height: 42px;
@@ -59,7 +196,6 @@
       pointer-events: none;
     }
 
-    /* Glass highlight on orb */
     #orb::before {
       content: '';
       position: absolute;
@@ -68,15 +204,10 @@
       width: 18px;
       height: 8px;
       border-radius: 50%;
-      background: linear-gradient(
-        180deg,
-        rgba(255, 255, 255, 0.07) 0%,
-        transparent 100%
-      );
+      background: linear-gradient(180deg, rgba(255,255,255,0.07) 0%, transparent 100%);
       z-index: 5;
     }
 
-    /* VII Text */
     #orb-text {
       font-family: 'Georgia', 'Times New Roman', serif;
       font-size: 11px;
@@ -87,32 +218,22 @@
       transition: color 0.6s ease, text-shadow 0.6s ease;
     }
 
-    /* ══════════════════════════════════════
-       AMBIENT GLOW
-       ══════════════════════════════════════ */
     #orb-glow {
       position: absolute;
-      top: 50%;
-      left: 50%;
+      top: 50%; left: 50%;
       transform: translate(-50%, -50%);
-      width: 42px;
-      height: 42px;
+      width: 42px; height: 42px;
       border-radius: 50%;
       pointer-events: none;
       z-index: 0;
       transition: box-shadow 0.8s ease;
     }
 
-    /* ══════════════════════════════════════
-       PULSE RING
-       ══════════════════════════════════════ */
     #pulse-ring {
       position: absolute;
-      top: 50%;
-      left: 50%;
+      top: 50%; left: 50%;
       transform: translate(-50%, -50%);
-      width: 50px;
-      height: 50px;
+      width: 50px; height: 50px;
       border-radius: 50%;
       border: 1.5px solid transparent;
       pointer-events: none;
@@ -120,14 +241,11 @@
       transition: border-color 0.6s ease;
     }
 
-    /* Ghost ring */
     #ghost-ring {
       position: absolute;
-      top: 50%;
-      left: 50%;
+      top: 50%; left: 50%;
       transform: translate(-50%, -50%);
-      width: 50px;
-      height: 50px;
+      width: 50px; height: 50px;
       border-radius: 50%;
       border: 1px solid transparent;
       pointer-events: none;
@@ -135,167 +253,27 @@
       opacity: 0;
     }
 
-    /* ══════════════════════════════════════
-       INTERACTION LAYER
-       One single layer handles BOTH
-       dragging AND clicking
-       ══════════════════════════════════════ */
     #interaction-layer {
       position: absolute;
-      top: 0;
-      left: 0;
-      width: 80px;
-      height: 80px;
+      top: 0; left: 0;
+      width: 80px; height: 80px;
       z-index: 10;
       cursor: grab;
       border-radius: 50%;
     }
 
-    #interaction-layer:active {
-      cursor: grabbing;
-    }
+    #interaction-layer:active { cursor: grabbing; }
 
-    /* Hover effect - applied to orb via parent */
-    #interaction-layer:hover ~ #orb {
-      transform: scale(1.08);
-      border-color: rgba(255, 255, 255, 0.08);
-    }
-
-    /* ══════════════════════════════════════════════
-       STATE: IDLE
-       ══════════════════════════════════════════════ */
-    .idle #orb {
-      border-color: rgba(40, 40, 55, 0.3);
-    }
-    .idle #orb-text {
-      color: rgba(255, 255, 255, 0.2);
-    }
-    .idle #orb-glow {
-      box-shadow: 0 0 8px rgba(40, 40, 60, 0.08);
-    }
-    .idle #pulse-ring {
-      border-color: rgba(40, 40, 60, 0.08);
-    }
-
-    /* ══════════════════════════════════════════════
-       STATE: LISTENING — Green
-       ══════════════════════════════════════════════ */
-    .listening #orb {
-      border-color: rgba(34, 197, 94, 0.1);
-    }
-    .listening #orb-text {
-      color: rgba(255, 255, 255, 0.45);
-      text-shadow: 0 0 8px rgba(34, 197, 94, 0.15);
-    }
-    .listening #orb-glow {
-      box-shadow:
-        0 0 20px rgba(34, 197, 94, 0.12),
-        0 0 40px rgba(34, 197, 94, 0.06);
-    }
-    .listening #pulse-ring {
-      border-color: rgba(34, 197, 94, 0.4);
-      animation: pulse 2.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
-    }
-    .listening #ghost-ring {
-      border-color: rgba(34, 197, 94, 0.15);
-      opacity: 1;
-      animation: pulse 2.4s cubic-bezier(0.4, 0, 0.2, 1) infinite 0.6s;
-    }
-
-    /* ══════════════════════════════════════════════
-       STATE: THINKING — Purple
-       ══════════════════════════════════════════════ */
-    .thinking #orb {
-      border-color: rgba(168, 85, 247, 0.1);
-    }
-    .thinking #orb-text {
-      color: rgba(255, 255, 255, 0.45);
-      text-shadow: 0 0 8px rgba(168, 85, 247, 0.15);
-    }
-    .thinking #orb-glow {
-      box-shadow:
-        0 0 22px rgba(168, 85, 247, 0.15),
-        0 0 40px rgba(168, 85, 247, 0.06);
-    }
-    .thinking #pulse-ring {
-      border-color: rgba(168, 85, 247, 0.4);
-      border-style: dashed;
-      border-width: 1.5px;
-      animation: spin 2s linear infinite;
-    }
-
-    /* ══════════════════════════════════════════════
-       STATE: SPEAKING — Blue
-       ══════════════════════════════════════════════ */
-    .speaking #orb {
-      border-color: rgba(59, 130, 246, 0.1);
-    }
-    .speaking #orb-text {
-      color: rgba(255, 255, 255, 0.45);
-      text-shadow: 0 0 8px rgba(59, 130, 246, 0.15);
-    }
-    .speaking #orb-glow {
-      box-shadow:
-        0 0 20px rgba(59, 130, 246, 0.12),
-        0 0 40px rgba(59, 130, 246, 0.06);
-    }
-    .speaking #pulse-ring {
-      border-color: rgba(59, 130, 246, 0.4);
-      animation: breathe 1s ease-in-out infinite;
-    }
-    .speaking #ghost-ring {
-      border-color: rgba(59, 130, 246, 0.12);
-      opacity: 1;
-      animation: breathe 1s ease-in-out infinite 0.2s;
-    }
-
-    /* ══════════════════════════════════════
-       ANIMATIONS
-       ══════════════════════════════════════ */
-    @keyframes pulse {
-      0% {
-        transform: translate(-50%, -50%) scale(1);
-        opacity: 0.6;
-      }
-      70% {
-        transform: translate(-50%, -50%) scale(1.35);
-        opacity: 0;
-      }
-      100% {
-        transform: translate(-50%, -50%) scale(1.35);
-        opacity: 0;
-      }
-    }
-
-    @keyframes spin {
-      from { transform: translate(-50%, -50%) rotate(0deg); }
-      to { transform: translate(-50%, -50%) rotate(360deg); }
-    }
-
-    @keyframes breathe {
-      0%, 100% {
-        transform: translate(-50%, -50%) scale(1);
-        opacity: 0.5;
-      }
-      50% {
-        transform: translate(-50%, -50%) scale(1.12);
-        opacity: 0.25;
-      }
-    }
-
-    /* ══════════════════════════════════════
-       TOOLTIP
-       ══════════════════════════════════════ */
     #tooltip {
       position: fixed;
       top: -26px;
       left: 50%;
       transform: translateX(-50%);
       background: #0e0e18;
-      color: rgba(255, 255, 255, 0.4);
+      color: rgba(255,255,255,0.4);
       padding: 3px 10px;
       border-radius: 3px;
-      border: 1px solid rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255,255,255,0.04);
       font-family: 'Segoe UI', system-ui, sans-serif;
       font-size: 9px;
       font-weight: 600;
@@ -308,13 +286,90 @@
       z-index: 100;
     }
 
-    #orb-container:hover #tooltip {
-      opacity: 1;
+    #orb-container:hover #tooltip { opacity: 1; }
+
+    /* ── State styles ── */
+    .idle     #orb          { border-color: rgba(40,40,55,0.3); }
+    .idle     #orb-text     { color: rgba(255,255,255,0.2); }
+    .idle     #orb-glow     { box-shadow: 0 0 8px rgba(40,40,60,0.08); }
+    .idle     #pulse-ring   { border-color: rgba(40,40,60,0.08); }
+    .idle     #seven-dot    { background: rgba(255,255,255,0.2); }
+
+    .listening #orb         { border-color: rgba(34,197,94,0.1); }
+    .listening #orb-text    { color: rgba(255,255,255,0.45); text-shadow: 0 0 8px rgba(34,197,94,0.15); }
+    .listening #orb-glow    { box-shadow: 0 0 20px rgba(34,197,94,0.12), 0 0 40px rgba(34,197,94,0.06); }
+    .listening #pulse-ring  { border-color: rgba(34,197,94,0.4); animation: pulse 2.4s cubic-bezier(0.4,0,0.2,1) infinite; }
+    .listening #ghost-ring  { border-color: rgba(34,197,94,0.15); opacity: 1; animation: pulse 2.4s cubic-bezier(0.4,0,0.2,1) infinite 0.6s; }
+    .listening #seven-dot   { background: #22c55e; }
+
+    .thinking #orb          { border-color: rgba(168,85,247,0.1); }
+    .thinking #orb-text     { color: rgba(255,255,255,0.45); text-shadow: 0 0 8px rgba(168,85,247,0.15); }
+    .thinking #orb-glow     { box-shadow: 0 0 22px rgba(168,85,247,0.15), 0 0 40px rgba(168,85,247,0.06); }
+    .thinking #pulse-ring   { border-color: rgba(168,85,247,0.4); border-style: dashed; border-width: 1.5px; animation: spin 2s linear infinite; }
+    .thinking #seven-dot    { background: #a855f7; }
+
+    .speaking #orb          { border-color: rgba(59,130,246,0.1); }
+    .speaking #orb-text     { color: rgba(255,255,255,0.45); text-shadow: 0 0 8px rgba(59,130,246,0.15); }
+    .speaking #orb-glow     { box-shadow: 0 0 20px rgba(59,130,246,0.12), 0 0 40px rgba(59,130,246,0.06); }
+    .speaking #pulse-ring   { border-color: rgba(59,130,246,0.4); animation: breathe 1s ease-in-out infinite; }
+    .speaking #ghost-ring   { border-color: rgba(59,130,246,0.12); opacity: 1; animation: breathe 1s ease-in-out infinite 0.2s; }
+    .speaking #seven-dot    { background: #6366f1; }
+
+    /* ── Animations ── */
+    @keyframes pulse {
+      0%   { transform: translate(-50%,-50%) scale(1); opacity: 0.6; }
+      70%  { transform: translate(-50%,-50%) scale(1.35); opacity: 0; }
+      100% { transform: translate(-50%,-50%) scale(1.35); opacity: 0; }
+    }
+
+    @keyframes spin {
+      from { transform: translate(-50%,-50%) rotate(0deg); }
+      to   { transform: translate(-50%,-50%) rotate(360deg); }
+    }
+
+    @keyframes breathe {
+      0%,100% { transform: translate(-50%,-50%) scale(1); opacity: 0.5; }
+      50%     { transform: translate(-50%,-50%) scale(1.12); opacity: 0.25; }
+    }
+
+    @keyframes dotBounce {
+      0%,80%,100% { transform: scale(0.6); opacity: 0.4; }
+      40%         { transform: scale(1);   opacity: 1;   }
+    }
+
+    @keyframes dotPulse {
+      0%,100% { opacity: 1; }
+      50%     { opacity: 0.4; }
+    }
+
+    @keyframes cursorBlink {
+      0%,100% { opacity: 1; }
+      50%     { opacity: 0; }
     }
   </style>
 </head>
 <body class="listening">
 
+  <!-- Conversation panel — LEFT of orb -->
+  <div id="conv-panel">
+    <div id="user-line">
+      <div id="user-dot"></div>
+      <div id="user-text"></div>
+    </div>
+    <div id="conv-divider"></div>
+    <div id="seven-line">
+      <div id="seven-dot"></div>
+      <div style="flex:1;overflow:hidden">
+        <div id="thinking-dots">
+          <span></span><span></span><span></span>
+        </div>
+        <div id="seven-text"></div>
+        <span id="cursor"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Orb — RIGHT side -->
   <div id="orb-container">
     <div id="orb-glow"></div>
     <div id="ghost-ring"></div>
@@ -322,129 +377,123 @@
     <div id="orb">
       <span id="orb-text">VII</span>
     </div>
-    <!-- Single layer: handles drag + click + right-click -->
     <div id="interaction-layer"></div>
     <div id="tooltip">Listening</div>
   </div>
 
   <script>
-    const body = document.body;
+    const body          = document.body;
+    const convPanel     = document.getElementById('conv-panel');
+    const userTextEl    = document.getElementById('user-text');
+    const sevenTextEl   = document.getElementById('seven-text');
+    const thinkingDots  = document.getElementById('thinking-dots');
+    const cursor        = document.getElementById('cursor');
+    const sevenDot      = document.getElementById('seven-dot');
+    const tooltip       = document.getElementById('tooltip');
     const interactionLayer = document.getElementById('interaction-layer');
-    const tooltip = document.getElementById('tooltip');
 
-    let currentStatus = 'listening';
-    let ws = null;
-    let reconnectAttempts = 0;
-    const maxReconnectAttempts = 50;
+    let currentStatus   = 'listening';
+    let ws              = null;
+    let reconnectCount  = 0;
+    let fadeTimer       = null;
 
     const statusLabels = {
-      idle: 'Offline',
+      idle:      'Offline',
       listening: 'Listening',
-      thinking: 'Processing',
-      speaking: 'Speaking'
+      thinking:  'Processing',
+      speaking:  'Speaking'
     };
 
-    // ========================================
-    // UNIFIED INTERACTION: DRAG + CLICK
-    // ========================================
-    let isMouseDown = false;
-    let startScreenX = 0;
-    let startScreenY = 0;
-    let hasDragged = false;
-    const DRAG_THRESHOLD = 5;
+    // ── Conversation panel logic ──
+    function showPanel() {
+      convPanel.classList.add('visible');
+      if (fadeTimer) { clearTimeout(fadeTimer); fadeTimer = null; }
+    }
 
-    interactionLayer.addEventListener('mousedown', (e) => {
-      if (e.button === 0) {
-        // Left button: could be drag or click
-        isMouseDown = true;
-        hasDragged = false;
-        startScreenX = e.screenX;
-        startScreenY = e.screenY;
+    function scheduleHide() {
+      if (fadeTimer) clearTimeout(fadeTimer);
+      fadeTimer = setTimeout(() => {
+        convPanel.classList.remove('visible');
+        fadeTimer = null;
+      }, 5000);
+    }
 
-        if (window.orbAPI && window.orbAPI.dragStart) {
-          window.orbAPI.dragStart(e.screenX, e.screenY);
-        }
-
-        e.preventDefault();
-      }
-    });
-
-    document.addEventListener('mousemove', (e) => {
-      if (!isMouseDown) return;
-
-      const dx = Math.abs(e.screenX - startScreenX);
-      const dy = Math.abs(e.screenY - startScreenY);
-
-      if (dx > DRAG_THRESHOLD || dy > DRAG_THRESHOLD) {
-        hasDragged = true;
+    function updateConversation(userText, sevenText, isThinking, isSpeaking) {
+      // User text
+      if (userText) {
+        userTextEl.textContent = userText;
+        document.getElementById('user-line').style.display = 'flex';
+        document.getElementById('conv-divider').style.display = 'block';
+      } else {
+        document.getElementById('user-line').style.display = 'none';
+        document.getElementById('conv-divider').style.display = 'none';
       }
 
-      // Always send move — main.js decides whether to move window
-      if (window.orbAPI && window.orbAPI.dragMove) {
-        window.orbAPI.dragMove(e.screenX, e.screenY);
+      // Seven text or thinking dots
+      if (isThinking && !sevenText) {
+        thinkingDots.style.display = 'flex';
+        sevenTextEl.textContent = '';
+        cursor.classList.remove('active');
+        showPanel();
+      } else if (sevenText) {
+        thinkingDots.style.display = 'none';
+        sevenTextEl.textContent = sevenText;
+        cursor.classList.toggle('active', isSpeaking);
+        sevenDot.classList.toggle('speaking', isSpeaking);
+        showPanel();
+      } else if (!userText) {
+        scheduleHide();
       }
-    });
 
-    document.addEventListener('mouseup', (e) => {
-      if (!isMouseDown) return;
-      isMouseDown = false;
-
-      if (e.button === 0 && !hasDragged) {
-        // Didn't drag — this is a CLICK
-        console.log('[ORB] Click detected — toggle dashboard');
-        if (window.orbAPI && window.orbAPI.toggleDashboard) {
-          window.orbAPI.toggleDashboard();
-        }
+      // Auto-hide when fully idle
+      if (!isThinking && !isSpeaking && sevenText) {
+        scheduleHide();
       }
-    });
+    }
 
-    // RIGHT CLICK — context menu
-    interactionLayer.addEventListener('contextmenu', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      console.log('[ORB] Right click — show menu');
-      if (window.orbAPI && window.orbAPI.showMenu) {
-        window.orbAPI.showMenu();
-      }
-    });
-
-    // ========================================
-    // WEBSOCKET
-    // ========================================
-    function connectWebSocket() {
-      if (reconnectAttempts >= maxReconnectAttempts) return;
-
+    // ── WebSocket ──
+    function connect() {
+      if (reconnectCount > 60) return;
       try {
         ws = new WebSocket('ws://127.0.0.1:7777/ws/status');
 
         ws.onopen = () => {
-          reconnectAttempts = 0;
+          reconnectCount = 0;
           setStatus('listening');
         };
 
         ws.onmessage = (event) => {
           try {
             const data = JSON.parse(event.data);
+
+            // Determine orb state
             let s = 'listening';
-            if (data.speaking) s = 'speaking';
-            else if (data.thinking) s = 'thinking';
-            else if (data.listening) s = 'listening';
-            else s = 'idle';
-            if (data.status) s = data.status;
+            if (data.speaking)        s = 'speaking';
+            else if (data.thinking)   s = 'thinking';
+            else if (data.listening)  s = 'listening';
+            else                      s = 'idle';
             setStatus(s);
+
+            // Update conversation panel
+            updateConversation(
+              data.user_text  || '',
+              data.seven_text || '',
+              data.thinking   || false,
+              data.speaking   || false
+            );
           } catch (e) {}
         };
 
         ws.onclose = () => {
-          reconnectAttempts++;
-          setTimeout(connectWebSocket, 2000);
+          reconnectCount++;
+          setTimeout(connect, 2000);
         };
 
-        ws.onerror = () => ws.close();
+        ws.onerror = () => ws && ws.close();
 
       } catch (e) {
-        reconnectAttempts++;
-        setTimeout(connectWebSocket, 2000);
+        reconnectCount++;
+        setTimeout(connect, 2000);
       }
     }
 
@@ -452,47 +501,62 @@
       if (currentStatus === status) return;
       currentStatus = status;
       body.className = status;
-      tooltip.textContent = statusLabels[status] || 'Unknown';
+      tooltip.textContent = statusLabels[status] || '';
     }
 
-    // ========================================
-    // CLICK-THROUGH TRANSPARENT AREAS
-    // Mouse passes through empty space,
-    // but stops on the orb itself
-    // ========================================
-    const onMouseEvent = (e) => {
-      const el = document.elementFromPoint(e.clientX, e.clientY);
-      
-      // If mouse is on the interaction layer or orb area — capture it
-      if (el && (el.id === 'interaction-layer' || 
-                 el.id === 'orb' || 
-                 el.id === 'orb-text' ||
-                 el.id === 'orb-container')) {
-        if (window.orbAPI && window.orbAPI.setIgnoreMouseEvents) {
-          window.orbAPI.setIgnoreMouseEvents(false);
-        }
-      } else {
-        // Mouse is on transparent area — let it pass through
-        if (window.orbAPI && window.orbAPI.setIgnoreMouseEvents) {
-          window.orbAPI.setIgnoreMouseEvents(true);
-        }
-      }
-    };
+    // ── Drag + Click ──
+    let isMouseDown = false;
+    let startX = 0, startY = 0;
+    let hasDragged = false;
+    const DRAG_THRESHOLD = 5;
 
-    document.addEventListener('mousemove', onMouseEvent);
-    document.addEventListener('mouseleave', () => {
-      // When mouse leaves the window entirely, let clicks pass through
-      if (window.orbAPI && window.orbAPI.setIgnoreMouseEvents) {
-        window.orbAPI.setIgnoreMouseEvents(true);
+    interactionLayer.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      isMouseDown = true;
+      hasDragged = false;
+      startX = e.screenX;
+      startY = e.screenY;
+      window.orbAPI?.dragStart(e.screenX, e.screenY);
+      e.preventDefault();
+    });
+
+    document.addEventListener('mousemove', (e) => {
+      if (!isMouseDown) return;
+      if (Math.abs(e.screenX - startX) > DRAG_THRESHOLD ||
+          Math.abs(e.screenY - startY) > DRAG_THRESHOLD) {
+        hasDragged = true;
+      }
+      window.orbAPI?.dragMove(e.screenX, e.screenY);
+    });
+
+    document.addEventListener('mouseup', (e) => {
+      if (!isMouseDown) return;
+      isMouseDown = false;
+      if (e.button === 0 && !hasDragged) {
+        window.orbAPI?.toggleDashboard();
       }
     });
-    document.addEventListener('mouseenter', onMouseEvent);
 
-    // ========================================
-    // INIT
-    // ========================================
+    interactionLayer.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      window.orbAPI?.showMenu();
+    });
+
+    // ── Click-through transparent areas ──
+    document.addEventListener('mousemove', (e) => {
+      const el = document.elementFromPoint(e.clientX, e.clientY);
+      const isOrb = el && ['interaction-layer','orb','orb-text','orb-container'].includes(el.id);
+      const isPanel = el && (el === convPanel || convPanel.contains(el));
+      window.orbAPI?.setIgnoreMouseEvents(!(isOrb || isPanel));
+    });
+
+    document.addEventListener('mouseleave', () => {
+      window.orbAPI?.setIgnoreMouseEvents(true);
+    });
+
+    // ── Init ──
     setStatus('listening');
-    setTimeout(() => connectWebSocket(), 1000);
+    setTimeout(connect, 1200);
   </script>
 </body>
 </html>
