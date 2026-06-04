@@ -54,11 +54,13 @@ app.add_middleware(
 # =========================================================================
 
 _state = {
-    "listening": False,
-    "speaking": False,
-    "thinking": False,
-    "start_time": None,
-    "current_speaker": "default",
+    "listening":    False,
+    "thinking":     False,
+    "speaking":     False,
+    "user_text":    "",
+    "seven_text":   "",
+    "status_text":  "SYSTEM ONLINE",
+    "status_color": "#00ff00",
 }
 
 _start_time = time.time()
@@ -274,17 +276,19 @@ def get_status():
             print(f"[API] /status mood error: {e}")
 
         return {
-            "listening": _state.get("listening", False),
-            "speaking": _state.get("speaking", False),
-            "thinking": _state.get("thinking", False),
-            "mood": mood_label,
-            "mood_value": mood_value,
-            "model": model,
-            "streaming": False,
-            "uptime": f"{hours}h {minutes}m",
+            "listening":    _state.get("listening",  False),
+            "speaking":     _state.get("speaking",   False),
+            "thinking":     _state.get("thinking",   False),
+            "user_text":    _state.get("user_text",  ""),
+            "seven_text":   _state.get("seven_text", ""),
+            "mood":         mood_label,
+            "mood_value":   mood_value,
+            "model":        model,
+            "streaming":    False,
+            "uptime":       f"{hours}h {minutes}m",
             "uptime_seconds": uptime_secs,
-            "speaker": _state.get("current_speaker", "default"),
-            "version": version
+            "speaker":      _state.get("current_speaker", "default"),
+            "version":      version
         }
     except Exception as e:
         import traceback
@@ -1517,13 +1521,15 @@ async def status_websocket(websocket: WebSocket):
     try:
         while True:
             await websocket.send_json({
-                "listening": _state.get("listening", False),
-                "thinking": _state.get("thinking", False),
-                "speaking": _state.get("speaking", False)
+                "listening":  _state.get("listening",  False),
+                "thinking":   _state.get("thinking",   False),
+                "speaking":   _state.get("speaking",   False),
+                "user_text":  _state.get("user_text",  ""),
+                "seven_text": _state.get("seven_text", ""),
             })
-            await asyncio.sleep(0.5)  # Send every 500ms
-    except:
-        pass  # Client disconnected
+            await asyncio.sleep(0.3)
+    except Exception:
+        pass
 
 
 # =========================================================================
