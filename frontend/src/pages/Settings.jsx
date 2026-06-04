@@ -294,10 +294,24 @@ export default function Settings() {
     setTimeout(() => setPreviewingVoice(null), 6000);
   };
 
-  const saveSpeed = async (speed) => {
+  const saveSpeed = async (newSpeed) => {
+    setVoiceSpeed(newSpeed);
     setSavingSpeed(true);
     try {
-      await api.put('/config', { updates: { voice: { speed } } });
+      // Read CURRENT config fresh to get latest voice settings
+      const fresh = await api.get('/config');
+      const currentVoice = fresh.data?.voice || {};
+      await api.put('/config', {
+        updates: {
+          voice: {
+            engine:      currentVoice.engine      || selectedEngine  || 'piper',
+            voice_id:    currentVoice.voice_id    || selectedVoiceId || 'en_US-ryan-high',
+            voice_index: currentVoice.voice_index ?? 0,
+            speed:       newSpeed,
+          }
+        }
+      });
+      console.log('[SPEED] Saved speed:', newSpeed, 'with voice:', currentVoice.voice_id);
     } catch (e) {
       console.error('[SPEED] Save failed:', e);
     }
@@ -305,20 +319,22 @@ export default function Settings() {
   };
 
   const saveVoice = async (voice) => {
+    // Update local state immediately for responsive UI
     setSelectedVoiceId(voice.voice_id);
     setSelectedEngine(voice.engine);
+
+    const voiceConfig = {
+      engine:      voice.engine,
+      voice_id:    voice.voice_id ?? String(voice.index),
+      voice_index: voice.engine === 'sapi' ? parseInt(voice.voice_id) : 0,
+      speed:       voiceSpeed,
+    };
+
     try {
-      await api.put('/config', {
-        updates: {
-          voice: {
-            engine:      voice.engine,
-            voice_id:    voice.voice_id ?? String(voice.index),
-            voice_index: voice.engine === 'sapi' ? parseInt(voice.voice_id) : 0,
-            speed:       voiceSpeed,
-          }
-        }
-      });
-      console.log('[VOICE] Saved:', voice.engine, voice.voice_id);
+      await api.put('/config', { updates: { voice: voiceConfig } });
+      // Also update local state so speed saves don't overwrite
+      setLocal(prev => prev ? { ...prev, voice: voiceConfig } : prev);
+      console.log('[VOICE] Saved and local updated:', voiceConfig);
     } catch (e) {
       console.error('[VOICE] Save failed:', e);
     }
@@ -597,7 +613,7 @@ export default function Settings() {
           </div>
         </div>
 
-               {/* ── SEVEN'S VOICE ── */}
+        {/* ── SEVEN'S VOICE ── */}
         <div className="bg-s-card border border-s-border rounded p-4">
 
           {/* Header */}
@@ -758,7 +774,7 @@ export default function Settings() {
                     return (
                       <button
                         key={label}
-                        onClick={() => { setVoiceSpeed(value); saveSpeed(value); }}
+                        onClick={() => { setVoiceSpeed(value); saveSpeed(value); setLocal(prev => prev ? { ...prev, voice: { ...(prev.voice||{}), speed: value } } : prev); }}
                         className={`px-2.5 py-1.5 text-[9px] font-medium transition-all border-r border-s-border/50 last:border-r-0 ${
                           isActive
                             ? 'bg-s-accent text-white'
