@@ -263,10 +263,10 @@ export default function Updates() {
           )}
 
           {/* Action buttons */}
-          <div className="flex gap-3 w-full">
+          <div className="flex gap-3 w-full justify-center">
             {downloadReady ? (
               <>
-                  <HoverButton onClick={installUpdate} variant="install">
+                  <HoverButton onClick={installUpdate} variant="install" className="w-full max-w-sm mx-auto">
                   <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
                     <path d="M2 11L11 2M11 2H5M11 2V8"
                       stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
