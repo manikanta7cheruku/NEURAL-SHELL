@@ -13,7 +13,7 @@ ENDPOINTS: 30+ routes covering status, chat, memory, schedules,
 =============================================================================
 """
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, Dict, Any, List
@@ -1931,18 +1931,25 @@ def complete_setup(req: SetupCompleteRequest):
 
 
 @app.post("/api/setup/preview-voice")
-def preview_voice(req: dict):
+async def preview_voice(request: Request):
     """
     Preview a voice by engine + voice_id.
     Runs in daemon thread — returns immediately.
     Accepts: { engine: "piper"|"sapi", voice_id: "en_US-ryan-high"|"0" }
     """
     import threading
-    import sys
 
-    engine_name = req.get("engine", "piper")
-    voice_id    = req.get("voice_id", "en_US-ryan-high")
+    # Parse body manually — avoids FastAPI dict parsing bug
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    engine_name = body.get("engine", "piper")
+    voice_id    = body.get("voice_id", "en_US-ryan-high")
     sample_text = "Hello. I am Seven. Your private AI assistant. How can I help you today?"
+    
+    print(f"[PREVIEW] engine={engine_name} voice_id={voice_id}")
 
     def _speak():
         try:
@@ -1983,20 +1990,28 @@ def preview_voice(req: dict):
                 )
 
                 if result.returncode == 0:
-                    ps_script = (
-                        f"$p = New-Object System.Media.SoundPlayer('{tmp_path}'); "
-                        f"$p.PlaySync();"
-                    )
-                    sp.run(
-                        ["powershell", "-NoProfile", "-Command", ps_script],
-                        capture_output=True, timeout=30
-                    )
+                    # winsound is instant — no PowerShell startup delay
+                    try:
+                        import winsound
+                        winsound.PlaySound(tmp_path, winsound.SND_FILENAME)
+                    except Exception:
+                        # PowerShell fallback
+                        ps_script = (
+                            f"$p = New-Object System.Media.SoundPlayer('{tmp_path}'); "
+                            f"$p.PlaySync();"
+                        )
+                        sp.run(
+                            ["powershell", "-NoProfile", "-Command", ps_script],
+                            capture_output=True, timeout=30
+                        )
                     try:
                         os.unlink(tmp_path)
                     except Exception:
                         pass
                 else:
-                    raise Exception(result.stderr.decode("utf-8", errors="replace"))
+                    err = result.stderr.decode("utf-8", errors="replace")
+                    print(f"[PREVIEW] Piper failed: {err}")
+                    raise Exception(err)
 
             else:
                 # SAPI fallback

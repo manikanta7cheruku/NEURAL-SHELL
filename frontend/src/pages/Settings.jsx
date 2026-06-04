@@ -31,12 +31,11 @@ export default function Settings() {
   const [savingVoice,      setSavingVoice]      = useState(false);
   const [editingVoice,     setEditingVoice]     = useState(false);
 
-  // Voice selector
-  const [voices,           setVoices]           = useState([]);
-  const [selectedVoice,    setSelectedVoice]    = useState(0);
-  const [selectedVoiceId,  setSelectedVoiceId]  = useState('en_US-ryan-high');
-  const [selectedEngine,   setSelectedEngine]   = useState('piper');
-  const [previewingVoice,  setPreviewingVoice]  = useState(null);
+  // Voice selector — track by voice_id string (unique), not integer index
+  const [voices,          setVoices]          = useState([]);
+  const [selectedVoiceId, setSelectedVoiceId] = useState('en_US-ryan-high');
+  const [selectedEngine,  setSelectedEngine]  = useState('piper');
+  const [previewingVoice, setPreviewingVoice] = useState(null);
 
   // Identity editing
   const [editName,    setEditName]    = useState('');
@@ -64,9 +63,9 @@ export default function Settings() {
     }).catch(() => {});
     api.get('/config').then(r => {
       const v = r.data?.voice || {};
-      setSelectedVoice(v.voice_index ?? 0);
+      // Use voice_id as source of truth — never use index for identity
       setSelectedVoiceId(v.voice_id || 'en_US-ryan-high');
-      setSelectedEngine(v.engine || 'piper');
+      setSelectedEngine(v.engine   || 'piper');
     }).catch(() => {});
     api.get('/voice-control/words').then(r => setVoiceWords(r.data)).catch(() => {
       setVoiceWords({
@@ -267,31 +266,35 @@ export default function Settings() {
   const removeVoiceWord = (t, i) => { setVoiceWords(p => ({ ...p, [t]: p[t].filter((_,j) => j!==i) })); setVoiceWordsEdited(true); };
 
   const previewVoice = async (voice) => {
-    setPreviewingVoice(voice.index);
+    setPreviewingVoice(voice.voice_id);
     try {
       await api.post('/setup/preview-voice', {
         engine:   voice.engine,
-        voice_id: voice.voice_id,
+        voice_id: voice.voice_id ?? String(voice.index),
       });
-    } catch {}
-    setTimeout(() => setPreviewingVoice(null), 5000);
+    } catch (e) {
+      console.error('[PREVIEW] failed:', e);
+    }
+    setTimeout(() => setPreviewingVoice(null), 6000);
   };
 
   const saveVoice = async (voice) => {
-    setSelectedVoice(voice.index);
     setSelectedVoiceId(voice.voice_id);
     setSelectedEngine(voice.engine);
     try {
       await api.put('/config', {
         updates: {
           voice: {
-            voice_index: voice.index,
-            voice_id:    voice.voice_id,
             engine:      voice.engine,
+            voice_id:    voice.voice_id ?? String(voice.index),
+            voice_index: voice.engine === 'sapi' ? parseInt(voice.voice_id) : 0,
           }
         }
       });
-    } catch {}
+      console.log('[VOICE] Saved:', voice.engine, voice.voice_id);
+    } catch (e) {
+      console.error('[VOICE] Save failed:', e);
+    }
   };
 
   // ── Export ──
@@ -590,8 +593,8 @@ export default function Settings() {
                     const gVoices = voices.filter(v => v.engine === 'piper' && v.gender === gender);
                     if (!gVoices.length) return null;
                     return gVoices.map(v => {
-                      const isActive = selectedVoice === v.index;
-                      const isPreviewing = previewingVoice === v.index;
+                      const isActive     = selectedVoiceId === v.voice_id;
+                      const isPreviewing = previewingVoice === v.voice_id;
                       return (
                         <div
                           key={v.index}
@@ -657,8 +660,8 @@ export default function Settings() {
                   </div>
                   <div className="space-y-px">
                     {voices.filter(v => v.engine === 'sapi').map(v => {
-                      const isActive = selectedVoice === v.index;
-                      const isPreviewing = previewingVoice === v.index;
+                        const isActive     = selectedVoiceId === v.voice_id;
+                        const isPreviewing = previewingVoice === v.voice_id;
                       return (
                         <div
                           key={v.index}

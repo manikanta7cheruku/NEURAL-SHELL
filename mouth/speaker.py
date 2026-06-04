@@ -152,11 +152,20 @@ def _speak_piper(text, voice_id):
 
 def _play_wav(wav_path):
     """
-    Play a WAV file synchronously using Windows built-in tools.
-    No external dependencies needed.
+    Play a WAV file synchronously.
+    winsound = instant start, no subprocess overhead.
+    PowerShell = fallback only.
     """
     try:
-        # Method 1: PowerShell SoundPlayer (most reliable, synchronous)
+        # Method 1: winsound — pure Windows API, instant, no subprocess cost
+        import winsound
+        winsound.PlaySound(wav_path, winsound.SND_FILENAME)
+        return
+    except Exception as e:
+        print(f"[SPEAKER] winsound error, trying PowerShell: {e}", file=sys.stderr)
+
+    try:
+        # Method 2: PowerShell SoundPlayer (fallback)
         ps_script = (
             f"$player = New-Object System.Media.SoundPlayer('{wav_path}'); "
             f"$player.PlaySync();"
@@ -167,13 +176,7 @@ def _play_wav(wav_path):
             timeout=60,
         )
     except Exception as e:
-        print(f"[SPEAKER] WAV playback error: {e}", file=sys.stderr)
-        try:
-            # Method 2: winsound (stdlib fallback)
-            import winsound
-            winsound.PlaySound(wav_path, winsound.SND_FILENAME)
-        except Exception as e2:
-            print(f"[SPEAKER] winsound fallback error: {e2}", file=sys.stderr)
+        print(f"[SPEAKER] PowerShell fallback error: {e}", file=sys.stderr)
 
 
 # ── pyttsx3 fallback ──────────────────────────────────────────────────────
@@ -212,14 +215,19 @@ def speak_text(text):
     Speak text. Uses Piper if available, falls back to pyttsx3.
     """
     engine, voice_id, sapi_idx = _get_voice_setting()
+    print(f"[SPEAKER] engine={engine} voice_id={voice_id} sapi_idx={sapi_idx}", file=sys.stderr)
 
     if engine == "piper":
+        piper_dir  = _get_piper_dir()
+        model_path = _get_voice_model_path(voice_id)
+        print(f"[SPEAKER] piper_dir={piper_dir}", file=sys.stderr)
+        print(f"[SPEAKER] model_path={model_path}", file=sys.stderr)
         success = _speak_piper(text, voice_id)
         if not success:
-            # Fallback to SAPI if Piper fails
-            print("[SPEAKER] Falling back to SAPI", file=sys.stderr)
+            print("[SPEAKER] Piper failed — falling back to SAPI", file=sys.stderr)
             _speak_sapi(text, sapi_idx)
     else:
+        print(f"[SPEAKER] Using SAPI index {sapi_idx}", file=sys.stderr)
         _speak_sapi(text, sapi_idx)
 
 
