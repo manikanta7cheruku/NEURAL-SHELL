@@ -444,8 +444,10 @@ def seven_logic():
             # ── Core processing ──
             print(Fore.YELLOW + f"USER: {user_input}")
             app_ui.update_status("THINKING...", "#ff00ff")
-            api_set_state("thinking", True)
-            api_set_state("listening", False)
+            api_set_state("thinking",   True)
+            api_set_state("listening",  False)
+            api_set_state("user_text",  user_input)   # → shows in conversation panel
+            api_set_state("seven_text", "")            # clear previous response
 
             # ── Pre-check fact limit before brain thinks ──
             # If user is trying to store a fact and they're at limit,
@@ -516,6 +518,10 @@ def seven_logic():
                     full_parts.append(sentence)
                     if "###" in sentence:
                         continue
+                    # Push each sentence as it streams — UI updates in real time
+                    api_set_state("seven_text", " ".join(
+                        p for p in full_parts if "###" not in p
+                    ))
                     completed = speak_with_interrupt(sentence)
                     if not completed:
                         break
@@ -527,6 +533,7 @@ def seven_logic():
                 )
             elif speech_part:
                 interrupt_context["last_input"] = user_input
+                api_set_state("seven_text", speech_part)  # push full response
                 completed = speak_with_interrupt(speech_part)
                 app_ui.update_status(
                     "⚡ INTERRUPTED" if not completed else speech_part,
@@ -761,7 +768,13 @@ def start_app():
     if is_electron:
         class DummyUI:
             def update_status(self, text, color):
-                pass
+                # Push status text to React frontend via api_set_state
+                # This is how the conversation panel gets updated
+                try:
+                    api_set_state("status_text", text)
+                    api_set_state("status_color", color)
+                except Exception:
+                    pass
             def close(self):
                 print(Fore.RED + "[SYSTEM] Shutdown requested")
                 os._exit(0)
@@ -781,40 +794,33 @@ def start_app():
             os._exit(0)
 
     else:
-        # Try standalone tkinter mode. If tkinter is missing, fall back to headless.
-        try:
-            import tkinter as tk
-            import gui as gui_module
+        # Standalone mode — no Electron, no Tkinter
+        # gui.py is removed. Use DummyUI that pushes to API state.
+        print(Fore.YELLOW + "[SYSTEM] Standalone mode — headless with API frontend")
 
-            root   = tk.Tk()
-            app_ui = gui_module.SevenGUI(root)
-
-            logic_thread = threading.Thread(target=seven_logic, daemon=True)
-            logic_thread.start()
-
-            root.mainloop()
-        except ImportError as e:
-            print(Fore.YELLOW + f"[SYSTEM] tkinter unavailable ({e}) — running headless")
-
-            class DummyUI:
-                def update_status(self, text, color):
+        class DummyUI:
+            def update_status(self, text, color):
+                try:
+                    api_set_state("status_text", text)
+                    api_set_state("status_color", color)
+                except Exception:
                     pass
-                def close(self):
-                    print(Fore.RED + "[SYSTEM] Shutdown requested")
-                    os._exit(0)
-
-            app_ui = DummyUI()
-            logic_thread = threading.Thread(target=seven_logic, daemon=True)
-            logic_thread.start()
-
-            print(Fore.GREEN + "[SYSTEM] Headless mode active — API server running")
-            try:
-                import time
-                while True:
-                    time.sleep(1)
-            except KeyboardInterrupt:
-                print(Fore.RED + "\n[SYSTEM] Interrupted by user")
+            def close(self):
+                print(Fore.RED + "[SYSTEM] Shutdown requested")
                 os._exit(0)
+
+        app_ui = DummyUI()
+        logic_thread = threading.Thread(target=seven_logic, daemon=True)
+        logic_thread.start()
+
+        print(Fore.GREEN + "[SYSTEM] Backend running. Open http://localhost:5173 in browser.")
+        try:
+            import time
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            print(Fore.RED + "\n[SYSTEM] Interrupted by user")
+            os._exit(0)
 
 
 if __name__ == "__main__":
