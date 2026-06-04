@@ -571,6 +571,15 @@ if (!gotTheLock) {
       console.warn('[APP] Could not write version.txt:', e.message);
     }
 
+    // Write version.txt so Python reads correct version
+    try {
+      const versionTxtPath = path.join(getAppSourcePath(), 'version.txt');
+      fs.writeFileSync(versionTxtPath, app.getVersion(), 'utf8');
+      console.log('[APP] Version written:', app.getVersion(), '->', versionTxtPath);
+    } catch (e) {
+      console.warn('[APP] Could not write version.txt:', e.message);
+    }
+
     // Start Python backend
     startPython();
 
