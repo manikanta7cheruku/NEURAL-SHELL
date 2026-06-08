@@ -2031,19 +2031,17 @@ async def preview_voice(request: Request):
                     return
 
                 if proc.returncode == 0 and os.path.exists(tmp_path):
-                    # Play via PowerShell — can be killed if needed
-                    ps_script = (
-                        f"$p = New-Object System.Media.SoundPlayer('{tmp_path}');"
-                        f"$p.PlaySync();"
-                    )
-                    with _preview_lock:
-                        _preview_process = sp.Popen(
-                            ["powershell", "-NoProfile", "-Command", ps_script],
-                            stdout=sp.PIPE, stderr=sp.PIPE
+                    try:
+                        import winsound
+                        winsound.PlaySound(tmp_path, winsound.SND_FILENAME)
+                    except Exception as we:
+                        print(f"[PREVIEW] winsound failed: {we} — trying PowerShell")
+                        ps_script = (
+                            f"$p = New-Object System.Media.SoundPlayer('{tmp_path}');"
+                            f"$p.PlaySync();"
                         )
-                        play_proc = _preview_process
-
-                    play_proc.wait(timeout=30)
+                        sp.run(["powershell", "-NoProfile", "-Command", ps_script],
+                               capture_output=True, timeout=30)
                     try:
                         os.unlink(tmp_path)
                     except Exception:
@@ -2051,7 +2049,6 @@ async def preview_voice(request: Request):
                 else:
                     err = proc.stderr.read().decode("utf-8", errors="replace") if proc.stderr else ""
                     print(f"[PREVIEW] Piper error: {err}")
-                    # Fall back to SAPI
                     _speak_sapi_preview(voice_id)
 
             else:
