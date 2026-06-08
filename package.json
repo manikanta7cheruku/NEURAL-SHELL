@@ -1,25 +1,25 @@
 {
-  "name": "vii-desktop",
-  "version": "1.2.5",
-  "description": "SEVEN — Private AI Voice Assistant",
-  "main": "electron/main.js",
-  "scripts": {
-    "dev": "concurrently \"npm run frontend:dev\" \"npm run electron:dev\"",
-    "frontend:dev": "cd frontend && npm run dev",
-    "electron:dev": "wait-on http://localhost:5173 && electron .",
-    "build:frontend": "cd frontend && npm run build",
-    "build:full": "node scripts/build.js",
-    "dist": "npm run build:frontend && electron-builder --config frontend/electron-builder.yml",
-    "dist:full": "node scripts/build.js",
-    "prepare-python": "node scripts/prepare-python.js"
-  },
-  "devDependencies": {
-    "concurrently": "^9.1.0",
-    "electron": "^33.0.0",
-    "electron-builder": "^25.0.0",
-    "wait-on": "^8.0.0"
-  },
-  "dependencies": {
-    "electron-store": "^10.0.0"
-  }
+    "name":  "vii-desktop",
+    "version":  "1.2.6",
+    "description":  "SEVEN — Private AI Voice Assistant",
+    "main":  "electron/main.js",
+    "scripts":  {
+                    "dev":  "concurrently \"npm run frontend:dev\" \"npm run electron:dev\"",
+                    "frontend:dev":  "cd frontend \u0026\u0026 npm run dev",
+                    "electron:dev":  "wait-on http://localhost:5173 \u0026\u0026 electron .",
+                    "build:frontend":  "cd frontend \u0026\u0026 npm run build",
+                    "build:full":  "node scripts/build.js",
+                    "dist":  "npm run build:frontend \u0026\u0026 electron-builder --config frontend/electron-builder.yml",
+                    "dist:full":  "node scripts/build.js",
+                    "prepare-python":  "node scripts/prepare-python.js"
+                },
+    "devDependencies":  {
+                            "concurrently":  "^9.1.0",
+                            "electron":  "^33.0.0",
+                            "electron-builder":  "^25.0.0",
+                            "wait-on":  "^8.0.0"
+                        },
+    "dependencies":  {
+                         "electron-store":  "^10.0.0"
+                     }
 }
