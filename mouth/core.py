@@ -52,12 +52,25 @@ def speak(text):
 
     try:
         with _lock:
-            # Spawn speaker.py as separate process
+            # Build env with correct PYTHONPATH for packaged app
+            env = os.environ.copy()
+            app_path = os.environ.get("SEVEN_APP_PATH", "")
+            here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            # Ensure mouth module is findable
+            python_path_parts = [here]
+            if app_path:
+                python_path_parts.insert(0, app_path)
+            existing = env.get("PYTHONPATH", "")
+            if existing:
+                python_path_parts.append(existing)
+            env["PYTHONPATH"] = os.pathsep.join(python_path_parts)
+
             _current_process = subprocess.Popen(
                 [sys.executable, "-m", "mouth.speaker", text],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
-                cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                cwd=here,
+                env=env
             )
 
         # Wait for speech to finish OR be interrupted
@@ -115,11 +128,23 @@ def speak_streamed(sentence_generator):
         
         try:
             with _lock:
+                env = os.environ.copy()
+                app_path = os.environ.get("SEVEN_APP_PATH", "")
+                here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                python_path_parts = [here]
+                if app_path:
+                    python_path_parts.insert(0, app_path)
+                existing = env.get("PYTHONPATH", "")
+                if existing:
+                    python_path_parts.append(existing)
+                env["PYTHONPATH"] = os.pathsep.join(python_path_parts)
+
                 _current_process = subprocess.Popen(
                     [sys.executable, "-m", "mouth.speaker", sentence],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.PIPE,
-                    cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                    cwd=here,
+                    env=env
                 )
             
             _current_process.wait()
