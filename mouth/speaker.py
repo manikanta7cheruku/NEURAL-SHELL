@@ -275,7 +275,10 @@ def speak_text(text):
         _speak_sapi(text, sapi_idx)
 
 
-if __name__ == "__main__":
-    if len(sys.argv) > 1:
+if __name__ == "__main__" or os.environ.get("SEVEN_SPEAK_TEXT"):
+    # Get text from env var (set by core.py) or command line args
+    text = os.environ.get("SEVEN_SPEAK_TEXT", "")
+    if not text and len(sys.argv) > 1:
         text = " ".join(sys.argv[1:])
+    if text:
         speak_text(text)
