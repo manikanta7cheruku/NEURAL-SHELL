@@ -52,28 +52,35 @@ def speak(text):
 
     try:
         with _lock:
-            # Build env with correct PYTHONPATH for packaged app
+            here     = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            app_path = os.environ.get("SEVEN_APP_PATH", here)
+
+            # Build a self-contained Python command that:
+            # 1. Adds app_path to sys.path manually
+            # 2. Imports speak_text directly
+            # 3. Calls it with the text
+            # Avoids ALL module resolution issues with embeddable Python
+            safe_text = text.replace("'", "\\'").replace("\n", " ")
+
+            run_cmd = (
+                f"import sys; "
+                f"sys.path.insert(0, r'{app_path}'); "
+                f"sys.path.insert(0, r'{here}'); "
+                f"from mouth.speaker import speak_text; "
+                f"speak_text('{safe_text}')"
+            )
+
             env = os.environ.copy()
-            app_path = os.environ.get("SEVEN_APP_PATH", "")
-            here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            # Ensure mouth module is findable
-            python_path_parts = [here]
-            if app_path:
-                python_path_parts.insert(0, app_path)
-            existing = env.get("PYTHONPATH", "")
-            if existing:
-                python_path_parts.append(existing)
-            env["PYTHONPATH"] = os.pathsep.join(python_path_parts)
+            env["SEVEN_APP_PATH"] = app_path
 
             _current_process = subprocess.Popen(
-                [sys.executable, "-m", "mouth.speaker", text],
+                [sys.executable, "-c", run_cmd],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
-                cwd=here,
+                cwd=app_path,
                 env=env
             )
 
-        # Wait for speech to finish OR be interrupted
         _current_process.wait()
 
         with _lock:
@@ -128,22 +135,27 @@ def speak_streamed(sentence_generator):
         
         try:
             with _lock:
+                here     = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                app_path = os.environ.get("SEVEN_APP_PATH", here)
+
+                safe_sentence = sentence.replace("'", "\\'").replace("\n", " ")
+
+                run_cmd = (
+                    f"import sys; "
+                    f"sys.path.insert(0, r'{app_path}'); "
+                    f"sys.path.insert(0, r'{here}'); "
+                    f"from mouth.speaker import speak_text; "
+                    f"speak_text('{safe_sentence}')"
+                )
+
                 env = os.environ.copy()
-                app_path = os.environ.get("SEVEN_APP_PATH", "")
-                here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-                python_path_parts = [here]
-                if app_path:
-                    python_path_parts.insert(0, app_path)
-                existing = env.get("PYTHONPATH", "")
-                if existing:
-                    python_path_parts.append(existing)
-                env["PYTHONPATH"] = os.pathsep.join(python_path_parts)
+                env["SEVEN_APP_PATH"] = app_path
 
                 _current_process = subprocess.Popen(
-                    [sys.executable, "-m", "mouth.speaker", sentence],
+                    [sys.executable, "-c", run_cmd],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.PIPE,
-                    cwd=here,
+                    cwd=app_path,
                     env=env
                 )
             
