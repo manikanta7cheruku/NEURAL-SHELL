@@ -511,17 +511,36 @@ ipcMain.on('run-installer', (_, { path: installerPath, silent }) => {
     return;
   }
 
-  // silent=true → /S flag → no wizard, Seven restarts automatically
-  // silent=false → wizard shown → user clicks Next/Finish
-  const flags = silent ? '/S' : '';
-  const child  = exec(`"${installerPath}" ${flags}`, { detached: true });
-  child.unref();
+  // Always use /S (silent) for updates — no wizard needed
+  // User already saw changelog in the Updates page
+  // NSIS /S installs silently and overwrites existing install
+  const args = ['/S'];
 
+  console.log('[UPDATE] Launching:', installerPath, args);
+
+  try {
+    const child = require('child_process').spawn(
+      installerPath,
+      args,
+      {
+        detached: true,
+        stdio:    'ignore',
+        shell:    false,
+      }
+    );
+    child.unref();
+    console.log('[UPDATE] Installer launched, pid:', child.pid);
+  } catch (e) {
+    console.error('[UPDATE] Failed to launch installer:', e.message);
+    return;
+  }
+
+  // Quit after small delay so installer can start
   setTimeout(() => {
     app.isQuitting = true;
     stopPython();
     app.quit();
-  }, 1000);
+  }, 2000);
 });
 
 // ============================================================================
@@ -561,17 +580,7 @@ if (!gotTheLock) {
     console.log('[APP] Mode:', isDev ? 'DEVELOPMENT' : 'PACKAGED');
     console.log('[APP] Source path:', getAppSourcePath());
 
-    // Write version.txt so Python can read app version reliably
-    // Works in both dev and packaged — no asar extraction needed
-    try {
-      const versionTxtPath = path.join(getAppSourcePath(), 'version.txt');
-      fs.writeFileSync(versionTxtPath, app.getVersion(), 'utf8');
-      console.log('[APP] Version written:', app.getVersion(), '→', versionTxtPath);
-    } catch (e) {
-      console.warn('[APP] Could not write version.txt:', e.message);
-    }
-
-    // Write version.txt so Python reads correct version
+    // Write version.txt so Python reads correct app version
     try {
       const versionTxtPath = path.join(getAppSourcePath(), 'version.txt');
       fs.writeFileSync(versionTxtPath, app.getVersion(), 'utf8');
