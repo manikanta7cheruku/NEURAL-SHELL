@@ -607,31 +607,61 @@ def validate_license(online: bool = True) -> Dict:
         except:
             pass
     
-    # No license in DB — check config.json as fallback
+    # No license found — check config.json as fallback
+    # Also check if a lower tier key is still valid (Pro after Ultimate expires)
     try:
         import config as _cfg
-        cfg_tier = _cfg.KEY.get("license", {}).get("tier", "free")
-        cfg_key  = _cfg.KEY.get("license", {}).get("key", "")
-        cfg_exp  = _cfg.KEY.get("license", {}).get("expires_at", None)
-        cfg_ver  = _cfg.KEY.get("license", {}).get("verified", False)
+        cfg_tier    = _cfg.KEY.get("license", {}).get("tier", "free")
+        cfg_key     = _cfg.KEY.get("license", {}).get("key", "")
+        cfg_exp     = _cfg.KEY.get("license", {}).get("expires_at", None)
+        cfg_ver     = _cfg.KEY.get("license", {}).get("verified", False)
 
         if cfg_tier != "free" and cfg_ver and cfg_key:
-            # Config says PRO/Ultimate — trust it
-            # Also fix the DB so it's consistent next time
-            try:
-                _appdata  = os.environ.get("APPDATA", os.path.expanduser("~"))
-                _db       = os.path.join(_appdata, "SEVEN", "data", "license.db")
-                _conn     = sqlite3.connect(_db)
-                _c        = _conn.cursor()
-                _c.execute("""
-                    UPDATE activations SET license_key = ?
-                    WHERE device_id = ?
-                """, (cfg_key, device_id))
-                _conn.commit()
-                _conn.close()
-                print("[LICENSE] Fixed DB from config fallback")
-            except Exception:
-                pass
+            # Check if expired
+            if cfg_exp:
+                try:
+                    expiry = datetime.fromisoformat(cfg_exp)
+                    if datetime.now() > expiry:
+                        # This plan expired — check if there's another active key
+                        # Look in license.db for any other active activation
+                        try:
+                            _appdata  = os.environ.get("APPDATA", os.path.expanduser("~"))
+                            _db       = os.path.join(_appdata, "SEVEN", "data", "license.db")
+                            _conn     = sqlite3.connect(_db)
+                            _c        = _conn.cursor()
+                            _c.execute("""
+                                SELECT l.tier, l.expires_at, l.license_key
+                                FROM activations a
+                                JOIN licenses l ON a.license_key = l.license_key
+                                WHERE a.device_id = ? AND l.is_active = 1
+                                AND (l.expires_at IS NULL OR l.expires_at > ?)
+                                ORDER BY CASE l.tier
+                                    WHEN 'ultimate' THEN 1
+                                    WHEN 'pro' THEN 2
+                                    ELSE 3 END ASC
+                                LIMIT 1
+                            """, (device_id, datetime.now().isoformat()))
+                            fallback = _c.fetchone()
+                            _conn.close()
+                            if fallback:
+                                fb_tier, fb_exp, fb_key = fallback
+                                days = (datetime.fromisoformat(fb_exp) - datetime.now()).days if fb_exp else None
+                                _update_cache(fb_tier, fb_exp, fb_key)
+                                return {
+                                    "tier": fb_tier,
+                                    "valid": True,
+                                    "expires_at": fb_exp,
+                                    "days_until_expiry": days,
+                                    "offline_mode": False
+                                }
+                        except Exception:
+                            pass
+                        # No fallback found — return free
+                        return {"tier": "free", "valid": False,
+                                "expires_at": cfg_exp, "days_until_expiry": 0,
+                                "offline_mode": False}
+                except Exception:
+                    pass
 
             days_left = None
             if cfg_exp:
