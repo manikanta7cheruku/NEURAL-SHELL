@@ -134,7 +134,7 @@ def _get_voice_model_path(voice_id):
 
 # ── Piper TTS ─────────────────────────────────────────────────────────────
 
-def _speak_piper(text, voice_id):
+def _speak_piper(text, voice_id, speed=165):
     """
     Speak text using Piper TTS.
     Piper reads from stdin, outputs WAV, we play via Windows built-in player.
@@ -155,17 +155,23 @@ def _speak_piper(text, voice_id):
             tmp_path = tmp.name
 
         # Run piper: stdin → WAV file
+                # Convert speed to piper length_scale
+        # speed 130=slow(1.3), 165=normal(1.0), 190=fast(0.8), 220=max(0.6)
+        length_scale = round(1.0 - (speed - 165) / 275, 2)
+        length_scale = max(0.5, min(2.0, length_scale))
+
         result = subprocess.run(
             [
                 piper_exe,
-                "--model",       model_path,
-                "--output_file", tmp_path,
+                "--model",        model_path,
+                "--output_file",  tmp_path,
+                "--length_scale", str(length_scale),
             ],
             input=text.encode("utf-8"),
             capture_output=True,
             timeout=30,
-            cwd=piper_dir,   # important: espeak-ng-data must be next to piper.exe
-        )
+            cwd=piper_dir,
+        ),
 
         if result.returncode != 0:
             err = result.stderr.decode("utf-8", errors="replace")
@@ -223,7 +229,7 @@ def _play_wav(wav_path):
 
 # ── pyttsx3 fallback ──────────────────────────────────────────────────────
 
-def _speak_sapi(text, voice_index=0):
+def _speak_sapi(text, voice_index=0, speed=165):
     """
     Speak text using Windows SAPI (pyttsx3).
     Used when Piper is not installed.
@@ -241,9 +247,7 @@ def _speak_sapi(text, voice_index=0):
             voice_index = 0
 
         engine.setProperty('voice',  voices[voice_index].id)
-        cfg   = _get_config()
-        speed = cfg.get("voice", {}).get("speed", 165)
-        engine.setProperty('rate', speed)
+        engine.setProperty('rate',   int(speed))
         engine.setProperty('volume', 1.0)
         engine.say(text)
         engine.runAndWait()
@@ -257,22 +261,19 @@ def _speak_sapi(text, voice_index=0):
 def speak_text(text):
     """
     Speak text. Uses Piper if available, falls back to pyttsx3.
+    Speed read from config and applied to both engines.
     """
     engine, voice_id, sapi_idx = _get_voice_setting()
-    print(f"[SPEAKER] engine={engine} voice_id={voice_id} sapi_idx={sapi_idx}", file=sys.stderr)
+    cfg   = _get_config()
+    speed = cfg.get("voice", {}).get("speed", 165)
 
     if engine == "piper":
-        piper_dir  = _get_piper_dir()
-        model_path = _get_voice_model_path(voice_id)
-        print(f"[SPEAKER] piper_dir={piper_dir}", file=sys.stderr)
-        print(f"[SPEAKER] model_path={model_path}", file=sys.stderr)
-        success = _speak_piper(text, voice_id)
+        success = _speak_piper(text, voice_id, speed=speed)
         if not success:
-            print("[SPEAKER] Piper failed — falling back to SAPI", file=sys.stderr)
-            _speak_sapi(text, sapi_idx)
+            print("[SPEAKER] Falling back to SAPI", file=sys.stderr)
+            _speak_sapi(text, sapi_idx, speed=speed)
     else:
-        print(f"[SPEAKER] Using SAPI index {sapi_idx}", file=sys.stderr)
-        _speak_sapi(text, sapi_idx)
+        _speak_sapi(text, sapi_idx, speed=speed)
 
 
 if __name__ == "__main__" or os.environ.get("SEVEN_SPEAK_TEXT"):
