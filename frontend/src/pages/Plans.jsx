@@ -456,15 +456,24 @@ export default function Plans() {
                 </button>
               )}
 
-              {/* Current Plan / Activate Hint */}
+              {/* Current Plan / Upgrade / Activate */}
               {tier === plan.tier ? (
                 <div className="mt-2 text-center py-1.5 border border-s-border rounded text-[11px] text-s-text-4">
                   Current Plan
                 </div>
               ) : tier === 'free' && plan.tier !== 'free' ? (
-                <div className="mt-2 text-center py-1.5 border border-s-accent/30 bg-s-accent/10 rounded text-[11px] text-s-accent cursor-pointer hover:bg-s-accent/20"
-                  onClick={goToPurchase}>
+                <div
+                  className="mt-2 text-center py-1.5 border border-s-accent/30 bg-s-accent/10 rounded text-[11px] text-s-accent cursor-pointer hover:bg-s-accent/20"
+                  onClick={() => navigate('/purchase', { state: { plan: plan.tier === 'pro' ? 'pro_lifetime' : 'ultimate_lifetime' } })}
+                >
                   Get {plan.name} →
+                </div>
+              ) : tier === 'pro' && plan.tier === 'ultimate' ? (
+                <div
+                  className="mt-2 text-center py-1.5 border border-s-accent/40 bg-gradient-to-r from-s-accent/20 to-s-accent/10 rounded text-[11px] text-s-accent cursor-pointer hover:from-s-accent/30 hover:to-s-accent/20 font-medium"
+                  onClick={() => navigate('/purchase', { state: { plan: 'ultimate_lifetime' } })}
+                >
+                  Upgrade to Ultimate →
                 </div>
               ) : null}
             </div>
