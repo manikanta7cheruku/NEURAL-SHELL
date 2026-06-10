@@ -1135,8 +1135,16 @@ export default function Settings() {
                 return (
                   <button
                     key={label}
-                    onClick={() => {
+                    onClick={async () => {
                       set('ambient_panel.opacity', value);
+                      // Save immediately — don't wait for Save Changes
+                      try {
+                        await api.put('/config', {
+                          updates: { ambient_panel: { opacity: value } }
+                        });
+                      } catch (e) {
+                        console.error('[AMBIENT] Save failed:', e);
+                      }
                     }}
                     className={`px-3 py-1.5 text-[9px] font-medium transition-all border-r border-s-border/50 last:border-r-0 ${
                       isActive
@@ -1151,7 +1159,7 @@ export default function Settings() {
             </div>
           </div>
           <p className="text-[9px] text-s-text-4 mt-2">
-            Changes apply after Save Changes.
+            Changes apply after Save Changes. 
           </p>
         </div>
 
