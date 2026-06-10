@@ -5,7 +5,7 @@ import requests
 import tempfile
 
 SERVER_URL  = "https://seven-server-u2rp.onrender.com"
-TIMEOUT     = 8
+TIMEOUT     = 25
 CHECK_DELAY = 15
 
 def _get_cache_file():
