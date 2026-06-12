@@ -947,7 +947,7 @@ export default function Settings() {
         {/* ── REFERRAL ── */}
         <div className="bg-gradient-to-br from-s-accent/5 to-s-accent/10 border border-s-accent/20 rounded p-4 space-y-4">
           <div className="text-[9px] text-s-accent uppercase tracking-wider font-medium">
-            Refer Friends — Get Premium Free
+            Refer Friends - Get Premium Free
           </div>
 
           <p className="text-[11px] text-s-text-3 leading-relaxed">
