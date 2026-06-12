@@ -44,22 +44,109 @@ export default function Purchase() {
   const [searchParams] = useSearchParams();
   const preselected = searchParams.get('plan');
   
-  const [selectedPlan, setSelectedPlan] = useState(preselected || 'pro_lifetime');
-  const [provider, setProvider] = useState('gumroad');
-  const [email, setEmail] = useState('');
+  const [selectedPlan, setSelectedPlan] = useState(
+    location.state?.plan || 'pro_lifetime'
+  );
+  const [email,    setEmail]   = useState('');
+  const [loading,  setLoading] = useState(false);
 
-  const handlePurchase = () => {
+  const handlePurchase = async () => {
     if (!email || !email.includes('@')) {
       alert('Please enter a valid email to receive your license key');
       return;
     }
-    
-    const url = PAYMENT_PROVIDERS[provider][selectedPlan];
-    
-    // Add email as query param (Gumroad supports this)
-    const purchaseUrl = `${url}?email=${encodeURIComponent(email)}`;
-    
-    window.open(purchaseUrl, '_blank');
+
+    setLoading(true);
+
+    try {
+      // Step 1: Create order on your server
+      const orderRes = await fetch(
+        'https://seven-server-u2rp.onrender.com/api/payment/create-order',
+        {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ plan_id: selectedPlan, email }),
+        }
+      );
+
+      if (!orderRes.ok) throw new Error('Failed to create order');
+      const order = await orderRes.json();
+
+      // Step 2: Load Razorpay checkout
+      const options = {
+        key:         order.key_id,
+        amount:      order.amount,
+        currency:    order.currency,
+        order_id:    order.order_id,
+        name:        'Seven AI',
+        description: `${selected?.tier} ${selected?.type} Plan`,
+        prefill: {
+          email: email,
+        },
+        theme: {
+          color: '#6366f1',
+        },
+        handler: async (response) => {
+          // Step 3: Verify payment and get license key
+          try {
+            const verifyRes = await fetch(
+              'https://seven-server-u2rp.onrender.com/api/payment/verify',
+              {
+                method:  'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body:    JSON.stringify({
+                  razorpay_order_id:   response.razorpay_order_id,
+                  razorpay_payment_id: response.razorpay_payment_id,
+                  razorpay_signature:  response.razorpay_signature,
+                  plan_id:             selectedPlan,
+                  email:               email,
+                }),
+              }
+            );
+
+            const result = await verifyRes.json();
+
+            if (result.success) {
+              alert(
+                `Payment successful!\n\nYour license key:\n${result.license_key}\n\n` +
+                `Also sent to: ${email}\n\n` +
+                `Go to Plans page → Activate to use it now.`
+              );
+              navigate('/plans');
+            } else {
+              alert('Payment verified but key generation failed. Contact support.');
+            }
+          } catch (e) {
+            alert('Payment done but verification failed. Contact support@seven.app');
+          }
+        },
+        modal: {
+          ondismiss: () => {
+            setLoading(false);
+          }
+        }
+      };
+
+      // Load Razorpay script dynamically
+      if (!window.Razorpay) {
+        await new Promise((resolve, reject) => {
+          const script    = document.createElement('script');
+          script.src      = 'https://checkout.razorpay.com/v1/checkout.js';
+          script.onload   = resolve;
+          script.onerror  = reject;
+          document.body.appendChild(script);
+        });
+      }
+
+      const rzp = new window.Razorpay(options);
+      rzp.open();
+      setLoading(false);
+
+    } catch (e) {
+      console.error('[PURCHASE]', e);
+      alert('Failed to start payment. Please try again.');
+      setLoading(false);
+    }
   };
 
   const selected = PLANS.find(p => p.id === selectedPlan);
