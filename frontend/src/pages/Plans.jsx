@@ -594,7 +594,7 @@ export default function Plans() {
         {/* Referral Section */}
         <div className="bg-gradient-to-r from-s-accent/5 to-s-accent/10 border border-s-accent/20 rounded p-4 space-y-3">
           <div className="text-[9px] text-s-accent uppercase tracking-wider font-medium">
-            🎁 Refer Friends — Get Premium Free
+            Refer Friends - Get Premium Free
           </div>
 
           <p className="text-[11px] text-s-text-3 leading-relaxed">
@@ -617,7 +617,7 @@ export default function Plans() {
                 <button
                   onClick={() => {
                     const msg =
-                      `Hey! I use Seven AI — a private voice assistant that runs 100% on your PC. No cloud, no data leaving your device.\n\n` +
+                      `Hey! I use Seven AI, a private voice assistant that runs 100% on your PC. No cloud, no data leaving your device.\n\n` +
                       `Download: https://github.com/manikanta7cheruku/seven-releases/releases/latest\n\n` +
                       `During setup, enter my referral code: ${referralStats.referral_code}\n\n` +
                       `Use it for 7 hours → you get Pro free for 1 month, I get Ultimate free!`;
@@ -637,7 +637,7 @@ export default function Plans() {
                   Message that gets copied
                 </div>
                 <p className="text-[10px] text-s-text-3 leading-relaxed">
-                  Hey! I use Seven AI — a private voice assistant that runs 100% on your PC.
+                  Hey! I use Seven AI, a private voice assistant that runs 100% on your PC.
                   No cloud, no data leaving your device.
                 </p>
                 <p className="text-[10px] text-s-accent font-mono">
