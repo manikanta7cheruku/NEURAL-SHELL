@@ -166,7 +166,7 @@ export default function Commands() {
     <div className="h-full flex flex-col">
       <PageHeader
         title="Commands"
-        sub="Control how Seven finds and launches apps, URLs, files, and folders. Say an alias name — Seven opens it instantly."
+        sub="Control how Seven finds and launches apps, URLs, files, and folders. Say an alias name, Seven opens it instantly."
       />
 
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
@@ -206,7 +206,7 @@ export default function Commands() {
             <div className="bg-s-card border border-s-border rounded p-3">
               <div className="flex items-center justify-between mb-2">
                 <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium">
-                  Add alias — app name, URL, file path, or folder
+                  Add alias, app name, URL, file path, or folder
                 </div>
                 <div className={`text-[9px] font-mono ${aliasAtLimit ? 'text-s-red' : 'text-s-text-4'}`}>
                   {aliasCounter}

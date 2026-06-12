@@ -25,7 +25,7 @@ export default function Console() {
 
   return (
     <div className="h-full flex flex-col">
-      <PageHeader title="Console" sub="Same brain as voice — all commands available"
+      <PageHeader title="Console" sub="Same brain as voice, all commands available"
         right={messages.length > 0 && <button onClick={useChat.getState().clear} className="text-[10px] text-s-text-4 hover:text-s-text-3">Clear</button>} />
 
       <div className="flex-1 overflow-y-auto">

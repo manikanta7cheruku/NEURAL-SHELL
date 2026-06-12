@@ -225,7 +225,7 @@ export default function Schedules() {
 
         {active.length === 0
           ? <div className="bg-s-card border border-s-border rounded py-6 text-center text-[11px] text-s-text-4">
-              No active schedules — click + New to add one
+              No active schedules, click + New to add one
             </div>
           : <div className="space-y-1">
               {active.map(s => (

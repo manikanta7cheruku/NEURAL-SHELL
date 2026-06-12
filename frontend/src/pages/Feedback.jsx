@@ -35,7 +35,7 @@ export default function Feedback() {
 
   return (
     <div className="h-full flex flex-col">
-      <PageHeader title="Feedback & Issues" sub="Help improve Seven — every report matters" />
+      <PageHeader title="Feedback & Issues" sub="Help improve Seven, every report matters" />
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         <div className="grid grid-cols-2 gap-4">
           {/* Category */}

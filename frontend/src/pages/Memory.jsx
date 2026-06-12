@@ -21,7 +21,7 @@ export default function Memory() {
 
   return (
     <div className="h-full flex flex-col">
-      <PageHeader title="Memory" sub="Everything Seven has learned — stored locally on your disk" />
+      <PageHeader title="Memory" sub="Everything Seven has learned, stored locally on your disk" />
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
         {stats && (
           <div className="grid grid-cols-4 gap-2">
