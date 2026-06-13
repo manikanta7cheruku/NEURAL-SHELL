@@ -1130,18 +1130,29 @@ export default function Settings() {
                 { label: 'Dim',    value: 0.65 },
                 { label: 'Solid',  value: 0.85 },
               ].map(({ label, value }) => {
-                const current = local?.ambient_panel?.opacity ?? 0.78;
-                const isActive = Math.abs(current - value) < 0.15;
+                const current = local?.ambient_panel?.opacity ?? 0.65;
+                const isActive = Math.abs(current - value) < 0.13;
                 return (
                   <button
                     key={label}
                     onClick={async () => {
-                      set('ambient_panel.opacity', value);
-                      // Save immediately — don't wait for Save Changes
+                      // Update local state
+                      setLocal(prev => {
+                        if (!prev) return prev;
+                        return {
+                          ...prev,
+                          ambient_panel: {
+                            ...(prev.ambient_panel || {}),
+                            opacity: value
+                          }
+                        };
+                      });
+                      // Save to server immediately
                       try {
                         await api.put('/config', {
                           updates: { ambient_panel: { opacity: value } }
                         });
+                        console.log('[AMBIENT] Opacity saved:', value);
                       } catch (e) {
                         console.error('[AMBIENT] Save failed:', e);
                       }
