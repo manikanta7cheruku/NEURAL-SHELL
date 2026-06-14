@@ -101,9 +101,28 @@ def _stream_sentences(prompt, payload):
         yield "Something went wrong with my thinking."
 try:
     MODEL_NAME = config.KEY['brain']['model_name']
+    # Verify model is actually installed in Ollama
+    try:
+        import requests as _req
+        _r = _req.get("http://127.0.0.1:11434/api/tags", timeout=3)
+        if _r.status_code == 200:
+            _models = [m['name'] for m in _r.json().get('models', [])]
+            _base_models = [m.split(':')[0] for m in _models]
+            _configured = MODEL_NAME.split(':')[0]
+            if _models and _configured not in _base_models and MODEL_NAME not in _models:
+                print(f"[BRAIN] Warning: '{MODEL_NAME}' not found in Ollama.")
+                print(f"[BRAIN] Available: {_models}")
+                # Use first available model
+                if _models:
+                    MODEL_NAME = _models[0]
+                    print(f"[BRAIN] Auto-switching to: {MODEL_NAME}")
+                    import config as _cfg
+                    _cfg.update_config({"brain": {"model_name": MODEL_NAME}})
+    except Exception as _e:
+        print(f"[BRAIN] Could not verify model: {_e}")
 except Exception:
-    MODEL_NAME = "phi3:mini"
-    print("[BRAIN] Warning: Could not read model_name from config. Using phi3:mini.")
+    MODEL_NAME = "tinyllama"
+    print("[BRAIN] Warning: Could not read model_name from config. Using tinyllama.")
 CONVO_HISTORY = {}
 USER_NAME = "Admin"
 LAST_USER_INPUT = ""
