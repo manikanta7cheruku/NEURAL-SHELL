@@ -232,25 +232,65 @@ app_ui = None
 def seven_logic():
     global app_ui
 
-    # ── Load heavy modules here — AFTER API server is already running ──
-    # This is why startup is fast — API responds in 2s, models load in background
     print("[SYSTEM] Loading AI modules...")
 
-    from ears import listen
-    from ears.voice_id import (identify_speaker, enroll_speaker,
-                                is_voice_id_enabled, get_enrolled_speakers)
-    from ears.core import listen_for_interrupt
-    import brain
-    import brain_manager
-    import hands.core as core
-    import hands.system as system_mod
-    import hands.scheduler as scheduler_mod
-    import hands.windows as hands_windows
-    import mouth
-    from mouth import interrupt as mouth_interrupt, is_speaking
-    from memory import seven_memory
-    from memory.mood import mood_engine
-    from memory.command_log import command_log
+    # ── Load modules with individual error handling ──
+    # If any module fails, log it but continue — don't crash entire pipeline
+    try:
+        from ears import listen
+        from ears.voice_id import (identify_speaker, enroll_speaker,
+                                    is_voice_id_enabled, get_enrolled_speakers)
+        from ears.core import listen_for_interrupt
+        print("[SYSTEM] Ears loaded ✓")
+    except Exception as e:
+        print(f"[SYSTEM] ✗ Ears failed to load: {e}")
+        import traceback
+        traceback.print_exc()
+        app_ui.update_status("EARS ERROR — check logs", "#ff0000")
+        return
+
+    try:
+        import brain
+        import brain_manager
+        print("[SYSTEM] Brain loaded ✓")
+    except Exception as e:
+        print(f"[SYSTEM] ✗ Brain failed to load: {e}")
+        import traceback
+        traceback.print_exc()
+        app_ui.update_status("BRAIN ERROR — check logs", "#ff0000")
+        return
+
+    try:
+        import hands.core as core
+        import hands.system as system_mod
+        import hands.scheduler as scheduler_mod
+        import hands.windows as hands_windows
+        print("[SYSTEM] Hands loaded ✓")
+    except Exception as e:
+        print(f"[SYSTEM] ✗ Hands failed to load: {e}")
+        import traceback
+        traceback.print_exc()
+
+    try:
+        import mouth
+        from mouth import interrupt as mouth_interrupt, is_speaking
+        print("[SYSTEM] Mouth loaded ✓")
+    except Exception as e:
+        print(f"[SYSTEM] ✗ Mouth failed to load: {e}")
+        import traceback
+        traceback.print_exc()
+        app_ui.update_status("MOUTH ERROR — check logs", "#ff0000")
+        return
+
+    try:
+        from memory import seven_memory
+        from memory.mood import mood_engine
+        from memory.command_log import command_log
+        print("[SYSTEM] Memory loaded ✓")
+    except Exception as e:
+        print(f"[SYSTEM] ✗ Memory failed to load: {e}")
+        import traceback
+        traceback.print_exc()
 
     print("[SYSTEM] AI modules loaded.")
 
