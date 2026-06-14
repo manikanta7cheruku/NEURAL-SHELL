@@ -25,8 +25,36 @@ colorama.init(autoreset=True)
 MODEL_SIZE = "medium.en"
 AUDIO_TEMP_PATH = "temp_audio.wav"
 
+def _load_whisper_model(model_size: str) -> WhisperModel:
+    """
+    Load Whisper with best available device.
+    Priority: CUDA GPU → CPU
+    Falls back to CPU if CUDA fails or unavailable.
+    """
+    # Try GPU first
+    try:
+        import torch
+        if torch.cuda.is_available():
+            model = WhisperModel(model_size, device="cuda", compute_type="float16")
+            print(Fore.GREEN + f"[EARS] Whisper loaded on GPU (CUDA) ✓")
+            return model
+        else:
+            print(Fore.YELLOW + "[EARS] CUDA not available — using CPU")
+    except Exception as e:
+        print(Fore.YELLOW + f"[EARS] GPU check failed ({e}) — using CPU")
+
+    # CPU fallback — works on ALL machines
+    try:
+        model = WhisperModel(model_size, device="cpu", compute_type="int8")
+        print(Fore.GREEN + f"[EARS] Whisper loaded on CPU ✓")
+        return model
+    except Exception as e:
+        print(Fore.RED + f"[EARS] CPU load failed: {e}")
+        raise
+
+
 print(Fore.CYAN + f"[EARS] Loading Whisper Model ({MODEL_SIZE})...")
-audio_model = WhisperModel(MODEL_SIZE, device="cuda", compute_type="float16")
+audio_model = _load_whisper_model(MODEL_SIZE)
 
 
 def listen():
