@@ -2204,7 +2204,8 @@ def think(prompt_text, speaker_id="default"):
             "temperature": 0.3,
             "num_predict": response_length,
             "repeat_penalty": 1.3,
-            "stop": ["User:", "System:", "Seven:"]
+            "stop": ["User:", "System:", "Seven:"],
+            "num_ctx": 512        # Smaller context for tiny models
         }
     }
 
@@ -2243,7 +2244,7 @@ def think(prompt_text, speaker_id="default"):
     start_time = _time.time()
     
     try:
-        r = requests.post(OLLAMA_URL, json=payload, timeout=30)
+        r = requests.post(OLLAMA_URL, json=payload, timeout=120)
         
         elapsed = int((_time.time() - start_time) * 1000)
         try:
