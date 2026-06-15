@@ -559,10 +559,14 @@ export default function Settings() {
               <input
                 value={local.brain?.model_name || ''}
                 onChange={e => set('brain.model_name', e.target.value)}
+                placeholder="auto"
                 className="w-full bg-s-bg border border-s-border rounded px-2.5 py-2 text-[12px] text-s-text font-mono"
               />
+              <p className="text-[9px] text-s-text-4 mt-1">
+                Type <span className="font-mono text-s-accent">auto</span> — Seven picks best for your hardware.
+              </p>
               {hw && (
-                <p className="text-[9px] text-s-text-4 mt-1">
+                <p className="text-[9px] text-s-text-4 mt-0.5">
                   Recommended:{' '}
                   <span className="text-s-accent font-mono">{hw.recommended_model}</span>
                 </p>
@@ -593,16 +597,92 @@ export default function Settings() {
                   <span key={v} className="text-[8px] text-s-text-4">{l}</span>
                 ))}
               </div>
+              <p className="text-[9px] text-s-text-4 mt-1.5 leading-relaxed">
+                Low = precise and factual. High = creative but may go off-script.
+              </p>
             </div>
           </div>
-          <div className="flex items-center justify-between bg-s-bg rounded px-3 py-2 border border-s-border mt-3">
+
+          {/* ── TARS Personality Controls ── */}
+          <div className="mt-4 border-t border-s-border/50 pt-3">
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-[8px] text-s-text-4 uppercase tracking-widest">
+                Personality
+              </div>
+              <span className="text-[8px] text-s-text-4 italic">Inspired by TARS</span>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+
+              {/* Humor */}
+              <div className="bg-s-bg border border-s-border rounded p-2.5">
+                <div className="flex items-center justify-between mb-1.5">
+                  <div>
+                    <div className="text-[10px] text-s-text-2 font-medium">Humor</div>
+                    <div className="text-[8px] text-s-text-4 mt-0.5 leading-snug">
+                      How dry and witty Seven sounds.<br/>
+                      <span className="text-s-text-4 opacity-70">0% = deadpan · 100% = sarcasm</span>
+                    </div>
+                  </div>
+                  <span className="text-[11px] font-mono text-s-accent shrink-0 ml-2">
+                    {local.brain?.tars_humor ?? 75}%
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={0} max={100} step={5}
+                  value={local.brain?.tars_humor ?? 75}
+                  onChange={e => set('brain.tars_humor', parseInt(e.target.value))}
+                  className="w-full h-[3px] accent-s-accent cursor-pointer rounded-full"
+                />
+                <div className="flex justify-between mt-1">
+                  <span className="text-[7px] text-s-text-4">Deadpan</span>
+                  <span className="text-[7px] text-s-text-4">Witty</span>
+                </div>
+              </div>
+
+              {/* Honesty */}
+              <div className="bg-s-bg border border-s-border rounded p-2.5">
+                <div className="flex items-center justify-between mb-1.5">
+                  <div>
+                    <div className="text-[10px] text-s-text-2 font-medium">Honesty</div>
+                    <div className="text-[8px] text-s-text-4 mt-0.5 leading-snug">
+                      How direct when you're wrong.<br/>
+                      <span className="text-s-text-4 opacity-70">100% = don't ask if you can't handle it</span>
+                    </div>
+                  </div>
+                  <span className="text-[11px] font-mono text-s-accent shrink-0 ml-2">
+                    {local.brain?.tars_honesty ?? 85}%
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={0} max={100} step={5}
+                  value={local.brain?.tars_honesty ?? 85}
+                  onChange={e => set('brain.tars_honesty', parseInt(e.target.value))}
+                  className="w-full h-[3px] accent-s-accent cursor-pointer rounded-full"
+                />
+                <div className="flex justify-between mt-1">
+                  <span className="text-[7px] text-s-text-4">Diplomatic</span>
+                  <span className="text-[7px] text-s-text-4">Brutal</span>
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+          {/* Streaming toggle */}
+          <div className="flex items-center justify-between bg-s-bg rounded px-3 py-2 border border-s-border mt-4">
             <div>
               <div className="text-[12px] text-s-text-2">Streaming</div>
-              <p className="text-[9px] text-s-text-4 mt-0.5">Speak as sentences generate</p>
+              <p className="text-[9px] text-s-text-4 mt-0.5">
+                Seven speaks as it thinks — faster first word, slight choppiness.
+                Off = waits for full answer, then speaks smoothly.
+              </p>
             </div>
             <button
               onClick={() => set('brain.streaming', !local.brain?.streaming)}
-              className={`w-8 h-[18px] rounded-full relative transition-colors ${
+              className={`w-8 h-[18px] rounded-full relative transition-colors shrink-0 ml-4 ${
                 local.brain?.streaming ? 'bg-s-accent' : 'bg-s-border'
               }`}
             >
