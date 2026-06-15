@@ -101,10 +101,10 @@ def _stream_sentences(prompt, payload):
         yield "Something went wrong with my thinking."
 # Model selection — auto or manual based on config
 try:
-    from brain.model_selector import select_model
+    from brain_modules.model_selector import select_model
     MODEL_NAME = select_model()
 except Exception as _model_err:
-    print(f"[BRAIN] Model selector failed: {_model_err}. Falling back.")
+    print(f"[BRAIN] Model selector failed: {_model_err}. Reading from config.")
     try:
         MODEL_NAME = config.KEY['brain']['model_name']
     except Exception:
@@ -1366,6 +1366,87 @@ def think(prompt_text, speaker_id="default"):
     # --- WHAT SHOULD I CALL YOU ---
     if "call you" in clean_in or "should i call" in clean_in:
         return "You can call me Seven."
+
+    # --- TARS SETTING CONTROLS ---
+    # "set your humor to 80" / "change honesty to 50"
+    # "what is your humor level" / "what's your current honesty"
+    # Seven adjusts its own personality when asked, like Cooper does with TARS
+
+    _humor_set = (
+        ("set" in clean_in or "change" in clean_in or "make" in clean_in or "put" in clean_in)
+        and ("humor" in clean_in or "humour" in clean_in or "funny" in clean_in or "sarcasm" in clean_in)
+    )
+    _honesty_set = (
+        ("set" in clean_in or "change" in clean_in or "make" in clean_in or "put" in clean_in)
+        and ("honesty" in clean_in or "honest" in clean_in or "direct" in clean_in or "brutal" in clean_in)
+    )
+    _humor_query  = ("humor" in clean_in or "humour" in clean_in) and any(
+        w in clean_in for w in ["what", "current", "your", "level", "how"]
+    )
+    _honesty_query = ("honesty" in clean_in or "honest" in clean_in) and any(
+        w in clean_in for w in ["what", "current", "your", "level", "how"]
+    )
+
+    if _humor_set or _honesty_set:
+        import re as _re_tars
+        _num_match = _re_tars.search(r'\b(\d{1,3})\b', clean_in)
+        if _num_match:
+            _val = max(0, min(100, int(_num_match.group(1))))
+            try:
+                _bcfg = config.KEY.get('brain', {})
+                if _humor_set:
+                    _bcfg['tars_humor'] = _val
+                    config.update_config({'brain': _bcfg})
+                    _label = (
+                        "deadpan" if _val <= 10 else
+                        "mostly serious" if _val <= 30 else
+                        "dry wit" if _val <= 60 else
+                        "TARS mode" if _val <= 85 else
+                        "maximum sarcasm"
+                    )
+                    return f"Humor set to {_val}%. {_label.capitalize()}."
+                if _honesty_set:
+                    _bcfg['tars_honesty'] = _val
+                    config.update_config({'brain': _bcfg})
+                    _label = (
+                        "diplomatic" if _val <= 20 else
+                        "tactful" if _val <= 50 else
+                        "direct" if _val <= 80 else
+                        "blunt" if _val <= 95 else
+                        "no filter"
+                    )
+                    return f"Honesty set to {_val}%. {_label.capitalize()}."
+            except Exception as _tars_err:
+                print(f"[BRAIN] TARS setting save failed: {_tars_err}")
+                return "Could not save that setting."
+        else:
+            if _humor_set:
+                return "Give me a number. What percentage humor do you want?"
+            return "Give me a number. What percentage honesty do you want?"
+
+    if _humor_query:
+        _cur_humor = config.KEY.get('brain', {}).get('tars_humor', 75)
+        _label = (
+            "deadpan" if _cur_humor <= 10 else
+            "mostly serious" if _cur_humor <= 30 else
+            "dry wit" if _cur_humor <= 60 else
+            "TARS default" if _cur_humor <= 85 else
+            "maximum sarcasm"
+        )
+        return f"Humor is at {_cur_humor}%. {_label.capitalize()}."
+
+    if _honesty_query:
+        _cur_honesty = config.KEY.get('brain', {}).get('tars_honesty', 85)
+        _label = (
+            "diplomatic" if _cur_honesty <= 20 else
+            "tactful" if _cur_honesty <= 50 else
+            "direct" if _cur_honesty <= 80 else
+            "blunt" if _cur_honesty <= 95 else
+            "no filter"
+        )
+        return f"Honesty is at {_cur_honesty}%. {_label.capitalize()}."
+
+    # --- TARS SETTING CONTROLS END ---
     
     # --- CAPABILITIES (V1.6.1) ---
     # When user asks what Seven can do, inject capability facts into LLM context
@@ -2129,7 +2210,7 @@ def think(prompt_text, speaker_id="default"):
     _honesty    = int(_brain_cfg.get('tars_honesty', 85))
 
     # Build prompt from prompt_builder — this is the only place personality lives
-    from brain.prompt_builder import build_system_prompt
+    from brain_modules.prompt_builder import build_system_prompt
     system_prompt = build_system_prompt(
         speaker_name = speaker_name,
         humor        = _humor,
