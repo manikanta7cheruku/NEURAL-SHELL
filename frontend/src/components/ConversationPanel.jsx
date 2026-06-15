@@ -52,7 +52,8 @@ export default function ConversationPanel() {
     }
   }, [sevenText]);
 
-  if (!connected || !visible) return null;
+  if (!connected) return null;
+  if (!visible && !userText && !sevenText && !thinking && !speaking) return null;
 
   return (
     <div
