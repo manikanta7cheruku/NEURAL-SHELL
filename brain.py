@@ -128,8 +128,9 @@ def load_name_from_memory():
     """
     global USER_NAME
 
-    # Priority 1: Settings name (most intentional — user typed it)
+    # Priority 1: Settings name (most intentional - user typed it)
     try:
+        config.load()  # force fresh read from disk
         cfg_name = config.KEY.get('identity', {}).get('user_name', '').strip()
         if cfg_name and cfg_name.lower() not in ('admin', ''):
             USER_NAME = cfg_name
@@ -1150,7 +1151,8 @@ def think(prompt_text, speaker_id="default"):
         except:
             pass
     else:
-        speaker_name = USER_NAME
+        # Always read current global - may have been updated this session by voice
+        speaker_name = globals().get('USER_NAME', 'there')
 
     clean_in = prompt_text.lower().strip()
     clean_in = clean_in.replace("?", "").replace(".", "").replace("!", "").replace("'", "").replace(",", "")
@@ -1176,11 +1178,13 @@ def think(prompt_text, speaker_id="default"):
             speaker_name = new_name
         else:
             USER_NAME = new_name
+            # Update the global immediately so this session uses it right now
+            globals()['USER_NAME'] = new_name
             seven_memory.store_fact(
                 f"User's name is {USER_NAME}",
                 category="identity"
             )
-            # Sync name to config.json so Settings UI reflects it immediately
+            # Sync to config so Settings UI shows it and restarts pick it up
             try:
                 current_identity = config.KEY.get('identity', {})
                 current_identity['user_name'] = new_name
@@ -1775,8 +1779,6 @@ def think(prompt_text, speaker_id="default"):
                 LAST_SYSTEM_DOMAIN = "brightness"
 
             
-            import random as _rand
-            
             # Parse tag for speech generation
             _parts = {}
             for _p in sys_tag.split():
@@ -1878,8 +1880,6 @@ def think(prompt_text, speaker_id="default"):
                                         is_move_monitor, is_swap, is_window_close,
                                         is_transparent, is_solid, is_pin, is_unpin)
         if tag_params:
-            import random as _rand
-            
             # --- BUILD CONTEXT-AWARE SPEECH ---
             # Jarvis doesn't say "On it." — he tells you WHAT he's doing
             # Parse the tag to understand the action
@@ -2056,7 +2056,6 @@ def think(prompt_text, speaker_id="default"):
             else:
                 tags = " ".join([f"###{tag}: {app}" for app in apps])
             
-            import random as _rand
             # Natural speech before command
             app_list = ", ".join(apps)
             if tag == "OPEN":
