@@ -11,8 +11,8 @@ import time
 import random
 from colorama import Fore
 
-SILENCE_THRESHOLD  = 60   # seconds before Seven speaks
-PROACTIVE_COOLDOWN = 180  # seconds before Seven speaks again
+SILENCE_THRESHOLD  = 300  # 5 minutes before Seven speaks proactively
+PROACTIVE_COOLDOWN = 600  # 10 minutes between proactive lines
 
 
 class SilenceWatcher:
@@ -28,7 +28,9 @@ class SilenceWatcher:
         self._keyboard_time    = 0
         self._running          = False
         self._thread           = None
-        self._start_keyboard()
+        self._listener         = None
+        # Keyboard listener starts in start() not here
+        # This avoids numpy circular import race with faster_whisper
 
     def on_user_spoke(self):
         self._last_user_time  = time.time()
@@ -46,6 +48,9 @@ class SilenceWatcher:
 
     def start(self):
         self._running = True
+        # Start keyboard monitor here - all other modules already loaded
+        # Delays pynput import until after faster_whisper/numpy are fully init
+        self._start_keyboard()
         self._thread  = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
         print(Fore.CYAN + "[SILENCE] Watcher started")
@@ -136,7 +141,19 @@ class SilenceWatcher:
             print(Fore.CYAN + f"[SILENCE] Scenario {scenario} speaking: {line}")
 
             try:
+                # Push text to orb before speaking
+                try:
+                    from backend.api_server import set_state as _api_set
+                    _api_set("seven_text", line)
+                    _api_set("speaking", True)
+                except Exception:
+                    pass
                 self._speak(line)
+                try:
+                    from backend.api_server import set_state as _api_set
+                    _api_set("speaking", False)
+                except Exception:
+                    pass
                 self._last_proactive = now
                 self._keyboard_active = False
             except Exception as e:
