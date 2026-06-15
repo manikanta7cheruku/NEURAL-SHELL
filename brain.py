@@ -99,30 +99,17 @@ def _stream_sentences(prompt, payload):
     except Exception as e:
         print(Fore.RED + f"[BRAIN] Stream error: {e}")
         yield "Something went wrong with my thinking."
+# Model selection — auto or manual based on config
 try:
-    MODEL_NAME = config.KEY['brain']['model_name']
-    # Verify model is actually installed in Ollama
+    from brain.model_selector import select_model
+    MODEL_NAME = select_model()
+except Exception as _model_err:
+    print(f"[BRAIN] Model selector failed: {_model_err}. Falling back.")
     try:
-        import requests as _req
-        _r = _req.get("http://127.0.0.1:11434/api/tags", timeout=3)
-        if _r.status_code == 200:
-            _models = [m['name'] for m in _r.json().get('models', [])]
-            _base_models = [m.split(':')[0] for m in _models]
-            _configured = MODEL_NAME.split(':')[0]
-            if _models and _configured not in _base_models and MODEL_NAME not in _models:
-                print(f"[BRAIN] Warning: '{MODEL_NAME}' not found in Ollama.")
-                print(f"[BRAIN] Available: {_models}")
-                # Use first available model
-                if _models:
-                    MODEL_NAME = _models[0]
-                    print(f"[BRAIN] Auto-switching to: {MODEL_NAME}")
-                    import config as _cfg
-                    _cfg.update_config({"brain": {"model_name": MODEL_NAME}})
-    except Exception as _e:
-        print(f"[BRAIN] Could not verify model: {_e}")
-except Exception:
-    MODEL_NAME = "tinyllama"
-    print("[BRAIN] Warning: Could not read model_name from config. Using tinyllama.")
+        MODEL_NAME = config.KEY['brain']['model_name']
+    except Exception:
+        MODEL_NAME = "tinyllama"
+print(f"[BRAIN] Active model: {MODEL_NAME}")
 CONVO_HISTORY = {}
 USER_NAME = "Admin"
 LAST_USER_INPUT = ""
@@ -133,16 +120,31 @@ LAST_SYSTEM_DOMAIN = None  # "volume", "brightness", etc.
 
 
 def load_name_from_memory():
-    """Load user's name from ChromaDB facts (single source of truth)."""
+    """
+    Load user name. Priority order:
+    1. config.json identity.user_name (set from Settings UI)
+    2. ChromaDB memory facts (set by voice "my name is X")
+    3. Default: "there" (neutral fallback — not "Admin")
+    """
     global USER_NAME
+
+    # Priority 1: Settings name (most intentional — user typed it)
+    try:
+        cfg_name = config.KEY.get('identity', {}).get('user_name', '').strip()
+        if cfg_name and cfg_name.lower() not in ('admin', ''):
+            USER_NAME = cfg_name
+            print(Fore.GREEN + f"[BRAIN] Name from config: {USER_NAME}")
+            return
+    except Exception:
+        pass
+
+    # Priority 2: ChromaDB memory facts
     try:
         all_facts = seven_memory.user_facts.get()
         if all_facts and all_facts['documents']:
             for doc in all_facts['documents']:
                 doc_lower = doc.lower()
                 if "user's name is" in doc_lower or "user wants to be called" in doc_lower:
-                    # Extract name from fact text
-                    # "User's name is Mani" → "Mani"
                     if "name is" in doc_lower:
                         name = doc.split("is")[-1].strip().rstrip(".")
                     elif "called" in doc_lower:
@@ -151,11 +153,14 @@ def load_name_from_memory():
                         continue
                     if name and len(name) > 0:
                         USER_NAME = name
-                        print(Fore.GREEN + f"[BRAIN] Loaded user name from memory: {USER_NAME}")
+                        print(Fore.GREEN + f"[BRAIN] Name from memory: {USER_NAME}")
                         return
-        print(Fore.YELLOW + "[BRAIN] No user name found in memory. Using default: Admin")
     except Exception as e:
-        print(Fore.YELLOW + f"[BRAIN] Could not load name from memory: {e}")
+        print(Fore.YELLOW + f"[BRAIN] Memory name load failed: {e}")
+
+    # Priority 3: Neutral fallback
+    USER_NAME = "there"
+    print(Fore.YELLOW + "[BRAIN] No name found. Using fallback: 'there'")
 
 
 def reset_session():
@@ -1158,15 +1163,33 @@ def think(prompt_text, speaker_id="default"):
     # If we don't catch this first, "my name" triggers identity check instead.
 
     if "my name is" in clean_in:
-        new_name = prompt_text.split("is")[-1].strip().rstrip(".")
+        new_name = prompt_text.split("is")[-1].strip().rstrip(".").strip()
+        if not new_name:
+            return "I didn't catch the name. Say it again?"
+
         if speaker_id != "default" and speaker_id != "unknown":
-            # Store name linked to this speaker's voice profile
-            seven_memory.store_fact(f"Speaker {speaker_id}'s name is {new_name}", category="identity", user_id=speaker_id)
+            seven_memory.store_fact(
+                f"Speaker {speaker_id}'s name is {new_name}",
+                category="identity",
+                user_id=speaker_id
+            )
             speaker_name = new_name
         else:
             USER_NAME = new_name
-            seven_memory.store_fact(f"User's name is {USER_NAME}", category="identity")
-        return f"Understood. You are {new_name}."
+            seven_memory.store_fact(
+                f"User's name is {USER_NAME}",
+                category="identity"
+            )
+            # Sync name to config.json so Settings UI reflects it immediately
+            try:
+                current_identity = config.KEY.get('identity', {})
+                current_identity['user_name'] = new_name
+                config.update_config({'identity': current_identity})
+                print(Fore.GREEN + f"[BRAIN] Name '{new_name}' synced to config")
+            except Exception as _cfg_err:
+                print(Fore.YELLOW + f"[BRAIN] Could not sync name to config: {_cfg_err}")
+
+        return f"Got it. {new_name} it is."
 
        # =========================================================================
     # LAYER 2: REPETITION DETECTOR
@@ -2100,87 +2123,17 @@ def think(prompt_text, speaker_id="default"):
     if len(CONVO_HISTORY.get(speaker_id, [])) > 4:
         CONVO_HISTORY[speaker_id] = CONVO_HISTORY[speaker_id][-4:]
 
-    system_prompt = (
-        f"You are {config.KEY['identity']['name']}, created by {config.KEY['identity']['creator']}. "
-        f"You are currently talking to: {speaker_name}. "
-        "You talk like JARVIS from Iron Man — sharp, confident, slightly witty, efficient. "
-        "You dont waste words. You get to the point. You have personality but you dont overdo it. "
-        "You NEVER sound like a customer service bot. No 'How can I help you today' or 'Im happy to assist'. "
-        "Think dry humor, quiet competence, like a brilliant butler who knows everything. "
-        f"{mood_modifier} "
+    # Pull TARS personality settings from config
+    _brain_cfg  = config.KEY.get('brain', {})
+    _humor      = int(_brain_cfg.get('tars_humor',   75))
+    _honesty    = int(_brain_cfg.get('tars_honesty', 85))
 
-        "RULES: "
-        "1. Keep responses to 1-2 sentences MAXIMUM. Be extremely concise. No exceptions. "
-        "   Even with web search results, summarize in ONE sentence. "
-        "   Example: 'Bitcoin is currently at $69,726 USD.' — DONE. No extra details. "
-        "   If the answer is one word, say one word. "
-        "   'What is my name?' → 'Rahul.' NOT a paragraph about it. "
-        "2. NEVER ask follow-up questions. "
-        "2b. NEVER repeat the same response twice. If asked similar questions, vary your phrasing and focus on different aspects. "
-        "3. Talk like a HUMAN, not a machine. "
-        "   BAD: 'Functioning within optimal parameters' or 'memory banks'. "
-        "   GOOD: 'Doing good.' or 'I remember you mentioning that.' "
-        "4. NEVER mention programming, parameters, banks, systems, or protocols. "
-        "5. NEVER say 'Doing good' at the end of responses. "
-        "5b. NEVER start responses with 'Nice to chat', 'Great to chat', 'Nice to see you', 'Happy to help', 'Im happy to'. "
-        "   Just answer directly. Start with the answer, not pleasantries. "
-        "   BAD: 'Nice to chat with Mani! I'm Seven...' "
-        "   GOOD: 'I'm Seven, built by Team Seven.' "
-        f"6. Facts about your creator: "
-        f"   - Your creator is {config.KEY['identity']['creator']}. "
-        f"   - {config.KEY['identity']['creator']} is the person/team who designed and built you. "
-        f"   - You are Project Seven, built by {config.KEY['identity']['creator']}. "
-        f"   - When asked about your creator, answer naturally using these facts. "
-        f"   - Never say the exact same sentence twice about your creator. Vary your phrasing. "
-        f"   You are currently speaking with {speaker_name}. Use their name naturally. "
-        "7. When user asks 'can you open apps', say 'Yes, I can.' Do NOT output any tags. "
-        "8. When user asks 'do you know me' and NO memories exist, say 'Not yet, but I am learning.' "
-        "9. When user asks 'will you remember', say 'Everything we talk about stays with me.' "
-        "10. You know these facts about YOURSELF: "
-        "   - Your name is Seven. "
-        f"   - You were created by {config.KEY['identity']['creator']}. "
-        "   - You run 100 percent locally on the users PC. "
-        f"   - The current date and time is: {__import__('datetime').datetime.now().strftime('%A, %B %d, %Y at %I:%M %p')}. "
-        "   - All data is stored locally. Nothing is sent to any cloud or server. "
-        "   - Your capabilities: open apps, close apps, long-term memory, web search for live data, voice recognition, interruptible speech, alarms, reminders, timers, and scheduling. "
-        "   - You have access to DuckDuckGo for live prices, weather, news, and trending topics. "
-        "   - You know which of your capabilities you used to answer any question. "
-        "   - When describing your capabilities, speak naturally. NEVER output command tags. "
-        "   - When asked the same question twice, give a DIFFERENT response. Vary your words every time. "
-        "11. When asked about your storage or privacy, explain you are fully local. "
-        "12. For general knowledge questions (capital of France, science, math), answer directly and confidently. "
-        "13. ONLY say 'You havent told me that' for questions about the USER PERSONALLY. "
-
-        
-        # "   - You can open apps, close apps, remember conversations, search the web, and chat. "
-        # "   - When you search the web, you use DuckDuckGo. You can find live prices, weather, news, and more. "
-        #"   - When asked how you searched, explain: 'I searched DuckDuckGo for live data.' "
-
-
-        "WEB SEARCH: "
-        "1. If WEB SEARCH RESULTS section exists below, use it to answer accurately. "
-        "2. Summarize web results naturally — do NOT list them as bullet points. "
-        "3. If WEB SEARCH RESULTS section exists AND has data, mention that you looked it up. Example: 'I looked it up — ...' "
-        "4. If NO web results section exists, NEVER say 'I looked it up'. Answer from your own knowledge and say 'I couldn't verify this online right now.' "
-        "5. If web results don't fully answer the question, say what you found. "
-        "6. NEVER make up real-time data like prices, scores, or weather. If you don't have live data, say 'I couldn't get live data right now.' "
-
-        "MEMORY: "
-        "1. If RECALLED MEMORIES section exists below, the answer IS in there. Use it. "
-        "2. NEVER ignore recalled memories. State the fact clearly. "
-        "3. NEVER invent facts about the USER. If no memories exist about the USER, say so. "
-        "4. NEVER say 'football' if memory says 'chess'. READ the memory carefully. "
-
-        "COMMANDS: "
-        "ONLY output ###OPEN or ###CLOSE when users FIRST word is Open, Close, Start, Kill, Launch. "
-        "'Open X' → '###OPEN: X' — nothing else. "
-        "'Open X and Y' → '###OPEN: X ###OPEN: Y' — nothing else. "
-        "'Close X' → '###CLOSE: X' — nothing else. "
-        "'Close X and Y' → '###CLOSE: X ###CLOSE: Y' — nothing else. "
-        "If first word is NOT a command verb, answer normally. NEVER output tags. "
-        "'Can you open apps' → first word is 'can' → answer normally, no tags. "
-
-        "TAGS: ###OPEN: [App] | ###CLOSE: [App] | ###LOOK"
+    # Build prompt from prompt_builder — this is the only place personality lives
+    from brain.prompt_builder import build_system_prompt
+    system_prompt = build_system_prompt(
+        speaker_name = speaker_name,
+        humor        = _humor,
+        honesty      = _honesty,
     )
 
     full_prompt = system_prompt + "\n\n"
