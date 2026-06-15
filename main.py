@@ -250,7 +250,7 @@ def seven_logic():
         return
 
     try:
-        import brain
+        import brain_modules
         import brain_manager
         print("[SYSTEM] Brain loaded ✓")
     except Exception as e:
@@ -359,7 +359,7 @@ def seven_logic():
         _last_topic_ref = [None]  # mutable ref so closure can update it
 
         _silence_watcher = SilenceWatcher(
-            speak_fn        = lambda text: mouth.speak(text),
+            speak_fn          = speak_with_interrupt,
             get_last_topic_fn = lambda: _last_topic_ref[0],
         )
         _silence_watcher.start()
@@ -436,7 +436,7 @@ def seven_logic():
                             f"I had said: '{old_response}'. "
                             f"Continue from where I left off naturally."
                         )
-                        response = brain.think(resume_prompt, speaker_id="default")
+                        response = brain_modules.think(resume_prompt, speaker_id="default")
                         if response:
                             speak_with_interrupt(response)
                         else:
@@ -550,7 +550,7 @@ def seven_logic():
                 except Exception:
                     pass
 
-            response = brain.think(user_input, speaker_id=speaker_id)
+            response = brain_modules.think(user_input, speaker_id=speaker_id)
             telemetry.log_activity()
 
             if not response:
