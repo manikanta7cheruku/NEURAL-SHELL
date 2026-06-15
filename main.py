@@ -352,6 +352,23 @@ def seven_logic():
 
         return True
 
+    # ── Silence watcher — proactive behavior ──
+    try:
+        from pipeline.silence_watcher import SilenceWatcher
+
+        _last_topic_ref = [None]  # mutable ref so closure can update it
+
+        _silence_watcher = SilenceWatcher(
+            speak_fn        = lambda text: mouth.speak(text),
+            get_last_topic_fn = lambda: _last_topic_ref[0],
+        )
+        _silence_watcher.start()
+        print(Fore.CYAN + "[SYSTEM] Silence watcher started ✓")
+    except Exception as _sw_err:
+        print(Fore.YELLOW + f"[SYSTEM] Silence watcher skipped: {_sw_err}")
+        _silence_watcher = None
+        _last_topic_ref  = [None]
+
     # ── Startup stats ──
     stats      = seven_memory.get_stats()
     mood_status = mood_engine.get_status()
@@ -395,6 +412,11 @@ def seven_logic():
             user_input, audio_path = listen()
             if not user_input:
                 continue
+
+            # Tell silence watcher user just spoke
+            if _silence_watcher:
+                _silence_watcher.on_user_spoke()
+            _last_topic_ref[0] = user_input
 
             text_lower = user_input.lower()
 
@@ -469,6 +491,8 @@ def seven_logic():
                     is_active = True
                     mouth.speak("I'm listening.")
                     app_ui.update_status("RESUMED", "#00ff00")
+                    if _silence_watcher:
+                        _silence_watcher.set_paused(False)
                 continue
 
             # ── Pause command ──
@@ -476,6 +500,8 @@ def seven_logic():
                 is_active = False
                 mouth.speak("Standing by.")
                 app_ui.update_status("PAUSED", "#555555")
+                if _silence_watcher:
+                    _silence_watcher.set_paused(True)
                 # Clear conversation panel when paused
                 api_set_state("user_text",  "")
                 api_set_state("seven_text", "")
@@ -552,6 +578,8 @@ def seven_logic():
                 speech_part = response.split("###")[0].strip()
 
             api_set_state("speaking", True)
+            if _silence_watcher:
+                _silence_watcher.on_seven_speaking(True)
 
             if is_streaming:
                 _, sentence_gen = response
@@ -585,6 +613,8 @@ def seven_logic():
 
             api_set_state("speaking", False)
             api_set_state("thinking", False)
+            if _silence_watcher:
+                _silence_watcher.on_seven_speaking(False)
             # Text stays visible — scheduleHide in status.html fades it after 5s
             # No need to clear here — the orb window handles the fade timer
 
