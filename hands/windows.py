@@ -261,20 +261,22 @@ def _safe_foreground(hwnd):
         target_thread = win32process.GetWindowThreadProcessId(hwnd)[0]
         current_thread = win32api.GetCurrentThreadId()
         
-        attached = False
+        fg_attached     = False
+        target_attached = False
         try:
             if foreground_thread != current_thread:
                 ctypes.windll.user32.AttachThreadInput(current_thread, foreground_thread, True)
-                attached = True
-            if target_thread != current_thread:
+                fg_attached = True
+            if target_thread != current_thread and target_thread != foreground_thread:
                 ctypes.windll.user32.AttachThreadInput(current_thread, target_thread, True)
-            
+                target_attached = True
+
             win32gui.BringWindowToTop(hwnd)
             ctypes.windll.user32.SetForegroundWindow(hwnd)
         finally:
-            if attached:
+            if fg_attached:
                 ctypes.windll.user32.AttachThreadInput(current_thread, foreground_thread, False)
-            if target_thread != current_thread:
+            if target_attached:
                 ctypes.windll.user32.AttachThreadInput(current_thread, target_thread, False)
     except:
         # Last resort — just try without attachment
