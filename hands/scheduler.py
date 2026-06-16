@@ -824,16 +824,32 @@ def _fire_schedule(schedule):
     else:
         fire_msg = f"{speaker_name}, {message}." if speaker_name and message else (message if message else "Schedule alert.")
     
-    print(Fore.YELLOW + f"[SCHEDULER] 🔔 FIRING: {fire_msg}")
-    
-    # Speak through callback (set by main.py)
+        print(Fore.YELLOW + f"[SCHEDULER] FIRING: {fire_msg}")
+
+    # Push banner to frontend
+    try:
+        from backend.api_server import set_schedule_alert
+        set_schedule_alert(fire_msg, stype, schedule.get("id"))
+    except Exception:
+        pass
+
+    # Speak and ask for confirmation
     if _speak_callback:
         try:
             _speak_callback(fire_msg)
+            import time as _t
+            _t.sleep(0.8)
+            import random as _r
+            confirm = _r.choice([
+                "Got that?",
+                "Did you catch that?",
+                "Should I remind you again later?",
+            ])
+            _speak_callback(confirm)
         except Exception as e:
             print(Fore.RED + f"[SCHEDULER] Speech error: {e}")
     else:
-        print(Fore.YELLOW + f"[SCHEDULER] No speak callback set. Message: {fire_msg}")
+        print(Fore.YELLOW + f"[SCHEDULER] No speak callback. Message: {fire_msg}")
 
 
 def _background_checker():
