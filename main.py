@@ -234,8 +234,6 @@ def seven_logic():
 
     print("[SYSTEM] Loading AI modules...")
 
-    # ── Load modules with individual error handling ──
-    # If any module fails, log it but continue — don't crash entire pipeline
     try:
         from ears import listen
         from ears.voice_id import (identify_speaker, enroll_speaker,
@@ -246,18 +244,18 @@ def seven_logic():
         print(f"[SYSTEM] ✗ Ears failed to load: {e}")
         import traceback
         traceback.print_exc()
-        app_ui.update_status("EARS ERROR — check logs", "#ff0000")
+        app_ui.update_status("EARS ERROR - check logs", "#ff0000")
         return
 
     try:
-        import brain_modules
+        import brain
         import brain_manager
         print("[SYSTEM] Brain loaded ✓")
     except Exception as e:
         print(f"[SYSTEM] ✗ Brain failed to load: {e}")
         import traceback
         traceback.print_exc()
-        app_ui.update_status("BRAIN ERROR — check logs", "#ff0000")
+        app_ui.update_status("BRAIN ERROR - check logs", "#ff0000")
         return
 
     try:
@@ -271,52 +269,92 @@ def seven_logic():
         import traceback
         traceback.print_exc()
 
+    print(Fore.CYAN + "[SYSTEM] Past hands block, entering mouth/memory block...")
+
+    # Initialize Windows COM for this thread before importing pyttsx3/mouth
+    # pyttsx3 uses COM objects which must be initialized on the calling thread
     try:
-        import mouth
+        import pythoncom
+        pythoncom.CoInitialize()
+        print(Fore.CYAN + "[SYSTEM] COM initialized for voice thread")
+    except Exception as _com_err:
+        print(Fore.YELLOW + f"[SYSTEM] COM init skipped: {_com_err}")
+
+    # Import mouth - if it fails, use a fallback that just prints
+    mouth = None
+    mouth_interrupt = None
+    is_speaking = None
+    try:
+        print(Fore.CYAN + "[SYSTEM] About to import mouth...")
+        # Force reimport - clear any cached module state
+        import sys as _sys
+        for _k in list(_sys.modules.keys()):
+            if 'mouth' in _k.lower() or 'pyttsx' in _k.lower():
+                del _sys.modules[_k]
+        import mouth as _mouth_mod
+        mouth = _mouth_mod
         from mouth import interrupt as mouth_interrupt, is_speaking
-        print("[SYSTEM] Mouth loaded ✓")
+        print(Fore.GREEN + "[SYSTEM] Mouth loaded ✓")
     except Exception as e:
-        print(f"[SYSTEM] ✗ Mouth failed to load: {e}")
+        print(Fore.RED + f"[SYSTEM] Mouth failed: {e}")
         import traceback
         traceback.print_exc()
-        app_ui.update_status("MOUTH ERROR — check logs", "#ff0000")
-        return
+        # Do NOT return - create a fallback mouth so voice loop still starts
+        class _FallbackMouth:
+            def speak(self, text):
+                print(f"[MOUTH FALLBACK] {text}")
+            def interrupt(self):
+                pass
+            def is_speaking(self):
+                return False
+        mouth = _FallbackMouth()
+        mouth_interrupt = mouth.interrupt
+        is_speaking = mouth.is_speaking
+        print(Fore.YELLOW + "[SYSTEM] Using fallback mouth - no audio output")
 
+    print(Fore.CYAN + "[SYSTEM] Past mouth block, entering memory block...")
+
+    seven_memory = None
+    mood_engine  = None
+    command_log  = None
     try:
-        from memory import seven_memory
-        from memory.mood import mood_engine
-        from memory.command_log import command_log
-        print("[SYSTEM] Memory loaded ✓")
+        print(Fore.CYAN + "[SYSTEM] Importing memory...")
+        from memory import seven_memory as _sm
+        from memory.mood import mood_engine as _me
+        from memory.command_log import command_log as _cl
+        seven_memory = _sm
+        mood_engine  = _me
+        command_log  = _cl
+        print(Fore.CYAN + "[SYSTEM] Memory imported, forcing init...")
+        _ = seven_memory.get_stats()
+        print(Fore.GREEN + "[SYSTEM] Memory loaded ✓")
     except Exception as e:
-        print(f"[SYSTEM] ✗ Memory failed to load: {e}")
+        print(Fore.RED + f"[SYSTEM] Memory failed: {e}")
         import traceback
         traceback.print_exc()
 
-    print("[SYSTEM] AI modules loaded.")
+    print(Fore.GREEN + "[SYSTEM] AI modules loaded.")
 
     is_active = True
 
-    # ── Interrupt configuration ──
-    interrupt_config = config.KEY.get('interrupt', {})
-    INTERRUPT_ENABLED   = interrupt_config.get('enabled', True)
-    INTERRUPT_WORDS     = interrupt_config.get('words', ["stop", "seven", "hey seven"])
-    INTERRUPT_COOLDOWN  = interrupt_config.get('interrupt_cooldown', 1.5)
+    interrupt_config  = config.KEY.get('interrupt', {})
+    INTERRUPT_ENABLED = interrupt_config.get('enabled', True)
+    INTERRUPT_WORDS   = interrupt_config.get('words', ["stop", "seven", "hey seven"])
+    INTERRUPT_COOLDOWN = interrupt_config.get('interrupt_cooldown', 1.5)
     last_interrupt_time = [0]
 
     interrupt_context = {
-        "last_response":    None,
-        "last_input":       None,
-        "was_interrupted":  False
+        "last_response":   None,
+        "last_input":      None,
+        "was_interrupted": False
     }
 
-    # ── Wake / pause / kill words ──
     WAKE_WORDS  = ["wake up", "seven", "hey seven", "listen", "online", "resume"]
     PAUSE_WORDS = ["not you", "hold it", "hold on", "just a moment", "wait",
                    "pause", "stop listening", "sleep", "silence"]
     KILL_WORDS  = ["shut down", "shutdown", "kill system", "go to sleep", "terminate"]
 
     def speak_with_interrupt(text):
-        """Speak with interrupt detection. Returns True if completed."""
         import time as _time
         if not INTERRUPT_ENABLED or (_time.time() - last_interrupt_time[0] < INTERRUPT_COOLDOWN):
             mouth.speak(text)
@@ -336,14 +374,12 @@ def seven_logic():
             daemon=True
         )
         interrupt_thread.start()
-
         completed = mouth.speak(text)
-
         stop_listening.set()
         interrupt_thread.join(timeout=2)
 
         if was_interrupted.is_set():
-            print("[SYSTEM] ⚡ Speech interrupted by user")
+            print("[SYSTEM] Speech interrupted by user")
             app_ui.update_status("INTERRUPTED", "#ffaa00")
             interrupt_context["was_interrupted"] = True
             interrupt_context["last_response"]   = text
@@ -352,53 +388,63 @@ def seven_logic():
 
         return True
 
-    # ── Silence watcher — proactive behavior ──
+    # Silence watcher
+    _silence_watcher = None
+    _last_topic_ref  = [None]
     try:
         from pipeline.silence_watcher import SilenceWatcher
-
-        _last_topic_ref = [None]  # mutable ref so closure can update it
-
         _silence_watcher = SilenceWatcher(
             speak_fn          = speak_with_interrupt,
             get_last_topic_fn = lambda: _last_topic_ref[0],
         )
-        _silence_watcher.start()
+        _sw_thread = threading.Thread(target=_silence_watcher.start, daemon=True)
+        _sw_thread.start()
         print(Fore.CYAN + "[SYSTEM] Silence watcher started ✓")
     except Exception as _sw_err:
         print(Fore.YELLOW + f"[SYSTEM] Silence watcher skipped: {_sw_err}")
-        _silence_watcher = None
-        _last_topic_ref  = [None]
 
-    # ── Startup stats ──
-    stats      = seven_memory.get_stats()
-    mood_status = mood_engine.get_status()
-    cmd_stats  = command_log.get_stats()
+    # Startup stats
+    try:
+        if seven_memory:
+            stats = seven_memory.get_stats()
+            print(Fore.GREEN + f"[SYSTEM] Memory: {stats['total_conversations']} conversations, "
+                               f"{stats['total_facts']} facts")
+        if mood_engine:
+            mood_status = mood_engine.get_status()
+            print(Fore.MAGENTA + f"[SYSTEM] Mood: {mood_status['mood_value']:.2f} ({mood_status['label']})")
+        if command_log:
+            cmd_stats = command_log.get_stats()
+            print(Fore.CYAN + f"[SYSTEM] Commands: {cmd_stats['total']} (success: {cmd_stats['success_rate']})")
+    except Exception as _stats_err:
+        print(Fore.YELLOW + f"[SYSTEM] Stats skipped: {_stats_err}")
 
-    print(Fore.GREEN   + f"[SYSTEM] Memory: {stats['total_conversations']} conversations, "
-                         f"{stats['total_facts']} facts")
-    print(Fore.MAGENTA + f"[SYSTEM] Mood: {mood_status['mood_value']:.2f} ({mood_status['label']})")
-    print(Fore.CYAN    + f"[SYSTEM] Commands: {cmd_stats['total']} (success: {cmd_stats['success_rate']})")
+    try:
+        if is_voice_id_enabled():
+            speakers = get_enrolled_speakers()
+            print(Fore.CYAN + f"[SYSTEM] Voice ID active. Speakers: {', '.join(speakers)}")
+        else:
+            print(Fore.YELLOW + "[SYSTEM] Voice ID inactive.")
+    except Exception:
+        pass
 
-    if is_voice_id_enabled():
-        speakers = get_enrolled_speakers()
-        print(Fore.CYAN + f"[SYSTEM] Voice ID active. Speakers: {', '.join(speakers)}")
-    else:
-        print(Fore.YELLOW + "[SYSTEM] Voice ID inactive.")
-
-    # ── Initial greeting ──
-    mouth.speak(f"{config.KEY['identity']['name']} online.")
-    scheduler_mod.start_background(speak_fn=mouth.speak)
-    sched_count = scheduler_mod.get_active_count()
-    if sched_count > 0:
-        print(Fore.CYAN + f"[SYSTEM] Scheduler: {sched_count} pending schedule(s).")
-    app_ui.update_status("SYSTEM ONLINE", "#00ff00")
+    # Initial greeting
+    try:
+        mouth.speak(f"{config.KEY['identity']['name']} online.")
+        scheduler_mod.start_background(speak_fn=mouth.speak)
+        sched_count = scheduler_mod.get_active_count()
+        if sched_count > 0:
+            print(Fore.CYAN + f"[SYSTEM] Scheduler: {sched_count} active schedules.")
+        app_ui.update_status("SYSTEM ONLINE", "#00ff00")
+    except Exception as _greet_err:
+        print(Fore.RED + f"[SYSTEM] Greeting failed: {_greet_err}")
+        import traceback
+        traceback.print_exc()
 
     # =========================================================================
     # MAIN LOOP
     # =========================================================================
     while True:
         try:
-            # ── GUI / API state ──
             if is_active:
                 app_ui.update_status("LISTENING...", "#00ff00")
                 api_set_state("listening", True)
@@ -408,58 +454,62 @@ def seven_logic():
                 app_ui.update_status("PAUSED (Say 'Wake Up')", "#555555")
                 api_set_state("listening", False)
 
-            # ── Listen ──
             user_input, audio_path = listen()
             if not user_input:
                 continue
 
-            # Tell silence watcher user just spoke
             if _silence_watcher:
                 _silence_watcher.on_user_spoke()
             _last_topic_ref[0] = user_input
 
-            text_lower = user_input.lower()
+            text_lower = user_input.lower().strip()
 
-            # ── Interrupt context handler ──
+            # Filter Whisper hallucinations
+            _hallucinations = {
+                "thank you", "thanks", "thank you.", "thanks.",
+                "you", "the", "bye", "bye.", "yes", "no",
+                "thanks for watching", "thank you for watching",
+                ".", "..", "...", " ", ""
+            }
+            if text_lower in _hallucinations or len(text_lower) < 2:
+                print(Fore.YELLOW + f"[EARS] Filtered: '{user_input}'")
+                continue
+
+            # Interrupt context
             if interrupt_context["was_interrupted"]:
-                resume_words = ["continue", "resume", "go on", "go ahead",
-                                "keep going", "carry on"]
+                resume_words = ["continue", "resume", "go on", "go ahead", "keep going", "carry on"]
                 if any(w in text_lower for w in resume_words):
                     old_response = interrupt_context["last_response"]
                     old_input    = interrupt_context["last_input"]
-                    interrupt_context.update(
-                        {"was_interrupted": False, "last_response": None, "last_input": None}
-                    )
+                    interrupt_context.update({"was_interrupted": False, "last_response": None, "last_input": None})
                     if old_response and old_input:
                         resume_prompt = (
                             f"I was interrupted while answering: '{old_input}'. "
                             f"I had said: '{old_response}'. "
                             f"Continue from where I left off naturally."
                         )
-                        response = brain_modules.think(resume_prompt, speaker_id="default")
+                        response = brain.think(resume_prompt, speaker_id="default")
                         if response:
                             speak_with_interrupt(response)
                         else:
-                            mouth.speak("Sorry, I lost my train of thought.")
+                            mouth.speak("Sorry, lost my train of thought.")
                     else:
-                        mouth.speak("Sorry, I lost my train of thought. Ask me again?")
+                        mouth.speak("Sorry, lost my train of thought. Ask me again?")
                 else:
-                    interrupt_context.update(
-                        {"was_interrupted": False, "last_response": None, "last_input": None}
-                    )
+                    interrupt_context.update({"was_interrupted": False, "last_response": None, "last_input": None})
                 continue
 
-            # ── Voice ID ──
+            # Voice ID
             speaker_id = "default"
             if audio_path and is_voice_id_enabled():
                 speaker_id = identify_speaker(audio_path)
                 print(Fore.CYAN + f"[VOICE ID] Speaker: {speaker_id}")
                 api_set_state("current_speaker", speaker_id)
 
-            # ── Voice enrollment ──
+            # Voice enrollment
             if "enroll my voice" in text_lower or "enroll voice" in text_lower:
                 mouth.speak("What name should I save this voice as?")
-                app_ui.update_status("ENROLLING — Speak your name...", "#ff00ff")
+                app_ui.update_status("ENROLLING - Speak your name...", "#ff00ff")
                 name_input, name_audio = listen()
                 if name_input:
                     enroll_name = name_input.strip().replace(".", "").replace("!", "")
@@ -468,41 +518,37 @@ def seven_logic():
                     enroll_input, enroll_audio = listen()
                     if enroll_audio:
                         success = enroll_speaker(enroll_name, enroll_audio)
-                        mouth.speak(
-                            f"Got it, {enroll_name}." if success
-                            else "I couldn't capture your voice clearly. Try again."
-                        )
+                        mouth.speak(f"Got it, {enroll_name}." if success else "Could not capture your voice clearly. Try again.")
                     else:
-                        mouth.speak("I didn't hear anything. Try again.")
+                        mouth.speak("I did not hear anything. Try again.")
                 else:
-                    mouth.speak("I didn't catch your name. Try again.")
+                    mouth.speak("I did not catch your name. Try again.")
                 continue
 
-            # ── Kill command ──
+            # Kill
             if any(trigger in text_lower for trigger in KILL_WORDS):
                 app_ui.update_status("SHUTTING DOWN...", "#ff0000")
                 mouth.speak("Systems offline. Goodbye.")
                 app_ui.close()
                 os._exit(0)
 
-            # ── Wake command ──
+            # Wake
             if any(trigger in text_lower for trigger in WAKE_WORDS):
                 if not is_active:
                     is_active = True
-                    mouth.speak("I'm listening.")
+                    mouth.speak("Listening.")
                     app_ui.update_status("RESUMED", "#00ff00")
                     if _silence_watcher:
                         _silence_watcher.set_paused(False)
                 continue
 
-            # ── Pause command ──
+            # Pause
             if is_active and any(trigger in text_lower for trigger in PAUSE_WORDS):
                 is_active = False
                 mouth.speak("Standing by.")
                 app_ui.update_status("PAUSED", "#555555")
                 if _silence_watcher:
                     _silence_watcher.set_paused(True)
-                # Clear conversation panel when paused
                 api_set_state("user_text",  "")
                 api_set_state("seven_text", "")
                 continue
@@ -510,47 +556,38 @@ def seven_logic():
             if not is_active:
                 continue
 
-            # ── Core processing ──
+            # Core processing
             print(Fore.YELLOW + f"USER: {user_input}")
             app_ui.update_status("THINKING...", "#ff00ff")
-            api_set_state("thinking",   True)
-            api_set_state("listening",  False)
-            api_set_state("user_text",  user_input)   # → shows in conversation panel
-            api_set_state("seven_text", "")            # clear previous response
+            api_set_state("thinking",  True)
+            api_set_state("listening", False)
+            api_set_state("user_text", user_input)
+            api_set_state("seven_text", "")
 
-            # ── Pre-check fact limit before brain thinks ──
-            # If user is trying to store a fact and they're at limit,
-            # tell them immediately without wasting LLM call
+            # Fact limit pre-check
             _fact_triggers = [
                 "remember that", "remember this", "my name is",
                 "call me", "i love", "i like", "i prefer",
                 "i am a", "i work at", "i study at",
                 "my favorite", "my favourite"
             ]
-            _is_fact_intent = any(
-                t in user_input.lower() for t in _fact_triggers
-            )
-            if _is_fact_intent:
+            if any(t in user_input.lower() for t in _fact_triggers):
                 try:
                     import voice_limits
-                    _current_facts = seven_memory.user_facts.count()
-                    _fact_ok, _fact_msg = voice_limits.check(
-                        "facts_limit", _current_facts
-                    )
-                    if not _fact_ok:
-                        api_set_state("speaking", True)
-                        mouth.speak(_fact_msg)
-                        api_set_state("speaking", False)
-                        app_ui.update_status("PLAN LIMIT", "#ffaa00")
-                        print(Fore.YELLOW +
-                              f"[LIMIT] Fact limit pre-check blocked "
-                              f"({_current_facts}) "
-                              f"tier={voice_limits.get_tier()}")
-                        continue
+                    if seven_memory:
+                        _current_facts = seven_memory.user_facts.count()
+                        _fact_ok, _fact_msg = voice_limits.check("facts_limit", _current_facts)
+                        if not _fact_ok:
+                            api_set_state("speaking", True)
+                            mouth.speak(_fact_msg)
+                            api_set_state("speaking", False)
+                            app_ui.update_status("PLAN LIMIT", "#ffaa00")
+                            continue
                 except Exception:
                     pass
 
-            response = brain_modules.think(user_input, speaker_id=speaker_id)
+            # Brain think - THIS IS THE KEY FIX: brain.think not brain_modules.think
+            response = brain.think(user_input, speaker_id=speaker_id)
             telemetry.log_activity()
 
             if not response:
@@ -563,7 +600,6 @@ def seven_logic():
             )
             completed = True
 
-            # ── Memory storage ──
             should_store = True
             if isinstance(response, str) and response.strip().startswith("###"):
                 should_store = False
@@ -572,10 +608,12 @@ def seven_logic():
             if user_input.lower().strip() in ["hi", "hello", "hey"]:
                 should_store = False
 
-            # ── Speech part ──
             speech_part = response
             if isinstance(response, str) and "###" in response:
                 speech_part = response.split("###")[0].strip()
+
+            if not is_streaming and speech_part:
+                api_set_state("seven_text", speech_part)
 
             api_set_state("speaking", True)
             if _silence_watcher:
@@ -589,25 +627,21 @@ def seven_logic():
                     full_parts.append(sentence)
                     if "###" in sentence:
                         continue
-                    # Push each sentence as it streams — UI updates in real time
-                    api_set_state("seven_text", " ".join(
-                        p for p in full_parts if "###" not in p
-                    ))
+                    api_set_state("seven_text", " ".join(p for p in full_parts if "###" not in p))
                     completed = speak_with_interrupt(sentence)
                     if not completed:
                         break
                 response    = " ".join(full_parts)
                 speech_part = response.split("###")[0].strip() if "###" in response else response
                 app_ui.update_status(
-                    "⚡ INTERRUPTED" if not completed else speech_part[:80],
+                    "INTERRUPTED" if not completed else speech_part[:80],
                     "#ffaa00" if not completed else "#00ccff"
                 )
             elif speech_part:
                 interrupt_context["last_input"] = user_input
-                api_set_state("seven_text", speech_part)  # push full response
                 completed = speak_with_interrupt(speech_part)
                 app_ui.update_status(
-                    "⚡ INTERRUPTED" if not completed else speech_part,
+                    "INTERRUPTED" if not completed else speech_part,
                     "#ffaa00" if not completed else "#00ccff"
                 )
 
@@ -615,17 +649,13 @@ def seven_logic():
             api_set_state("thinking", False)
             if _silence_watcher:
                 _silence_watcher.on_seven_speaking(False)
-            # Text stays visible — scheduleHide in status.html fades it after 5s
-            # No need to clear here — the orb window handles the fade timer
 
-            # ── Store conversation (enforce plan limit) ──
-            if should_store and isinstance(response, str):
+            # Store conversation
+            if should_store and isinstance(response, str) and seven_memory:
                 try:
                     import voice_limits
                     current_convos = seven_memory.conversations.count()
-                    allowed, limit_msg = voice_limits.check(
-                        "conversation_history", current_convos
-                    )
+                    allowed, limit_msg = voice_limits.check("conversation_history", current_convos)
                     if allowed:
                         clean_response = re.sub(r'###\w+:\s*\S+', '', response).strip()
                         if not completed and clean_response:
@@ -634,16 +664,13 @@ def seven_logic():
                             seven_memory.store_conversation(
                                 user_input, clean_response,
                                 user_id=speaker_id if speaker_id not in
-                                        ("default", "unknown") else "default"
+                                        ("default", "unknown") else "mani"
                             )
                     else:
-                        # Don't block the conversation — just stop saving
-                        print(Fore.YELLOW + f"[LIMIT] Conversation memory full "
-                              f"({current_convos}) tier={voice_limits.get_tier()}")
+                        print(Fore.YELLOW + f"[LIMIT] Conversation memory full ({current_convos})")
                 except Exception as e:
                     print(Fore.RED + f"[MEMORY ERROR] {e}")
 
-            # ── Command pipeline ──
             if not isinstance(response, str):
                 continue
 
@@ -659,18 +686,16 @@ def seven_logic():
                     try:
                         success, msg = hands_windows.manage_window(params)
                         if success:
-                            app_ui.update_status(f"🪟 {msg}", "#00ff00")
+                            app_ui.update_status(f"Window: {msg}", "#00ff00")
                             if params.get("action") == "list" and msg:
                                 speak_with_interrupt(msg)
                         else:
-                            api_set_state("speaking", True)
                             mouth.speak(msg)
-                            api_set_state("speaking", False)
-                            app_ui.update_status(f"🪟 FAILED: {msg}", "#ff0000")
+                            app_ui.update_status(f"Window failed: {msg}", "#ff0000")
                     except Exception as e:
-                        print(Fore.RED + f"[WINDOW CMD ERROR] {e}")
+                        print(Fore.RED + f"[WINDOW ERROR] {e}")
 
-            # Scheduler commands (enforce plan limit)
+            # Scheduler commands
             sched_cmds = re.findall(r"###SCHED:\s*(.*?)(?=###|$)", response)
             for param_str in sched_cmds:
                 params = {"speaker_id": speaker_id}
@@ -680,55 +705,33 @@ def seven_logic():
                         params[k.strip()] = v.strip()
                 if params:
                     action = params.get("action", "")
-
-                    # Only check limits for CREATE actions
                     if action in ("alarm", "reminder", "timer", "event"):
-                        import voice_limits
-
-                        # Check recurring schedule permission
-                        recur = params.get("recur", "")
-                        if recur and recur not in ("", "none"):
-                            rec_ok, rec_msg = voice_limits.check_bool(
-                                "recurring_schedules"
-                            )
-                            if not rec_ok:
-                                api_set_state("speaking", True)
-                                mouth.speak(rec_msg)
-                                api_set_state("speaking", False)
-                                app_ui.update_status(
-                                    "📅 PLAN LIMIT", "#ffaa00"
-                                )
+                        try:
+                            import voice_limits
+                            recur = params.get("recur", "")
+                            if recur and recur not in ("", "none"):
+                                rec_ok, rec_msg = voice_limits.check_bool("recurring_schedules")
+                                if not rec_ok:
+                                    mouth.speak(rec_msg)
+                                    app_ui.update_status("PLAN LIMIT", "#ffaa00")
+                                    continue
+                            current_scheds = scheduler_mod.get_active_count()
+                            sched_ok, sched_msg = voice_limits.check("schedules", current_scheds)
+                            if not sched_ok:
+                                mouth.speak(sched_msg)
+                                app_ui.update_status("PLAN LIMIT", "#ffaa00")
                                 continue
-
-                        # Check schedule count limit
-                        current_scheds = scheduler_mod.get_active_count()
-                        sched_ok, sched_msg = voice_limits.check(
-                            "schedules", current_scheds
-                        )
-                        if not sched_ok:
-                            api_set_state("speaking", True)
-                            mouth.speak(sched_msg)
-                            api_set_state("speaking", False)
-                            app_ui.update_status(
-                                "📅 PLAN LIMIT", "#ffaa00"
-                            )
-                            print(Fore.YELLOW +
-                                  f"[LIMIT] Schedule limit hit "
-                                  f"({current_scheds}) "
-                                  f"tier={voice_limits.get_tier()}")
-                            continue
-
+                        except Exception:
+                            pass
                     success, msg = scheduler_mod.manage_schedule(params)
                     telemetry.log_activity()
                     if success:
-                        app_ui.update_status(f"📅 {msg}", "#00ff00")
+                        app_ui.update_status(f"Schedule: {msg}", "#00ff00")
                         if msg:
                             speak_with_interrupt(msg)
                     else:
-                        api_set_state("speaking", True)
                         mouth.speak(msg)
-                        api_set_state("speaking", False)
-                        app_ui.update_status(f"📅 FAILED: {msg}", "#ff0000")
+                        app_ui.update_status(f"Schedule failed: {msg}", "#ff0000")
 
             # System commands
             sys_cmds = re.findall(r"###SYS:\s*(.*?)(?=###|$)", response)
@@ -741,25 +744,21 @@ def seven_logic():
                 if params:
                     success, msg = system_mod.manage_system(params)
                     if success:
-                        app_ui.update_status(f"⚙️ {msg}", "#00ff00")
+                        app_ui.update_status(f"System: {msg}", "#00ff00")
                         action = params.get("action", "")
                         if action in ["battery", "volume_get", "brightness_get",
                                       "wifi_status", "bluetooth_status"] and msg:
                             speak_with_interrupt(msg)
                     else:
-                        api_set_state("speaking", True)
                         mouth.speak(msg)
-                        api_set_state("speaking", False)
-                        app_ui.update_status(f"⚙️ FAILED: {msg}", "#ff0000")
+                        app_ui.update_status(f"System failed: {msg}", "#ff0000")
 
-            # App open/close/search commands
+            # App commands
             commands = re.findall(r"###(OPEN|CLOSE|SEARCH):\s*(.*?)(?=###|$)", response)
             for cmd_type, arg in commands:
                 clean_arg = arg.replace('"','').replace("'","").replace(",","").replace(".","").strip()
                 if not clean_arg:
                     continue
-
-                # Split multiple apps
                 if " and " in clean_arg:
                     sub_apps = clean_arg.split(" and ")
                 elif "," in clean_arg:
@@ -773,30 +772,22 @@ def seven_logic():
                     app_name = app_name.strip()
                     if not app_name:
                         continue
-
                     if cmd_type == "OPEN":
-                        app_ui.update_status(f"OPENING: {app_name}", "#00ff00")
+                        app_ui.update_status(f"Opening: {app_name}", "#00ff00")
                         success = core.open_app(app_name)
                         telemetry.log_activity()
                         if not success:
-                            api_set_state("speaking", True)
-                            mouth.speak(f"Can't find {app_name}. Is it installed?")
-                            api_set_state("speaking", False)
-
+                            mouth.speak(f"Cannot find {app_name}. Is it installed?")
                     elif cmd_type == "CLOSE":
-                        app_ui.update_status(f"CLOSING: {app_name}", "#ff0000")
+                        app_ui.update_status(f"Closing: {app_name}", "#ff0000")
                         success = core.close_app(app_name)
                         telemetry.log_activity()
                         if not success:
-                            api_set_state("speaking", True)
-                            mouth.speak(f"{app_name} doesn't seem to be running.")
-                            api_set_state("speaking", False)
-
+                            mouth.speak(f"{app_name} does not seem to be running.")
                     elif cmd_type == "SEARCH":
-                        app_ui.update_status(f"SEARCHING: {app_name}", "#0000ff")
+                        app_ui.update_status(f"Searching: {app_name}", "#0000ff")
                         core.search_web(app_name)
 
-            # Clean up temp audio
             if audio_path and os.path.exists(audio_path):
                 try:
                     os.remove(audio_path)
