@@ -852,6 +852,77 @@ def cancel_schedule(schedule_id: int):
         return {"success": True, "message": msg}
     else:
         raise HTTPException(status_code=404, detail=msg)
+    
+
+# Schedule alert state - set by scheduler when it fires
+_schedule_alert = {"active": False, "message": "", "type": "", "id": None}
+
+@app.get("/api/schedule/alert")
+async def get_schedule_alert():
+    """Frontend polls this to show banner when schedule fires."""
+    return _schedule_alert
+
+@app.post("/api/schedule/alert/dismiss")
+async def dismiss_schedule_alert():
+    """User clicked Got it."""
+    global _schedule_alert
+    _schedule_alert = {"active": False, "message": "", "type": "", "id": None}
+    return {"ok": True}
+
+@app.post("/api/schedule/alert/snooze")
+async def snooze_schedule_alert(minutes: int = 5):
+    """User clicked Remind me later - reschedule for X minutes."""
+    global _schedule_alert
+    if _schedule_alert["active"]:
+        # Re-add the schedule for X minutes from now
+        from hands.scheduler import add_schedule
+        add_schedule(
+            stype="reminder",
+            message=_schedule_alert["message"],
+            time_str=f"in {minutes} minutes",
+            speaker_id="default"
+        )
+    _schedule_alert = {"active": False, "message": "", "type": "", "id": None}
+    return {"ok": True}
+
+# ── Schedule Alert State ──
+_schedule_alert_state = {"active": False, "message": "", "type": "", "id": None}
+
+@app.get("/api/schedule/alert")
+async def get_schedule_alert():
+    return _schedule_alert_state
+
+@app.post("/api/schedule/alert/dismiss")
+async def dismiss_schedule_alert():
+    global _schedule_alert_state
+    _schedule_alert_state = {"active": False, "message": "", "type": "", "id": None}
+    return {"ok": True}
+
+@app.post("/api/schedule/alert/snooze")
+async def snooze_schedule_alert(minutes: int = 5):
+    global _schedule_alert_state
+    if _schedule_alert_state.get("active"):
+        try:
+            from hands.scheduler import add_schedule
+            add_schedule(
+                stype="reminder",
+                message=_schedule_alert_state["message"],
+                time_str=f"in {minutes} minutes",
+                speaker_id="default"
+            )
+        except Exception:
+            pass
+    _schedule_alert_state = {"active": False, "message": "", "type": "", "id": None}
+    return {"ok": True}
+
+def set_schedule_alert(message: str, stype: str, schedule_id=None):
+    global _schedule_alert_state
+    _schedule_alert_state = {
+        "active":  True,
+        "message": message,
+        "type":    stype,
+        "id":      schedule_id
+    }
 
 
 # =========================================================================
