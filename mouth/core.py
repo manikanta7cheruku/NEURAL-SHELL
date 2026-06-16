@@ -20,10 +20,23 @@ import io
 import os
 import threading
 
-# Fix Windows console encoding
-if sys.platform == 'win32': 
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+# Fix Windows console encoding only if not already configured
+# Do NOT re-wrap if main.py already called reconfigure() — causes thread deadlock
+if sys.platform == 'win32':
+    try:
+        if hasattr(sys.stdout, 'reconfigure'):
+            sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        elif not isinstance(sys.stdout, io.TextIOWrapper):
+            sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    except Exception:
+        pass
+    try:
+        if hasattr(sys.stderr, 'reconfigure'):
+            sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+        elif not isinstance(sys.stderr, io.TextIOWrapper):
+            sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+    except Exception:
+        pass
 
 # State tracking
 _current_process = None
