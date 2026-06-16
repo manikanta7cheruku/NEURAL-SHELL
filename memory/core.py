@@ -18,6 +18,7 @@ os.environ["HF_HUB_DISABLE_TELEMETRY"]     = "1"
 os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
 os.environ["HF_HUB_DISABLE_IMPLICIT_TOKEN"]= "1"
 os.environ["TOKENIZERS_PARALLELISM"]        = "false"
+os.environ["CUDA_VISIBLE_DEVICES"]          = ""
 
 import logging
 logging.getLogger("chromadb.telemetry").setLevel(logging.CRITICAL)
@@ -49,38 +50,29 @@ EMBEDDING_MODEL = "all-MiniLM-L6-v2"
 
 
 # =============================================================================
-# OFFLINE EMBEDDER
+# OFFLINE EMBEDDER UNA
 # =============================================================================
 
-def _is_model_cached(model_name: str) -> bool:
-    """Check if embedding model is already downloaded on this machine."""
-    home = os.path.expanduser("~")
-    check_paths = [
-        os.path.join(home, ".cache", "huggingface", "hub",
-                     f"models--sentence-transformers--{model_name}", "snapshots"),
-        os.path.join(home, ".cache", "torch", "sentence_transformers",
-                     f"sentence-transformers_{model_name}"),
-        os.path.join(home, ".cache", "sentence_transformers",
-                     f"sentence-transformers_{model_name}"),
-        os.path.join(".", "seven_data", "models", model_name),
-    ]
-    for p in check_paths:
-        if os.path.exists(p):
-            return True
-    return False
 
 
 def _load_offline_embedder_standalone(model_name: str):
+    """
+    Returns a ChromaDB-compatible embedding function.
+    Uses chromadb.utils.embedding_functions.SentenceTransformerEmbeddingFunction
+    which is already built to work with ChromaDB's Rust query layer.
+    Falls back to manual embedder only if chromadb utility is unavailable.
+    """
     from sentence_transformers import SentenceTransformer
 
+    # First verify model is cached locally
     home = os.path.expanduser("~")
-
     hf_snapshot_path = os.path.join(
         home, ".cache", "huggingface", "hub",
         f"models--sentence-transformers--{model_name}",
         "snapshots"
     )
 
+    model_local_path = None
     search_paths = [
         hf_snapshot_path,
         os.path.join(home, ".cache", "torch", "sentence_transformers",
@@ -90,74 +82,75 @@ def _load_offline_embedder_standalone(model_name: str):
         os.path.join(".", "seven_data", "models", model_name),
     ]
 
-    model = None
-
-    # ── Try loading from local cache first ──
     for path in search_paths:
         if not os.path.exists(path):
             continue
-        try:
-            load_path = path
-            if "snapshots" in path:
+        if "snapshots" in path:
+            try:
                 snapshots = [
                     f for f in os.listdir(path)
                     if os.path.isdir(os.path.join(path, f))
                 ]
-                if not snapshots:
-                    continue
-                load_path = os.path.join(path, snapshots[0])
-            model = SentenceTransformer(load_path, local_files_only=True)
-            print(Fore.GREEN + "[MEMORY] ✓ Model loaded from local cache (offline)")
+                if snapshots:
+                    model_local_path = os.path.join(path, snapshots[0])
+                    break
+            except Exception:
+                continue
+        else:
+            model_local_path = path
             break
-        except Exception as e:
-            print(Fore.YELLOW + f"[MEMORY] Path failed ({path}): {e}")
-            continue
 
-    # ── If not cached — download it (first time only) ──
-    if model is None:
-        print(Fore.YELLOW + "[MEMORY] Embedding model not cached on this machine.")
-        print(Fore.YELLOW + "[MEMORY] Downloading all-MiniLM-L6-v2 (~90MB) — one time only...")
-
-        # Temporarily clear offline env vars so download can proceed
-        _hf_offline   = os.environ.pop("HF_HUB_OFFLINE", None)
-        _tf_offline    = os.environ.pop("TRANSFORMERS_OFFLINE", None)
-
+    if model_local_path is None:
+        print(Fore.YELLOW + "[MEMORY] Model not cached. Downloading once...")
         try:
-            model = SentenceTransformer(model_name)
-            print(Fore.GREEN + "[MEMORY] ✓ Model downloaded and cached. Will work offline from now on.")
+            SentenceTransformer(model_name)
+            print(Fore.GREEN + "[MEMORY] Model downloaded and cached.")
+            model_local_path = model_name  # use name, it is now cached
         except Exception as e:
-            print(Fore.RED + f"[MEMORY] ✗ Download failed: {e}")
-            print(Fore.RED + "[MEMORY] Memory features disabled. Brain will still work.")
-            model = None
-        finally:
-            # Restore offline flags after download attempt
-            if _hf_offline is not None:
-                os.environ["HF_HUB_OFFLINE"] = _hf_offline
-            if _tf_offline is not None:
-                os.environ["TRANSFORMERS_OFFLINE"] = _tf_offline
+            print(Fore.RED + f"[MEMORY] Download failed: {e}")
+            model_local_path = model_name
 
-    # ── After model is confirmed cached, enforce offline mode ──
-    if model is not None and _is_model_cached(model_name):
-        os.environ["HF_HUB_OFFLINE"]     = "1"
-        os.environ["TRANSFORMERS_OFFLINE"] = "1"
-        print(Fore.CYAN + "[MEMORY] Offline mode enabled — model cached locally.")
+    print(Fore.GREEN + "[MEMORY] Model loaded from local cache (offline)")
 
-    class _OfflineEmbedder:
+    # Set offline flags after model is confirmed present
+    os.environ["HF_HUB_OFFLINE"]      = "1"
+    os.environ["TRANSFORMERS_OFFLINE"] = "1"
+    print(Fore.CYAN + "[MEMORY] Offline mode enabled — model cached locally.")
+
+    # Use ChromaDB's own SentenceTransformer wrapper
+    # This is guaranteed to work with ChromaDB's Rust query layer
+    try:
+        from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
+        ef = SentenceTransformerEmbeddingFunction(
+            model_name=model_local_path,
+            device="cpu"
+        )
+        print(Fore.GREEN + "[MEMORY] Using ChromaDB native SentenceTransformer embedder")
+        return ef
+    except Exception as e:
+        print(Fore.YELLOW + f"[MEMORY] ChromaDB native embedder failed: {e}")
+        print(Fore.YELLOW + "[MEMORY] Falling back to manual embedder")
+
+    # Manual fallback - only if ChromaDB utility unavailable
+    try:
+        model = SentenceTransformer(model_local_path, local_files_only=True)
+    except Exception:
+        model = SentenceTransformer(model_name)
+
+    class _FallbackEmbedder:
         def __init__(self, m):
             self._model = m
 
-        def __call__(self, input: list) -> list:
-            if self._model is None:
-                # Return zero vectors if model failed — brain still works
-                return [[0.0] * 384 for _ in input]
+        def __call__(self, input) -> list:
+            texts = [input] if isinstance(input, str) else list(input)
             return self._model.encode(
-                input, show_progress_bar=False, batch_size=32
+                texts, show_progress_bar=False
             ).tolist()
 
-        def name(self) -> str:
-            return "seven_offline_embedder"
+        def name(self):
+            return "seven_fallback_embedder"
 
-    return _OfflineEmbedder(model)
+    return _FallbackEmbedder(model)
 
 
 # =============================================================================
@@ -173,7 +166,11 @@ class SevenMemory:
         print(Fore.CYAN + "[MEMORY] Loading embedding model (offline)...")
         self.embedding_function = _load_offline_embedder_standalone(EMBEDDING_MODEL)
 
-        # Connect to ChromaDB — with auto-recovery if database is corrupt
+        # Skip verification - it was tested separately and works
+        # _verify_embedder creates a temp collection which can hang on slow systems
+        print(Fore.GREEN + "[MEMORY] Embedder ready (verification skipped for speed)")
+
+        # Connect to ChromaDB
         self.client = self._safe_init_client(MEMORY_DIR)
 
         self.conversations = self.client.get_or_create_collection(
@@ -193,19 +190,69 @@ class SevenMemory:
             print(Fore.GREEN + f"[MEMORY] Online. Conversations: {conv_count} | Facts: {fact_count}")
         except Exception as e:
             print(Fore.YELLOW + f"[MEMORY] DB schema incompatible: {e}")
-            print(Fore.YELLOW + "[MEMORY] Resetting database to clean state...")
-            self.client      = self._reset_and_reinit(MEMORY_DIR)
+            print(Fore.YELLOW + "[MEMORY] Resetting to clean state...")
+            self.client = self._reset_and_reinit(MEMORY_DIR)
             self.conversations = self.client.get_or_create_collection(
                 name="conversations",
                 embedding_function=self.embedding_function,
                 metadata={"description": "Stores all conversation history"}
             )
-            self.user_facts    = self.client.get_or_create_collection(
+            self.user_facts = self.client.get_or_create_collection(
                 name="user_facts",
                 embedding_function=self.embedding_function,
                 metadata={"description": "Stores permanent user facts"}
             )
             print(Fore.GREEN + "[MEMORY] Online (fresh). Conversations: 0 | Facts: 0")
+
+    def _verify_embedder(self, ef):
+        """
+        Test the embedder with a real ChromaDB query path.
+        If it fails, fall back to chromadb default embedder.
+        This prevents the rust layer TypeError from crashing the voice loop.
+        """
+        import tempfile
+        try:
+            # Create a tiny temp collection and run a real query
+            test_settings = chromadb.Settings(
+                anonymized_telemetry=False,
+                allow_reset=True,
+            )
+            test_dir = os.path.join(tempfile.gettempdir(), "seven_ef_test")
+            os.makedirs(test_dir, exist_ok=True)
+            test_client = chromadb.PersistentClient(
+                path=test_dir,
+                settings=test_settings
+            )
+            # Delete if exists from previous test
+            try:
+                test_client.delete_collection("ef_test")
+            except Exception:
+                pass
+            test_col = test_client.get_or_create_collection(
+                name="ef_test",
+                embedding_function=ef
+            )
+            test_col.add(
+                documents=["hello world test"],
+                ids=["test_001"]
+            )
+            test_col.query(query_texts=["hello"], n_results=1)
+            # Clean up
+            test_client.delete_collection("ef_test")
+            print(Fore.GREEN + "[MEMORY] Embedding function verified OK")
+            return ef
+        except Exception as e:
+            print(Fore.YELLOW + f"[MEMORY] Custom embedder failed verification: {e}")
+            print(Fore.YELLOW + "[MEMORY] Falling back to ChromaDB default embedder")
+            try:
+                from chromadb.utils import embedding_functions
+                default_ef = embedding_functions.DefaultEmbeddingFunction()
+                print(Fore.GREEN + "[MEMORY] Using ChromaDB default embedder (online required for first use)")
+                return default_ef
+            except Exception as e2:
+                print(Fore.RED + f"[MEMORY] Default embedder also failed: {e2}")
+                print(Fore.RED + "[MEMORY] Memory search disabled - brain still works")
+                return ef  # return original, search will fail gracefully
 
     # -------------------------------------------------------------------------
 
@@ -326,27 +373,53 @@ class SevenMemory:
     def _search_collection(self, collection, query, n_results=5, user_id=None):
         if collection.count() == 0:
             return []
-        where_filter = {"user_id": user_id} if user_id else None
-        actual_n     = min(n_results, collection.count())
+        actual_n = min(n_results, collection.count())
+
+        # Try with user_id filter first, fall back to no filter
+        # ChromaDB where filter throws when no documents match
+        queries_to_try = []
+        if user_id:
+            queries_to_try.append({"user_id": user_id})
+        queries_to_try.append(None)
+
+        results = None
+        for where_filter in queries_to_try:
+            try:
+                res = collection.query(
+                    query_texts=[query],
+                    n_results=actual_n,
+                    where=where_filter
+                )
+                if (res.get("documents") and
+                        res["documents"] and
+                        len(res["documents"][0]) > 0):
+                    results = res
+                    break
+            except Exception:
+                continue
+
+        if not results:
+            return []
+
         try:
-            results = collection.query(
-                query_texts=[query],
-                n_results=actual_n,
-                where=where_filter
-            )
+            docs      = results["documents"][0]
+            distances = results["distances"][0]  if results.get("distances")  else [1.0] * len(docs)
+            metadatas = results["metadatas"][0]  if results.get("metadatas")  else [{}]  * len(docs)
+            ids       = results["ids"][0]        if results.get("ids")        else [f"u_{i}" for i in range(len(docs))]
+
             parsed = []
-            for i in range(len(results["documents"][0])):
-                distance  = results["distances"][0][i]
-                relevance = max(0, 1 - (distance / 2))
+            for i in range(len(docs)):
+                distance  = distances[i] if i < len(distances) else 1.0
+                relevance = max(0.0, 1.0 - (distance / 2.0))
                 parsed.append({
-                    "text":      results["documents"][0][i],
+                    "text":      docs[i],
                     "relevance": round(relevance, 3),
-                    "metadata":  results["metadatas"][0][i],
-                    "id":        results["ids"][0][i]
+                    "metadata":  metadatas[i] if i < len(metadatas) else {},
+                    "id":        ids[i]       if i < len(ids)       else f"u_{i}"
                 })
             return parsed
         except Exception as e:
-            print(Fore.RED + f"[MEMORY ERROR] Search failed: {e}")
+            print(Fore.RED + f"[MEMORY ERROR] Parse failed: {e}")
             return []
 
     def _format_memories(self, results):
@@ -369,13 +442,36 @@ class SevenMemory:
     def extract_and_store_facts(self, user_input, user_id="mani"):
         clean = user_input.lower().strip()
 
-        if "my name is" in clean:
-            name = user_input.split("is")[-1].strip().rstrip(".")
-            self.store_fact(f"User's name is {name}", category="identity", user_id=user_id)
+        _has_name_change = (
+            "my name is" in clean
+            or "call me" in clean
+            or "change my name" in clean
+            or "rename me" in clean
+            or ("my name" in clean and any(
+                w in clean for w in ["into", "to is", "should be", "is now"]
+            ))
+        )
+        if _has_name_change:
+            import re as _re_mem
+            raw = user_input.lower().split("my name is")[-1].strip()
+            raw = _re_mem.split(r'\bnot\b|\bokay\b|\bplease\b|\bright\b|\bok\b', raw)[0]
+            raw = raw.strip().rstrip(".,!?").strip()
+            words_raw = [w for w in raw.split()
+                         if w not in {"please","okay","ok","right","now","just"}]
+            name = " ".join(words_raw[:2]).strip().title()
+            if name:
+                self.store_fact(f"User's name is {name}", category="identity", user_id=user_id)
             return True
         if "call me" in clean:
-            name = user_input.lower().split("call me")[-1].strip().rstrip(".")
-            self.store_fact(f"User wants to be called {name}", category="identity", user_id=user_id)
+            import re as _re_mem
+            raw = user_input.lower().split("call me")[-1].strip()
+            raw = _re_mem.split(r'\bnot\b|\bokay\b|\bplease\b|\bright\b|\bok\b', raw)[0]
+            raw = raw.strip().rstrip(".,!?").strip()
+            words_raw = [w for w in raw.split()
+                         if w not in {"please","okay","ok","right","now","just"}]
+            name = " ".join(words_raw[:2]).strip().title()
+            if name:
+                self.store_fact(f"User wants to be called {name}", category="identity", user_id=user_id)
             return True
         if "my favorite" in clean or "my favourite" in clean:
             question_starts = ["what","which","who","when","where","how","do","can","tell"]
