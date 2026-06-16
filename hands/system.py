@@ -157,10 +157,10 @@ def _volume_down(step=10):
 
 def _volume_set(level):
     """Set volume to exact percentage (0-100)."""
+    level = max(0, min(100, int(level)))
     vol = _get_volume()
     if vol:
         try:
-            level = max(0, min(100, int(level)))
             vol.SetMasterVolumeLevelScalar(level / 100.0, None)
             print(Fore.GREEN + f"   -> Volume set to {level}%")
             command_log.log_command("SYS", f"volume_set {level}", True, f"Set {level}%")
@@ -168,26 +168,39 @@ def _volume_set(level):
             return True, f"Volume at {level}%."
         except Exception as e:
             print(Fore.YELLOW + f"   -> COM volume set failed: {e}")
-    
-    # Fallback: use PowerShell to set volume directly (no keypress nonsense)
+
+    # Fallback: calculate delta from current and use keypresses
+    # Never go to 0 first - that is audible and jarring
     try:
-        level = max(0, min(100, int(level)))
-        ps_cmd = (
-            f"$wshShell = New-Object -ComObject WScript.Shell; "
-            f"1..50 | ForEach-Object {{ $wshShell.SendKeys([char]174) }}; "  # Vol down to 0
-            f"Start-Sleep -Milliseconds 200; "
-            f"1..{level // 2} | ForEach-Object {{ $wshShell.SendKeys([char]175) }}"  # Vol up to target
-        )
-        subprocess.run(["powershell", "-Command", ps_cmd], capture_output=True, timeout=10)
-        print(Fore.GREEN + f"   -> Volume set to ~{level}% (PowerShell)")
-        command_log.log_command("SYS", f"volume_set {level}", True, f"PS ~{level}%")
+        import pyautogui
+        current_pct = 50  # safe default if we cannot read current
+        if vol:
+            try:
+                current_pct = int(vol.GetMasterVolumeLevelScalar() * 100)
+            except Exception:
+                pass
+
+        delta = level - current_pct
+        if delta == 0:
+            command_log.log_command("SYS", f"volume_set {level}", True, "No change needed")
+            mood_engine.on_command_result(True)
+            return True, f"Volume already at {level}%."
+
+        presses = max(1, abs(delta) // 2)
+        if delta > 0:
+            pyautogui.press("volumeup", presses=presses)
+        else:
+            pyautogui.press("volumedown", presses=presses)
+
+        print(Fore.GREEN + f"   -> Volume adjusted to ~{level}% ({presses} keypresses)")
+        command_log.log_command("SYS", f"volume_set {level}", True, f"keypress delta {delta}")
         mood_engine.on_command_result(True)
-        return True, f"Volume at {level}%."
+        return True, f"Volume around {level}%."
     except Exception as e:
         print(Fore.RED + f"   -> Volume set fallback failed: {e}")
         command_log.log_command("SYS", f"volume_set {level}", False, str(e))
         mood_engine.on_command_result(False)
-        return False, "Couldn't set exact volume."
+        return False, "Could not set volume."
 
 
 def _volume_mute():
