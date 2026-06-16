@@ -42,13 +42,16 @@ from memory.mood import mood_engine
 # =========================================================================
 
 _volume_interface = None
+_volume_init_failed = False  # If COM fails once, don't retry every call
 
 
 def _get_volume():
-    """Get the Windows audio endpoint volume interface. Works with all pycaw versions."""
-    global _volume_interface
+    """Get the Windows audio endpoint volume interface."""
+    global _volume_interface, _volume_init_failed
     if _volume_interface is not None:
         return _volume_interface
+    if _volume_init_failed:
+        return None
     try:
         import comtypes
         from comtypes import GUID, CLSCTX_ALL
@@ -99,7 +102,8 @@ def _get_volume():
         
     except Exception as e:
         print(Fore.RED + f"[SYSTEM] Volume COM init failed: {e}")
-        print(Fore.YELLOW + "[SYSTEM] Falling back to nircmd for volume control")
+        print(Fore.YELLOW + "[SYSTEM] Will use keypress fallback for volume")
+        _volume_init_failed = True
         return None
 
 
@@ -159,45 +163,48 @@ def _volume_set(level):
     """Set volume to exact percentage (0-100)."""
     level = max(0, min(100, int(level)))
     vol = _get_volume()
+
+    # Try COM first - this is exact
     if vol:
         try:
             vol.SetMasterVolumeLevelScalar(level / 100.0, None)
-            print(Fore.GREEN + f"   -> Volume set to {level}%")
-            command_log.log_command("SYS", f"volume_set {level}", True, f"Set {level}%")
+            actual = int(vol.GetMasterVolumeLevelScalar() * 100)
+            print(Fore.GREEN + f"   -> Volume set to {actual}% (COM)")
+            command_log.log_command("SYS", f"volume_set {level}", True, f"COM {actual}%")
             mood_engine.on_command_result(True)
-            return True, f"Volume at {level}%."
+            return True, f"Volume at {actual}%."
         except Exception as e:
             print(Fore.YELLOW + f"   -> COM volume set failed: {e}")
 
-    # Fallback: calculate delta from current and use keypresses
-    # Never go to 0 first - that is audible and jarring
+    # Keypress fallback - read current first then apply delta
     try:
         import pyautogui
-        current_pct = 50  # safe default if we cannot read current
+
+        # Read current level if COM available, otherwise estimate from keypress count
         if vol:
             try:
                 current_pct = int(vol.GetMasterVolumeLevelScalar() * 100)
             except Exception:
-                pass
+                current_pct = 50
+        else:
+            current_pct = 50
 
         delta = level - current_pct
         if delta == 0:
-            command_log.log_command("SYS", f"volume_set {level}", True, "No change needed")
             mood_engine.on_command_result(True)
             return True, f"Volume already at {level}%."
 
-        presses = max(1, abs(delta) // 2)
-        if delta > 0:
-            pyautogui.press("volumeup", presses=presses)
-        else:
-            pyautogui.press("volumedown", presses=presses)
+        # Each keypress is approximately 2%
+        presses = max(1, round(abs(delta) / 2))
+        key = "volumeup" if delta > 0 else "volumedown"
+        pyautogui.press(key, presses=presses, interval=0.02)
 
-        print(Fore.GREEN + f"   -> Volume adjusted to ~{level}% ({presses} keypresses)")
-        command_log.log_command("SYS", f"volume_set {level}", True, f"keypress delta {delta}")
+        print(Fore.GREEN + f"   -> Volume: {current_pct}% -> ~{level}% ({presses} keypresses)")
+        command_log.log_command("SYS", f"volume_set {level}", True, f"keypress ~{level}%")
         mood_engine.on_command_result(True)
         return True, f"Volume around {level}%."
     except Exception as e:
-        print(Fore.RED + f"   -> Volume set fallback failed: {e}")
+        print(Fore.RED + f"   -> Volume set failed: {e}")
         command_log.log_command("SYS", f"volume_set {level}", False, str(e))
         mood_engine.on_command_result(False)
         return False, "Could not set volume."
