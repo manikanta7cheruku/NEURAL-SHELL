@@ -75,21 +75,12 @@ def _try_custom_path(app_name):
         ext = os.path.splitext(exe_path)[1].lower()
 
         if ext == '.exe':
-            subprocess.Popen(f'"{exe_path}"', shell=True)
+            subprocess.Popen([exe_path], shell=False)
         else:
             os.startfile(exe_path)
 
-        # Force window to foreground after short delay
-        import threading
-        import time
-        def _bring_to_front():
-            time.sleep(1.5)
-            try:
-                import pyautogui
-                pyautogui.hotkey('alt', 'tab')
-            except Exception:
-                pass
-        threading.Thread(target=_bring_to_front, daemon=True).start()
+        # No alt+tab needed - os.startfile handles focus
+        # alt+tab was CAUSING the minimize by switching away
 
         print(Fore.GREEN + f"   -> Launched via custom path: {exe_path}")
         command_log.log_command("OPEN", clean, True, f"Custom path: {exe_path}")
