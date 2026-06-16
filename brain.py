@@ -124,20 +124,27 @@ def load_name_from_memory():
     Load user name. Priority order:
     1. config.json identity.user_name (set from Settings UI)
     2. ChromaDB memory facts (set by voice "my name is X")
-    3. Default: "there" (neutral fallback — not "Admin")
+    3. Default: "there"
     """
     global USER_NAME
 
-    # Priority 1: Settings name (most intentional - user typed it)
+    # Priority 1: Settings name - read fresh from disk every time
     try:
-        config.load()  # force fresh read from disk
-        cfg_name = config.KEY.get('identity', {}).get('user_name', '').strip()
-        if cfg_name and cfg_name.lower() not in ('admin', ''):
-            USER_NAME = cfg_name
-            print(Fore.GREEN + f"[BRAIN] Name from config: {USER_NAME}")
-            return
-    except Exception:
-        pass
+        import json
+        _cfg_path = os.path.join(
+            os.environ.get('APPDATA', ''),
+            'SEVEN', 'config.json'
+        )
+        if os.path.exists(_cfg_path):
+            with open(_cfg_path, 'r', encoding='utf-8') as _f:
+                _cfg_data = json.load(_f)
+            cfg_name = _cfg_data.get('identity', {}).get('user_name', '').strip()
+            if cfg_name and cfg_name.lower() not in ('admin', ''):
+                USER_NAME = cfg_name
+                print(Fore.GREEN + f"[BRAIN] Name from config: {USER_NAME}")
+                return
+    except Exception as _e:
+        print(Fore.YELLOW + f"[BRAIN] Config name read failed: {_e}")
 
     # Priority 2: ChromaDB memory facts
     try:
@@ -1129,6 +1136,7 @@ def _build_system_tag(clean_in):
 def think(prompt_text, speaker_id="default"):
     global CONVO_HISTORY, USER_NAME, LAST_USER_INPUT, RECENT_QUESTIONS
 
+
     # If we know who's speaking, use their name
     if speaker_id not in ("default", "unknown"):
         # Try to find this speaker's real name from memory
@@ -1151,8 +1159,8 @@ def think(prompt_text, speaker_id="default"):
         except:
             pass
     else:
-        # Always read current global - may have been updated this session by voice
-        speaker_name = globals().get('USER_NAME', 'there')
+        # Always use current USER_NAME - updated by voice commands this session
+        speaker_name = USER_NAME if USER_NAME else 'there'
 
     clean_in = prompt_text.lower().strip()
     clean_in = clean_in.replace("?", "").replace(".", "").replace("!", "").replace("'", "").replace(",", "")
@@ -1164,10 +1172,69 @@ def think(prompt_text, speaker_id="default"):
     # "My name is Mani" must save BEFORE any other check runs.
     # If we don't catch this first, "my name" triggers identity check instead.
 
-    if "my name is" in clean_in:
-        new_name = prompt_text.split("is")[-1].strip().rstrip(".").strip()
+    _name_triggers = (
+        "my name is" in clean_in
+        or "call me" in clean_in
+        or "my name's" in clean_in
+        or ("change my name" in clean_in)
+        or ("rename me" in clean_in)
+        or ("my name" in clean_in and any(
+            w in clean_in for w in ["into", "to", "should be", "is now"]
+        ))
+    )
+    if _name_triggers:
+        # Extract name cleanly
+        import re as _re_name
+        _pt_lower = prompt_text.lower()
+
+        if "my name is" in _pt_lower:
+            raw = _pt_lower.split("my name is")[-1].strip()
+        elif "my name's" in _pt_lower:
+            raw = _pt_lower.split("my name's")[-1].strip()
+        elif "call me" in _pt_lower:
+            raw = _pt_lower.split("call me")[-1].strip()
+        elif "change my name" in _pt_lower:
+            # "change my name into cheruku" / "change my name to cheruku"
+            for sep in ["into", "to", "as"]:
+                if sep in _pt_lower.split("change my name")[-1]:
+                    raw = _pt_lower.split("change my name")[-1].split(sep)[-1].strip()
+                    break
+            else:
+                raw = _pt_lower.split("change my name")[-1].strip()
+        elif "rename me" in _pt_lower:
+            raw = _pt_lower.split("rename me")[-1].strip()
+            for sep in ["to", "as", "into"]:
+                if raw.startswith(sep + " "):
+                    raw = raw[len(sep):].strip()
+                    break
+        else:
+            raw = _pt_lower.split("my name")[-1].strip()
+            for sep in ["into", "to", "is", "should be", "is now"]:
+                if raw.startswith(sep + " "):
+                    raw = raw[len(sep):].strip()
+                    break
+
+        # Remove correction phrases like "not ray" or "not mani"
+        # "cheruku not ray" -> "cheruku"
+        # "mani okay" -> "mani"
+        import re as _re_name
+        raw = _re_name.split(r'\bnot\b|\bokay\b|\bplease\b|\bright\b|\bok\b', raw)[0]
+        raw = raw.strip().rstrip(".,!?").strip()
+
+        # Take only the first meaningful word as the name
+        # "cheruku manikanta" -> keep both words (it's a name)
+        # "seven please" -> just "seven"
+        words_in_name = raw.split()
+        # Filter out filler words
+        filler = {"please", "okay", "ok", "right", "now", "actually", "just"}
+        name_words = [w for w in words_in_name if w.lower() not in filler]
+        new_name = " ".join(name_words[:2]).strip()  # max 2 words for a name
+
+        # Capitalize properly
+        new_name = new_name.title()
+
         if not new_name:
-            return "I didn't catch the name. Say it again?"
+            return "I did not catch the name. Say it again?"
 
         if speaker_id != "default" and speaker_id != "unknown":
             seven_memory.store_fact(
@@ -1195,33 +1262,29 @@ def think(prompt_text, speaker_id="default"):
 
         return f"Got it. {new_name} it is."
 
-       # =========================================================================
+    # =========================================================================
     # LAYER 2: REPETITION DETECTOR
     # =========================================================================
 
-    # NEVER block commands — user might retry because first attempt failed
     first_word = words[0] if words else ""
     window_first_words = ["minimize", "maximise", "maximize", "restore", "snap",
                           "switch", "focus", "bring", "center", "centre", "put"]
-    is_command = first_word in ["open", "close", "start", "kill", "launch"] + window_first_words
+    is_command  = first_word in ["open", "close", "start", "kill", "launch"] + window_first_words
     is_greeting = first_word in ["hi", "hey", "hello", "bye", "goodbye", "good"]
+    is_request  = first_word in ["sing", "open", "close"]
 
-    # Skip repetition for commands, greetings, AND requests
-    is_request = False
-    if first_word in ["sing", "open", "close"]:
-        is_request = True
-    
     speaker_questions = RECENT_QUESTIONS.get(speaker_id, [])
-    # V1.4: Similar question detector (not just exact match)
+
     similar_groups = [
-        ["introduce yourself", "tell me what you can do", "what can you do", 
+        ["introduce yourself", "tell me what you can do", "what can you do",
          "what you can do", "what are your capabilities", "tell me about yourself",
          "what do you do", "list your capabilities"],
-        ["whats your name", "who are you", "what should i call you", "tell me your name"],
+        ["whats your name", "who are you", "what should i call you", "tell me your name",
+         "your name", "yuor name"],
         ["whats my name", "who am i", "do you know my name", "do you know me"],
         ["who created you", "who made you", "who built you", "who is your creator"],
     ]
-    
+
     similar_detected = False
     for group in similar_groups:
         if any(g in clean_in for g in group):
@@ -1230,75 +1293,69 @@ def think(prompt_text, speaker_id="default"):
                 if any(g in prev for g in group):
                     asked_similar = True
                     break
-            
             if asked_similar and not is_command and not is_greeting:
                 similar_detected = True
                 break
 
     if similar_detected:
-        import random
-        ack = random.choice([
+        ack_options = [
             "You asked something similar just now.",
             "We just covered this.",
-            "Similar question — but sure.",
+            "Similar question, but sure.",
             "You already asked that, but alright.",
-        ])
-        # Modify the prompt so LLM gives a DIFFERENT answer
-        prompt_text = f"[The user asked a similar question before. Acknowledge briefly then answer differently than last time.] {prompt_text}"
-        
+        ]
+        ack = random.choice(ack_options)
+        prompt_text = (
+            f"[The user asked a similar question before. "
+            f"Acknowledge briefly then answer differently than last time.] {prompt_text}"
+        )
+
     if clean_in in speaker_questions and not is_command and not is_greeting and not is_request:
 
-        # Identity questions have FIXED answers — no need to check memory
-        # These answers NEVER change, so always block on repeat
         if "your name" in clean_in or "who are you" in clean_in:
-            
-            responses = [
+            name_responses = [
                 "Seven. Same as before.",
                 "Still Seven.",
-                "I'm Seven. That hasn't changed.",
-                "Seven — same answer as last time.",
+                "I am Seven. That has not changed.",
+                "Seven. Same answer as last time.",
             ]
-            return random.choice(responses)
+            return random.choice(name_responses)
+
         if "my name" in clean_in or "who am i" in clean_in:
             if speaker_id not in ("default", "unknown") and speaker_name == speaker_id.title():
-                return "You haven't told me your name yet."
-            
-            responses = [
-                f"You're {speaker_name}.",
+                return "You have not told me your name yet."
+            name_responses = [
+                f"You are {speaker_name}.",
                 f"Still {speaker_name}.",
                 f"{speaker_name}, same as before.",
-                f"{speaker_name} — hasn't changed.",
+                f"{speaker_name}. Has not changed.",
             ]
-            return random.choice(responses)
+            return random.choice(name_responses)
+
         if "what are you" in clean_in:
             return "Still Seven, your personal AI assistant."
+
         if "call you" in clean_in:
             return "Seven. Same as always."
+
         if "created you" in clean_in or "made you" in clean_in or "who made" in clean_in:
             creator = config.KEY['identity']['creator']
-            
-            responses = [
+            creator_responses = [
                 f"{creator}. Same answer.",
                 f"Still {creator}.",
-                f"{creator} built me. That hasn't changed.",
-                f"{creator} — my creator.",
+                f"{creator} built me. That has not changed.",
             ]
-            return random.choice(responses)
+            return random.choice(creator_responses)
 
-        # For NON-identity questions, check if new memories exist
-        search_uid = speaker_id if speaker_id not in ("default", "unknown") else "mani"
+        search_uid   = speaker_id if speaker_id not in ("default", "unknown") else "mani"
         fresh_memory = seven_memory.search(prompt_text, user_id=search_uid)
         if fresh_memory:
-            # New info available — don't block, let LLM answer with memory
             memory_context = fresh_memory
             print(Fore.MAGENTA + "[MEMORY] Found NEW memories for repeated question!")
-            print(Fore.MAGENTA + memory_context)
         else:
             repeat_count = speaker_questions.count(clean_in)
-
             if repeat_count >= 2:
-                return "You've asked me this multiple times now. My answer hasn't changed."
-
+                return "You have asked me this multiple times. My answer has not changed."
             return "You just asked me that. Same answer."
 
     if not is_command and not is_greeting:
@@ -1345,15 +1402,30 @@ def think(prompt_text, speaker_id="default"):
         
     # --- GREETINGS ---
     greeting_words = ["hi", "hello", "hey", "hi seven", "hello seven", "hey seven",
-                      "good morning", "good afternoon", "good evening"]
-    if clean_in in greeting_words:
-        import random
+                      "good morning", "good afternoon", "good evening",
+                      "heyy", "heyyy", "heyyyy", "hii", "hiii", "yo", "sup",
+                      "wassup", "whatsup", "what's up"]
+    # Also catch greetings that are just variations of hi/hey
+    _is_greeting_like = (
+        clean_in in greeting_words or
+        (len(words) <= 2 and words[0] in ["hi", "hey", "hello", "yo", "sup"])
+    )
+    if _is_greeting_like:
+
         greetings = [
-            f"Hey {speaker_name}! What can I do for you?",
-            f"Hey {speaker_name}! How can I help?",
-            f"{speaker_name}! What's on your mind?",
-            f"Hey! What do you need, {speaker_name}?",
+            f"Yeah?",
+            f"Go ahead.",
+            f"Listening.",
+            f"What do you need?",
+            f"Here.",
         ]
+        # Use name if we know it and it is not the fallback
+        if speaker_name and speaker_name.lower() not in ("there", "admin", "default"):
+            greetings += [
+                f"What is it, {speaker_name}?",
+                f"{speaker_name}.",
+                f"Yeah, {speaker_name}?",
+            ]
         return random.choice(greetings)
         
     # --- FAREWELLS ---
@@ -1370,6 +1442,14 @@ def think(prompt_text, speaker_id="default"):
     # --- WHAT SHOULD I CALL YOU ---
     if "call you" in clean_in or "should i call" in clean_in:
         return "You can call me Seven."
+
+    # "instead of seven" / "other than seven" / "besides seven"
+    _name_alternatives = (
+        ("instead of" in clean_in or "other than" in clean_in or "besides" in clean_in)
+        and "seven" in clean_in
+    )
+    if _name_alternatives:
+        return "Seven is my name. That is the only one I have."
 
     # --- TARS SETTING CONTROLS ---
     # "set your humor to 80" / "change honesty to 50"
@@ -1451,6 +1531,31 @@ def think(prompt_text, speaker_id="default"):
         return f"Honesty is at {_cur_honesty}%. {_label.capitalize()}."
 
     # --- TARS SETTING CONTROLS END ---
+
+    # --- HOW/WHY QUESTIONS ABOUT MEMORY ---
+    # "how you know that" / "how do you know my name" / "how did you know"
+    _memory_how = (
+        ("how" in clean_in or "why" in clean_in)
+        and ("know" in clean_in or "knew" in clean_in or "remember" in clean_in)
+        and any(w in clean_in for w in ["that", "my name", "this", "me", "about me"])
+    )
+    if _memory_how:
+        _humor = config.KEY.get('brain', {}).get('tars_humor', 75)
+        if _humor >= 60:
+            _how_responses = [
+                "You told me. I listened.",
+                "You mentioned it. I remembered. That is my job.",
+                "I pay attention. It is one of my better qualities.",
+                "Memory. I have one.",
+                "You said it. I stored it. Not complicated.",
+            ]
+        else:
+            _how_responses = [
+                "You told me earlier. I stored it in memory.",
+                "I remembered what you told me in a previous conversation.",
+                "It is in my local memory from when you shared it with me.",
+            ]
+        return random.choice(_how_responses)
     
     # --- CAPABILITIES (V1.6.1) ---
     # When user asks what Seven can do, inject capability facts into LLM context
@@ -1791,34 +1896,34 @@ def think(prompt_text, speaker_id="default"):
             
             # Context-aware speech
             if _action == "volume_up":
-                speech = _rand.choice(["Turning it up.", "Louder.", "Volume up."])
+                speech = random.choice(["Turning it up.", "Louder.", "Volume up."])
             elif _action == "volume_down":
-                speech = _rand.choice(["Turning it down.", "Quieter.", "Volume down."])
+                speech = random.choice(["Turning it down.", "Quieter.", "Volume down."])
             elif _action == "volume_set":
                 speech = f"Setting volume to {_value}%."
             elif _action == "volume_mute":
-                speech = _rand.choice(["Muted.", "Going silent.", "Sound off."])
+                speech = random.choice(["Muted.", "Going silent.", "Sound off."])
             elif _action == "volume_unmute":
-                speech = _rand.choice(["Unmuted.", "Sound on.", "You're live."])
+                speech = random.choice(["Unmuted.", "Sound on.", "You are live."])
             elif _action == "volume_get":
-                speech = ""  # Result will be spoken from returned data
+                speech = ""
             elif _action == "brightness_up":
-                speech = _rand.choice(["Brightening up.", "More brightness.", "Screen brighter."])
+                speech = random.choice(["Brightening up.", "More brightness.", "Screen brighter."])
             elif _action == "brightness_down":
-                speech = _rand.choice(["Dimming.", "Less brightness.", "Screen dimmer."])
+                speech = random.choice(["Dimming.", "Less brightness.", "Screen dimmer."])
             elif _action == "brightness_set":
                 speech = f"Brightness to {_value}%."
             elif _action == "brightness_get":
                 speech = ""
             elif _action == "battery":
-                speech = ""  # Result spoken from data
+                speech = ""
             elif _action.startswith("wifi"):
                 if "on" in _action:
                     speech = "Enabling WiFi."
                 elif "off" in _action:
                     speech = "Disabling WiFi."
                 else:
-                    speech = ""  # Status — result spoken
+                    speech = ""
             elif _action.startswith("bluetooth"):
                 if "on" in _action:
                     speech = "Enabling Bluetooth."
@@ -1827,29 +1932,29 @@ def think(prompt_text, speaker_id="default"):
                 else:
                     speech = ""
             elif _action == "media_play_pause":
-                speech = _rand.choice(["Play pause.", "Toggled.", ""])
+                speech = random.choice(["Toggled.", "Done.", ""])
             elif _action == "media_next":
-                speech = _rand.choice(["Next track.", "Skipping.", "Next."])
+                speech = random.choice(["Next track.", "Skipping.", "Next."])
             elif _action == "media_prev":
-                speech = _rand.choice(["Previous track.", "Going back.", "Previous."])
+                speech = random.choice(["Previous track.", "Going back.", "Previous."])
             elif _action == "media_stop":
                 speech = "Stopping playback."
             elif _action == "dark_mode_on":
-                speech = _rand.choice(["Going dark.", "Dark mode.", "Switching to dark."])
+                speech = random.choice(["Going dark.", "Dark mode.", "Switching to dark."])
             elif _action == "dark_mode_off":
-                speech = _rand.choice(["Going light.", "Light mode.", "Switching to light."])
+                speech = random.choice(["Going light.", "Light mode.", "Switching to light."])
             elif _action == "night_light_on":
-                speech = _rand.choice(["Night light on.", "Easy on the eyes.", "Warming the screen."])
+                speech = random.choice(["Night light on.", "Easy on the eyes.", "Warming the screen."])
             elif _action == "night_light_off":
                 speech = "Night light off."
             elif _action == "dnd_on":
-                speech = _rand.choice(["Do not disturb.", "Going quiet.", "Notifications silenced."])
+                speech = random.choice(["Do not disturb.", "Going quiet.", "Notifications silenced."])
             elif _action == "dnd_off":
                 speech = "Notifications back on."
             elif _action == "airplane_on":
-                speech = _rand.choice(["Airplane mode on.", "Going offline.", "All radios off."])
+                speech = random.choice(["Airplane mode on.", "Going offline.", "All radios off."])
             elif _action == "airplane_off":
-                speech = _rand.choice(["Airplane mode off.", "Back online.", "Radios on."])
+                speech = random.choice(["Airplane mode off.", "Back online.", "Radios on."])
             else:
                 speech = "On it."
             
@@ -1896,7 +2001,7 @@ def think(prompt_text, speaker_id="default"):
             
             # Generate natural speech based on what's happening
             if _action == "focus":
-                speech = _rand.choice([
+                speech = random.choice([
                     f"Switching to {_target}.",
                     f"Bringing up {_target}.",
                     f"{_target}, coming up.",
@@ -1905,24 +2010,24 @@ def think(prompt_text, speaker_id="default"):
                 if _target in ["this", "current", "active"]:
                     speech = "Minimizing this window."
                 else:
-                    speech = _rand.choice([
+                    speech = random.choice([
                         f"Minimizing {_target}.",
                         f"Putting {_target} away.",
                         f"{_target}, out of sight.",
                     ])
             elif _action == "maximize":
-                speech = _rand.choice([
+                speech = random.choice([
                     f"Maximizing {_target}.",
                     f"Full size on {_target}.",
                     f"{_target}, going big.",
                 ])
             elif _action == "restore":
-                speech = _rand.choice([
+                speech = random.choice([
                     f"Restoring {_target}.",
                     f"Bringing {_target} back.",
                 ])
             elif _action == "snap":
-                speech = _rand.choice([
+                speech = random.choice([
                     f"Snapping {_target} to the {_position}.",
                     f"{_target}, {_position} side.",
                     f"Putting {_target} on the {_position}.",
@@ -1939,34 +2044,34 @@ def think(prompt_text, speaker_id="default"):
                 else:
                     speech = f"Arranging {_target}."
             elif _action == "minimize_all":
-                speech = _rand.choice([
+                speech = random.choice([
                     "Clearing the deck.",
                     "Everything down.",
                     "Desktop, clear.",
                 ])
             elif _action == "show_desktop":
-                speech = _rand.choice([
+                speech = random.choice([
                     "Showing desktop.",
                     "All clear.",
                     "Desktop.",
                 ])
             elif _action == "swap":
-                speech = _rand.choice([
+                speech = random.choice([
                     f"Swapping {_target}.",
                     f"{_target}, switching places.",
                 ])
             elif _action == "pin":
-                speech = _rand.choice([
+                speech = random.choice([
                     f"Pinning {_target} on top.",
                     f"{_target} stays on top now.",
                 ])
             elif _action == "unpin":
-                speech = _rand.choice([
+                speech = random.choice([
                     f"Unpinning {_target}.",
                     f"{_target}, back to normal.",
                 ])
             elif _action == "fullscreen":
-                speech = _rand.choice([
+                speech = random.choice([
                     f"Fullscreen on {_target}.",
                     f"{_target}, going fullscreen.",
                 ])
@@ -1974,12 +2079,12 @@ def think(prompt_text, speaker_id="default"):
                 _opacity = _parts.get("opacity", "0.8")
                 # Build context-aware speech based on opacity type
                 if _opacity == "more":
-                    speech = _rand.choice([
+                    speech = random.choice([
                         f"Making {_target} more transparent.",
                         f"{_target}, a bit more see-through.",
                     ])
                 elif _opacity == "less":
-                    speech = _rand.choice([
+                    speech = random.choice([
                         f"Making {_target} less transparent.",
                         f"Brightening {_target} up.",
                         f"{_target}, more visible now.",
@@ -1996,14 +2101,14 @@ def think(prompt_text, speaker_id="default"):
                     except:
                         speech = f"Making {_target} transparent."
             elif _action == "solid":
-                speech = _rand.choice([
+                speech = random.choice([
                     f"Making {_target} solid again.",
                     f"{_target}, back to full opacity.",
                 ])
             elif _action == "close_window":
                 speech = "Closing this window."
             elif _action == "undo":
-                speech = _rand.choice([
+                speech = random.choice([
                     "Undoing that.",
                     "Putting it back.",
                     "Reverting.",
@@ -2059,7 +2164,7 @@ def think(prompt_text, speaker_id="default"):
             # Natural speech before command
             app_list = ", ".join(apps)
             if tag == "OPEN":
-                speech = _rand.choice([
+                speech = random.choice([
                     f"Opening {app_list}.",
                     f"On it. {app_list} coming up.",
                     f"{app_list}, coming right up.",
@@ -2067,13 +2172,13 @@ def think(prompt_text, speaker_id="default"):
                 ])
             else:
                 if close_all:
-                    speech = _rand.choice([
+                    speech = random.choice([
                         f"Closing all {app_list}.",
                         f"Shutting down every {app_list}.",
                         f"Killing all {app_list} instances.",
                     ])
                 else:
-                    speech = _rand.choice([
+                    speech = random.choice([
                         f"Closing {app_list}.",
                         f"Shutting down {app_list}.",
                         f"Done with {app_list}.",
@@ -2092,7 +2197,11 @@ def think(prompt_text, speaker_id="default"):
 
     if "VISUAL_REPORT:" not in prompt_text and not is_command and not is_greeting:
         search_uid = speaker_id if speaker_id not in ("default", "unknown") else "mani"
-        memory_context = seven_memory.search(prompt_text, user_id=search_uid)
+        try:
+            memory_context = seven_memory.search(prompt_text, user_id=search_uid)
+        except Exception as _mem_err:
+            print(Fore.YELLOW + f"[BRAIN] Memory search skipped: {_mem_err}")
+            memory_context = ""
 
         if memory_context:
             print(Fore.MAGENTA + "[MEMORY] Found relevant memories!")
@@ -2189,7 +2298,10 @@ def think(prompt_text, speaker_id="default"):
 
     if "VISUAL_REPORT:" not in prompt_text and not is_command and not is_greeting:
         search_uid = speaker_id if speaker_id not in ("default", "unknown") else "mani"
-        seven_memory.extract_and_store_facts(prompt_text, user_id=search_uid)
+        try:
+            seven_memory.extract_and_store_facts(prompt_text, user_id=search_uid)
+        except Exception as _fact_err:
+            print(Fore.YELLOW + f"[BRAIN] Fact extraction skipped: {_fact_err}")
 
     # =========================================================================
     # LAYER 8: LLM INFERENCE
@@ -2200,8 +2312,8 @@ def think(prompt_text, speaker_id="default"):
             CONVO_HISTORY[speaker_id] = []
         CONVO_HISTORY[speaker_id].append(f"User: {prompt_text}")
 
-    if len(CONVO_HISTORY.get(speaker_id, [])) > 4:
-        CONVO_HISTORY[speaker_id] = CONVO_HISTORY[speaker_id][-4:]
+    if len(CONVO_HISTORY.get(speaker_id, [])) > 8:
+        CONVO_HISTORY[speaker_id] = CONVO_HISTORY[speaker_id][-8:]
 
     # Pull TARS personality settings from config
     _brain_cfg  = config.KEY.get('brain', {})
@@ -2253,11 +2365,11 @@ def think(prompt_text, speaker_id="default"):
         "prompt": full_prompt,
         "stream": False,
         "options": {
-            "temperature": 0.3,
-            "num_predict": response_length,
-            "repeat_penalty": 1.3,
+            "temperature": 0.2,
+            "num_predict": min(response_length, 80),
+            "repeat_penalty": 1.5,
             "stop": ["User:", "System:", "Seven:"],
-            "num_ctx": 512        # Smaller context for tiny models
+            "num_ctx": 2048
         }
     }
 
