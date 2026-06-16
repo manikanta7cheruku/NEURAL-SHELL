@@ -171,7 +171,7 @@ def _speak_piper(text, voice_id, speed=165):
             capture_output=True,
             timeout=30,
             cwd=piper_dir,
-        ),
+        )
 
         if result.returncode != 0:
             err = result.stderr.decode("utf-8", errors="replace")
