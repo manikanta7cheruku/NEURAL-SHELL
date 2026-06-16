@@ -29,6 +29,8 @@ function NavigationHelper() {
   return null;
 }
 
+import ScheduleAlert from '../components/ScheduleAlert';
+
 function MainApp() {
   const { fetchStatus: fetchUpdateStatus } = useUpdate();
   useEffect(() => {
@@ -40,6 +42,7 @@ function MainApp() {
     <div className="flex h-screen bg-s-bg text-white overflow-hidden flex-col">
       <TitleBar />
       <UpdateBanner />
+      <ScheduleAlert />
       <div className="flex flex-1 overflow-hidden">
         <Sidebar />
         <main className="flex-1 overflow-y-auto">
