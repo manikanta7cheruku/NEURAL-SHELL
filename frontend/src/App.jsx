@@ -1,6 +1,7 @@
 import { HashRouter, Routes, Route, useNavigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import Sidebar        from './components/Sidebar';
+import ScheduleAlert  from './components/ScheduleAlert';
 import TitleBar       from './components/TitleBar';
 import UpdateBanner   from './components/UpdateBanner';
 import Home           from './pages/Home';
@@ -28,8 +29,6 @@ function NavigationHelper() {
   }, [navigate]);
   return null;
 }
-
-import ScheduleAlert from '../components/ScheduleAlert';
 
 function MainApp() {
   const { fetchStatus: fetchUpdateStatus } = useUpdate();

@@ -34,25 +34,25 @@ export default function ScheduleAlert() {
 
   const typeIcon = {
     alarm:    '⏰',
-    reminder: '🔔',
+    reminder: '',
     timer:    '⏱',
     event:    '📅',
-  }[alert.type] || '🔔';
+  }[alert.type] || '';
 
   return (
-    <div className="fixed top-4 right-4 z-50 w-80 animate-in slide-in-from-right duration-300">
+    <div className="fixed top-4 right-4 z-50 w-80">
       <div
         className="rounded-xl border border-s-accent/30 overflow-hidden"
         style={{
-          background:         'rgba(9, 9, 11, 0.92)',
-          backdropFilter:     'blur(20px)',
+          background:           'rgba(9, 9, 11, 0.92)',
+          backdropFilter:       'blur(20px)',
           WebkitBackdropFilter: 'blur(20px)',
-          boxShadow:          '0 8px 32px rgba(0,0,0,0.5), 0 0 0 1px rgba(99,102,241,0.2)',
+          boxShadow:            '0 8px 32px rgba(0,0,0,0.5), 0 0 0 1px rgba(99,102,241,0.2)',
         }}
       >
         {/* Header */}
         <div className="flex items-center gap-2.5 px-4 py-3 border-b border-s-border/50">
-          <span className="text-lg">{typeIcon}</span>
+          <span className="text-base">{typeIcon}</span>
           <div>
             <div className="text-[11px] font-semibold text-s-accent uppercase tracking-wider">
               {alert.type || 'Alert'}
