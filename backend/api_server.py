@@ -886,43 +886,47 @@ async def snooze_schedule_alert(minutes: int = 5):
     return {"ok": True}
 
 # ── Schedule Alert State ──
-_schedule_alert_state = {"active": False, "message": "", "type": "", "id": None}
+_schedule_alert_container = [{"active": False, "message": "", "type": "", "id": None}]
 
 @app.get("/api/schedule/alert")
 async def get_schedule_alert():
-    return _schedule_alert_state
+    return _schedule_alert_container[0]
 
 @app.post("/api/schedule/alert/dismiss")
 async def dismiss_schedule_alert():
-    global _schedule_alert_state
-    _schedule_alert_state = {"active": False, "message": "", "type": "", "id": None}
+    _schedule_alert_container[0] = {"active": False, "message": "", "type": "", "id": None}
     return {"ok": True}
 
 @app.post("/api/schedule/alert/snooze")
 async def snooze_schedule_alert(minutes: int = 5):
-    global _schedule_alert_state
-    if _schedule_alert_state.get("active"):
+    if _schedule_alert_container[0].get("active"):
         try:
             from hands.scheduler import add_schedule
             add_schedule(
                 stype="reminder",
-                message=_schedule_alert_state["message"],
+                message=_schedule_alert_container[0]["message"],
                 time_str=f"in {minutes} minutes",
                 speaker_id="default"
             )
         except Exception:
             pass
-    _schedule_alert_state = {"active": False, "message": "", "type": "", "id": None}
+    _schedule_alert_container[0] = {"active": False, "message": "", "type": "", "id": None}
     return {"ok": True}
 
 def set_schedule_alert(message: str, stype: str, schedule_id=None):
-    global _schedule_alert_state
-    _schedule_alert_state = {
+    """Called by scheduler when a schedule fires. Sets frontend banner state."""
+    _schedule_alert_container[0] = {
         "active":  True,
         "message": message,
         "type":    stype,
         "id":      schedule_id
     }
+    print(f"[API] Schedule alert set: {stype} - {message[:50]}")
+    print(f"[API] Alert state now: {_schedule_alert_container[0]}")
+
+def dismiss_schedule_alert_sync():
+    """Synchronous dismiss - called from brain.py without async context."""
+    _schedule_alert_container[0] = {"active": False, "message": "", "type": "", "id": None}
 
 
 # =========================================================================
@@ -2596,3 +2600,9 @@ def start_api_server(host="127.0.0.1", port=7777):
         print(f"[API] Update auto-check failed to start: {e}")
 
     return thread
+
+
+def dismiss_schedule_alert_sync():
+    """Synchronous version for brain.py to call."""
+    global _schedule_alert_container[0]
+    _schedule_alert_container[0] = {"active": False, "message": "", "type": "", "id": None}
