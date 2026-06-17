@@ -430,7 +430,14 @@ def seven_logic():
     # Initial greeting
     try:
         mouth.speak(f"{config.KEY['identity']['name']} online.")
-        scheduler_mod.start_background(speak_fn=mouth.speak)
+        try:
+            from backend.api_server import set_schedule_alert as _set_alert
+            scheduler_mod.start_background(
+                speak_fn=speak_with_interrupt,
+                alert_fn=_set_alert
+            )
+        except Exception:
+            scheduler_mod.start_background(speak_fn=speak_with_interrupt)
         sched_count = scheduler_mod.get_active_count()
         if sched_count > 0:
             print(Fore.CYAN + f"[SYSTEM] Scheduler: {sched_count} active schedules.")
@@ -661,10 +668,15 @@ def seven_logic():
                         if not completed and clean_response:
                             clean_response = f"[INTERRUPTED] {clean_response}"
                         if clean_response:
+                            # Use configured user name as default user_id
+                            # Falls back to "default" if name not configured
+                            _default_uid = config.KEY.get(
+                                'identity', {}
+                            ).get('user_name', 'default').lower() or "default"
                             seven_memory.store_conversation(
                                 user_input, clean_response,
                                 user_id=speaker_id if speaker_id not in
-                                        ("default", "unknown") else "mani"
+                                        ("default", "unknown") else _default_uid
                             )
                     else:
                         print(Fore.YELLOW + f"[LIMIT] Conversation memory full ({current_convos})")
@@ -774,10 +786,17 @@ def seven_logic():
                         continue
                     if cmd_type == "OPEN":
                         app_ui.update_status(f"Opening: {app_name}", "#00ff00")
-                        success = core.open_app(app_name)
-                        telemetry.log_activity()
-                        if not success:
-                            mouth.speak(f"Cannot find {app_name}. Is it installed?")
+                        already = core._check_already_running(app_name)
+                        if already:
+                            mouth.speak(f"{app_name} is already running.")
+                        else:
+                            success = core.open_app(app_name)
+                            telemetry.log_activity()
+                            if not success:
+                                mouth.speak(
+                                    f"Cannot find {app_name}. "
+                                    f"If it keeps failing, report it in the feedback section."
+                                )
                     elif cmd_type == "CLOSE":
                         app_ui.update_status(f"Closing: {app_name}", "#ff0000")
                         success = core.close_app(app_name)
