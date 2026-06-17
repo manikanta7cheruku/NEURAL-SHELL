@@ -102,9 +102,26 @@ def _try_custom_path(app_name):
         ext = os.path.splitext(exe_path)[1].lower()
 
         if ext == '.exe':
-            subprocess.Popen([exe_path], shell=False)
+            subprocess.Popen([exe_path])
         else:
             os.startfile(exe_path)
+
+        # Bring newly opened window to front after short delay
+        import threading
+        import time
+        def _focus_new():
+            time.sleep(2)
+            try:
+                import pyautogui
+                # Press alt briefly to allow SetForegroundWindow to work
+                # Then the OS brings the most recently opened window forward
+                import ctypes
+                ctypes.windll.user32.keybd_event(0x12, 0, 0, 0)  # alt down
+                time.sleep(0.05)
+                ctypes.windll.user32.keybd_event(0x12, 0, 2, 0)  # alt up
+            except Exception:
+                pass
+        threading.Thread(target=_focus_new, daemon=True).start()
 
         # No alt+tab needed - os.startfile handles focus
         # alt+tab was CAUSING the minimize by switching away
@@ -163,9 +180,20 @@ def close_app(app_name):
     clean_name = _resolve_alias(clean_name)
 
     # Check if this is a custom alias with a known process
-    if clean_name in _custom_alias_to_process:
-        process_names = _custom_alias_to_process[clean_name]
-        for proc_name in process_names:
+    # Check in-memory registry first, then fall back to config path lookup
+    process_names_to_try = _custom_alias_to_process.get(clean_name, [])
+
+    # If not in memory registry, check config for the file path and infer process
+    if not process_names_to_try:
+        custom_paths = _get_custom_paths()
+        if clean_name in custom_paths:
+            file_path = custom_paths[clean_name]
+            ext = os.path.splitext(file_path)[1].lower()
+            process_names_to_try = _EXTENSION_PROCESS_MAP.get(ext, [])
+            print(Fore.CYAN + f"   -> Inferred process list from extension {ext}: {process_names_to_try}")
+
+    if process_names_to_try:
+        for proc_name in process_names_to_try:
             for proc in psutil.process_iter(['pid', 'name']):
                 try:
                     if proc_name.lower() in proc.info['name'].lower():
@@ -366,25 +394,38 @@ def open_app(app_name):
         
         # Windows native apps (manual overrides — these don't work with AppOpener)
         if "camera" in clean_name:
-            os.system("start microsoft.windows.camera:")
+            subprocess.Popen(
+                ["explorer.exe", "microsoft.windows.camera:"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
             command_log.log_command("OPEN", "camera", True, "Windows URI")
             mood_engine.on_command_result(True)
             return True
         
         if "control panel" in clean_name:
-            os.system("control")
+            subprocess.Popen("control", shell=True)
             command_log.log_command("OPEN", "control panel", True, "Direct command")
             mood_engine.on_command_result(True)
             return True
             
         if "settings" in clean_name:
-            os.system("start ms-settings:")
+            subprocess.Popen(
+                ["explorer.exe", "ms-settings:"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
             command_log.log_command("OPEN", "settings", True, "Windows URI")
             mood_engine.on_command_result(True)
             return True
             
         if "calculator" in clean_name:
-            os.system("calc")
+            subprocess.Popen(
+                "calc",
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                shell=True
+            )
             command_log.log_command("OPEN", "calculator", True, "Direct command")
             mood_engine.on_command_result(True)
             return True
@@ -402,7 +443,11 @@ def open_app(app_name):
             return True
             
         if "whatsapp" in clean_name:
-            os.system("start whatsapp:")
+            subprocess.Popen(
+                ["explorer.exe", "whatsapp:"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
             command_log.log_command("OPEN", "whatsapp", True, "Windows URI")
             mood_engine.on_command_result(True)
             return True

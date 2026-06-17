@@ -55,11 +55,28 @@ def _get_volume():
     try:
         from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
         from comtypes import CLSCTX_ALL
-        devices = AudioUtilities.GetSpeakers()
-        interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
         from ctypes import cast, POINTER
+
+        # pycaw changed API - handle both old and new versions
+        speakers = AudioUtilities.GetSpeakers()
+
+        # New pycaw: speakers is AudioDevice, access via _dev
+        if hasattr(speakers, '_dev'):
+            interface = speakers._dev.Activate(
+                IAudioEndpointVolume._iid_, CLSCTX_ALL, None
+            )
+        # Old pycaw: speakers is IMMDevice directly
+        elif hasattr(speakers, 'Activate'):
+            interface = speakers.Activate(
+                IAudioEndpointVolume._iid_, CLSCTX_ALL, None
+            )
+        else:
+            raise AttributeError(f"Unknown pycaw speaker type: {type(speakers)}")
+
         _volume_interface = cast(interface, POINTER(IAudioEndpointVolume))
-        print(Fore.GREEN + "[SYSTEM] Volume control initialized (pycaw)")
+        # Verify it works
+        test = _volume_interface.GetMasterVolumeLevelScalar()
+        print(Fore.GREEN + f"[SYSTEM] Volume control initialized (pycaw) current={int(test*100)}%")
         return _volume_interface
     except Exception as e:
         print(Fore.RED + f"[SYSTEM] Volume init failed: {e}")
