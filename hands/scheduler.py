@@ -39,8 +39,8 @@ _schedules = []
 _lock = threading.Lock()
 _next_id = 1
 _background_thread = None
-_speak_callback = None      # Set by main.py
-_alert_callback = None      # Set by main.py - pushes banner to frontend
+_speak_callback = None   # Set by main.py
+_alert_callback = None  # Set by main.py - pushes banner to frontend
 _running = False
 
 
@@ -827,13 +827,65 @@ def _fire_schedule(schedule):
     
         print(Fore.YELLOW + f"[SCHEDULER] FIRING: {fire_msg}")
 
-    # Push banner to frontend via callback (avoids circular import)
-    if _alert_callback:
-        try:
-            _alert_callback(fire_msg, stype, schedule.get("id"))
-            print(Fore.CYAN + "[SCHEDULER] Banner callback fired")
-        except Exception as _banner_err:
-            print(Fore.YELLOW + f"[SCHEDULER] Banner callback failed: {_banner_err}")
+    # Push banner via callback (no circular import)
+    # Write alert to file directly - no import needed, works across threads
+    try:
+        import json as _js
+        import os as _os
+        _alert_path = _os.path.join(
+            _os.environ.get('APPDATA', _os.path.expanduser('~')),
+            'SEVEN', 'schedule_alert.json'
+        )
+        with open(_alert_path, 'w') as _f:
+            _js.dump({
+                "active":  True,
+                "message": fire_msg,
+                "type":    stype,
+                "id":      schedule.get("id")
+            }, _f)
+        print(Fore.CYAN + "[SCHEDULER] Alert written to file")
+    except Exception as _ae:
+        print(Fore.YELLOW + f"[SCHEDULER] Alert file write failed: {_ae}")
+
+    # Write alert to file directly - no circular import risk
+    try:
+        import json as _js
+        import os as _os
+        _alert_path = _os.path.join(
+            _os.environ.get('APPDATA', _os.path.expanduser('~')),
+            'SEVEN', 'schedule_alert.json'
+        )
+        with open(_alert_path, 'w') as _f:
+            _js.dump({
+                "active":  True,
+                "message": fire_msg,
+                "type":    stype,
+                "id":      schedule.get("id")
+            }, _f)
+        print(Fore.CYAN + "[SCHEDULER] Alert written to file")
+    except Exception as _ae:
+        print(Fore.YELLOW + f"[SCHEDULER] Alert file write failed: {_ae}")
+
+    # Callback kept for compatibility but file write is the primary method
+    # File write handles banner state - no callback needed
+
+    # Windows desktop notification (shows even when Seven is not focused)
+    try:
+        from winotify import Notification, audio
+        toast = Notification(
+            app_id="Seven AI",
+            title=f"Seven - {stype.capitalize()}",
+            msg=fire_msg,
+            duration="long"
+        )
+        toast.set_audio(audio.Default, loop=False)
+        toast.show()
+        print(Fore.CYAN + "[SCHEDULER] Windows notification sent")
+    except Exception as _toast_err:
+        print(Fore.YELLOW + f"[SCHEDULER] Windows notification failed: {_toast_err}")
+        print(Fore.CYAN + "[SCHEDULER] Windows notification sent")
+    except Exception as _toast_err:
+        print(Fore.YELLOW + f"[SCHEDULER] Windows notification failed: {_toast_err}")
 
     # Speak and ask for confirmation
     if _speak_callback:
@@ -910,9 +962,7 @@ def _background_checker():
 
 
 def start_background(speak_fn, alert_fn=None):
-    """Start the background scheduler thread. Called from main.py."""
     global _speak_callback, _alert_callback, _running, _background_thread
-
     _speak_callback = speak_fn
     _alert_callback = alert_fn
     
