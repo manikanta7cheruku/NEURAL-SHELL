@@ -2310,34 +2310,37 @@ def think(prompt_text, speaker_id="default"):
                 tags = " ".join([f"###{tag}: {app}" for app in apps])\
 
 
-            # Check if any app is just a number or clearly unknown
+            # Validate app name before generating tags
             if tag == "OPEN":
-                _custom_paths = {}
+                _cmd_paths = {}
+                _cmd_aliases = {}
                 try:
-                    import config as _c
-                    _custom_paths = _c.KEY.get("commands", {}).get("app_paths", {})
+                    _cmd_paths = config.KEY.get("commands", {}).get("app_paths", {})
+                    _cmd_aliases = config.KEY.get("commands", {}).get("app_aliases", {})
                 except Exception:
                     pass
-                _aliases = _get_aliases() if callable(globals().get('_get_aliases')) else {}
+
                 for _app in apps:
                     _app_clean = _app.lower().strip()
-                    # Pure number - definitely not an app
+
+                    # Skip validation if it is a known custom path or alias
+                    if _app_clean in _cmd_paths or _app_clean in _cmd_aliases:
+                        continue
+
+                    # Pure number and not in custom paths - not an app
                     if _app_clean.isdigit():
                         return (
                             f"I do not have anything called '{_app}'. "
-                            f"If you want to open a file or folder, go to Commands in the sidebar, "
-                            f"paste the file path, and give it a name. "
-                            f"Then you can say 'open {_app}' and I will find it."
+                            f"You can set it up in the Commands section. "
+                            f"Paste the file path and name it '{_app}'."
                         )
-                    # Unknown - not in aliases or custom paths
-                    if _app_clean not in _custom_paths and _app_clean not in _aliases:
-                        # Only guide if it seems like a file name not a real app
-                        if "." in _app_clean or len(_app_clean) <= 2:
-                            return (
-                                f"I do not know what '{_app}' is. "
-                                f"To open a specific file, go to Commands, paste its path, "
-                                f"and name it. Then say 'open {_app}' and I will open it."
-                            )
+
+                    # Very short unknown name - guide user
+                    if len(_app_clean) <= 2 and _app_clean not in _cmd_paths:
+                        return (
+                            f"I do not know what '{_app}' is. "
+                            f"Set it up in Commands with a file path and name."
+                        )
             
             # Natural speech before command
             app_list = ", ".join(apps)
