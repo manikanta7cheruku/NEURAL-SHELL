@@ -399,6 +399,22 @@ def open_app(app_name):
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL
             )
+            # Give camera time to launch then bring to front
+            import threading, time
+            def _focus_camera():
+                time.sleep(2.5)
+                try:
+                    import win32gui, win32con
+                    def _cb(hwnd, _):
+                        title = win32gui.GetWindowText(hwnd)
+                        if "camera" in title.lower() and win32gui.IsWindowVisible(hwnd):
+                            win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+                            win32gui.SetForegroundWindow(hwnd)
+                        return True
+                    win32gui.EnumWindows(_cb, None)
+                except Exception:
+                    pass
+            threading.Thread(target=_focus_camera, daemon=True).start()
             command_log.log_command("OPEN", "camera", True, "Windows URI")
             mood_engine.on_command_result(True)
             return True
