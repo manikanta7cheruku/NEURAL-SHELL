@@ -1488,6 +1488,22 @@ def think(prompt_text, speaker_id="default"):
     )
     if _name_alternatives:
         return "Seven is my name. That is the only one I have."
+    
+    # Vague opinion questions - TARS handles these briefly
+    _opinion_triggers = (
+        clean_in in ["what you think", "what do you think", "your thoughts",
+                     "what are your thoughts", "your opinion", "what is your opinion",
+                     "what do you think about it", "thoughts"]
+        or (clean_in.startswith("what") and "think" in clean_in and len(words) <= 5)
+    )
+    if _opinion_triggers:
+        _opinion_responses = [
+            "About what specifically?",
+            "Need more context. Think about what?",
+            "That is a broad question. Narrow it down.",
+            "You will need to be more specific.",
+        ]
+        return random.choice(_opinion_responses)
 
     # --- TARS SETTING CONTROLS ---
     # "set your humor to 80" / "change honesty to 50"
@@ -1594,6 +1610,28 @@ def think(prompt_text, speaker_id="default"):
                 "It is in my local memory from when you shared it with me.",
             ]
         return random.choice(_how_responses)
+    
+    # --- SESSION RECALL ---
+    # "What did I just say" / "What was my last message" / "Repeat what I said"
+    _session_recall = (
+        ("what did i" in clean_in and any(w in clean_in for w in ["say", "ask", "said"])) or
+        ("what was my last" in clean_in) or
+        ("repeat what i" in clean_in) or
+        (clean_in in ["what did i say", "what i said", "my last message", "what did i just say"])
+    )
+    if _session_recall:
+        history = CONVO_HISTORY.get(speaker_id, [])
+        # Find last User: entry
+        user_msgs = [h for h in history if h.startswith("User:")]
+        if len(user_msgs) >= 2:
+            # Second to last (last is the current "what did I say" question)
+            last_msg = user_msgs[-2].replace("User:", "").strip()
+            return f'You said: "{last_msg}"'
+        elif len(user_msgs) == 1:
+            last_msg = user_msgs[0].replace("User:", "").strip( )
+            return f'You said: "{last_msg}"'
+        else:
+            return "Nothing recorded in this session yet."
     
     # --- CAPABILITIES (V1.6.1) ---
     # When user asks what Seven can do, inject capability facts into LLM context
@@ -1812,7 +1850,9 @@ def think(prompt_text, speaker_id="default"):
     SCHED_TRIGGER_WORDS = [
         "remind", "reminder", "remember me", "alarm", "timer", "countdown",
         "wake me", "schedule", "calendar", "meeting",
-        "every day", "everyday", "daily reminder", "weekly",
+        "every day", "everyday", "daily reminder", "weekly", "after", "in 5", "in 10", "in 15", "in 30",
+        "don't let me forget", "dont let me forget",
+        "note that", "make note",
         "every monday", "every tuesday", "every wednesday",
         "every thursday", "every friday", "every saturday", "every sunday",
         "after", "notify", "alert me", "tell me to", "let me know",
@@ -1837,33 +1877,79 @@ def think(prompt_text, speaker_id="default"):
         "list reminders", "list alarms", "list timers",
         "my schedule", "my reminders", "my alarms",
         "cancel everything", "clear all schedules",
-        "how long left", "time left on timer"
+        "how long left", "time left on timer",         "after 5 seconds", "after 10 seconds", "after 30 seconds",
+        "after 1 minute", "after 2 minutes", "after 5 minutes",
+        "have to", "need to", "must"
     ]
     
-    _has_sched_trigger = (any(t in clean_in for t in SCHED_TRIGGER_PHRASES) or 
-                          any(t in words for t in ["remind", "reminder", "alarm", "timer", "countdown"]))
-    
-    # Guard: "what time is it" is NOT a scheduler command
-    # Guard: "open timer app" is NOT a scheduler command
+    import re as _re_sched
+    _has_after_duration = bool(_re_sched.search(
+        r'\bafter\s+\d+\s*(second|seconds|minute|minutes|hour|hours)\b', clean_in
+    ))
+    _has_in_duration = bool(_re_sched.search(
+        r'\bin\s+\d+\s*(second|seconds|minute|minutes|hour|hours)\b', clean_in
+    ))
+
+    _has_sched_trigger = (
+        any(t in clean_in for t in SCHED_TRIGGER_PHRASES)
+        or any(t in words for t in ["remind", "reminder", "alarm", "timer", "countdown"])
+        or _has_after_duration
+        or _has_in_duration
+    )
+
     _sched_guard = _app_verbs_present or ("what time is it" in clean_in)
     
     if _has_sched_trigger and not _sched_guard:
         sched_tag = _build_sched_tag(clean_in, words)
         if sched_tag:
-            is_command = True
-            
-            # Handle "ask" actions — Seven needs more info
-            if sched_tag == "action=timer_ask":
-                return "How long should I set the timer for?"
-            if sched_tag == "action=alarm_ask":
-                return "What time should I set the alarm for?"
-            if sched_tag == "action=reminder_ask":
-                return "What should I remind you about, and when?"
-            
-            # For all other actions, return the tag
-            # Speech is generated by scheduler.manage_schedule() → spoken by main.py
-            # So we return an empty speech + tag
-            return f"###SCHED: {sched_tag}"
+                is_command = True
+
+                if sched_tag == "action=timer_ask":
+                    return "How long should I set the timer for?"
+                if sched_tag == "action=alarm_ask":
+                    return "What time should I set the alarm for?"
+                if sched_tag == "action=reminder_ask":
+                    return "What should I remind you about, and when?"
+
+                # Generate TARS-style acknowledgment based on action type
+                _sched_acks = {
+                    "reminder": [
+                        "On it.",
+                        "Locked in.",
+                        "I have it.",
+                        "Leave it with me.",
+                        "Got it. I will remind you.",
+                    ],
+                    "timer": [
+                        "Clock is running.",
+                        "Counting down.",
+                        "Timer set.",
+                        "On the clock.",
+                    ],
+                    "alarm": [
+                        "Alarm set.",
+                        "I will wake you.",
+                        "Set.",
+                    ],
+                    "event": [
+                        "On the calendar.",
+                        "Locked in.",
+                        "Noted.",
+                    ],
+                    "cancel": [
+                        "Cancelled.",
+                        "Done. Removed.",
+                        "Cleared.",
+                    ],
+                    "list": [],
+                }
+                _sched_action = sched_tag.split("action=")[1].split(" ")[0] if "action=" in sched_tag else ""
+                _ack_list = _sched_acks.get(_sched_action, ["On it."])
+                _ack = random.choice(_ack_list) if _ack_list else ""
+
+                if _ack:
+                    return f"{_ack} ###SCHED: {sched_tag}"
+                return f"###SCHED: {sched_tag}"
     
     # --- SYSTEM COMMANDS (V1.7) ---
     # Detect system control commands BEFORE window/app commands.
@@ -2403,11 +2489,11 @@ def think(prompt_text, speaker_id="default"):
         "prompt": full_prompt,
         "stream": False,
         "options": {
-            "temperature": 0.2,
-            "num_predict": min(response_length, 80),
-            "repeat_penalty": 1.5,
+            "temperature": 0.15,
+            "num_predict": min(response_length, 60),
+            "repeat_penalty": 1.6,
             "stop": ["User:", "System:", "Seven:"],
-            "num_ctx": 2048
+            "num_ctx": 4096
         }
     }
 
