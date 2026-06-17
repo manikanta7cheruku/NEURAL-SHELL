@@ -1216,7 +1216,7 @@ def think(prompt_text, speaker_id="default"):
 
         # Remove correction phrases like "not ray" or "not mani"
         # "cheruku not ray" -> "cheruku"
-        # "mani okay" -> "mani"
+        # "mani okay" -> config.KEY.get("identity", {}).get("user_name", "default").lower() or "default"
         import re as _re_name
         raw = _re_name.split(r'\bnot\b|\bokay\b|\bplease\b|\bright\b|\bok\b', raw)[0]
         raw = raw.strip().rstrip(".,!?").strip()
@@ -1269,7 +1269,14 @@ def think(prompt_text, speaker_id="default"):
     first_word = words[0] if words else ""
     window_first_words = ["minimize", "maximise", "maximize", "restore", "snap",
                           "switch", "focus", "bring", "center", "centre", "put"]
-    is_command  = first_word in ["open", "close", "start", "kill", "launch"] + window_first_words
+    system_first_words = ["set", "mute", "unmute", "volume", "brightness",
+                          "play", "pause", "skip", "next", "previous",
+                          "louder", "quieter", "softer", "brighter", "dimmer"]
+    is_command = first_word in (
+        ["open", "close", "start", "kill", "launch"]
+        + window_first_words
+        + system_first_words
+    )
     is_greeting = first_word in ["hi", "hey", "hello", "bye", "goodbye", "good"]
     is_request  = first_word in ["sing", "open", "close"]
 
@@ -1347,7 +1354,7 @@ def think(prompt_text, speaker_id="default"):
             ]
             return random.choice(creator_responses)
 
-        search_uid   = speaker_id if speaker_id not in ("default", "unknown") else "mani"
+        search_uid   = speaker_id if speaker_id not in ("default", "unknown") else config.KEY.get("identity", {}).get("user_name", "default").lower() or "default"
         fresh_memory = seven_memory.search(prompt_text, user_id=search_uid)
         if fresh_memory:
             memory_context = fresh_memory
@@ -1433,6 +1440,37 @@ def think(prompt_text, speaker_id="default"):
                       "see ya", "later", "good night", "goodnight"]
     if clean_in in farewell_words:
         return f"Later, {speaker_name}."
+
+    # Schedule confirmation responses
+    # When Seven asks "Got that?" and user says yes/no
+    _confirm_words = {"yes", "yeah", "yep", "got it", "okay", "ok",
+                      "understood", "noted", "done", "sure", "yup"}
+    _deny_words = {"no", "nope", "didn't", "missed", "again",
+                   "repeat", "what", "remind me again"}
+
+    if clean_in in _confirm_words:
+        # Check if a schedule alert is active
+        try:
+            from backend.api_server import _schedule_alert_state
+            if _schedule_alert_state.get("active"):
+                # User confirmed they heard the reminder - dismiss it
+                from backend.api_server import dismiss_schedule_alert_sync
+                dismiss_schedule_alert_sync()
+                return random.choice([
+                    "Good. Dismissed.",
+                    "Got it. Cleared.",
+                    "Noted. Moving on.",
+                ])
+        except Exception:
+            pass
+
+    if clean_in in _deny_words and len(words) <= 3:
+        try:
+            from backend.api_server import _schedule_alert_state
+            if _schedule_alert_state.get("active"):
+                return "Want me to remind you again in 5 minutes?"
+        except Exception:
+            pass
 
     # --- WHAT ARE YOU ---
     if clean_in == "what are you":
@@ -2196,7 +2234,7 @@ def think(prompt_text, speaker_id="default"):
     is_greeting = first_word in ["hi", "hey", "hello", "bye", "goodbye"]
 
     if "VISUAL_REPORT:" not in prompt_text and not is_command and not is_greeting:
-        search_uid = speaker_id if speaker_id not in ("default", "unknown") else "mani"
+        search_uid = speaker_id if speaker_id not in ("default", "unknown") else config.KEY.get("identity", {}).get("user_name", "default").lower() or "default"
         try:
             memory_context = seven_memory.search(prompt_text, user_id=search_uid)
         except Exception as _mem_err:
@@ -2297,7 +2335,7 @@ def think(prompt_text, speaker_id="default"):
     # =========================================================================
 
     if "VISUAL_REPORT:" not in prompt_text and not is_command and not is_greeting:
-        search_uid = speaker_id if speaker_id not in ("default", "unknown") else "mani"
+        search_uid = speaker_id if speaker_id not in ("default", "unknown") else config.KEY.get("identity", {}).get("user_name", "default").lower() or "default"
         try:
             seven_memory.extract_and_store_facts(prompt_text, user_id=search_uid)
         except Exception as _fact_err:
