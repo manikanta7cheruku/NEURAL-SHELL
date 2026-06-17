@@ -39,7 +39,8 @@ _schedules = []
 _lock = threading.Lock()
 _next_id = 1
 _background_thread = None
-_speak_callback = None  # Set by main.py — function to call when schedule fires
+_speak_callback = None      # Set by main.py
+_alert_callback = None      # Set by main.py - pushes banner to frontend
 _running = False
 
 
@@ -826,12 +827,13 @@ def _fire_schedule(schedule):
     
         print(Fore.YELLOW + f"[SCHEDULER] FIRING: {fire_msg}")
 
-    # Push banner to frontend
-    try:
-        from backend.api_server import set_schedule_alert
-        set_schedule_alert(fire_msg, stype, schedule.get("id"))
-    except Exception:
-        pass
+    # Push banner to frontend via callback (avoids circular import)
+    if _alert_callback:
+        try:
+            _alert_callback(fire_msg, stype, schedule.get("id"))
+            print(Fore.CYAN + "[SCHEDULER] Banner callback fired")
+        except Exception as _banner_err:
+            print(Fore.YELLOW + f"[SCHEDULER] Banner callback failed: {_banner_err}")
 
     # Speak and ask for confirmation
     if _speak_callback:
@@ -907,11 +909,12 @@ def _background_checker():
     print(Fore.YELLOW + "[SCHEDULER] Background thread stopped.")
 
 
-def start_background(speak_fn):
+def start_background(speak_fn, alert_fn=None):
     """Start the background scheduler thread. Called from main.py."""
-    global _speak_callback, _running, _background_thread
-    
+    global _speak_callback, _alert_callback, _running, _background_thread
+
     _speak_callback = speak_fn
+    _alert_callback = alert_fn
     
     if _background_thread and _background_thread.is_alive():
         print(Fore.YELLOW + "[SCHEDULER] Background already running.")
