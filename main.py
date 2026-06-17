@@ -427,25 +427,33 @@ def seven_logic():
     except Exception:
         pass
 
-    # Initial greeting
+        # Initial greeting
     try:
+        print(Fore.GREEN + "[SYSTEM] Speaking startup greeting...")
         mouth.speak(f"{config.KEY['identity']['name']} online.")
-        try:
-            from backend.api_server import set_schedule_alert as _set_alert
-            scheduler_mod.start_background(
-                speak_fn=speak_with_interrupt,
-                alert_fn=_set_alert
-            )
-        except Exception:
-            scheduler_mod.start_background(speak_fn=speak_with_interrupt)
-        sched_count = scheduler_mod.get_active_count()
-        if sched_count > 0:
-            print(Fore.CYAN + f"[SYSTEM] Scheduler: {sched_count} active schedules.")
-        app_ui.update_status("SYSTEM ONLINE", "#00ff00")
+        print(Fore.GREEN + "[SYSTEM] Greeting spoken")
     except Exception as _greet_err:
         print(Fore.RED + f"[SYSTEM] Greeting failed: {_greet_err}")
         import traceback
         traceback.print_exc()
+
+    # Start scheduler
+    try:
+        from backend.api_server import set_schedule_alert as _alert_fn
+        scheduler_mod.start_background(
+            speak_fn=mouth.speak,
+            alert_fn=_alert_fn
+        )
+        print(Fore.GREEN + "[SYSTEM] Scheduler started with banner support")
+    except Exception:
+        scheduler_mod.start_background(speak_fn=mouth.speak)
+        print(Fore.YELLOW + "[SYSTEM] Scheduler started without banner support")
+
+    sched_count = scheduler_mod.get_active_count()
+    if sched_count > 0:
+        print(Fore.CYAN + f"[SYSTEM] Scheduler: {sched_count} active schedules.")
+
+    app_ui.update_status("SYSTEM ONLINE", "#00ff00")
 
     # =========================================================================
     # MAIN LOOP
@@ -739,7 +747,15 @@ def seven_logic():
                     telemetry.log_activity()
                     if success:
                         app_ui.update_status(f"Schedule: {msg}", "#00ff00")
-                        if msg:
+                        # Only speak scheduler message if brain gave no ack
+                        # Brain ack is in speech_part already spoken above
+                        # Scheduler msg would be a duplicate confirmation
+                        # Only speak if it contains time info (genuinely new info)
+                        if msg and any(x in msg for x in [
+                            "AM", "PM", "today", "tomorrow", "minutes", "seconds",
+                            "hours", "Monday", "Tuesday", "Wednesday", "Thursday",
+                            "Friday", "Saturday", "Sunday"
+                        ]):
                             speak_with_interrupt(msg)
                     else:
                         mouth.speak(msg)
