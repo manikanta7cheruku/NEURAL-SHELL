@@ -1449,26 +1449,34 @@ def think(prompt_text, speaker_id="default"):
                    "repeat", "what", "remind me again"}
 
     if clean_in in _confirm_words:
-        # Check if a schedule alert is active
         try:
-            from backend.api_server import _schedule_alert_state
-            if _schedule_alert_state.get("active"):
-                # User confirmed they heard the reminder - dismiss it
-                from backend.api_server import dismiss_schedule_alert_sync
-                dismiss_schedule_alert_sync()
-                return random.choice([
-                    "Good. Dismissed.",
-                    "Got it. Cleared.",
-                    "Noted. Moving on.",
-                ])
+            import json as _js, os as _os
+            _ap = _os.path.join(
+                _os.environ.get('APPDATA', ''), 'SEVEN', 'schedule_alert.json'
+            )
+            if _os.path.exists(_ap):
+                _alert = _js.load(open(_ap))
+                if _alert.get("active"):
+                    from backend.api_server import dismiss_schedule_alert_sync
+                    dismiss_schedule_alert_sync()
+                    return random.choice([
+                        "Good. Dismissed.",
+                        "Got it. Cleared.",
+                        "Noted.",
+                    ])
         except Exception:
             pass
 
     if clean_in in _deny_words and len(words) <= 3:
         try:
-            from backend.api_server import _schedule_alert_state
-            if _schedule_alert_state.get("active"):
-                return "Want me to remind you again in 5 minutes?"
+            import json as _js, os as _os
+            _ap = _os.path.join(
+                _os.environ.get('APPDATA', ''), 'SEVEN', 'schedule_alert.json'
+            )
+            if _os.path.exists(_ap):
+                _alert = _js.load(open(_ap))
+                if _alert.get("active"):
+                    return "Want me to remind you again? Say how long."
         except Exception:
             pass
 
@@ -1621,14 +1629,24 @@ def think(prompt_text, speaker_id="default"):
     )
     if _session_recall:
         history = CONVO_HISTORY.get(speaker_id, [])
-        # Find last User: entry
         user_msgs = [h for h in history if h.startswith("User:")]
         if len(user_msgs) >= 2:
-            # Second to last (last is the current "what did I say" question)
             last_msg = user_msgs[-2].replace("User:", "").strip()
+            # Strip any injected prompt content
+            if "===" in last_msg or "CAPABILITIES" in last_msg:
+                # Find the original question after injection
+                if "User asked:" in last_msg:
+                    last_msg = last_msg.split("User asked:")[-1].strip()
+                else:
+                    last_msg = "I could not recall cleanly. Ask me again?"
             return f'You said: "{last_msg}"'
         elif len(user_msgs) == 1:
-            last_msg = user_msgs[0].replace("User:", "").strip( )
+            last_msg = user_msgs[0].replace("User:", "").strip()
+            if "===" in last_msg:
+                if "User asked:" in last_msg:
+                    last_msg = last_msg.split("User asked:")[-1].strip()
+                else:
+                    last_msg = "I could not recall cleanly."
             return f'You said: "{last_msg}"'
         else:
             return "Nothing recorded in this session yet."
@@ -2431,10 +2449,14 @@ def think(prompt_text, speaker_id="default"):
     # LAYER 8: LLM INFERENCE
     # =========================================================================
 
-    if "VISUAL_REPORT:" not in prompt_text:
+    # Store ORIGINAL user input in history, not the modified prompt
+    _original_input = prompt_text
+    if "===" in _original_input and "User asked:" in _original_input:
+        _original_input = _original_input.split("User asked:")[-1].strip()
+    if "VISUAL_REPORT:" not in _original_input:
         if speaker_id not in CONVO_HISTORY:
             CONVO_HISTORY[speaker_id] = []
-        CONVO_HISTORY[speaker_id].append(f"User: {prompt_text}")
+        CONVO_HISTORY[speaker_id].append(f"User: {_original_input}")
 
     if len(CONVO_HISTORY.get(speaker_id, [])) > 8:
         CONVO_HISTORY[speaker_id] = CONVO_HISTORY[speaker_id][-8:]
@@ -2478,11 +2500,11 @@ def think(prompt_text, speaker_id="default"):
     needs_long = any(t in clean_in for t in long_triggers)
     
     if needs_long:
-        response_length = 150
+        response_length = 120
     elif web_searched:
         response_length = 80
     else:
-        response_length = 60
+        response_length = 50
 
     payload = {
         "model": MODEL_NAME,
@@ -2490,9 +2512,9 @@ def think(prompt_text, speaker_id="default"):
         "stream": False,
         "options": {
             "temperature": 0.15,
-            "num_predict": min(response_length, 60),
+            "num_predict": min(response_length, 120),
             "repeat_penalty": 1.6,
-            "stop": ["User:", "System:", "Seven:"],
+            "stop": ["User:", "System:", "Seven:", "(Note", "(note", "Note to self"],
             "num_ctx": 4096
         }
     }
