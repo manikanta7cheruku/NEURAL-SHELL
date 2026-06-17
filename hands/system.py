@@ -42,67 +42,27 @@ from memory.mood import mood_engine
 # =========================================================================
 
 _volume_interface = None
-_volume_init_failed = False  # If COM fails once, don't retry every call
+_volume_init_failed = False
 
 
 def _get_volume():
-    """Get the Windows audio endpoint volume interface."""
+    """Get Windows audio volume interface via pycaw."""
     global _volume_interface, _volume_init_failed
     if _volume_interface is not None:
         return _volume_interface
     if _volume_init_failed:
         return None
     try:
-        import comtypes
-        from comtypes import GUID, CLSCTX_ALL
-        from pycaw.pycaw import IAudioEndpointVolume
-        
-        # Bypass pycaw's AudioUtilities entirely — go straight to COM
-        MMDeviceEnumeratorCLSID = GUID('{BCDE0395-E52F-467C-8E3D-C4579291692E}')
-        IMMDeviceEnumeratorIID = GUID('{A95664D2-9614-4F35-A746-DE8DB63617E6}')
-        
-        # Define the COM interface manually
-        class IMMDevice(comtypes.IUnknown):
-            _iid_ = GUID('{D666063F-1587-4E43-81F1-B948E807363F}')
-            _methods_ = [
-                comtypes.COMMETHOD([], comtypes.HRESULT, 'Activate',
-                    (['in'], comtypes.POINTER(GUID), 'iid'),
-                    (['in'], comtypes.c_ulong, 'dwClsCtx'),
-                    (['in'], comtypes.POINTER(comtypes.c_ulong), 'pActivationParams'),
-                    (['out', 'retval'], comtypes.POINTER(comtypes.POINTER(comtypes.IUnknown)), 'ppInterface')),
-            ]
-        
-        class IMMDeviceEnumerator(comtypes.IUnknown):
-            _iid_ = IMMDeviceEnumeratorIID
-            _methods_ = [
-                comtypes.COMMETHOD([], comtypes.HRESULT, 'GetDefaultAudioEndpoint',
-                    (['in'], comtypes.c_uint, 'dataFlow'),
-                    (['in'], comtypes.c_uint, 'role'),
-                    (['out', 'retval'], comtypes.POINTER(comtypes.POINTER(IMMDevice)), 'ppEndpoint')),
-            ]
-        
-        enumerator = comtypes.CoCreateInstance(
-            MMDeviceEnumeratorCLSID,
-            IMMDeviceEnumerator,
-            comtypes.CLSCTX_INPROC_SERVER
-        )
-        
-        # 0 = eRender (speakers), 1 = eMultimedia
-        device = enumerator.GetDefaultAudioEndpoint(0, 1)
-        
-        interface = device.Activate(
-            IAudioEndpointVolume._iid_,
-            CLSCTX_ALL,
-            None
-        )
-        
-        _volume_interface = comtypes.cast(interface, comtypes.POINTER(IAudioEndpointVolume))
-        print(Fore.GREEN + "[SYSTEM] Volume control initialized (direct COM)")
+        from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
+        from comtypes import CLSCTX_ALL
+        devices = AudioUtilities.GetSpeakers()
+        interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+        from ctypes import cast, POINTER
+        _volume_interface = cast(interface, POINTER(IAudioEndpointVolume))
+        print(Fore.GREEN + "[SYSTEM] Volume control initialized (pycaw)")
         return _volume_interface
-        
     except Exception as e:
-        print(Fore.RED + f"[SYSTEM] Volume COM init failed: {e}")
-        print(Fore.YELLOW + "[SYSTEM] Will use keypress fallback for volume")
+        print(Fore.RED + f"[SYSTEM] Volume init failed: {e}")
         _volume_init_failed = True
         return None
 
