@@ -918,7 +918,12 @@ def start_app():
         try:
             import time
             while True:
-                time.sleep(1)
+                time.sleep(5)
+                # Watchdog - restart voice loop if it crashed
+                if not logic_thread.is_alive():
+                    print(Fore.RED + "[WATCHDOG] Voice loop crashed. Restarting...")
+                    logic_thread = threading.Thread(target=seven_logic, daemon=True)
+                    logic_thread.start()
         except KeyboardInterrupt:
             print(Fore.RED + "\n[SYSTEM] Interrupted by user")
             os._exit(0)
