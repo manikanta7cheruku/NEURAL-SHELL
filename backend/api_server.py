@@ -767,6 +767,7 @@ def get_memory_stats():
                     pass
 
     stats["storage_mb"] = round(storage_bytes / (1024 * 1024), 2)
+    stats["tier"] = config.KEY.get("license", {}).get("tier", "free")
     return stats
 
 
@@ -886,15 +887,42 @@ async def snooze_schedule_alert(minutes: int = 5):
     return {"ok": True}
 
 # ── Schedule Alert State ──
+import json as _json_alert
+
+_ALERT_FILE = os.path.join(
+    os.environ.get('APPDATA', os.path.expanduser('~')),
+    'SEVEN', 'schedule_alert.json'
+)
 _schedule_alert_container = [{"active": False, "message": "", "type": "", "id": None}]
+
+
+def _write_alert_file(data: dict):
+    try:
+        with open(_ALERT_FILE, 'w') as f:
+            _json_alert.dump(data, f)
+    except Exception:
+        pass
+
+
+def _read_alert_file() -> dict:
+    try:
+        if os.path.exists(_ALERT_FILE):
+            with open(_ALERT_FILE, 'r') as f:
+                return _json_alert.load(f)
+    except Exception:
+        pass
+    return {"active": False, "message": "", "type": "", "id": None}
 
 @app.get("/api/schedule/alert")
 async def get_schedule_alert():
-    return _schedule_alert_container[0]
+    # Read from file - works across threads and processes
+    return _read_alert_file()
 
 @app.post("/api/schedule/alert/dismiss")
 async def dismiss_schedule_alert():
-    _schedule_alert_container[0] = {"active": False, "message": "", "type": "", "id": None}
+    empty = {"active": False, "message": "", "type": "", "id": None}
+    _schedule_alert_container[0] = empty
+    _write_alert_file(empty)
     return {"ok": True}
 
 @app.post("/api/schedule/alert/snooze")
@@ -908,21 +936,18 @@ async def snooze_schedule_alert(minutes: int = 5):
                 time_str=f"in {minutes} minutes",
                 speaker_id="default"
             )
-        except Exception:
-            pass
-    _schedule_alert_container[0] = {"active": False, "message": "", "type": "", "id": None}
+        except Exception as e:
+            print(f"[API] Snooze reschedule failed: {e}")
+    empty = {"active": False, "message": "", "type": "", "id": None}
+    _schedule_alert_container[0] = empty
+    _write_alert_file(empty)
     return {"ok": True}
 
 def set_schedule_alert(message: str, stype: str, schedule_id=None):
-    """Called by scheduler when a schedule fires. Sets frontend banner state."""
-    _schedule_alert_container[0] = {
-        "active":  True,
-        "message": message,
-        "type":    stype,
-        "id":      schedule_id
-    }
+    data = {"active": True, "message": message, "type": stype, "id": schedule_id}
+    _schedule_alert_container[0] = data
+    _write_alert_file(data)
     print(f"[API] Schedule alert set: {stype} - {message[:50]}")
-    print(f"[API] Alert state now: {_schedule_alert_container[0]}")
 
 def dismiss_schedule_alert_sync():
     """Synchronous dismiss - called from brain.py without async context."""
@@ -2603,6 +2628,7 @@ def start_api_server(host="127.0.0.1", port=7777):
 
 
 def dismiss_schedule_alert_sync():
-    """Synchronous version for brain.py to call."""
-    global _schedule_alert_container[0]
-    _schedule_alert_container[0] = {"active": False, "message": "", "type": "", "id": None}
+    """Synchronous dismiss called from brain.py without async context."""
+    empty = {"active": False, "message": "", "type": "", "id": None}
+    _schedule_alert_container[0] = empty
+    _write_alert_file(empty)
