@@ -141,19 +141,27 @@ class SilenceWatcher:
             print(Fore.CYAN + f"[SILENCE] Scenario {scenario} speaking: {line}")
 
             try:
-                # Push text to orb before speaking
                 try:
                     from backend.api_server import set_state as _api_set
                     _api_set("seven_text", line)
                     _api_set("speaking", True)
+                    _api_set("thinking", False)
+                    _api_set("listening", False)
                 except Exception:
                     pass
+
                 self._speak(line)
+
                 try:
                     from backend.api_server import set_state as _api_set
                     _api_set("speaking", False)
+                    _api_set("listening", False)
+                    # Orb returns to idle after proactive speech
+                    # Main loop will set listening=True when next listen() call starts
+                    # after 5 seconds automatically via its useEffect
                 except Exception:
                     pass
+
                 self._last_proactive = now
                 self._keyboard_active = False
             except Exception as e:
