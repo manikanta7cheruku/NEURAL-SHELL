@@ -3,8 +3,13 @@ import useMemory from '../stores/useMemory';
 import PageHeader from '../components/PageHeader';
 import Spinner from '../components/Spinner';
 import api from '../api';
+import useConfig from '../stores/useConfig';
 
 export default function Memory() {
+  const { config } = useConfig();
+  const tier = config?.license?.tier || 'free';
+  const convLimit = { free: 7, pro: 77, ultimate: null }[tier];
+  const factLimit = { free: 7, pro: 77, ultimate: null }[tier];
   const [tab, setTab] = useState('facts');
   const [search, setSearch] = useState('');
   const [newFact, setNewFact] = useState('');
@@ -25,6 +30,71 @@ export default function Memory() {
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
         {stats && (
           <div className="grid grid-cols-4 gap-2">
+
+        {/* ── Limit banners ── */}
+        {stats && (() => {
+          const tier = stats.tier || 'free';
+          const limits = { free: 7, pro: 77, ultimate: null };
+          const convLimit = limits[tier];
+          const factLimit = { free: 7, pro: 77, ultimate: null }[tier];
+          const convNearLimit = convLimit && stats.total_conversations >= convLimit * 0.9;
+          const factNearLimit = factLimit && stats.total_facts >= factLimit * 0.9;
+          const convAtLimit = convLimit && stats.total_conversations >= convLimit;
+          const factAtLimit = factLimit && stats.total_facts >= factLimit;
+
+          return (
+            <>
+              {convAtLimit && (
+                <div className="flex items-center justify-between px-3 py-2.5 rounded-lg bg-s-accent/5 border border-s-accent/20">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-1.5 h-1.5 rounded-full bg-s-accent animate-pulse flex-shrink-0" />
+                    <div>
+                      <div className="text-[11px] text-s-text-2 font-medium">
+                        Conversation memory full
+                      </div>
+                      <div className="text-[9px] text-s-text-4 mt-0.5">
+                        {tier === 'pro'
+                          ? `Pro limit: ${convLimit} conversations. Upgrade to Ultimate for unlimited.`
+                          : `Free limit: ${convLimit} conversations. Upgrade for more.`}
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => window.__navigate?.('/plans')}
+                    className="text-[10px] text-s-accent font-medium hover:underline shrink-0 ml-3"
+                  >
+                    Upgrade
+                  </button>
+                </div>
+              )}
+              {factAtLimit && (
+                <div className="flex items-center justify-between px-3 py-2.5 rounded-lg bg-yellow-500/5 border border-yellow-500/20">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-1.5 h-1.5 rounded-full bg-yellow-400 animate-pulse flex-shrink-0" />
+                    <div>
+                      <div className="text-[11px] text-s-text-2 font-medium">
+                        Facts memory full
+                      </div>
+                      <div className="text-[9px] text-s-text-4 mt-0.5">
+                        {tier === 'pro'
+                          ? `Pro limit: ${factLimit} facts. Upgrade to Ultimate for unlimited.`
+                          : `Free limit: ${factLimit} facts. Upgrade for more.`}
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => window.__navigate?.('/plans')}
+                    className="text-[10px] text-yellow-400 font-medium hover:underline shrink-0 ml-3"
+                  >
+                    Upgrade
+                  </button>
+                </div>
+              )}
+            </>
+          );
+        })()}
+
+
             {[['Facts', stats.total_facts], ['Conversations', stats.total_conversations], ['DB Size', `${stats.storage_mb || 0} MB`], ['Storage', 'Local disk']].map(([l, v]) => (
               <div key={l} className="bg-s-card border border-s-border rounded px-3 py-2">
                 <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium">{l}</div>
