@@ -767,7 +767,11 @@ def get_memory_stats():
                     pass
 
     stats["storage_mb"] = round(storage_bytes / (1024 * 1024), 2)
-    stats["tier"] = config.KEY.get("license", {}).get("tier", "free")
+    try:
+        import config as _cfg
+        stats["tier"] = _cfg.KEY.get("license", {}).get("tier", "free")
+    except Exception:
+        stats["tier"] = "free"
     return stats
 
 
@@ -916,10 +920,6 @@ def set_schedule_alert(message: str, stype: str, schedule_id=None):
     _schedule_alert_container[0] = data
     _write_alert_file(data)
     print(f"[API] Schedule alert set: {stype} - {message[:50]}")
-
-def dismiss_schedule_alert_sync():
-    """Synchronous dismiss - called from brain.py without async context."""
-    _schedule_alert_container[0] = {"active": False, "message": "", "type": "", "id": None}
 
 
 # =========================================================================
