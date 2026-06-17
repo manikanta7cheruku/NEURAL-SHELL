@@ -71,39 +71,80 @@ def listen():
     recognizer = sr.Recognizer()
 
     with sr.Microphone() as source:
-        recognizer.adjust_for_ambient_noise(source, duration=0.3)
+        recognizer.adjust_for_ambient_noise(source, duration=0.5)
         recognizer.dynamic_energy_threshold = True
-        recognizer.pause_threshold = 0.6
+        recognizer.energy_threshold = max(recognizer.energy_threshold, 400)
+        recognizer.pause_threshold = 0.8
+        recognizer.non_speaking_duration = 0.4
 
         try:
             audio = recognizer.listen(source, timeout=None, phrase_time_limit=8)
             with open(AUDIO_TEMP_PATH, "wb") as f:
                 f.write(audio.get_wav_data())
 
-            segments, info = audio_model.transcribe(AUDIO_TEMP_PATH, beam_size=5)
-            full_text = "".join([s.text for s in segments]).strip()
+            segments_list = list(audio_model.transcribe(
+                AUDIO_TEMP_PATH,
+                beam_size=5,
+                language="en",
+                condition_on_previous_text=False,
+                no_speech_threshold=0.6,
+                log_prob_threshold=-1.0,
+            ))
+            segments = segments_list[0]
 
-            # --- AGGRESSIVE SILENCE FILTER ---
-            clean = full_text.lower().strip().replace(".", "").replace("!", "").replace(",", "")
+            # Filter segments with low confidence (hallucinations have high no_speech_prob)
+            confident_segments = []
+            for seg in segments:
+                if hasattr(seg, 'no_speech_prob') and seg.no_speech_prob > 0.6:
+                    print(Fore.YELLOW + f"[EARS] Low confidence segment filtered (no_speech={seg.no_speech_prob:.2f}): '{seg.text}'")
+                    continue
+                confident_segments.append(seg)
 
-            # 1. Ignore very short noise
-            if len(clean) < 2:
+            full_text = "".join([s.text for s in confident_segments]).strip()
+
+            if not full_text:
                 return None, None
 
-            # 2. Ignore specific silence hallucinations (Exact Match)
-            ghosts = [
+            clean = full_text.lower().strip()
+            for ch in [".", "!", ",", "?", "..."]:
+                clean = clean.replace(ch, "")
+            clean = clean.strip()
+
+            # Very short - noise
+            if len(clean) < 3:
+                return None, None
+
+            # Known Whisper hallucinations on silence/music
+            ghosts = {
                 "thank you", "thanks", "you", "bye", "okay", "alright",
                 "thank you very much", "thanks for watching", "watching",
-                "i", "so", "and", "the", "video", "subtitles", "caption"
-            ]
-
+                "i", "so", "and", "the", "video", "subtitles", "caption",
+                "goodbye", "see you", "see you next time", "like and subscribe",
+                "bada ba ba ba", "ba ba ba", "da da da", "la la la",
+                "hmm", "hm", "uh", "um", "ah", "oh",
+                "music", "applause", "laughter",
+            }
             if clean in ghosts:
+                print(Fore.YELLOW + f"[EARS] Ghost filtered: '{clean}'")
                 return None, None
 
-            # 3. Ignore YouTube Outros (Substring Match)
-            forbidden = ["subscribe", "amara.org", "caption", "copyright", "all rights reserved"]
+            # Substring hallucination patterns
+            forbidden = [
+                "subscribe", "amara.org", "caption", "copyright",
+                "all rights reserved", "bada ba", "ba ba ba ba",
+                "da da da", "la la la la",
+            ]
             for p in forbidden:
                 if p in clean:
+                    print(Fore.YELLOW + f"[EARS] Forbidden pattern filtered: '{p}' in '{clean}'")
+                    return None, None
+
+            # Reject if input is ONLY repeated single syllables (music hallucination)
+            words = clean.split()
+            if len(words) >= 3:
+                unique = set(words)
+                if len(unique) == 1 and len(list(unique)[0]) <= 3:
+                    print(Fore.YELLOW + f"[EARS] Repeated syllable filtered: '{clean}'")
                     return None, None
 
             # --- AUTOCORRECT ---
