@@ -53,6 +53,33 @@ def _resolve_alias(app_name):
     return clean
 
 
+# Maps custom alias -> process name that opened it
+# So "close pic" can find "Microsoft.Photos.exe" or "vlc.exe"
+_EXTENSION_PROCESS_MAP = {
+    ".jpg": ["Photos", "Microsoft.Photos", "mspaint", "gimp"],
+    ".jpeg": ["Photos", "Microsoft.Photos", "mspaint"],
+    ".png": ["Photos", "Microsoft.Photos", "mspaint", "gimp"],
+    ".gif": ["Photos", "Microsoft.Photos"],
+    ".bmp": ["Photos", "Microsoft.Photos", "mspaint"],
+    ".mp4": ["vlc", "wmplayer", "Movies", "Microsoft.Media.Player"],
+    ".mp3": ["vlc", "wmplayer", "Groove", "Music"],
+    ".pdf": ["AcroRd32", "Acrobat", "FoxitReader", "edge", "chrome"],
+    ".docx": ["WINWORD"],
+    ".xlsx": ["EXCEL"],
+    ".pptx": ["POWERPNT"],
+}
+
+_custom_alias_to_process = {}
+
+
+def _register_custom_process(alias, file_path):
+    """Remember what process handles a custom alias."""
+    ext = os.path.splitext(file_path)[1].lower()
+    if ext in _EXTENSION_PROCESS_MAP:
+        _custom_alias_to_process[alias] = _EXTENSION_PROCESS_MAP[ext]
+        print(Fore.CYAN + f"   -> Registered {alias} -> {_EXTENSION_PROCESS_MAP[ext]}")
+
+
 def _try_custom_path(app_name):
     """
     Try launching an app via custom path.
@@ -85,6 +112,10 @@ def _try_custom_path(app_name):
         print(Fore.GREEN + f"   -> Launched via custom path: {exe_path}")
         command_log.log_command("OPEN", clean, True, f"Custom path: {exe_path}")
         mood_engine.on_command_result(True)
+
+        # Register which process this custom name maps to
+        # So "close pic" knows to look for the Photos app process
+        _register_custom_process(clean, exe_path)
         return True
 
     except Exception as e:
@@ -119,18 +150,33 @@ def _log_failed_app(user_phrase, attempted_name, error_detail):
 
 def close_app(app_name):
     raw_name = app_name.strip()
-    
-    # V1.5: Check for ALL_ prefix
+
     close_all = False
     if raw_name.upper().startswith("ALL_"):
         close_all = True
         raw_name = raw_name[4:]
-    
+
     clean_name = raw_name.lower().strip()
-    print(Fore.CYAN + f"🔧 HANDS: Closing '{clean_name}'" + (" (ALL instances)" if close_all else "") + "...")
+    print(Fore.CYAN + f"HANDS: Closing '{clean_name}'" + (" (ALL instances)" if close_all else "") + "...")
 
     # Resolve aliases from config
     clean_name = _resolve_alias(clean_name)
+
+    # Check if this is a custom alias with a known process
+    if clean_name in _custom_alias_to_process:
+        process_names = _custom_alias_to_process[clean_name]
+        for proc_name in process_names:
+            for proc in psutil.process_iter(['pid', 'name']):
+                try:
+                    if proc_name.lower() in proc.info['name'].lower():
+                        proc.terminate()
+                        print(Fore.GREEN + f"   -> Closed {proc.info['name']} for alias '{clean_name}'")
+                        command_log.log_command("CLOSE", clean_name, True, f"Via alias -> {proc.info['name']}")
+                        mood_engine.on_command_result(True)
+                        return True
+                except Exception:
+                    continue
+        print(Fore.YELLOW + f"   -> No running process found for alias '{clean_name}'")
 
     # 1. SPECIAL CASE: ACTIVE WINDOW
     if clean_name in ["current", "this", "it", "active window"]:
