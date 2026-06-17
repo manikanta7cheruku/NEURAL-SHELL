@@ -2042,7 +2042,7 @@ def think(prompt_text, speaker_id="default"):
             elif _action == "volume_down":
                 speech = random.choice(["Turning it down.", "Quieter.", "Volume down."])
             elif _action == "volume_set":
-                speech = f"Setting volume to {_value}%."
+                speech = f"{_value}%."
             elif _action == "volume_mute":
                 speech = random.choice(["Muted.", "Going silent.", "Sound off."])
             elif _action == "volume_unmute":
@@ -2288,7 +2288,13 @@ def think(prompt_text, speaker_id="default"):
         if tag == "CLOSE" and remaining.startswith("all "):
             close_all = True
             remaining = remaining[4:].strip()
-        
+
+        # Strip articles so "close the pic" becomes "close pic"
+        for _art in ["the ", "a ", "an "]:
+            if remaining.startswith(_art):
+                remaining = remaining[len(_art):].strip()
+                break
+
         if remaining:
             apps = []
             if " and " in remaining:
@@ -2301,7 +2307,37 @@ def think(prompt_text, speaker_id="default"):
             if close_all:
                 tags = " ".join([f"###{tag}: ALL_{app}" for app in apps])
             else:
-                tags = " ".join([f"###{tag}: {app}" for app in apps])
+                tags = " ".join([f"###{tag}: {app}" for app in apps])\
+
+
+            # Check if any app is just a number or clearly unknown
+            if tag == "OPEN":
+                _custom_paths = {}
+                try:
+                    import config as _c
+                    _custom_paths = _c.KEY.get("commands", {}).get("app_paths", {})
+                except Exception:
+                    pass
+                _aliases = _get_aliases() if callable(globals().get('_get_aliases')) else {}
+                for _app in apps:
+                    _app_clean = _app.lower().strip()
+                    # Pure number - definitely not an app
+                    if _app_clean.isdigit():
+                        return (
+                            f"I do not have anything called '{_app}'. "
+                            f"If you want to open a file or folder, go to Commands in the sidebar, "
+                            f"paste the file path, and give it a name. "
+                            f"Then you can say 'open {_app}' and I will find it."
+                        )
+                    # Unknown - not in aliases or custom paths
+                    if _app_clean not in _custom_paths and _app_clean not in _aliases:
+                        # Only guide if it seems like a file name not a real app
+                        if "." in _app_clean or len(_app_clean) <= 2:
+                            return (
+                                f"I do not know what '{_app}' is. "
+                                f"To open a specific file, go to Commands, paste its path, "
+                                f"and name it. Then say 'open {_app}' and I will open it."
+                            )
             
             # Natural speech before command
             app_list = ", ".join(apps)
@@ -2491,15 +2527,22 @@ def think(prompt_text, speaker_id="default"):
     # V1.4: Smart response length based on question type
     # Short answers: greetings, yes/no, prices, names
     # Long answers: explanations, lists, stories, capabilities
-    long_triggers = ["tell me", "explain", "describe", "what can you", 
+    long_triggers = ["tell me", "explain", "describe", "what can you",
                      "list", "how does", "how do", "why", "story",
                      "detail", "everything", "all about", "continue",
                      "go on", "more about", "your capabilities",
                      "what are you capable", "what do you do",
                      "what you can do", "capable of"]
-    needs_long = any(t in clean_in for t in long_triggers)
-    
-    if needs_long:
+
+    count_triggers = ["count", "1 to", "one to", "from 1", "from one",
+                      "list them", "name them", "enumerate"]
+
+    needs_long  = any(t in clean_in for t in long_triggers)
+    needs_count = any(t in clean_in for t in count_triggers)
+
+    if needs_count:
+        response_length = 200
+    elif needs_long:
         response_length = 120
     elif web_searched:
         response_length = 80
