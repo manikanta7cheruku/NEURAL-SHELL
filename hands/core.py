@@ -309,11 +309,35 @@ def close_app(app_name):
             command_log.log_command("CLOSE", clean_name, False, str(e))
             mood_engine.on_command_result(False)
             return False
+        
+def _check_already_running(app_name):
+    """
+    Check if an app is already running.
+    Returns the process name if found, None if not running.
+    """
+    search_terms = [app_name]
+    aliases = _get_aliases()
+    if app_name in aliases:
+        search_terms.append(aliases[app_name])
+
+    for proc in psutil.process_iter(['name']):
+        try:
+            pname = proc.info['name'].lower()
+            for term in search_terms:
+                if term in pname or pname.replace('.exe', '') in term:
+                    return proc.info['name']
+        except Exception:
+            continue
+    return None
 
 
 def open_app(app_name):
     original_name = app_name.lower().strip()
     clean_name = original_name.replace("activated", "").replace("!", "").strip()
+
+    # Check if already running before opening
+    # Only for non-custom-path apps
+    _already_running = _check_already_running(clean_name)
 
     # =====================================================================
     # THREE-TIER APP LAUNCH SYSTEM
