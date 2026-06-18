@@ -37,6 +37,12 @@ pycaw
 screen-brightness-control
 comtypes
 
+# --- Notifications ---
+winotify
+
+# --- Proactive Features ---
+pynput
+
 # --- API ---
 fastapi
 uvicorn[standard]
