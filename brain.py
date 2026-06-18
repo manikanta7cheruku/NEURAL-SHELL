@@ -810,10 +810,12 @@ def _build_sched_tag(clean_in, words):
                 tag += f" time={_enc(time_text)}"
             if message:
                 tag += f" message={_enc(message)}"
+            else:
+                tag += " message=reminder"
             if recur:
                 tag += f" recur={recur}"
             return tag
-        
+
         return "action=reminder_ask"
     
     # =====================================================================
