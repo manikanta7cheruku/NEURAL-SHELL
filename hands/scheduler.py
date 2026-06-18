@@ -34,7 +34,8 @@ from colorama import Fore
 # STORAGE
 # =========================================================================
 
-SCHEDULE_FILE = os.path.join("seven_data", "schedules.json")
+_APPDATA      = os.environ.get('APPDATA', os.path.expanduser('~'))
+SCHEDULE_FILE = os.path.join(_APPDATA, 'SEVEN', 'schedules.json')
 _schedules = []
 _lock = threading.Lock()
 _next_id = 1
@@ -412,27 +413,24 @@ def _register_windows_task(schedule):
         if not os.path.exists(pythonw):
             pythonw = python
 
+        # CRITICAL FIX: Running under SYSTEM (Session 0) hides Toast Notifications!
+        # Executing without /ru defaults to the interactive user (Session 1).
         cmd = [
             "schtasks", "/create", "/f",
             "/tn", task_name,
             "/tr", f'"{pythonw}" "{script}" "{message}" "{stype}"',
             "/sc", "once",
             "/st", time_str,
-            "/sd", date_str,
-            "/ru", "SYSTEM"
+            "/sd", date_str
         ]
 
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        # Use CREATE_NO_WINDOW to completely hide task creation flashes
+        _CREATE_NO_WINDOW = 0x08000000
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10, creationflags=_CREATE_NO_WINDOW)
         if result.returncode == 0:
-            print(Fore.GREEN + f"[SCHEDULER] Windows task registered: {task_name}")
+            print(Fore.GREEN + f"[SCHEDULER] Windows task registered (Session 1): {task_name}")
         else:
-            # Try without /ru SYSTEM (no admin needed)
-            cmd_no_sys = [x for x in cmd if x != "SYSTEM" and x != "/ru"]
-            result2 = subprocess.run(cmd_no_sys, capture_output=True, text=True, timeout=10)
-            if result2.returncode == 0:
-                print(Fore.GREEN + f"[SCHEDULER] Windows task registered (user): {task_name}")
-            else:
-                print(Fore.YELLOW + f"[SCHEDULER] Windows task failed: {result2.stderr.strip()}")
+            print(Fore.YELLOW + f"[SCHEDULER] Windows task registration failed: {result.stderr.strip()}")
     except Exception as e:
         print(Fore.YELLOW + f"[SCHEDULER] Windows task registration failed: {e}")
 
@@ -486,7 +484,8 @@ def _register_windows_task_recurring(schedule):
             "/st", time_str,
         ] + extra
 
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        _CREATE_NO_WINDOW = 0x08000000
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10, creationflags=_CREATE_NO_WINDOW)
         if result.returncode == 0:
             print(Fore.GREEN + f"[SCHEDULER] Recurring Windows task registered: {task_name}")
         else:
@@ -1070,19 +1069,10 @@ def _fire_schedule(schedule):
     except Exception as _toast_err:
         print(Fore.YELLOW + f"[SCHEDULER] Windows notification failed: {_toast_err}")
 
-    # Speak and ask for confirmation
+    # Speak the reminder once - no follow-up question
     if _speak_callback:
         try:
             _speak_callback(fire_msg)
-            import time as _t
-            _t.sleep(0.8)
-            import random as _r
-            confirm = _r.choice([
-                "Got that?",
-                "Did you catch that?",
-                "Should I remind you again later?",
-            ])
-            _speak_callback(confirm)
         except Exception as e:
             print(Fore.RED + f"[SCHEDULER] Speech error: {e}")
     else:
@@ -1110,11 +1100,27 @@ def _background_checker():
                         continue
                     
                     if now >= fire_time:
-                        # FIRE!
+                        # Check if daemon already fired this while Seven was closed
+                        _already_fired = False
+                        try:
+                            import os as _os2
+                            _appdata = _os2.environ.get('APPDATA', _os2.path.expanduser('~'))
+                            _fired_path = _os2.path.join(_appdata, 'SEVEN', 'daemon_fired.json')
+                            if _os2.path.exists(_fired_path):
+                                with open(_fired_path, 'r') as _ff:
+                                    _daemon_fired = set(json.load(_ff))
+                                if str(schedule.get("id", "")) in _daemon_fired:
+                                    _already_fired = True
+                                    # Clean it from daemon fired list so it can fire next time
+                                    _daemon_fired.discard(str(schedule.get("id", "")))
+                                    with open(_fired_path, 'w') as _ff:
+                                        json.dump(list(_daemon_fired), _ff)
+                        except Exception:
+                            pass
+
+                        # Mark as fired regardless
                         recur = schedule.get("recur", "none")
-                        
                         if recur != "none":
-                            # Recurring — advance to next occurrence
                             next_time = _next_recurrence(schedule)
                             if next_time:
                                 schedule["time"] = next_time.isoformat()
@@ -1122,15 +1128,18 @@ def _background_checker():
                                 schedule["status"] = "fired"
                         else:
                             schedule["status"] = "fired"
-                        
+
                         _save()
-                        
-                        # Fire outside the lock to avoid deadlock with speak
-                        threading.Thread(
-                            target=_fire_schedule,
-                            args=(schedule.copy(),),
-                            daemon=True
-                        ).start()
+
+                        # Only speak and notify if daemon did not already fire it
+                        if not _already_fired:
+                            threading.Thread(
+                                target=_fire_schedule,
+                                args=(schedule.copy(),),
+                                daemon=True
+                            ).start()
+                        else:
+                            print(Fore.YELLOW + f"[SCHEDULER] Skipped - daemon already fired id={schedule.get('id')}")
         
         except Exception as e:
             print(Fore.RED + f"[SCHEDULER] Background error: {e}")
