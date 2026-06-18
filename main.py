@@ -355,23 +355,28 @@ def seven_logic():
                     _os.environ.get('APPDATA', ''),
                     'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup'
                 )
-                _shortcut_path = _os.path.join(_startup_folder, 'SevenDaemon.bat')
+                _shortcut_path = _os.path.join(_startup_folder, 'SevenDaemon.vbs')
                 with open(_shortcut_path, 'w') as _sf:
-                    _sf.write(f'@echo off\nstart /b "" "{_pythonw}" "{_daemon}"\n')
+                    _sf.write(
+                        f'Set WshShell = CreateObject("WScript.Shell")\n'
+                        f'WshShell.Run """{_pythonw}"" ""{_daemon}""", 0, False\n'
+                    )
                 print(Fore.GREEN + "[SYSTEM] Schedule daemon registered in Startup folder")
             except Exception as _reg_err:
                 print(Fore.YELLOW + f"[SYSTEM] Daemon startup registration failed: {_reg_err}")
 
-        # Start daemon now
+        # Start daemon now - hidden, no terminal
         if _os.path.exists(_daemon):
+            _CREATE_NO_WINDOW    = 0x08000000
+            _DETACHED_PROCESS    = 0x00000008
             _sp.Popen(
                 [_pythonw, _daemon],
                 stdout=_sp.DEVNULL,
                 stderr=_sp.DEVNULL,
                 stdin=_sp.DEVNULL,
-                creationflags=0x08000000
+                creationflags=_CREATE_NO_WINDOW | _DETACHED_PROCESS
             )
-            print(Fore.CYAN + "[SYSTEM] Schedule daemon started")
+            print(Fore.CYAN + "[SYSTEM] Schedule daemon started (hidden)")
     except Exception as _de:
         print(Fore.YELLOW + f"[SYSTEM] Daemon skipped: {_de}")
 
