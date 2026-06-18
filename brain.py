@@ -1990,11 +1990,27 @@ def think(prompt_text, speaker_id="default"):
         "dark mode", "light mode", "dark theme", "light theme",
         "night light", "blue light", "night mode",
         "do not disturb", "dnd", "focus assist",
-        "airplane mode", "flight mode"
+        "airplane mode", "flight mode", "volume", "mute", "unmute", "louder", "quieter", "softer",
+        "brightness", "brighter", "dimmer", "dim",
+        "battery", "charging", "plugged",
     ]
     
     # Check for system trigger words
     # But guard against false positives: "play spotify" should NOT be media control
+        # Battery questions - catch before general system trigger
+    _battery_question = any(p in clean_in for p in [
+        "battery", "how much charge", "battery level",
+        "battery percentage", "is it charging", "plugged in"
+    ]) and not _app_verbs_present
+    
+    if _battery_question:
+        import random as _rand_bat
+        _bat_confirmations = [
+            "Checking.",
+            "On it.",
+            "One moment.",
+        ]
+        return f"{_rand_bat.choice(_bat_confirmations)} ###SYS: action=battery"
     _has_system_trigger = any(t in clean_in for t in SYSTEM_TRIGGER_WORDS)
     
     # Guard: if sentence contains app verbs + app names, it's NOT a system command
