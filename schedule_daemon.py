@@ -9,11 +9,22 @@ import json
 import os
 import sys
 import time
+import subprocess
 from datetime import datetime
+
+# CRITICAL FIX: Force all underlying winotify/PowerShell subprocesses to spawn entirely hidden.
+# This completely eliminates the black terminal flashing bug during daemon alerts.
+_orig_popen = subprocess.Popen
+def _hidden_popen(*args, **kwargs):
+    if sys.platform == "win32":
+        kwargs["creationflags"] = kwargs.get("creationflags", 0) | 0x08000000 # CREATE_NO_WINDOW
+    return _orig_popen(*args, **kwargs)
+subprocess.Popen = _hidden_popen
 
 APPDATA       = os.environ.get('APPDATA', os.path.expanduser('~'))
 SEVEN_ROOT    = os.path.dirname(os.path.abspath(__file__))
-SCHEDULE_FILE = os.path.join(SEVEN_ROOT, 'seven_data', 'schedules.json')
+# Schedules are stored in APPDATA so daemon and Seven share the same file
+SCHEDULE_FILE = os.path.join(APPDATA, 'SEVEN', 'schedules.json')
 ALERT_FILE    = os.path.join(APPDATA, 'SEVEN', 'schedule_alert.json')
 FIRED_FILE    = os.path.join(APPDATA, 'SEVEN', 'daemon_fired.json')
 LOCK_FILE     = os.path.join(APPDATA, 'SEVEN', 'schedule_daemon.lock')
@@ -24,9 +35,57 @@ _battery_level = 100
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 def acquire_lock():
-    """Prevent multiple daemon instances."""
+    """
+    Prevent multiple daemon instances using Windows named mutex.
+    Named mutex is the most reliable cross-process lock on Windows.
+    Falls back to file lock if ctypes fails.
+    """
+    # Method 1: Windows named mutex - truly atomic, no race conditions
+    try:
+        import ctypes
+        import ctypes.wintypes
+
+        _mutex_name = "Global\\SevenScheduleDaemon_SingleInstance"
+        _kernel32 = ctypes.windll.kernel32
+
+        # Try to create mutex with this name
+        # If another process already owns it, this returns a handle but
+        # GetLastError() returns ERROR_ALREADY_EXISTS (183)
+        _mutex = _kernel32.CreateMutexW(None, True, _mutex_name)
+        _last_err = _kernel32.GetLastError()
+
+        if _last_err == 183:  # ERROR_ALREADY_EXISTS
+            print(f"[DAEMON] Already running (mutex exists). Exiting.")
+            if _mutex:
+                _kernel32.CloseHandle(_mutex)
+            return False
+
+        if not _mutex:
+            print(f"[DAEMON] Could not create mutex. Falling back to file lock.")
+            # Fall through to file lock method
+        else:
+            # Mutex created successfully - we are the only instance
+            # Store handle so it stays alive for process lifetime
+            acquire_lock._mutex_handle = _mutex
+            print(f"[DAEMON] Mutex lock acquired. PID: {os.getpid()}")
+
+            # Also write PID file for main.py to check
+            try:
+                os.makedirs(os.path.dirname(LOCK_FILE), exist_ok=True)
+                with open(LOCK_FILE, 'w') as f:
+                    f.write(str(os.getpid()))
+            except Exception:
+                pass
+
+            return True
+
+    except Exception as _mutex_err:
+        print(f"[DAEMON] Mutex method failed: {_mutex_err}. Using file lock.")
+
+    # Method 2: File lock fallback
     try:
         os.makedirs(os.path.dirname(LOCK_FILE), exist_ok=True)
+
         if os.path.exists(LOCK_FILE):
             try:
                 with open(LOCK_FILE, 'r') as f:
@@ -34,18 +93,32 @@ def acquire_lock():
                 try:
                     import psutil
                     if psutil.pid_exists(old_pid):
-                        print(f"[DAEMON] Already running with PID {old_pid}")
+                        print(f"[DAEMON] Already running (PID {old_pid}). Exiting.")
                         return False
-                except Exception:
+                except ImportError:
                     pass
             except Exception:
                 pass
-        with open(LOCK_FILE, 'w') as f:
+            try:
+                os.remove(LOCK_FILE)
+            except Exception:
+                pass
+
+        fd = os.open(LOCK_FILE, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        with os.fdopen(fd, 'w') as f:
             f.write(str(os.getpid()))
+        print(f"[DAEMON] File lock acquired. PID: {os.getpid()}")
         return True
+
+    except FileExistsError:
+        print(f"[DAEMON] File lock race condition. Exiting.")
+        return False
     except Exception as e:
         print(f"[DAEMON] Lock error: {e}")
         return True
+
+# Storage for mutex handle - must stay alive for process lifetime
+acquire_lock._mutex_handle = None
 
 
 def release_lock():
