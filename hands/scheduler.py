@@ -373,6 +373,128 @@ def _format_remaining(target_dt):
 # SCHEDULE MANAGEMENT
 # =========================================================================
 
+def _get_python_exe():
+    """Get the Python executable path for task registration."""
+    import sys
+    return sys.executable
+
+
+def _get_script_path():
+    """Get path to reminder_fire.py."""
+    import os
+    # Look relative to this file
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(here, "reminder_fire.py")
+
+
+def _register_windows_task(schedule):
+    """
+    Register a one-time reminder as a Windows Scheduled Task.
+    This fires even when Seven is not running.
+    """
+    import subprocess
+    from datetime import datetime
+
+    try:
+        fire_time = datetime.fromisoformat(schedule["time"])
+        message   = schedule.get("message", "Seven Reminder")
+        stype     = schedule.get("type", "reminder")
+        task_name = f"SevenReminder_{schedule['id']}"
+        python    = _get_python_exe()
+        script    = _get_script_path()
+
+        # Format time for schtasks
+        time_str = fire_time.strftime("%H:%M")
+        date_str = fire_time.strftime("%m/%d/%Y")
+
+        cmd = [
+            "schtasks", "/create", "/f",
+            "/tn", task_name,
+            "/tr", f'"{python}" "{script}" "{message}" "{stype}"',
+            "/sc", "once",
+            "/st", time_str,
+            "/sd", date_str,
+            "/ru", "SYSTEM"
+        ]
+
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if result.returncode == 0:
+            print(Fore.GREEN + f"[SCHEDULER] Windows task registered: {task_name}")
+        else:
+            # Try without /ru SYSTEM (no admin needed)
+            cmd_no_sys = [x for x in cmd if x != "SYSTEM" and x != "/ru"]
+            result2 = subprocess.run(cmd_no_sys, capture_output=True, text=True, timeout=10)
+            if result2.returncode == 0:
+                print(Fore.GREEN + f"[SCHEDULER] Windows task registered (user): {task_name}")
+            else:
+                print(Fore.YELLOW + f"[SCHEDULER] Windows task failed: {result2.stderr.strip()}")
+    except Exception as e:
+        print(Fore.YELLOW + f"[SCHEDULER] Windows task registration failed: {e}")
+
+
+def _register_windows_task_recurring(schedule):
+    """
+    Register a recurring reminder as a Windows Scheduled Task.
+    """
+    import subprocess
+    from datetime import datetime
+
+    try:
+        fire_time = datetime.fromisoformat(schedule["time"])
+        message   = schedule.get("message", "Seven Reminder")
+        stype     = schedule.get("type", "reminder")
+        recur     = schedule.get("recur", "daily")
+        task_name = f"SevenRecurring_{schedule['id']}"
+        python    = _get_python_exe()
+        script    = _get_script_path()
+
+        time_str = fire_time.strftime("%H:%M")
+
+        if recur == "daily":
+            schedule_type = "daily"
+            extra = ["/mo", "1"]
+        elif recur == "weekdays":
+            schedule_type = "weekly"
+            extra = ["/d", "MON,TUE,WED,THU,FRI"]
+        elif recur.startswith("weekly_"):
+            day_num = int(recur.split("_")[1])
+            day_names = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"]
+            schedule_type = "weekly"
+            extra = ["/d", day_names[day_num]]
+        else:
+            schedule_type = "daily"
+            extra = ["/mo", "1"]
+
+        cmd = [
+            "schtasks", "/create", "/f",
+            "/tn", task_name,
+            "/tr", f'"{python}" "{script}" "{message}" "{stype}"',
+            "/sc", schedule_type,
+            "/st", time_str,
+        ] + extra
+
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if result.returncode == 0:
+            print(Fore.GREEN + f"[SCHEDULER] Recurring Windows task registered: {task_name}")
+        else:
+            print(Fore.YELLOW + f"[SCHEDULER] Recurring task failed: {result.stderr.strip()}")
+    except Exception as e:
+        print(Fore.YELLOW + f"[SCHEDULER] Recurring task registration failed: {e}")
+
+
+def _cancel_windows_task(schedule_id):
+    """Remove a Windows Scheduled Task when schedule is cancelled."""
+    import subprocess
+    try:
+        for prefix in ["SevenReminder_", "SevenRecurring_"]:
+            task_name = f"{prefix}{schedule_id}"
+            subprocess.run(
+                ["schtasks", "/delete", "/f", "/tn", task_name],
+                capture_output=True, timeout=5
+            )
+    except Exception:
+        pass
+
 def add_schedule(stype, message, time_str=None, duration=None, recur=None, speaker_id="default"):
     """
     Add a new schedule.
@@ -500,6 +622,13 @@ def add_schedule(stype, message, time_str=None, duration=None, recur=None, speak
         _next_id += 1
         _schedules.append(schedule)
         _save()
+
+        # Register with Windows Task Scheduler for persistence
+        # Works even when Seven is closed
+        if stype in ("alarm", "reminder", "event") and schedule["recur"] == "none":
+            _register_windows_task(schedule)
+        elif stype in ("alarm", "reminder") and schedule.get("recur") != "none":
+            _register_windows_task_recurring(schedule)
         
         print(Fore.GREEN + f"[SCHEDULER] Added: {schedule}")
         return True, speech, schedule
@@ -573,6 +702,7 @@ def cancel_schedule(match_str=None, schedule_id=None, cancel_type=None, speaker_
             if best:
                 best["status"] = "cancelled"
                 _save()
+                _cancel_windows_task(best.get("id"))
                 return True, f"Cancelled — {best['message']}."
             return False, f"Couldn't find a schedule matching '{match_str}'."
         
@@ -991,3 +1121,41 @@ def get_active_count():
     """Return count of active schedules."""
     with _lock:
         return sum(1 for s in _schedules if s["status"] == "active")
+    
+def register_daemon_startup():
+    """
+    Register schedule_daemon.py to run at Windows startup.
+    Called once during Seven setup or first run.
+    """
+    import subprocess
+    import sys
+    import os
+
+    python  = sys.executable
+    here    = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    daemon  = os.path.join(here, "schedule_daemon.py")
+    task_name = "SevenScheduleDaemon"
+
+    if not os.path.exists(daemon):
+        print(Fore.YELLOW + "[SCHEDULER] schedule_daemon.py not found")
+        return False
+
+    cmd = [
+        "schtasks", "/create", "/f",
+        "/tn", task_name,
+        "/tr", f'"{python}" "{daemon}"',
+        "/sc", "onlogon",
+        "/rl", "limited"
+    ]
+
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if result.returncode == 0:
+            print(Fore.GREEN + "[SCHEDULER] Daemon registered at startup")
+            return True
+        else:
+            print(Fore.YELLOW + f"[SCHEDULER] Daemon registration failed: {result.stderr}")
+            return False
+    except Exception as e:
+        print(Fore.YELLOW + f"[SCHEDULER] Daemon registration error: {e}")
+        return False
