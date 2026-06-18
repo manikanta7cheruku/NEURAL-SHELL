@@ -463,21 +463,26 @@ def seven_logic():
             capture_output=True
         )
         if _task_check.returncode != 0:
-            _sp.run([
-                "schtasks", "/create", "/f",
-                "/tn", "SevenScheduleDaemon",
-                "/tr", f'"{_python}" "{_daemon}"',
-                "/sc", "onlogon",
-                "/rl", "limited"
-            ], capture_output=True)
-            print(Fore.GREEN + "[SYSTEM] Schedule daemon registered at startup")
+            # Use Windows startup folder instead of schtasks (no admin needed)
+            try:
+                _startup_folder = _os.path.join(
+                    _os.environ.get('APPDATA', ''),
+                    'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup'
+                )
+                _shortcut_path = _os.path.join(_startup_folder, 'SevenDaemon.bat')
+                with open(_shortcut_path, 'w') as _sf:
+                    _sf.write(f'@echo off\nstart /b "" "{_python}" "{_daemon}"\n')
+                print(Fore.GREEN + "[SYSTEM] Schedule daemon registered in Startup folder")
+            except Exception as _reg_err:
+                print(Fore.YELLOW + f"[SYSTEM] Daemon startup registration failed: {_reg_err}")
 
         if _os.path.exists(_daemon):
             _sp.Popen(
                 [_python, _daemon],
                 stdout=_sp.DEVNULL,
                 stderr=_sp.DEVNULL,
-                creationflags=_sp.CREATE_NEW_PROCESS_GROUP | _sp.DETACHED_PROCESS
+                stdin=_sp.DEVNULL,
+                creationflags=0x00000008 | 0x00000200 | 0x08000000
             )
             print(Fore.CYAN + "[SYSTEM] Schedule daemon running in background")
     except Exception as _de:
@@ -970,31 +975,65 @@ def start_app():
 
         print(Fore.GREEN + "[SYSTEM] Backend running. Open http://localhost:5173 in browser.")
 
-        # Battery monitor
+        # Battery monitor - speaks AND shows notification
         def _battery_monitor():
             import time as _bt
-            import psutil as _psutil
             _alerted_20 = False
             _alerted_10 = False
             while True:
                 try:
                     _bt.sleep(300)
-                    bat = _psutil.sensors_battery()
-                    if bat and not bat.power_plugged:
-                        pct = int(bat.percent)
-                        if pct <= 10 and not _alerted_10:
-                            mouth.speak(
-                                f"Battery critically low at {pct} percent. Plug in now."
-                            )
-                            _alerted_10 = True
-                        elif pct <= 20 and not _alerted_20:
-                            mouth.speak(
-                                f"Heads up. Battery at {pct} percent. Consider plugging in."
-                            )
-                            _alerted_20 = True
-                    elif bat and bat.power_plugged:
+                    import psutil
+                    bat = psutil.sensors_battery()
+                    if bat is None:
+                        continue
+                    if bat.power_plugged:
                         _alerted_20 = False
                         _alerted_10 = False
+                        continue
+                    pct = int(bat.percent)
+                    if pct <= 10 and not _alerted_10:
+                        msg = f"Battery critically low at {pct} percent. Plug in now."
+                        # Speak it
+                        try:
+                            import mouth as _m
+                            _m.speak(msg)
+                        except Exception:
+                            pass
+                        # Also show notification
+                        try:
+                            from winotify import Notification, audio
+                            t = Notification(
+                                app_id="Seven AI",
+                                title="Seven - Battery Critical",
+                                msg=msg,
+                                duration="long"
+                            )
+                            t.set_audio(audio.Default, loop=False)
+                            t.show()
+                        except Exception:
+                            pass
+                        _alerted_10 = True
+                    elif pct <= 20 and not _alerted_20:
+                        msg = f"Heads up. Battery at {pct} percent. Consider plugging in."
+                        try:
+                            import mouth as _m
+                            _m.speak(msg)
+                        except Exception:
+                            pass
+                        try:
+                            from winotify import Notification, audio
+                            t = Notification(
+                                app_id="Seven AI",
+                                title="Seven - Battery Low",
+                                msg=msg,
+                                duration="long"
+                            )
+                            t.set_audio(audio.Default, loop=False)
+                            t.show()
+                        except Exception:
+                            pass
+                        _alerted_20 = True
                 except Exception:
                     pass
 
