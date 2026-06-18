@@ -355,6 +355,7 @@ def seven_logic():
                     _os.environ.get('APPDATA', ''),
                     'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup'
                 )
+                # VBS launches pythonw with window mode 0 = completely hidden
                 _shortcut_path = _os.path.join(_startup_folder, 'SevenDaemon.vbs')
                 with open(_shortcut_path, 'w') as _sf:
                     _sf.write(
@@ -365,10 +366,10 @@ def seven_logic():
             except Exception as _reg_err:
                 print(Fore.YELLOW + f"[SYSTEM] Daemon startup registration failed: {_reg_err}")
 
-        # Start daemon now - hidden, no terminal
+        # Start daemon now - completely hidden, no terminal
         if _os.path.exists(_daemon):
-            _CREATE_NO_WINDOW    = 0x08000000
-            _DETACHED_PROCESS    = 0x00000008
+            _CREATE_NO_WINDOW = 0x08000000
+            _DETACHED_PROCESS = 0x00000008
             _sp.Popen(
                 [_pythonw, _daemon],
                 stdout=_sp.DEVNULL,

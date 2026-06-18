@@ -407,9 +407,9 @@ def _register_windows_task(schedule):
         time_str = fire_time.strftime("%H:%M")
         date_str = fire_time.strftime("%m/%d/%Y")
 
-        # Use pythonw.exe to suppress terminal window when task fires
+        # pythonw suppresses terminal window when task fires
         pythonw = python.replace("python.exe", "pythonw.exe")
-        if not _os.path.exists(pythonw):
+        if not os.path.exists(pythonw):
             pythonw = python
 
         cmd = [
@@ -452,6 +452,10 @@ def _register_windows_task_recurring(schedule):
         task_name = f"SevenRecurring_{schedule['id']}"
         python    = _get_python_exe()
         script    = _get_script_path()
+
+        pythonw = python.replace("python.exe", "pythonw.exe")
+        if not os.path.exists(pythonw):
+            pythonw = python
 
         time_str = fire_time.strftime("%H:%M")
 

@@ -4,7 +4,7 @@ PROJECT SEVEN - test_chat.py (V1.6 - Developer Console)
 =============================================================================
 """
 
-import brain
+import brain_modules
 import hands.core as core
 import re
 import colorama
@@ -250,7 +250,7 @@ def clear_all_memory():
     confirm = input(Fore.RED + "  Type 'DELETE EVERYTHING' to confirm: ").strip()
     if confirm == "DELETE EVERYTHING":
         seven_memory.clear_all()
-        brain.reset_session()
+        brain_modules.reset_session()
         command_log.clear()
         mood_engine.reset()
         print(Fore.GREEN + "  ✅ All memories, logs, and mood cleared. Clean slate.")
@@ -809,7 +809,7 @@ while True:
 
     # --- NORMAL CHAT ---
     print(Fore.MAGENTA + "Seven is thinking...")
-    response = brain.think(user_input, speaker_id=active_speaker)
+    response = brain_modules.think(user_input, speaker_id=active_speaker)
     
     # V1.9: Handle streaming responses
     if isinstance(response, tuple) and len(response) == 2 and response[0] == "__STREAM__":
@@ -849,7 +849,7 @@ while True:
         should_store = False
     # Don't store identity responses (they pollute memory with duplicates)
     identity_phrases = ["i am seven", "you are mani", "you are mk", "you are admin",
-                        "you can call me seven", f"you are {brain.USER_NAME.lower()}",
+                        "you can call me seven", f"you are {brain_modules.USER_NAME.lower()}",
                         "still seven", "you just asked", "you've asked me this",
                         "you haven't told me that"]
     response_lower = response.lower()

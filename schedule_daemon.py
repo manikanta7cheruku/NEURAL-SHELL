@@ -254,6 +254,16 @@ def main():
 
 
 if __name__ == "__main__":
+    # Hide console window immediately
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            ctypes.windll.user32.ShowWindow(
+                ctypes.windll.kernel32.GetConsoleWindow(), 0
+            )
+        except Exception:
+            pass
+
     try:
         main()
     finally:

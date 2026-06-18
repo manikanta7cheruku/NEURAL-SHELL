@@ -48,6 +48,16 @@ def fire_reminder(message, stype="reminder"):
 
 
 if __name__ == "__main__":
+    # Hide console window immediately - in case called via python.exe not pythonw.exe
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            ctypes.windll.user32.ShowWindow(
+                ctypes.windll.kernel32.GetConsoleWindow(), 0
+            )
+        except Exception:
+            pass
+
     # Called by Windows Task Scheduler with args:
     # reminder_fire.py "message text" "type"
     if len(sys.argv) >= 2:
@@ -55,4 +65,4 @@ if __name__ == "__main__":
         stype = sys.argv[2] if len(sys.argv) >= 3 else "reminder"
         fire_reminder(msg, stype)
     else:
-        print("Usage: reminder_fire.py <message> <type>")
+        pass

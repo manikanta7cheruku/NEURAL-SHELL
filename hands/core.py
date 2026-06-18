@@ -241,6 +241,13 @@ def close_app(app_name):
         mood_engine.on_command_result(True)
         return True
 
+    # SPECIAL CASE: WHATSAPP - force kill is instant, terminate() is slow
+    if "whatsapp" in clean_name:
+        subprocess.Popen("taskkill /im WhatsApp.exe /f", shell=True)
+        command_log.log_command("CLOSE", "whatsapp", True, "Force kill")
+        mood_engine.on_command_result(True)
+        return True
+
     # 4. SPECIAL CASE: CAMERA
     if "camera" in clean_name:
         subprocess.Popen("taskkill /im WindowsCamera.exe /f", shell=True)
@@ -312,7 +319,7 @@ def close_app(app_name):
     if close_all:
         for proc in matching_procs:
             try:
-                proc.terminate()
+                proc.kill()
             except:
                 pass
         print(Fore.GREEN + f"   -> Closed ALL {len(matching_procs)} instances of '{clean_name}'")
@@ -323,7 +330,7 @@ def close_app(app_name):
         try:
             matching_procs.sort(key=lambda p: p.info.get('create_time', 0), reverse=True)
             newest = matching_procs[0]
-            newest.terminate()
+            newest.kill()
             remaining = len(matching_procs) - 1
             if remaining > 0:
                 print(Fore.GREEN + f"   -> Closed 1 instance of '{clean_name}' ({remaining} still running)")
