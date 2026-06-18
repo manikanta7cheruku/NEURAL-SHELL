@@ -64,3 +64,5 @@ mouth/piper/*.dll
 mouth/piper/espeak-ng-data/
 mouth/piper/voices/*.onnx
 mouth/piper/voices/*.onnx.json
+
+current_packages.txt
