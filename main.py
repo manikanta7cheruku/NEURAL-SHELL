@@ -483,7 +483,8 @@ def seven_logic():
                 app_ui.update_status("LISTENING...", "#00ff00")
                 api_set_state("listening", True)
                 api_set_state("thinking",  False)
-                api_set_state("speaking",  False)
+                # Only clear speaking if it was set - avoid resetting fade timer
+                # api_set_state("speaking", False) removed - speaking cleared after each response
             else:
                 app_ui.update_status("PAUSED (Say 'Wake Up')", "#555555")
                 api_set_state("listening", False)
