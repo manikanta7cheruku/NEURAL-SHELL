@@ -8,6 +8,16 @@ Can also reopen Seven if needed.
 import sys
 import os
 import json
+import subprocess
+
+# CRITICAL FIX: Force all underlying winotify/PowerShell subprocesses to spawn entirely hidden.
+# This completely eliminates the black terminal flashing bug.
+_orig_popen = subprocess.Popen
+def _hidden_popen(*args, **kwargs):
+    if sys.platform == "win32":
+        kwargs["creationflags"] = kwargs.get("creationflags", 0) | 0x08000000 # CREATE_NO_WINDOW
+    return _orig_popen(*args, **kwargs)
+subprocess.Popen = _hidden_popen
 
 def fire_reminder(message, stype="reminder"):
     """Show Windows notification for a reminder."""
