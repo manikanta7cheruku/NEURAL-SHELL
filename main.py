@@ -449,6 +449,40 @@ def seven_logic():
         scheduler_mod.start_background(speak_fn=mouth.speak)
         print(Fore.YELLOW + "[SYSTEM] Scheduler started without banner support")
 
+    # Register and start background schedule daemon
+    try:
+        import subprocess as _sp
+        import sys as _sys
+        import os as _os
+
+        _daemon = _os.path.join(_os.getcwd(), "schedule_daemon.py")
+        _python = _sys.executable
+
+        _task_check = _sp.run(
+            ["schtasks", "/query", "/tn", "SevenScheduleDaemon"],
+            capture_output=True
+        )
+        if _task_check.returncode != 0:
+            _sp.run([
+                "schtasks", "/create", "/f",
+                "/tn", "SevenScheduleDaemon",
+                "/tr", f'"{_python}" "{_daemon}"',
+                "/sc", "onlogon",
+                "/rl", "limited"
+            ], capture_output=True)
+            print(Fore.GREEN + "[SYSTEM] Schedule daemon registered at startup")
+
+        if _os.path.exists(_daemon):
+            _sp.Popen(
+                [_python, _daemon],
+                stdout=_sp.DEVNULL,
+                stderr=_sp.DEVNULL,
+                creationflags=_sp.CREATE_NEW_PROCESS_GROUP | _sp.DETACHED_PROCESS
+            )
+            print(Fore.CYAN + "[SYSTEM] Schedule daemon running in background")
+    except Exception as _de:
+        print(Fore.YELLOW + f"[SYSTEM] Daemon skipped: {_de}")
+
     # Register background daemon for schedules when Seven is closed
     try:
         scheduler_mod.register_daemon_startup()
@@ -935,11 +969,43 @@ def start_app():
         logic_thread.start()
 
         print(Fore.GREEN + "[SYSTEM] Backend running. Open http://localhost:5173 in browser.")
+
+        # Battery monitor
+        def _battery_monitor():
+            import time as _bt
+            import psutil as _psutil
+            _alerted_20 = False
+            _alerted_10 = False
+            while True:
+                try:
+                    _bt.sleep(300)
+                    bat = _psutil.sensors_battery()
+                    if bat and not bat.power_plugged:
+                        pct = int(bat.percent)
+                        if pct <= 10 and not _alerted_10:
+                            mouth.speak(
+                                f"Battery critically low at {pct} percent. Plug in now."
+                            )
+                            _alerted_10 = True
+                        elif pct <= 20 and not _alerted_20:
+                            mouth.speak(
+                                f"Heads up. Battery at {pct} percent. Consider plugging in."
+                            )
+                            _alerted_20 = True
+                    elif bat and bat.power_plugged:
+                        _alerted_20 = False
+                        _alerted_10 = False
+                except Exception:
+                    pass
+
+        _bat_thread = threading.Thread(target=_battery_monitor, daemon=True)
+        _bat_thread.start()
+        print(Fore.CYAN + "[SYSTEM] Battery monitor active")
+
         try:
             import time
             while True:
                 time.sleep(5)
-                # Watchdog - restart voice loop if it crashed
                 if not logic_thread.is_alive():
                     print(Fore.RED + "[WATCHDOG] Voice loop crashed. Restarting...")
                     logic_thread = threading.Thread(target=seven_logic, daemon=True)
