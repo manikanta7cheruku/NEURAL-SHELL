@@ -625,10 +625,6 @@ def add_schedule(stype, message, time_str=None, duration=None, recur=None, speak
 
         # Register with Windows Task Scheduler for persistence
         # Works even when Seven is closed
-        if stype in ("alarm", "reminder", "event") and schedule["recur"] == "none":
-            _register_windows_task(schedule)
-        elif stype in ("alarm", "reminder") and schedule.get("recur") != "none":
-            _register_windows_task_recurring(schedule)
         
         print(Fore.GREEN + f"[SCHEDULER] Added: {schedule}")
         return True, speech, schedule
@@ -702,7 +698,7 @@ def cancel_schedule(match_str=None, schedule_id=None, cancel_type=None, speaker_
             if best:
                 best["status"] = "cancelled"
                 _save()
-                _cancel_windows_task(best.get("id"))
+
                 return True, f"Cancelled — {best['message']}."
             return False, f"Couldn't find a schedule matching '{match_str}'."
         
