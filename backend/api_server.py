@@ -921,6 +921,17 @@ def set_schedule_alert(message: str, stype: str, schedule_id=None):
     _write_alert_file(data)
     print(f"[API] Schedule alert set: {stype} - {message[:50]}")
 
+@app.post("/api/system/battery-alert")
+async def battery_alert(message: str = "Battery low"):
+    """Daemon calls this when battery is low - Seven speaks it."""
+    try:
+        # Push to state so voice loop can speak it
+        set_state("battery_alert_msg", message)
+        set_state("battery_alert_pending", True)
+    except Exception:
+        pass
+    return {"ok": True}
+
 
 # =========================================================================
 # KNOWLEDGE ENDPOINTS
