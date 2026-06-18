@@ -43,7 +43,7 @@ export default function ConversationPanel() {
       }, 5000);
     }
     return () => { if (fadeTimer.current) clearTimeout(fadeTimer.current); };
-  }, [speaking, thinking]);
+  }, [speaking, thinking, sevenText]);
 
   // Auto-scroll Seven's text as it streams in
   useEffect(() => {
