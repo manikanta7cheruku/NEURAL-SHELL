@@ -449,9 +449,28 @@ def seven_logic():
         scheduler_mod.start_background(speak_fn=mouth.speak)
         print(Fore.YELLOW + "[SYSTEM] Scheduler started without banner support")
 
-    sched_count = scheduler_mod.get_active_count()
-    if sched_count > 0:
-        print(Fore.CYAN + f"[SYSTEM] Scheduler: {sched_count} active schedules.")
+    # Register background daemon for schedules when Seven is closed
+    try:
+        scheduler_mod.register_daemon_startup()
+    except Exception:
+        pass
+
+        # Start daemon in background for this session too
+    try:
+        import subprocess
+        import sys
+        import os
+        _daemon_path = os.path.join(os.getcwd(), "schedule_daemon.py")
+        if os.path.exists(_daemon_path):
+            subprocess.Popen(
+                [sys.executable, _daemon_path],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
+            print(Fore.CYAN + "[SYSTEM] Schedule daemon started in background")
+    except Exception as _de:
+        print(Fore.YELLOW + f"[SYSTEM] Daemon start skipped: {_de}")
 
     app_ui.update_status("SYSTEM ONLINE", "#00ff00")
 
