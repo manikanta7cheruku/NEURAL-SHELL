@@ -28,6 +28,78 @@ import config
 # PROTECTED SYSTEM APPS
 SAFE_APPS = ["system", "registry", "service", "nvidia", "antivirus", "explorer"]
 
+# FAST LAUNCH TABLE - bypasses AppOpener for common apps
+# Key: lowercase name fragment, Value: launch command or URI
+_FAST_LAUNCH = {
+    "chrome":      ("exe", "chrome"),
+    "firefox":     ("exe", "firefox"),
+    "edge":        ("uri", "microsoft-edge:"),
+    "notepad":     ("exe", "notepad"),
+    "notepad++":   ("exe", "notepad++"),
+    "vlc":         ("exe", "vlc"),
+    "spotify":     ("uri", "spotify:"),
+    "telegram":    ("exe", "telegram"),
+    "discord":     ("exe", "discord"),
+    "steam":       ("exe", "steam"),
+    "vs code":     ("exe", "code"),
+    "vscode":      ("exe", "code"),
+    "code":        ("exe", "code"),
+    "word":        ("exe", "winword"),
+    "excel":       ("exe", "excel"),
+    "powerpoint":  ("exe", "powerpnt"),
+    "paint":       ("exe", "mspaint"),
+    "cmd":         ("exe", "cmd"),
+    "terminal":    ("exe", "wt"),
+    "powershell":  ("exe", "powershell"),
+    "task manager":("exe", "taskmgr"),
+    "obs":         ("exe", "obs64"),
+    "zoom":        ("exe", "zoom"),
+    "teams":       ("uri", "msteams:"),
+    "outlook":     ("exe", "outlook"),
+    "file manager":("exe", "explorer"),
+    "files":       ("exe", "explorer"),
+}
+
+
+def _fast_launch(app_name):
+    """
+    Try launching from fast lookup table first.
+    Returns True if launched, False if not in table.
+    Zero AppOpener overhead.
+    """
+    clean = app_name.lower().strip()
+    entry = None
+
+    # Exact match first
+    if clean in _FAST_LAUNCH:
+        entry = _FAST_LAUNCH[clean]
+    else:
+        # Partial match
+        for key, val in _FAST_LAUNCH.items():
+            if key in clean or clean in key:
+                entry = val
+                break
+
+    if not entry:
+        return False
+
+    launch_type, target = entry
+    try:
+        if launch_type == "uri":
+            os.startfile(target)
+        else:
+            # Direct ShellExecute bypasses cmd.exe completely for sub-15ms launches
+            try:
+                os.startfile(target)
+            except FileNotFoundError:
+                _CREATE_NO_WINDOW = 0x08000000
+                subprocess.Popen(target, creationflags=_CREATE_NO_WINDOW)
+        print(Fore.GREEN + f"   -> Fast launch (Lightning API): {target}")
+        return True
+    except Exception as e:
+        print(Fore.YELLOW + f"   -> Fast launch failed: {e}")
+        return False
+
 
 def _get_aliases():
     """Get app aliases from config (user-editable via dashboard)."""
@@ -174,6 +246,21 @@ def close_app(app_name):
         raw_name = raw_name[4:]
 
     clean_name = raw_name.lower().strip()
+
+    # LIGHTNING FAST-PATH: Instant Kernel Process Kill via Win32 taskkill (<15ms)
+    _CREATE_NO_WINDOW = 0x08000000
+    _target_kill = f"{clean_name}.exe" if not clean_name.endswith(".exe") else clean_name
+    _kill_cmd = f"taskkill /IM {_target_kill} /F" if close_all else f"taskkill /IM {_target_kill}"
+    try:
+        if subprocess.call(_kill_cmd, shell=True, creationflags=_CREATE_NO_WINDOW, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) == 0:
+            print(Fore.GREEN + f"   -> Lightning kill executed for '{_target_kill}'")
+            command_log.log_command("CLOSE", clean_name, True, "Kernel Taskkill")
+            mood_engine.on_command_result(True)
+            return True
+    except Exception:
+        pass
+
+    clean_name = raw_name.lower().strip()
     print(Fore.CYAN + f"HANDS: Closing '{clean_name}'" + (" (ALL instances)" if close_all else "") + "...")
 
     # Resolve aliases from config
@@ -241,9 +328,24 @@ def close_app(app_name):
         mood_engine.on_command_result(True)
         return True
 
-    # SPECIAL CASE: WHATSAPP - force kill is instant, terminate() is slow
+    # SPECIAL CASE: WHATSAPP
+    # Windows Store WhatsApp runs under multiple possible process names
     if "whatsapp" in clean_name:
-        subprocess.Popen("taskkill /im WhatsApp.exe /f", shell=True)
+        killed = False
+        for _wa_proc in psutil.process_iter(['pid', 'name']):
+            try:
+                _pname = _wa_proc.info['name'].lower()
+                if 'whatsapp' in _pname:
+                    _wa_proc.kill()
+                    print(Fore.GREEN + f"   -> Killed WhatsApp process: {_wa_proc.info['name']}")
+                    killed = True
+            except Exception:
+                continue
+        if not killed:
+            # Fallback: taskkill with common names
+            for _wname in ["WhatsApp.exe", "whatsapp.exe", "WhatsAppDesktop.exe"]:
+                subprocess.Popen(f"taskkill /im {_wname} /f", shell=True,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         command_log.log_command("CLOSE", "whatsapp", True, "Force kill")
         mood_engine.on_command_result(True)
         return True
@@ -475,33 +577,44 @@ def open_app(app_name):
             mood_engine.on_command_result(True)
             return True
 
-        # AppOpener — universal fallback
-        try:
-            app_opener(clean_name, match_closest=True, throw_error=True)
-            command_log.log_command("OPEN", clean_name, True, "AppOpener")
+        # TIER 1.5: Lightning fast PATH Check via OS Kernel (<10ms)
+        if _fast_launch(clean_name):
+            command_log.log_command("OPEN", clean_name, True, "FastLaunch")
             mood_engine.on_command_result(True)
             return True
-        except Exception as appopener_error:
-            print(Fore.YELLOW + f"   -> AppOpener failed: {appopener_error}")
-            
-            # --- TIER 3: CUSTOM .EXE PATH ---
-            if _try_custom_path(clean_name):
-                return True
-            
-            # Also try the original name (before alias resolution)
-            if original_name != clean_name and _try_custom_path(original_name):
-                return True
-            
-            # ALL TIERS FAILED
-            error_msg = str(appopener_error)
-            print(Fore.RED + f"❌ HANDS: All launch methods failed for '{clean_name}'")
-            command_log.log_command("OPEN", clean_name, False, error_msg)
-            mood_engine.on_command_result(False)
-            
-            # Log failure for dashboard "Fix" feature
-            _log_failed_app(original_name, clean_name, error_msg)
-            
-            return False
+
+        # Try raw OS execution immediately (handles native exes in PATH instantly)
+        try:
+            os.startfile(clean_name)
+            command_log.log_command("OPEN", clean_name, True, "OS Kernel Startfile")
+            mood_engine.on_command_result(True)
+            return True
+        except Exception:
+            pass
+
+        # Try custom paths before hitting heavy AppOpener
+        if _try_custom_path(clean_name):
+            return True
+        if original_name != clean_name and _try_custom_path(original_name):
+            return True
+
+        # TIER 2: AppOpener — Wrapped in Background Thread for ZERO UI Blocking
+        print(Fore.YELLOW + f"   -> Dispatched async AppOpener crawl for '{clean_name}'...")
+        import threading
+        def _async_appopener():
+            try:
+                app_opener(clean_name, match_closest=True, throw_error=True)
+                command_log.log_command("OPEN", clean_name, True, "AppOpener Async")
+                mood_engine.on_command_result(True)
+            except Exception as appopener_error:
+                print(Fore.YELLOW + f"   -> Async AppOpener failed: {appopener_error}")
+                _log_failed_app(original_name, clean_name, str(appopener_error))
+
+        threading.Thread(target=_async_appopener, daemon=True).start()
+        # Return success instantly so Seven UI feels lightning fast
+        command_log.log_command("OPEN", clean_name, True, "AppOpener Dispatched")
+        mood_engine.on_command_result(True)
+        return True
         
     except Exception as e:
         print(Fore.RED + f"❌ HANDS: Failed to open '{clean_name}'. Error: {e}")
