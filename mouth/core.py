@@ -44,6 +44,59 @@ _lock = threading.Lock()
 _interrupted = threading.Event()
 
 
+def _build_run_cmd():
+    """Build the Python command and env for speaker subprocess."""
+    here     = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    app_path = os.environ.get("SEVEN_APP_PATH", here)
+    env      = os.environ.copy()
+    env["SEVEN_APP_PATH"] = app_path
+    return here, app_path, env
+
+
+def _spawn_speaker(text):
+    """
+    Spawn speaker.py subprocess for one piece of text.
+    Returns Popen object.
+    """
+    here, app_path, env = _build_run_cmd()
+    safe_text = text.replace("'", "\\'").replace("\n", " ")
+
+    run_cmd = (
+        f"import sys; "
+        f"sys.path.insert(0, r'{app_path}'); "
+        f"sys.path.insert(0, r'{here}'); "
+        f"from mouth.speaker import speak_text; "
+        f"speak_text('{safe_text}')"
+    )
+
+    proc = subprocess.Popen(
+        [sys.executable, "-c", run_cmd],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        cwd=app_path,
+        env=env
+    )
+    return proc, app_path
+
+
+def _wait_and_drain(proc):
+    """
+    Wait for subprocess to finish.
+    Drains stderr to prevent buffer deadlock.
+    """
+    try:
+        _, err = proc.communicate(timeout=60)
+        if err:
+            err_text = err.decode("utf-8", errors="replace").strip()
+            if err_text:
+                print(f"[SPEAKER] {err_text}")
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.communicate()
+    except Exception as e:
+        print(f"[MOUTH] Wait error: {e}")
+
+
 def speak(text):
     """
     Speak text aloud via subprocess.
@@ -65,39 +118,12 @@ def speak(text):
 
     try:
         with _lock:
-            here     = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            app_path = os.environ.get("SEVEN_APP_PATH", here)
+            proc, _ = _spawn_speaker(text)
+            _current_process = proc
 
-            # Build a self-contained Python command that:
-            # 1. Adds app_path to sys.path manually
-            # 2. Imports speak_text directly
-            # 3. Calls it with the text
-            # Avoids ALL module resolution issues with embeddable Python
-            safe_text = text.replace("'", "\\'").replace("\n", " ")
-
-            run_cmd = (
-                f"import sys; "
-                f"sys.path.insert(0, r'{app_path}'); "
-                f"sys.path.insert(0, r'{here}'); "
-                f"from mouth.speaker import speak_text; "
-                f"speak_text('{safe_text}')"
-            )
-
-            env = os.environ.copy()
-            env["SEVEN_APP_PATH"] = app_path
-
-            _current_process = subprocess.Popen(
-                [sys.executable, "-c", run_cmd],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-                cwd=app_path,
-                env=env
-            )
-
-        _current_process.wait()
+        _wait_and_drain(proc)
 
         with _lock:
-            proc = _current_process
             _current_process = None
 
         if _interrupted.is_set():
@@ -148,39 +174,18 @@ def speak_streamed(sentence_generator):
         
         try:
             with _lock:
-                here     = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-                app_path = os.environ.get("SEVEN_APP_PATH", here)
+                proc, _ = _spawn_speaker(sentence)
+                _current_process = proc
 
-                safe_sentence = sentence.replace("'", "\\'").replace("\n", " ")
+            _wait_and_drain(proc)
 
-                run_cmd = (
-                    f"import sys; "
-                    f"sys.path.insert(0, r'{app_path}'); "
-                    f"sys.path.insert(0, r'{here}'); "
-                    f"from mouth.speaker import speak_text; "
-                    f"speak_text('{safe_sentence}')"
-                )
-
-                env = os.environ.copy()
-                env["SEVEN_APP_PATH"] = app_path
-
-                _current_process = subprocess.Popen(
-                    [sys.executable, "-c", run_cmd],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.PIPE,
-                    cwd=app_path,
-                    env=env
-                )
-            
-            _current_process.wait()
-            
             with _lock:
                 _current_process = None
-            
+
             if _interrupted.is_set():
                 completed = False
                 break
-        
+
         except Exception as e:
             print(f"[MOUTH] Stream speech error: {e}")
             with _lock:
