@@ -407,10 +407,15 @@ def _register_windows_task(schedule):
         time_str = fire_time.strftime("%H:%M")
         date_str = fire_time.strftime("%m/%d/%Y")
 
+        # Use pythonw.exe to suppress terminal window when task fires
+        pythonw = python.replace("python.exe", "pythonw.exe")
+        if not _os.path.exists(pythonw):
+            pythonw = python
+
         cmd = [
             "schtasks", "/create", "/f",
             "/tn", task_name,
-            "/tr", f'"{python}" "{script}" "{message}" "{stype}"',
+            "/tr", f'"{pythonw}" "{script}" "{message}" "{stype}"',
             "/sc", "once",
             "/st", time_str,
             "/sd", date_str,
@@ -465,10 +470,14 @@ def _register_windows_task_recurring(schedule):
             schedule_type = "daily"
             extra = ["/mo", "1"]
 
+        pythonw = python.replace("python.exe", "pythonw.exe")
+        if not _os.path.exists(pythonw):
+            pythonw = python
+
         cmd = [
             "schtasks", "/create", "/f",
             "/tn", task_name,
-            "/tr", f'"{python}" "{script}" "{message}" "{stype}"',
+            "/tr", f'"{pythonw}" "{script}" "{message}" "{stype}"',
             "/sc", schedule_type,
             "/st", time_str,
         ] + extra
@@ -950,11 +959,10 @@ def _fire_schedule(schedule):
             fire_msg = f"{speaker_name}, you have something scheduled right now." if speaker_name else "You have an event right now."
     else:
         fire_msg = f"{speaker_name}, {message}." if speaker_name and message else (message if message else "Schedule alert.")
-    
-        print(Fore.YELLOW + f"[SCHEDULER] FIRING: {fire_msg}")
 
-    # Push banner via callback (no circular import)
-    # Write alert to file directly - no import needed, works across threads
+    print(Fore.YELLOW + f"[SCHEDULER] FIRING: {fire_msg}")
+
+    # Write alert to file - works across threads, no circular import
     try:
         import json as _js
         import os as _os
@@ -972,28 +980,6 @@ def _fire_schedule(schedule):
         print(Fore.CYAN + "[SCHEDULER] Alert written to file")
     except Exception as _ae:
         print(Fore.YELLOW + f"[SCHEDULER] Alert file write failed: {_ae}")
-
-    # Write alert to file directly - no circular import risk
-    try:
-        import json as _js
-        import os as _os
-        _alert_path = _os.path.join(
-            _os.environ.get('APPDATA', _os.path.expanduser('~')),
-            'SEVEN', 'schedule_alert.json'
-        )
-        with open(_alert_path, 'w') as _f:
-            _js.dump({
-                "active":  True,
-                "message": fire_msg,
-                "type":    stype,
-                "id":      schedule.get("id")
-            }, _f)
-        print(Fore.CYAN + "[SCHEDULER] Alert written to file")
-    except Exception as _ae:
-        print(Fore.YELLOW + f"[SCHEDULER] Alert file write failed: {_ae}")
-
-    # Callback kept for compatibility but file write is the primary method
-    # File write handles banner state - no callback needed
 
     # Windows desktop notification (shows even when Seven is not focused)
     try:
@@ -1006,9 +992,6 @@ def _fire_schedule(schedule):
         )
         toast.set_audio(audio.Default, loop=False)
         toast.show()
-        print(Fore.CYAN + "[SCHEDULER] Windows notification sent")
-    except Exception as _toast_err:
-        print(Fore.YELLOW + f"[SCHEDULER] Windows notification failed: {_toast_err}")
         print(Fore.CYAN + "[SCHEDULER] Windows notification sent")
     except Exception as _toast_err:
         print(Fore.YELLOW + f"[SCHEDULER] Windows notification failed: {_toast_err}")
