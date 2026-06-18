@@ -1,6 +1,6 @@
 # =============================================================================
 # PROJECT SEVEN - Dependencies
-# Version: 1.2 (Fixed versions for embedded Python)
+# Version: 1.2.8
 # =============================================================================
 
 # --- Core ---
@@ -20,7 +20,7 @@ AppOpener
 pyautogui
 
 # --- Memory System ---
-chromadb
+chromadb==1.5.8
 sentence-transformers
 
 # --- Voice Recognition ---
@@ -37,14 +37,27 @@ pycaw
 screen-brightness-control
 comtypes
 
+# --- API ---
+fastapi
+uvicorn[standard]
+websockets
+python-multipart
+
 # --- Notifications ---
 winotify
 
 # --- Proactive Features ---
 pynput
 
-# --- API ---
-fastapi
-uvicorn[standard]
-websockets
-python-multipart
+# --- Torch (GPU support) ---
+# Install separately with CUDA:
+# pip install torch torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
+# torch and torchaudio NOT in this file - GPU version installed manually
+
+# --- Torch ---
+# CPU only (auto-installed during setup):
+# torch torchaudio
+# GPU (CUDA 12.8, RTX 50 series / Blackwell):
+# pip install torch torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
+# GPU (CUDA 12.1, RTX 30/40 series):
+# pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu121

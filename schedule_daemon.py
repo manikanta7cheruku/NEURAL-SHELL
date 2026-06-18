@@ -94,8 +94,11 @@ def main():
     while True:
         try:
             # Skip if Seven is running - it handles its own schedules
-            if not is_seven_running():
-                schedules = load_schedules()
+        if not is_seven_running():
+            # Check battery level and alert if low
+            _check_battery_alert()
+
+            schedules = load_schedules()
                 now = datetime.now()
 
                 for schedule in schedules:
