@@ -2314,12 +2314,10 @@ def think(prompt_text, speaker_id="default"):
                 break
 
         if remaining:
-            apps = []
-            if " and " in remaining:
-                apps = [a.strip() for a in remaining.split(" and ") if a.strip()]
-            elif "," in remaining:
-                apps = [a.strip() for a in remaining.split(",") if a.strip()]
-            else:
+            # Normalize: replace " and " with "," then split on ","
+            _normalized = remaining.replace(" and ", ",").replace(" & ", ",")
+            apps = [a.strip() for a in _normalized.split(",") if a.strip()]
+            if not apps:
                 apps = [remaining.strip()]
             
             if close_all:
