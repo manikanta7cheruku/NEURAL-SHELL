@@ -1,40 +1,59 @@
 """
 schedule_daemon.py
-Runs at Windows login via Task Scheduler.
+Runs at Windows login via Startup folder.
 Fires reminders and battery alerts even when Seven is fully closed.
+Includes direct voice playback via Seven's mouth.speaker module.
 """
 
 import json
 import os
-import time
 import sys
+import time
 from datetime import datetime
 
 APPDATA       = os.environ.get('APPDATA', os.path.expanduser('~'))
-
-# Path to Seven's root folder (daemon lives in same folder)
-SEVEN_ROOT = os.path.dirname(os.path.abspath(__file__))
-
-
-def daemon_speak(text):
-    """Speak text using Seven's voice engine."""
-    try:
-        # Add Seven's root to path so mouth.speaker can be imported
-        if SEVEN_ROOT not in sys.path:
-            sys.path.insert(0, SEVEN_ROOT)
-        from mouth.speaker import speak_text
-        speak_text(text)
-    except Exception as e:
-        print(f"[DAEMON] Speak failed: {e}")
-
-SCHEDULE_FILE = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)),
-    'seven_data', 'schedules.json'
-)
+SEVEN_ROOT    = os.path.dirname(os.path.abspath(__file__))
+SCHEDULE_FILE = os.path.join(SEVEN_ROOT, 'seven_data', 'schedules.json')
 ALERT_FILE    = os.path.join(APPDATA, 'SEVEN', 'schedule_alert.json')
 FIRED_FILE    = os.path.join(APPDATA, 'SEVEN', 'daemon_fired.json')
+LOCK_FILE     = os.path.join(APPDATA, 'SEVEN', 'schedule_daemon.lock')
 
 _battery_level = 100
+
+
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
+def acquire_lock():
+    """Prevent multiple daemon instances."""
+    try:
+        os.makedirs(os.path.dirname(LOCK_FILE), exist_ok=True)
+        if os.path.exists(LOCK_FILE):
+            try:
+                with open(LOCK_FILE, 'r') as f:
+                    old_pid = int(f.read().strip())
+                try:
+                    import psutil
+                    if psutil.pid_exists(old_pid):
+                        print(f"[DAEMON] Already running with PID {old_pid}")
+                        return False
+                except Exception:
+                    pass
+            except Exception:
+                pass
+        with open(LOCK_FILE, 'w') as f:
+            f.write(str(os.getpid()))
+        return True
+    except Exception as e:
+        print(f"[DAEMON] Lock error: {e}")
+        return True
+
+
+def release_lock():
+    try:
+        if os.path.exists(LOCK_FILE):
+            os.remove(LOCK_FILE)
+    except Exception:
+        pass
 
 
 def load_schedules():
@@ -66,8 +85,44 @@ def save_fired(fired_ids):
         pass
 
 
+def is_seven_running():
+    try:
+        import requests
+        r = requests.get("http://127.0.0.1:7777/api/status", timeout=1)
+        return r.status_code == 200
+    except Exception:
+        return False
+
+
+def daemon_speak(text):
+    """Speak using Seven voice engine even when Seven UI is closed."""
+    try:
+        if SEVEN_ROOT not in sys.path:
+            sys.path.insert(0, SEVEN_ROOT)
+        from mouth.speaker import speak_text
+        speak_text(text)
+        print(f"[DAEMON] Spoke: {text}")
+    except Exception as e:
+        print(f"[DAEMON] Speak failed: {e}")
+
+
+def call_seven_speak(msg):
+    """Tell Seven to speak via API if it is running."""
+    try:
+        import requests as _r
+        _r.post(
+            "http://127.0.0.1:7777/api/system/battery-alert",
+            params={"message": msg},
+            timeout=2
+        )
+    except Exception:
+        pass
+
+
 def fire_notification(message, stype):
-    # Show Windows notification
+    """Show Windows notification, speak if Seven is closed, write alert file."""
+
+    # Windows notification
     try:
         from winotify import Notification, audio
         icons = {
@@ -84,28 +139,17 @@ def fire_notification(message, stype):
         )
         toast.set_audio(audio.Default, loop=False)
         toast.show()
-        print(f"[DAEMON] Fired: {message}")
+        print(f"[DAEMON] Notification: {message}")
     except Exception as e:
         print(f"[DAEMON] Notification failed: {e}")
 
-    # Speak it (works even when Seven UI is closed)
-    if not is_seven_running():
+    # Speak: if Seven running use API, else use direct voice
+    if is_seven_running():
+        call_seven_speak(message)
+    else:
         daemon_speak(message)
 
-    # Write to alert file so Seven shows banner when reopened
-    try:
-        os.makedirs(os.path.dirname(ALERT_FILE), exist_ok=True)
-        with open(ALERT_FILE, 'w') as f:
-            json.dump({
-                "active":  True,
-                "message": message,
-                "type":    stype,
-                "id":      None
-            }, f)
-    except Exception:
-        pass
-
-    # Write to alert file so Seven picks it up when reopened
+    # Write alert file so Seven shows panel when reopened
     try:
         os.makedirs(os.path.dirname(ALERT_FILE), exist_ok=True)
         with open(ALERT_FILE, 'w') as f:
@@ -119,28 +163,7 @@ def fire_notification(message, stype):
         pass
 
 
-def is_seven_running():
-    try:
-        import requests
-        r = requests.get("http://127.0.0.1:7777/api/status", timeout=1)
-        return r.status_code == 200
-    except Exception:
-        return False
-
-
-def _call_seven_speak(msg):
-    """Tell Seven to speak if it is running."""
-    if is_seven_running():
-        try:
-            import requests as _req
-            _req.post(
-                "http://127.0.0.1:7777/api/system/battery-alert",
-                params={"message": msg},
-                timeout=2
-            )
-        except Exception:
-            pass
-
+# ── Battery monitoring ────────────────────────────────────────────────────────
 
 def check_battery_alert():
     global _battery_level
@@ -157,35 +180,40 @@ def check_battery_alert():
             return
 
         if pct <= 5 and _battery_level != 5:
-            msg = f"Battery at {pct} percent. Shutting down soon. Plug in immediately."
-            fire_notification(msg, "alarm")
-            _call_seven_speak(msg)
+            fire_notification(
+                f"Battery at {pct} percent. Shutting down soon. Plug in immediately.",
+                "alarm"
+            )
             _battery_level = 5
-
         elif pct <= 10 and _battery_level != 10:
-            msg = f"Battery at {pct} percent. Getting critical. Plug in now."
-            fire_notification(msg, "alarm")
-            _call_seven_speak(msg)
+            fire_notification(
+                f"Battery at {pct} percent. Getting critical. Plug in now.",
+                "alarm"
+            )
             _battery_level = 10
-
         elif pct <= 20 and _battery_level != 20:
-            msg = f"Battery at {pct} percent. Should plug in soon."
-            fire_notification(msg, "reminder")
-            _call_seven_speak(msg)
+            fire_notification(
+                f"Battery at {pct} percent. Should plug in soon.",
+                "reminder"
+            )
             _battery_level = 20
-
         elif pct <= 30 and _battery_level != 30:
-            msg = f"Battery at {pct} percent. Just a heads up."
-            fire_notification(msg, "reminder")
-            _call_seven_speak(msg)
+            fire_notification(
+                f"Battery at {pct} percent. Just a heads up.",
+                "reminder"
+            )
             _battery_level = 30
-
     except Exception:
         pass
 
 
+# ── Main loop ─────────────────────────────────────────────────────────────────
+
 def main():
-    print("[DAEMON] Schedule daemon started")
+    if not acquire_lock():
+        return
+
+    print("[DAEMON] Seven schedule daemon started")
     fired = load_fired()
 
     while True:
@@ -200,7 +228,6 @@ def main():
                         continue
 
                     sid = str(schedule.get("id", ""))
-
                     if sid in fired:
                         continue
 
@@ -218,6 +245,7 @@ def main():
 
         except KeyboardInterrupt:
             print("[DAEMON] Stopped")
+            release_lock()
             break
         except Exception as e:
             print(f"[DAEMON] Error: {e}")
@@ -226,4 +254,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    finally:
+        release_lock()
