@@ -1,8 +1,7 @@
 """
 schedule_daemon.py
-Lightweight background process that monitors schedules.json
-and fires notifications even when Seven is not running.
-Runs at Windows startup via Task Scheduler (registered at install time).
+Runs at Windows login via Task Scheduler.
+Fires reminders and battery alerts even when Seven is fully closed.
 """
 
 import json
@@ -11,14 +10,15 @@ import time
 import sys
 from datetime import datetime
 
-
-APPDATA = os.environ.get('APPDATA', os.path.expanduser('~'))
+APPDATA       = os.environ.get('APPDATA', os.path.expanduser('~'))
 SCHEDULE_FILE = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    os.path.dirname(os.path.abspath(__file__)),
     'seven_data', 'schedules.json'
 )
-ALERT_FILE = os.path.join(APPDATA, 'SEVEN', 'schedule_alert.json')
-FIRED_FILE  = os.path.join(APPDATA, 'SEVEN', 'daemon_fired.json')
+ALERT_FILE    = os.path.join(APPDATA, 'SEVEN', 'schedule_alert.json')
+FIRED_FILE    = os.path.join(APPDATA, 'SEVEN', 'daemon_fired.json')
+
+_battery_alerted = False
 
 
 def load_schedules():
@@ -53,8 +53,12 @@ def save_fired(fired_ids):
 def fire_notification(message, stype):
     try:
         from winotify import Notification, audio
-        icons = {"alarm": "Alarm", "reminder": "Reminder",
-                 "timer": "Timer", "event": "Event"}
+        icons = {
+            "alarm":    "Alarm",
+            "reminder": "Reminder",
+            "timer":    "Timer",
+            "event":    "Event",
+        }
         toast = Notification(
             app_id="Seven AI",
             title=f"Seven - {icons.get(stype, 'Reminder')}",
@@ -67,18 +71,21 @@ def fire_notification(message, stype):
     except Exception as e:
         print(f"[DAEMON] Notification failed: {e}")
 
-    # Write to alert file so Seven picks up when reopened
+    # Write to alert file so Seven picks it up when reopened
     try:
         os.makedirs(os.path.dirname(ALERT_FILE), exist_ok=True)
         with open(ALERT_FILE, 'w') as f:
-            json.dump({"active": True, "message": message,
-                       "type": stype, "id": None}, f)
+            json.dump({
+                "active":  True,
+                "message": message,
+                "type":    stype,
+                "id":      None
+            }, f)
     except Exception:
         pass
 
 
 def is_seven_running():
-    """Check if Seven backend is already running."""
     try:
         import requests
         r = requests.get("http://127.0.0.1:7777/api/status", timeout=1)
@@ -87,18 +94,43 @@ def is_seven_running():
         return False
 
 
+def check_battery_alert():
+    global _battery_alerted
+    try:
+        import psutil
+        battery = psutil.sensors_battery()
+        if battery is None:
+            return
+        pct     = battery.percent
+        plugged = battery.power_plugged
+        if plugged:
+            _battery_alerted = False
+            return
+        if pct <= 10 and not _battery_alerted:
+            fire_notification(
+                f"Battery critically low at {int(pct)}%. Plug in now.",
+                "alarm"
+            )
+            _battery_alerted = True
+        elif pct <= 20 and not _battery_alerted:
+            fire_notification(
+                f"Battery at {int(pct)}%. Consider plugging in.",
+                "reminder"
+            )
+            _battery_alerted = True
+    except Exception:
+        pass
+
+
 def main():
     print("[DAEMON] Schedule daemon started")
     fired = load_fired()
 
     while True:
         try:
-            # Skip if Seven is running - it handles its own schedules
-        if not is_seven_running():
-            # Check battery level and alert if low
-            _check_battery_alert()
-
-            schedules = load_schedules()
+            if not is_seven_running():
+                check_battery_alert()
+                schedules = load_schedules()
                 now = datetime.now()
 
                 for schedule in schedules:
@@ -122,14 +154,13 @@ def main():
                         fired.add(sid)
                         save_fired(fired)
 
-            time.sleep(15)
-
         except KeyboardInterrupt:
             print("[DAEMON] Stopped")
             break
         except Exception as e:
             print(f"[DAEMON] Error: {e}")
-            time.sleep(15)
+
+        time.sleep(15)
 
 
 if __name__ == "__main__":
