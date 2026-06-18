@@ -243,6 +243,23 @@ def main():
                         fired.add(sid)
                         save_fired(fired)
 
+                        # Mark as fired in schedules.json so Seven does not
+                        # fire it again when it reopens
+                        try:
+                            with open(SCHEDULE_FILE, 'r') as _sf:
+                                _all = json.load(_sf)
+                            for _s in _all:
+                                if str(_s.get("id", "")) == sid:
+                                    _recur = _s.get("recur", "none")
+                                    if _recur == "none":
+                                        _s["status"] = "fired"
+                                    # Recurring: leave active, scheduler advances time
+                            with open(SCHEDULE_FILE, 'w') as _sf:
+                                json.dump(_all, _sf, indent=2)
+                            print(f"[DAEMON] Marked schedule {sid} as fired in schedules.json")
+                        except Exception as _me:
+                            print(f"[DAEMON] Could not mark fired in schedules.json: {_me}")
+
         except KeyboardInterrupt:
             print("[DAEMON] Stopped")
             release_lock()
