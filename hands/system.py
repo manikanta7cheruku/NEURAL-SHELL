@@ -337,17 +337,23 @@ def _battery_status():
         plugged = battery.power_plugged
         
         if plugged:
-            status = f"Battery at {pct}%, plugged in and charging." if pct < 100 else f"Battery fully charged at {pct}%, plugged in."
+            if pct >= 100:
+                status = f"Fully charged at {pct}%, plugged in."
+            else:
+                status = f"Battery at {pct}%, plugged in and charging."
         else:
             secs = battery.secsleft
-            if secs and secs > 0 and secs != -1:
+            # Sanity check - ignore clearly wrong values (over 24 hours is suspicious)
+            if secs and secs > 0 and secs != -1 and secs < 86400:
                 hours = secs // 3600
-                mins = (secs % 3600) // 60
-                if hours > 0:
+                mins  = (secs % 3600) // 60
+                if hours > 0 and mins > 0:
                     time_str = f"{hours} hour{'s' if hours > 1 else ''} and {mins} minutes"
+                elif hours > 0:
+                    time_str = f"{hours} hour{'s' if hours > 1 else ''}"
                 else:
                     time_str = f"{mins} minutes"
-                status = f"Battery at {pct}%, not plugged in. About {time_str} remaining."
+                status = f"Battery at {pct}%, not plugged in. About {time_str} left."
             else:
                 status = f"Battery at {pct}%, not plugged in."
         
