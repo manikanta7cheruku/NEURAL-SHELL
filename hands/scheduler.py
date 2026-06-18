@@ -928,27 +928,97 @@ def _fire_schedule(schedule):
         else:
             if speaker_name:
                 fire_msg = _rand3.choice([
-                    f"Hey {speaker_name}. Your {dur_str} timer is done.",
-                    f"{speaker_name}, that's {dur_str}. Timer's up.",
-                    f"Time's up, {speaker_name}. {dur_str}.",
+                    f"Hey {speaker_name}, that's {dur_str}. Time is up.",
+                    f"{speaker_name}, your {dur_str} timer just went off.",
+                    f"Clock stopped {speaker_name}. {dur_str} is done.",
                 ])
             else:
-                fire_msg = f"Your {dur_str} timer is up."
+                fire_msg = _rand3.choice([
+                    f"That's {dur_str}. Time is up.",
+                    f"Your {dur_str} timer just went off.",
+                    f"Done. {dur_str} on the clock.",
+                ])
     elif stype == "reminder":
         if message:
-            if speaker_name:
+            msg_lower = message.lower().strip()
+
+            # Detect message context for natural phrasing
+            is_light    = any(w in msg_lower for w in ["light", "lights", "lamp", "fan", "ac", "tv", "switch"])
+            is_meeting  = any(w in msg_lower for w in ["meeting", "call", "standup", "sync", "interview", "zoom", "teams"])
+            is_medicine = any(w in msg_lower for w in ["medicine", "tablet", "pill", "medication", "dose", "vitamin"])
+            is_food     = any(w in msg_lower for w in ["eat", "lunch", "dinner", "breakfast", "food", "cook", "oven", "stove"])
+            is_exercise = any(w in msg_lower for w in ["gym", "workout", "exercise", "run", "walk", "yoga"])
+            is_study    = any(w in msg_lower for w in ["study", "assignment", "homework", "exam", "class", "lecture"])
+            is_call     = any(w in msg_lower for w in ["call", "ring", "phone", "contact", "message", "text"])
+            is_water    = any(w in msg_lower for w in ["water", "drink", "hydrate"])
+            is_sleep    = any(w in msg_lower for w in ["sleep", "bed", "rest", "nap"])
+
+            name_part = f"{speaker_name}, " if speaker_name else ""
+
+            if is_light:
                 fire_msg = _rand3.choice([
-                    f"Hey {speaker_name}. Quick reminder — {message}.",
-                    f"{speaker_name}. Don't forget — {message}.",
-                    f"Heads up, {speaker_name}. {message}.",
-                    f"{speaker_name}. Just a nudge — {message}.",
-                    f"Hey. {message}. That's your reminder, {speaker_name}.",
+                    f"Hey {name_part}did you forget to turn off the {message}?",
+                    f"{name_part}quick check - the {message}. Still on?",
+                    f"Heads up {name_part}you left the {message} on.",
+                    f"{name_part}you wanted me to remind you about the {message}.",
+                ])
+            elif is_meeting:
+                fire_msg = _rand3.choice([
+                    f"Hey {name_part}you have {message} right now. Don't be late.",
+                    f"{name_part}your {message} is starting. Get in there.",
+                    f"Heads up {name_part}{message} is now. Did you forget?",
+                    f"{name_part}time for {message}. You asked me to remind you.",
+                ])
+            elif is_medicine:
+                fire_msg = _rand3.choice([
+                    f"Hey {name_part}time for your {message}. Don't skip it.",
+                    f"{name_part}you haven't taken your {message} yet. Do it now.",
+                    f"Medication reminder {name_part}{message}. Take it now.",
+                ])
+            elif is_food:
+                fire_msg = _rand3.choice([
+                    f"Hey {name_part}did you forget about {message}? Check it now.",
+                    f"{name_part}you set a reminder for {message}. Don't let it burn.",
+                    f"Food check {name_part}{message}. You might want to check on that.",
+                ])
+            elif is_exercise:
+                fire_msg = _rand3.choice([
+                    f"Hey {name_part}time to move. {message} is on your list.",
+                    f"{name_part}no excuses. You scheduled {message} for now.",
+                    f"Get up {name_part}{message} time. You set this yourself.",
+                ])
+            elif is_study:
+                fire_msg = _rand3.choice([
+                    f"Hey {name_part}you were supposed to {message} right now.",
+                    f"{name_part}study time. {message}. You set this reminder.",
+                    f"Focus time {name_part}{message} is on your schedule.",
+                ])
+            elif is_call:
+                fire_msg = _rand3.choice([
+                    f"Hey {name_part}you need to {message}. Do it now before you forget.",
+                    f"{name_part}reminder to {message}. They might be waiting.",
+                    f"Don't forget {name_part}you said you'd {message}.",
+                ])
+            elif is_water:
+                fire_msg = _rand3.choice([
+                    f"Hey {name_part}drink some water. You set this reminder.",
+                    f"{name_part}hydration check. Time to drink water.",
+                    f"Water break {name_part}you asked me to remind you to hydrate.",
+                ])
+            elif is_sleep:
+                fire_msg = _rand3.choice([
+                    f"Hey {name_part}it is time to sleep. You set this yourself.",
+                    f"{name_part}put the phone down. Bed time.",
+                    f"Sleep reminder {name_part}you said you'd rest now.",
                 ])
             else:
+                # Generic but still natural
                 fire_msg = _rand3.choice([
-                    f"Quick reminder — {message}.",
-                    f"Don't forget — {message}.",
-                    f"Heads up. {message}.",
+                    f"Hey {name_part}you asked me to remind you about {message}.",
+                    f"{name_part}don't forget - {message}.",
+                    f"Heads up {name_part}{message}. You set this reminder.",
+                    f"{name_part}quick nudge - {message}.",
+                    f"Just checking {name_part}did you handle {message} yet?",
                 ])
         else:
             fire_msg = f"Hey {speaker_name}, you have a reminder." if speaker_name else "You have a reminder."
