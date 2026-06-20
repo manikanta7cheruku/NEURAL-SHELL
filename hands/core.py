@@ -237,6 +237,47 @@ def _log_failed_app(user_phrase, attempted_name, error_detail):
     config.save_config()
 
 
+# Process name resolution table - maps common names to actual Windows process names
+# This is why "close camera" works even though process is "WindowsCamera.exe"
+_PROCESS_NAME_MAP = {
+    "camera":        ["WindowsCamera.exe"],
+    "calculator":    ["CalculatorApp.exe", "calc.exe"],
+    "photos":        ["Microsoft.Photos.exe", "Photos.exe"],
+    "store":         ["WinStore.App.exe"],
+    "mail":          ["HxOutlook.exe", "HxTsr.exe"],
+    "maps":          ["Maps.exe"],
+    "clock":         ["TimeDate.CPL"],
+    "settings":      ["SystemSettings.exe"],
+    "paint":         ["mspaint.exe"],
+    "notepad":       ["notepad.exe"],
+    "explorer":      ["explorer.exe"],
+    "chrome":        ["chrome.exe"],
+    "firefox":       ["firefox.exe"],
+    "edge":          ["msedge.exe"],
+    "brave":         ["brave.exe"],
+    "spotify":       ["Spotify.exe"],
+    "discord":       ["Discord.exe"],
+    "telegram":      ["Telegram.exe"],
+    "whatsapp":      ["WhatsApp.exe", "WhatsAppDesktop.exe"],
+    "vlc":           ["vlc.exe"],
+    "zoom":          ["Zoom.exe"],
+    "teams":         ["Teams.exe", "ms-teams.exe"],
+    "outlook":       ["OUTLOOK.EXE"],
+    "word":          ["WINWORD.EXE"],
+    "excel":         ["EXCEL.EXE"],
+    "powerpoint":    ["POWERPNT.EXE"],
+    "obs":           ["obs64.exe", "obs32.exe"],
+    "steam":         ["steam.exe"],
+    "vs code":       ["Code.exe"],
+    "vscode":        ["Code.exe"],
+    "code":          ["Code.exe"],
+    "task manager":  ["Taskmgr.exe"],
+    "powershell":    ["powershell.exe", "pwsh.exe"],
+    "cmd":           ["cmd.exe"],
+    "terminal":      ["WindowsTerminal.exe"],
+}
+
+
 def close_app(app_name):
     raw_name = app_name.strip()
 
@@ -247,24 +288,55 @@ def close_app(app_name):
 
     clean_name = raw_name.lower().strip()
 
-    # LIGHTNING FAST-PATH: Instant Kernel Process Kill via Win32 taskkill (<15ms)
-    _CREATE_NO_WINDOW = 0x08000000
-    _target_kill = f"{clean_name}.exe" if not clean_name.endswith(".exe") else clean_name
-    _kill_cmd = f"taskkill /IM {_target_kill} /F" if close_all else f"taskkill /IM {_target_kill}"
-    try:
-        if subprocess.call(_kill_cmd, shell=True, creationflags=_CREATE_NO_WINDOW, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) == 0:
-            print(Fore.GREEN + f"   -> Lightning kill executed for '{_target_kill}'")
-            command_log.log_command("CLOSE", clean_name, True, "Kernel Taskkill")
-            mood_engine.on_command_result(True)
-            return True
-    except Exception:
-        pass
-
-    clean_name = raw_name.lower().strip()
-    print(Fore.CYAN + f"HANDS: Closing '{clean_name}'" + (" (ALL instances)" if close_all else "") + "...")
-
-    # Resolve aliases from config
+    # Resolve alias from config first
     clean_name = _resolve_alias(clean_name)
+
+    _CREATE_NO_WINDOW = 0x08000000
+    _flag = "/F" if close_all else ""
+
+    # LIGHTNING FAST-PATH: Use process name map for instant kill
+    # This correctly maps "camera" → "WindowsCamera.exe" etc.
+    _target_processes = _PROCESS_NAME_MAP.get(clean_name, [])
+
+    if _target_processes:
+        for _proc_exe in _target_processes:
+            try:
+                _result = subprocess.call(
+                    f"taskkill /IM {_proc_exe} {_flag}",
+                    shell=True,
+                    creationflags=_CREATE_NO_WINDOW,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+                if _result == 0:
+                    print(Fore.GREEN + f"   -> Lightning kill: {_proc_exe}")
+                    command_log.log_command("CLOSE", clean_name, True, f"Lightning: {_proc_exe}")
+                    mood_engine.on_command_result(True)
+                    return True
+            except Exception:
+                continue
+        # Map had entries but none matched — fall through to psutil scan
+        print(Fore.YELLOW + f"   -> Process map miss for '{clean_name}', trying psutil scan...")
+    else:
+        # Not in map — try direct name match first (fast)
+        _direct_exe = f"{clean_name}.exe"
+        try:
+            _result = subprocess.call(
+                f"taskkill /IM {_direct_exe} {_flag}",
+                shell=True,
+                creationflags=_CREATE_NO_WINDOW,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+            if _result == 0:
+                print(Fore.GREEN + f"   -> Direct taskkill: {_direct_exe}")
+                command_log.log_command("CLOSE", clean_name, True, f"Direct: {_direct_exe}")
+                mood_engine.on_command_result(True)
+                return True
+        except Exception:
+            pass
+
+    print(Fore.CYAN + f"HANDS: Closing '{clean_name}'" + (" (ALL instances)" if close_all else "") + "...")
 
     # Check if this is a custom alias with a known process
     # Check in-memory registry first, then fall back to config path lookup

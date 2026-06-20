@@ -1166,6 +1166,15 @@ def think(prompt_text, speaker_id="default"):
 
     clean_in = prompt_text.lower().strip()
     clean_in = clean_in.replace("?", "").replace(".", "").replace("!", "").replace("'", "").replace(",", "")
+
+    # Strip leading filler words so "and open chrome" becomes "open chrome"
+    # This prevents "and/also/now/then" from blocking command detection
+    _filler_starts = ["and ", "also ", "now ", "then ", "please ", "can you ", "could you ", "hey "]
+    for _filler in _filler_starts:
+        if clean_in.startswith(_filler):
+            clean_in = clean_in[len(_filler):].strip()
+            break
+
     words = clean_in.split()
 
     # =========================================================================
@@ -2392,7 +2401,14 @@ def think(prompt_text, speaker_id="default"):
     # Skip memory for commands, greetings, and farewells
     is_greeting = first_word in ["hi", "hey", "hello", "bye", "goodbye"]
 
-    if "VISUAL_REPORT:" not in prompt_text and not is_command and not is_greeting:
+    # Hard skip memory for all action commands - these never need memory
+    _is_action_cmd = first_word in ["open", "close", "start", "kill", "launch",
+                                     "minimize", "maximize", "maximise", "restore",
+                                     "snap", "mute", "unmute", "set", "volume",
+                                     "brightness", "play", "pause", "skip", "next",
+                                     "previous", "stop"]
+
+    if "VISUAL_REPORT:" not in prompt_text and not is_command and not is_greeting and not _is_action_cmd:
         search_uid = speaker_id if speaker_id not in ("default", "unknown") else config.KEY.get("identity", {}).get("user_name", "default").lower() or "default"
         try:
             memory_context = seven_memory.search(prompt_text, user_id=search_uid)
@@ -2413,7 +2429,7 @@ def think(prompt_text, speaker_id="default"):
     
     knowledge_context = ""
     
-    if not is_command and not is_greeting and "VISUAL_REPORT:" not in prompt_text:
+    if not is_command and not is_greeting and not _is_action_cmd and "VISUAL_REPORT:" not in prompt_text:
         # Only search knowledge for factual questions
         knowledge_triggers = ["what is", "what are", "who is", "who was", "who were",
                              "explain", "define", "how does", "how do", "how is",
@@ -2448,7 +2464,7 @@ def think(prompt_text, speaker_id="default"):
     web_context = ""
     web_searched = False
     
-    if not is_command and not is_greeting and "VISUAL_REPORT:" not in prompt_text:
+    if not is_command and not is_greeting and not _is_action_cmd and "VISUAL_REPORT:" not in prompt_text:
         from web.classifier import needs_web_search
         from web.core import web_search, web_news
         
@@ -2493,7 +2509,7 @@ def think(prompt_text, speaker_id="default"):
     # LAYER 7: FACT EXTRACTION (Meaningful input only — not commands)
     # =========================================================================
 
-    if "VISUAL_REPORT:" not in prompt_text and not is_command and not is_greeting:
+    if "VISUAL_REPORT:" not in prompt_text and not is_command and not is_greeting and not _is_action_cmd:
         search_uid = speaker_id if speaker_id not in ("default", "unknown") else config.KEY.get("identity", {}).get("user_name", "default").lower() or "default"
         try:
             seven_memory.extract_and_store_facts(prompt_text, user_id=search_uid)
@@ -2508,7 +2524,8 @@ def think(prompt_text, speaker_id="default"):
     _original_input = prompt_text
     if "===" in _original_input and "User asked:" in _original_input:
         _original_input = _original_input.split("User asked:")[-1].strip()
-    if "VISUAL_REPORT:" not in _original_input:
+    # Do not store action commands in conversation history - they pollute LLM context
+    if "VISUAL_REPORT:" not in _original_input and not _is_action_cmd:
         if speaker_id not in CONVO_HISTORY:
             CONVO_HISTORY[speaker_id] = []
         CONVO_HISTORY[speaker_id].append(f"User: {_original_input}")

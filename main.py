@@ -337,37 +337,34 @@ def seven_logic():
     if sched_count > 0:
         print(Fore.CYAN + f"[SYSTEM] Scheduler: {sched_count} active schedules.")
 
-    # Daemon
+    # Daemon - check if already running before starting
+    # SevenScheduleDaemon in schtasks handles login startup
+    # We only start one here if none is running
     try:
         import subprocess as _sp
         import os as _os
+
         _daemon  = _os.path.join(_os.getcwd(), "schedule_daemon.py")
         _python  = sys.executable
         _pythonw = _python.replace("python.exe", "pythonw.exe")
         if not _os.path.exists(_pythonw):
             _pythonw = _python
 
-        # Register in startup folder
-        _task_check = _sp.run(["schtasks", "/query", "/tn", "SevenScheduleDaemon"], capture_output=True)
-        if _task_check.returncode != 0:
-            try:
-                _startup_folder = _os.path.join(
-                    _os.environ.get('APPDATA', ''),
-                    'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup'
-                )
-                # VBS launches pythonw with window mode 0 = completely hidden
-                _shortcut_path = _os.path.join(_startup_folder, 'SevenDaemon.vbs')
-                with open(_shortcut_path, 'w') as _sf:
-                    _sf.write(
-                        f'Set WshShell = CreateObject("WScript.Shell")\n'
-                        f'WshShell.Run """{_pythonw}"" ""{_daemon}""", 0, False\n'
-                    )
-                print(Fore.GREEN + "[SYSTEM] Schedule daemon registered in Startup folder")
-            except Exception as _reg_err:
-                print(Fore.YELLOW + f"[SYSTEM] Daemon startup registration failed: {_reg_err}")
+        # Count running daemon instances
+        _daemon_count = 0
+        try:
+            import psutil as _psu
+            for _proc in _psu.process_iter(['pid', 'cmdline']):
+                try:
+                    _cmd = " ".join(_proc.info['cmdline'] or [])
+                    if "schedule_daemon" in _cmd:
+                        _daemon_count += 1
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
-        # Start daemon now - completely hidden, no terminal
-        if _os.path.exists(_daemon):
+        if _daemon_count == 0 and _os.path.exists(_daemon):
             _CREATE_NO_WINDOW = 0x08000000
             _DETACHED_PROCESS = 0x00000008
             _sp.Popen(
@@ -378,6 +375,9 @@ def seven_logic():
                 creationflags=_CREATE_NO_WINDOW | _DETACHED_PROCESS
             )
             print(Fore.CYAN + "[SYSTEM] Schedule daemon started (hidden)")
+        elif _daemon_count > 0:
+            print(Fore.CYAN + f"[SYSTEM] Daemon already running ({_daemon_count} instance). Skipping.")
+
     except Exception as _de:
         print(Fore.YELLOW + f"[SYSTEM] Daemon skipped: {_de}")
 
