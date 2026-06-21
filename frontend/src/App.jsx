@@ -10,7 +10,7 @@ import Commands       from './pages/Commands';
 import Memory         from './pages/Memory';
 import Schedules      from './pages/Schedules';
 import Knowledge      from './pages/Knowledge';
-import Settings       from './pages/Settings';
+import Settings       from './pages/settings/index'
 import Plans          from './pages/Plans';
 import Purchase       from './pages/Purchase';
 import Blog           from './pages/Blog';
