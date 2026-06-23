@@ -282,7 +282,7 @@ def seven_logic():
     _silence_watcher = None
     _last_topic_ref  = [None]
     try:
-        from pipeline.silence_watcher import SilenceWatcher
+        from brain_modules.silence_watcher import SilenceWatcher
         _silence_watcher = SilenceWatcher(
             speak_fn=speak_with_interrupt,
             get_last_topic_fn=lambda: _last_topic_ref[0],
