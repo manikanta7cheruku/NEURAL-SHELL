@@ -20,6 +20,7 @@ class ChatResponse(BaseModel):
     response: str
     actions: List[str] = []
     streaming: bool = False
+    file_results: Optional[dict] = None
 
 
 @router.post("/api/chat", response_model=ChatResponse)
@@ -96,10 +97,23 @@ def chat(req: ChatRequest):
         except Exception:
             pass
 
+        # Pull file search results from shared state if brain.py set them
+        file_results = None
+        try:
+            from backend.api_server import get_state as _get_state
+            _current_state = _get_state()
+            file_results = _current_state.get("file_search_results")
+            # Clear after reading so next request starts fresh
+            if file_results:
+                set_state("file_search_results", None)
+        except Exception:
+            pass
+
         return ChatResponse(
             response=clean_response,
             actions=action_list,
-            streaming=is_streaming
+            streaming=is_streaming,
+            file_results=file_results
         )
 
     except Exception as e:
@@ -179,4 +193,4 @@ def _execute_actions(action_list, full_response, speaker_id):
             if _telemetry:
                 _telemetry.log_activity()
         except Exception as e:
-            print(f"[API] App command error: {e}")
+            print(f"[API] App command error: {e}")  
