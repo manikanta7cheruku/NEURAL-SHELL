@@ -34,13 +34,14 @@ except ImportError:
 # =========================================================================
 
 _state = {
-    "listening":    False,
-    "thinking":     False,
-    "speaking":     False,
-    "user_text":    "",
-    "seven_text":   "",
-    "status_text":  "SYSTEM ONLINE",
-    "status_color": "#00ff00",
+    "listening":          False,
+    "thinking":           False,
+    "speaking":           False,
+    "user_text":          "",
+    "seven_text":         "",
+    "status_text":        "SYSTEM ONLINE",
+    "status_color":       "#00ff00",
+    "file_search_results": None,   # set by brain.py Layer 4.3 when file search runs
 }
 
 _start_time = time.time()
