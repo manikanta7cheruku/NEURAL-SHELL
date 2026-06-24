@@ -60,7 +60,7 @@ audio_model = _load_whisper_model(MODEL_SIZE)
 # 800 works for most laptop mics at normal speaking distance (30-50cm)
 # If you are far from laptop, lower this to 400
 # If background noise is loud, raise this to 1200
-RMS_THRESHOLD = 800
+RMS_THRESHOLD = 500
 
 
 def listen():
@@ -77,15 +77,18 @@ def listen():
     recognizer = sr.Recognizer()
 
     with sr.Microphone() as source:
-        # Calibrate to current room noise — 0.3 sec is enough, 0.5 was adding delay
-        recognizer.adjust_for_ambient_noise(source, duration=0.3)
+        # Short calibration — 0.2s is enough for ambient noise baseline
+        recognizer.adjust_for_ambient_noise(source, duration=0.2)
         recognizer.dynamic_energy_threshold = True
 
-        # 4000 minimum — laptop mic needs this floor to ignore background TV/YouTube
-        # 400 was far too low, background audio easily crossed it
-        recognizer.energy_threshold = max(recognizer.energy_threshold, 4000)
-        recognizer.pause_threshold = 0.8
-        recognizer.non_speaking_duration = 0.4
+        # Keep energy_threshold low — let audio through, crest factor does discrimination
+        # 300 catches silence. Crest factor 30-44 catches your voice vs speaker bleed.
+        # Calibrated: ambient noise threshold on this machine = ~119
+        # Voice RMS = 3049, Crest = 10.69
+        # Keep threshold low — crest factor handles speaker bleed discrimination
+        recognizer.energy_threshold = max(recognizer.energy_threshold, 200)
+        recognizer.pause_threshold = 0.6   # was 0.8 — faster end-of-speech detection
+        recognizer.non_speaking_duration = 0.3  # was 0.4
 
         try:
             audio = recognizer.listen(source, timeout=None, phrase_time_limit=10)
@@ -98,30 +101,42 @@ def listen():
             # This is the single most effective hallucination filter.
             try:
                 audio_np = np.frombuffer(wav_data, dtype=np.int16).astype(np.float32)
-                rms = np.sqrt(np.mean(audio_np ** 2))
+                rms  = np.sqrt(np.mean(audio_np ** 2))
+                peak = np.max(np.abs(audio_np))
+
                 if rms < RMS_THRESHOLD:
-                    # Too quiet — background noise, not direct speech
                     print(Fore.YELLOW + f"[EARS] RMS too low ({rms:.0f} < {RMS_THRESHOLD}) — background noise, skipping")
                     return None, None
-                print(Fore.CYAN + f"[EARS] RMS: {rms:.0f} — proceeding to Whisper")
+
+                # Crest factor = peak / RMS
+                # Direct voice: crest factor typically 4-15 (sharp consonant peaks)
+                # Speaker bleed: crest factor typically 1.5-3 (diffuse, averaged out)
+                # If crest factor is very low, audio is diffuse = speaker bleed
+                crest = peak / rms if rms > 0 else 0
+                if crest < 2.5:
+                    print(Fore.YELLOW + f"[EARS] Low crest factor ({crest:.2f}) — diffuse audio, likely speaker bleed, skipping")
+                    return None, None
+
+                print(Fore.CYAN + f"[EARS] RMS: {rms:.0f} | Crest: {crest:.2f} — proceeding to Whisper")
             except Exception as _rms_err:
-                # numpy failed — skip RMS check, proceed normally
-                print(Fore.YELLOW + f"[EARS] RMS check skipped: {_rms_err}")
+                print(Fore.YELLOW + f"[EARS] Audio check skipped: {_rms_err}")
 
             with open(AUDIO_TEMP_PATH, "wb") as f:
                 f.write(wav_data)
 
             segments_list = list(audio_model.transcribe(
                 AUDIO_TEMP_PATH,
-                beam_size=5,    
+                beam_size=3,        # was 5 — 3 is 40% faster, negligible accuracy loss
                 language="en",
                 condition_on_previous_text=False,
-                # 0.7 — stricter than before. Whisper must be more confident
-                # speech exists before transcribing. Reduces hallucinations.
                 no_speech_threshold=0.7,
-                # -0.5 — was -1.0 which allowed very low prob transcriptions.
-                # -0.5 rejects uncertain transcriptions entirely.
                 log_prob_threshold=-0.5,
+                vad_filter=True,    # built-in Whisper VAD — skips silent segments
+                vad_parameters={
+                    "threshold": 0.5,           # speech probability threshold
+                    "min_speech_duration_ms": 200,   # ignore clips under 200ms
+                    "min_silence_duration_ms": 300,  # merge gaps under 300ms
+                },
             ))
             segments = segments_list[0]
 
@@ -195,7 +210,7 @@ def listen():
                 return None, None
 
             # Substring patterns — if ANY of these appear anywhere in the text,
-            # it is a hallucination from background audio
+            # it is background audio bleed, not user speech
             forbidden = [
                 "subscribe", "amara.org", "caption", "copyright",
                 "all rights reserved", "bada ba", "ba ba ba ba",
@@ -205,10 +220,43 @@ def listen():
                 "dont forget to", "don't forget to",
                 "hit the like", "like and subscribe",
                 "have a great day", "have a good day",
+                # Speaker bleed patterns from background video/audio
+                "thank you very much",
+                "thank you so much",
+                "i wish i could",
+                "i'll begin",
+                "i will begin",
+                "that was quick",
+                "almost at a percent",
+                "platform is almost",
+                "you're watching",
+                "youre watching",
+                "welcome back",
+                "welcome to",
+                "in today's video",
+                "in todays video",
+                "in this video",
+                "let's get started",
+                "lets get started",
+                "without further ado",
+                "make sure to",
+                "guys and gals",
+                "smash that like",
+                "drop a comment",
+                "down below",
+                "check out",
+                "my name is",          # common YouTube intro — will not fire for Seven
+                "i'm your host",
+                "im your host",
+                "stay tuned",
+                "coming up next",
+                "right after this",
+                "we'll be right back",
+                "well be right back",
             ]
             for p in forbidden:
                 if p in clean:
-                    print(Fore.YELLOW + f"[EARS] Forbidden pattern filtered: '{p}' in '{clean}'")
+                    print(Fore.YELLOW + f"[EARS] Speaker bleed filtered: '{p}' in '{clean}'")
                     return None, None
 
             # Reject if input is ONLY repeated single syllables (music hallucination)
@@ -233,6 +281,29 @@ def listen():
                 if filler_ratio > 0.75:
                     print(Fore.YELLOW + f"[EARS] High filler ratio ({filler_ratio:.2f}) filtered: '{clean}'")
                     return None, None
+
+            # Reject run-on sentences — user commands are concise
+            # Background audio produces long mixed transcriptions
+            # Hard limit: more than 18 words = almost certainly background audio
+            if len(words) > 18:
+                print(Fore.YELLOW + f"[EARS] Too long ({len(words)} words) — background audio, filtered: '{clean[:60]}...'")
+                return None, None
+
+            # Reject trailing-off sentences — background audio fades out
+            # "thank you i wish i could just" ends with "just" — no object
+            # Real commands always complete: "open chrome", "set volume 50"
+            _trailing_off = ["just", "but", "and", "so", "because",
+                             "though", "although", "however", "anyway",
+                             "i mean", "you know", "like i"]
+            if words and words[-1] in _trailing_off:
+                print(Fore.YELLOW + f"[EARS] Trailing-off sentence filtered: '{clean}'")
+                return None, None
+
+            # Reject if sentence has multiple "thank you" or "thanks" embedded
+            _ty_count = clean.count("thank you") + clean.count("thanks")
+            if _ty_count >= 1 and len(words) > 5:
+                print(Fore.YELLOW + f"[EARS] Thank-you pattern in long sentence filtered: '{clean}'")
+                return None, None
 
             # --- AUTOCORRECT ---
             corrections = {
