@@ -143,6 +143,15 @@ _EXTENSION_PROCESS_MAP = {
 
 _custom_alias_to_process = {}
 
+def _load_process_registry():
+    """Load saved alias->process mappings from config on startup."""
+    saved = config.KEY.get("commands", {}).get("alias_process_map", {})
+    for alias, procs in saved.items():
+        _custom_alias_to_process[alias] = procs if isinstance(procs, list) else [procs]
+    if saved:
+        print(Fore.CYAN + f"   -> Loaded {len(saved)} alias->process mappings from config")
+
+_load_process_registry()
 
 def _register_custom_process(alias, file_path):
     """Remember what process handles a custom alias."""
@@ -178,33 +187,46 @@ def _try_custom_path(app_name):
         else:
             os.startfile(exe_path)
 
-        # Bring newly opened window to front after short delay
-        import threading
-        import time
-        def _focus_new():
-            time.sleep(2)
-            try:
-                import pyautogui
-                # Press alt briefly to allow SetForegroundWindow to work
-                # Then the OS brings the most recently opened window forward
-                import ctypes
-                ctypes.windll.user32.keybd_event(0x12, 0, 0, 0)  # alt down
-                time.sleep(0.05)
-                ctypes.windll.user32.keybd_event(0x12, 0, 2, 0)  # alt up
-            except Exception:
-                pass
-        threading.Thread(target=_focus_new, daemon=True).start()
-
-        # No alt+tab needed - os.startfile handles focus
-        # alt+tab was CAUSING the minimize by switching away
+        # No focus thread needed — os.startfile brings window to front natively
 
         print(Fore.GREEN + f"   -> Launched via custom path: {exe_path}")
         command_log.log_command("OPEN", clean, True, f"Custom path: {exe_path}")
         mood_engine.on_command_result(True)
 
-        # Register which process this custom name maps to
-        # So "close pic" knows to look for the Photos app process
-        _register_custom_process(clean, exe_path)
+        # Watch for the new process that opens this file
+        # so close_app knows exactly which process to kill
+        def _watch_new_process(alias, path):
+            import time
+            # Snapshot processes before
+            before_pids = {p.pid for p in psutil.process_iter(['pid'])}
+            time.sleep(2.5)  # Wait for app to launch
+            # Find new processes
+            for p in psutil.process_iter(['pid', 'name']):
+                try:
+                    if p.pid not in before_pids:
+                        _custom_alias_to_process[alias] = [p.info['name']]
+                        # Persist so it survives Seven restart
+                        try:
+                            _apm = config.KEY.get("commands", {}).get("alias_process_map", {})
+                            _apm[alias] = [p.info['name']]
+                            if "commands" not in config.KEY:
+                                config.KEY["commands"] = {}
+                            config.KEY["commands"]["alias_process_map"] = _apm
+                            config.save_config()
+                        except Exception:
+                            pass
+                        print(Fore.GREEN + f"   -> Registered '{alias}' -> '{p.info['name']}'")
+                        return
+                except Exception:
+                    continue
+            # Fallback to extension map
+            _register_custom_process(alias, path)
+
+        threading.Thread(
+            target=_watch_new_process,
+            args=(clean, exe_path),
+            daemon=True
+        ).start()
         return True
 
     except Exception as e:
@@ -240,7 +262,7 @@ def _log_failed_app(user_phrase, attempted_name, error_detail):
 # Process name resolution table - maps common names to actual Windows process names
 # This is why "close camera" works even though process is "WindowsCamera.exe"
 _PROCESS_NAME_MAP = {
-    "camera":        ["WindowsCamera.exe"],
+    # camera intentionally excluded — UWP app needs psutil PID kill, not taskkill /IM
     "calculator":    ["CalculatorApp.exe", "calc.exe"],
     "photos":        ["Microsoft.Photos.exe", "Photos.exe"],
     "store":         ["WinStore.App.exe"],
@@ -355,15 +377,21 @@ def close_app(app_name):
         for proc_name in process_names_to_try:
             for proc in psutil.process_iter(['pid', 'name']):
                 try:
-                    if proc_name.lower() in proc.info['name'].lower():
-                        proc.terminate()
-                        print(Fore.GREEN + f"   -> Closed {proc.info['name']} for alias '{clean_name}'")
+                    p_lower = proc.info['name'].lower()
+                    pn_lower = proc_name.lower().replace('.exe', '')
+                    if pn_lower in p_lower or p_lower.startswith(pn_lower):
+                        proc.kill()  # kill not terminate — faster, no grace period
+                        print(Fore.GREEN + f"   -> Closed {proc.info['name']} for '{clean_name}'")
                         command_log.log_command("CLOSE", clean_name, True, f"Via alias -> {proc.info['name']}")
                         mood_engine.on_command_result(True)
                         return True
                 except Exception:
                     continue
+        # Process map had entries but nothing running — tell caller
         print(Fore.YELLOW + f"   -> No running process found for alias '{clean_name}'")
+        command_log.log_command("CLOSE", clean_name, False, "Process not running")
+        mood_engine.on_command_result(False)
+        return False
 
     # 1. SPECIAL CASE: ACTIVE WINDOW
     if clean_name in ["current", "this", "it", "active window"]:
@@ -422,12 +450,32 @@ def close_app(app_name):
         mood_engine.on_command_result(True)
         return True
 
-    # 4. SPECIAL CASE: CAMERA
+    # SPECIAL CASE: CAMERA (UWP app — taskkill /IM does not work, need PID)
     if "camera" in clean_name:
-        subprocess.Popen("taskkill /im WindowsCamera.exe /f", shell=True)
-        command_log.log_command("CLOSE", "camera", True, "Force kill")
-        mood_engine.on_command_result(True)
-        return True
+        _cam_killed = False
+        # Try psutil scan for UWP camera process
+        _cam_names = ["windowscamera", "camera"]
+        for _proc in psutil.process_iter(['pid', 'name']):
+            try:
+                _pn = _proc.info['name'].lower()
+                if any(_cn in _pn for _cn in _cam_names):
+                    _proc.kill()
+                    print(Fore.GREEN + f"   -> Killed camera process: {_proc.info['name']}")
+                    _cam_killed = True
+            except Exception:
+                continue
+        if not _cam_killed:
+            # UWP fallback via PowerShell
+            subprocess.Popen(
+                ['powershell', '-command',
+                 'Get-Process | Where-Object {$_.Name -like "*camera*"} | Stop-Process -Force'],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+            _cam_killed = True
+        command_log.log_command("CLOSE", "camera", _cam_killed, "UWP kill via psutil")
+        mood_engine.on_command_result(_cam_killed)
+        return _cam_killed
 
     # 5. TASK MANAGER
     if "task manager" in clean_name:
@@ -575,10 +623,12 @@ def open_app(app_name):
         
         # Windows native apps (manual overrides — these don't work with AppOpener)
         if "camera" in clean_name:
+            # Start-Process is faster than explorer.exe URI launch for UWP apps
             subprocess.Popen(
-                ["explorer.exe", "microsoft.windows.camera:"],
+                ['powershell', '-command', 'Start-Process "microsoft.windows.camera:"'],
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
+                stderr=subprocess.DEVNULL,
+                creationflags=0x08000000
             )
             # Give camera time to launch then bring to front
             import threading, time
