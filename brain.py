@@ -270,11 +270,13 @@ def think(prompt_text, speaker_id="default"):
     first_word = words[0] if words else ""
 
     # Pre-classify to skip unnecessary layers for commands/greetings
+    # REMOVED from is_command: volume, mute, unmute, brightness, play, pause,
+    # skip, next, previous, stop — these are SYSTEM commands handled by
+    # _build_system_tag(). Having them here set is_command=True which
+    # blocked the SYS layer entirely. That was why "volume 10" did nothing.
     is_command  = first_word in ["open", "close", "start", "kill", "launch",
                                   "minimize", "maximize", "maximise", "restore",
-                                  "snap", "mute", "unmute", "set", "volume",
-                                  "brightness", "play", "pause", "skip",
-                                  "next", "previous", "stop"]
+                                  "snap"]
     is_greeting = first_word in ["hi", "hey", "hello", "bye", "goodbye", "good"]
 
     # ------------------------------------------------------------------
@@ -435,7 +437,10 @@ def think(prompt_text, speaker_id="default"):
         )
     )
 
-    if (_has_sys and not is_command) or _has_context_ref:
+    # Use _is_app_cmd_only instead of is_command so system words like
+    # "volume", "mute" are not blocked by the app-command classifier.
+    _is_app_cmd_only = first_word in ["open", "close", "start", "kill", "launch"]
+    if (_has_sys and not _is_app_cmd_only) or _has_context_ref:
         sys_tag = _build_system_tag(clean_in)
         if sys_tag:
             is_command = True
@@ -637,20 +642,61 @@ def think(prompt_text, speaker_id="default"):
             if not apps:
                 apps = [remaining.strip()]
 
-            # Validate app names before generating tags
+            # Known system apps always closeable without a configured path
+            _ALWAYS_CLOSEABLE = {
+                "chrome", "firefox", "edge", "notepad", "explorer", "calculator",
+                "camera", "photos", "settings", "paint", "word", "excel",
+                "powerpoint", "outlook", "teams", "discord", "spotify",
+                "whatsapp", "telegram", "zoom", "obs", "vlc", "code",
+                "vscode", "terminal", "cmd", "powershell", "copilot",
+                "clock", "calendar", "mail", "maps", "store", "xbox",
+                "brave", "opera", "skype", "slack", "notepad++", "winamp",
+                "snipping tool", "task manager", "paint 3d", "media player",
+            }
+
+            _cmd_paths   = config.KEY.get("commands", {}).get("app_paths", {})
+            _cmd_aliases = config.KEY.get("commands", {}).get("app_aliases", {})
+
+            # Pronouns and garbage words that are never app names
+            _INVALID_TARGETS = {
+                "me", "it", "this", "that", "the", "a", "an",
+                "and", "or", "all", "everything", "them", "those",
+                "these", "here", "there", "now", "app", "window",
+            }
+
             if tag == "OPEN":
-                _cmd_paths   = config.KEY.get("commands", {}).get("app_paths", {})
-                _cmd_aliases = config.KEY.get("commands", {}).get("app_aliases", {})
                 for _app in apps:
                     _app_clean = _app.lower().strip()
+                    # Known configured app — allow through
                     if _app_clean in _cmd_paths or _app_clean in _cmd_aliases:
                         continue
-                    if _app_clean.isdigit():
-                        return (f"I do not have anything called '{_app}'. "
-                                f"Set it up in Commands.")
-                    if len(_app_clean) <= 2 and _app_clean not in _cmd_paths:
-                        return (f"I do not know what '{_app}' is. "
-                                f"Set it up in Commands with a file path and name.")
+                    # Common system app — allow through
+                    if _app_clean in _ALWAYS_CLOSEABLE:
+                        continue
+                    # Everything else — block with human message
+                    # (AppOpener async silently fails, user gets no feedback)
+                    return (
+                        f"I don't have '{_app}' in my commands. "
+                        f"Go to Commands and add the path, "
+                        f"then I can open it."
+                    )
+
+            if tag == "CLOSE":
+                for _app in apps:
+                    _app_clean = _app.lower().strip()
+
+                    # Reject pronouns — "close me", "close it", "close that"
+                    if _app_clean in _INVALID_TARGETS:
+                        return (f"Close what exactly? I did not catch a specific app name.")
+
+                    # Reject gibberish — no vowels and longer than 3 chars
+                    _has_vowel = any(v in _app_clean for v in "aeiou")
+                    if not _has_vowel and len(_app_clean) > 3:
+                        return (f"That does not look like an app name. What did you want to close?")
+
+                    # Reject very short unknown words
+                    if len(_app_clean) < 3 and _app_clean not in _cmd_paths:
+                        return (f"Close what? Be more specific.")
 
             tags     = " ".join([f"###{tag}: ALL_{a}" if close_all else f"###{tag}: {a}"
                                  for a in apps])
@@ -929,11 +975,13 @@ def think(prompt_text, speaker_id="default"):
         "prompt":  full_prompt,
         "stream":  False,
         "options": {
-            "temperature":    0.15,
-            "num_predict":    min(response_length, 120),
-            "repeat_penalty": 1.6,
+            # 0.15 was too low — caused robotic fragmented output
+            # "Hyderabad's Telanganas' pride" was repeat_penalty 1.6 destroying tokens
+            "temperature":    0.3,
+            "num_predict":    min(response_length, 150),
+            "repeat_penalty": 1.2,
             "stop":           ["User:", "System:", "Seven:", "(Note", "(note",
-                               "Note to self"],
+                               "Note to self", "\n\n"],
             "num_ctx":        4096
         }
     }
