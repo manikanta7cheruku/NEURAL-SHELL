@@ -184,6 +184,22 @@ def _try_custom_path(app_name):
 
         if ext == '.exe':
             subprocess.Popen([exe_path])
+        elif os.path.isdir(exe_path):
+            # Folder — open Explorer and force foreground
+            import ctypes
+            subprocess.Popen(f'explorer "{exe_path}"', shell=True)
+            # Give Explorer time to open then bring to front
+            import threading
+            def _focus_explorer():
+                import time
+                time.sleep(1.5)
+                try:
+                    ctypes.windll.user32.SetForegroundWindow(
+                        ctypes.windll.user32.FindWindowW("CabinetWClass", None)
+                    )
+                except Exception:
+                    pass
+            threading.Thread(target=_focus_explorer, daemon=True).start()
         else:
             os.startfile(exe_path)
 
