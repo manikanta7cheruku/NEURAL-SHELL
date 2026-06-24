@@ -55,6 +55,33 @@ export default function Console() {
                 : 'bg-s-card border border-s-border text-s-text-2'
               }`}>
                 <p className="text-[12.5px] leading-[1.6] whitespace-pre-wrap">{m.text}</p>
+                {m.fileResults && m.fileResults.count > 0 && (
+                  <div className="mt-2 border-t border-s-border/50 pt-2">
+                    <div className="text-[9px] text-s-text-4 uppercase tracking-wider mb-1.5">
+                      {m.fileResults.count} file{m.fileResults.count > 1 ? 's' : ''} found
+                    </div>
+                    {m.fileResults.results.map((f, fi) => (
+                      <div key={fi} className="flex items-start gap-2 py-1 border-b border-s-border/30 last:border-0">
+                        <span className="text-[9px] font-mono bg-s-accent/10 text-s-accent px-1 py-0.5 rounded shrink-0 mt-0.5">
+                          {f.ext || 'file'}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <div className="text-[11px] text-s-text-2 font-medium truncate">{f.name}</div>
+                          <button
+                            onClick={() => navigator.clipboard.writeText(f.path)}
+                            title="Click to copy path"
+                            className="text-[9px] text-s-text-4 hover:text-s-accent font-mono truncate block w-full text-left"
+                          >
+                            {f.path}
+                          </button>
+                          <div className="text-[8px] text-s-text-4 mt-0.5">
+                            {f.size_kb} KB · {f.modified}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 {m.actions?.length > 0 && (
                   <div className="flex flex-wrap gap-1 mt-1.5">
                     {m.actions.map((a, j) => <span key={j} className="px-1.5 py-0.5 bg-white/8 text-[8px] rounded font-mono">{a}</span>)}

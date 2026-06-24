@@ -32,6 +32,7 @@ const useChat = create((set, get) => ({
         role: 'assistant',
         text: r.data.response,
         actions: r.data.actions || [],
+        fileResults: r.data.file_results || null,
         time: new Date(),
       };
       set((s) => ({ messages: [...s.messages, botMsg], sending: false }));
