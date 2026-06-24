@@ -739,13 +739,31 @@ def seven_logic():
                                 mouth.speak(f"Cannot find {app_name}. Set it up in Commands if it is a file.")
 
                 elif cmd_type == "CLOSE":
-                    # Close all in parallel
                     for app_name in sub_apps:
                         app_name = app_name.strip()
                         if not app_name:
                             continue
+                        # Skip if app_name looks like leftover garbage
+                        # (brain validation should have caught this already)
+                        _skip_words = {"me", "it", "this", "that", "the", "a", "an"}
+                        if app_name.lower() in _skip_words:
+                            continue
                         app_ui.update_status(f"Closing: {app_name}", "#ff0000")
-                        threading.Thread(target=core.close_app, args=(app_name,), daemon=True).start()
+
+                        def _close_and_report(name):
+                            success = core.close_app(name)
+                            if not success:
+                                # App was not found running — tell user
+                                try:
+                                    mouth.speak(f"{name} is not running.")
+                                except Exception:
+                                    pass
+
+                        threading.Thread(
+                            target=_close_and_report,
+                            args=(app_name,),
+                            daemon=True
+                        ).start()
                         telemetry.log_activity()
 
                 elif cmd_type == "SEARCH":
@@ -879,4 +897,4 @@ def start_app():
 
 
 if __name__ == "__main__":
-    start_app()
+    start_app() 
