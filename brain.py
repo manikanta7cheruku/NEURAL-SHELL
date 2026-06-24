@@ -269,14 +269,38 @@ def think(prompt_text, speaker_id="default"):
     words      = clean_in.split()
     first_word = words[0] if words else ""
 
+    # Words that are NEVER app names — always file/folder references
+    # Defined here once — used by is_command check AND Layer 4.3
+    _FILE_WORDS = {
+        "resume", "cv", "folder", "pdf", "document", "photo",
+        "image", "screenshot", "video", "report", "invoice",
+        "contract", "presentation", "spreadsheet", "edit",
+        "itinerary", "trip", "travel", "gokarna", "file",
+    }
+    _has_file_word = any(w in _FILE_WORDS for w in words)
+
     # Pre-classify to skip unnecessary layers for commands/greetings
     # REMOVED from is_command: volume, mute, unmute, brightness, play, pause,
     # skip, next, previous, stop — these are SYSTEM commands handled by
     # _build_system_tag(). Having them here set is_command=True which
     # blocked the SYS layer entirely. That was why "volume 10" did nothing.
-    is_command  = first_word in ["open", "close", "start", "kill", "launch",
-                                  "minimize", "maximize", "maximise", "restore",
-                                  "snap"]
+    # File type words — "open resume" should go to file search, not app launcher
+    _always_file_words = {
+        "resume", "cv", "folder", "pdf", "document", "photo",
+        "image", "screenshot", "video", "report", "invoice",
+        "contract", "presentation", "spreadsheet", "edit",
+    }
+    # If any word in the command is a file word, it is a file request not an app command
+    _cmd_words      = clean_in.split()
+    _has_file_word  = any(w in _always_file_words for w in _cmd_words)
+
+    # If command contains a file word, it is a file request not an app launch
+    # "open resume" → file search. "open chrome" → app launch.
+    is_command = (
+        first_word in ["open", "close", "start", "kill", "launch",
+                       "minimize", "maximize", "maximise", "restore", "snap"]
+        and not _has_file_word
+    )
     is_greeting = first_word in ["hi", "hey", "hello", "bye", "goodbye", "good"]
 
     # ------------------------------------------------------------------
@@ -319,6 +343,43 @@ def think(prompt_text, speaker_id="default"):
     identity_result = handle_identity(clean_in, words, speaker_id, speaker_name, config)
     if identity_result is not None:
         return identity_result
+    
+
+    # ------------------------------------------------------------------
+    # LAYER 3.8: FILE SEARCH ROOT REGISTRATION
+    # "add M:\adobe2 to search folders", "remember to look in M:\edit"
+    # ------------------------------------------------------------------
+    _add_root_triggers = [
+        "add to search", "add to your search", "remember to search",
+        "search in", "also search", "look in", "search folder",
+        "add search folder", "include folder", "include in search",
+    ]
+    _has_add_root = any(t in clean_in for t in _add_root_triggers)
+
+    # Also catch drive paths directly: "add M:\adobe2"
+    import re as _re_path
+    _path_match = _re_path.search(r'[a-zA-Z]:\\[^\s]+', prompt_text)
+
+    if _has_add_root and _path_match:
+        _new_root = _path_match.group(0).rstrip('.,!?')
+        if os.path.exists(_new_root):
+            try:
+                _current_roots = config.KEY.get("file_search_roots", [])
+                if _new_root not in _current_roots:
+                    _current_roots.append(_new_root)
+                    config.update_config({"file_search_roots": _current_roots})
+                    # Rebuild search roots immediately
+                    from hands.files import _build_search_roots
+                    _build_search_roots()
+                    return (f"Got it. I will search {_new_root} from now on. "
+                            f"That folder is now in my search list.")
+                else:
+                    return f"Already searching {_new_root}."
+            except Exception as _root_err:
+                print(Fore.YELLOW + f"[BRAIN] Root registration failed: {_root_err}")
+                return "Could not save that folder. Try again."
+        else:
+            return f"That path does not exist: {_new_root}. Check the spelling."
 
     # ------------------------------------------------------------------
     # LAYER 4: TARS PERSONALITY CONTROLS
@@ -327,6 +388,128 @@ def think(prompt_text, speaker_id="default"):
     tars_result = handle_tars_controls(clean_in, words, config)
     if tars_result is not None:
         return tars_result
+
+
+    # ------------------------------------------------------------------
+    # FILE TYPE WORDS — defined here so both Layer 4.3 and Layer 6 can use it
+    # Layer 4.3 uses it to detect file intent
+    # Layer 6 uses it to avoid blocking file questions as personal questions
+    # ------------------------------------------------------------------
+    # Use _FILE_WORDS defined at top of think() — same set, defined once
+    _file_type_words = _FILE_WORDS
+
+    # ------------------------------------------------------------------
+    # LAYER 4.3: FILE SEARCH INTENT
+    # Catches "open my resume", "show resume to friends", "find my cv"
+    # before the LLM sees it. Uses hands/files.py filesystem crawler.
+    # ------------------------------------------------------------------
+    _file_intent_triggers = [
+        "my resume", "my cv", "my document", "my file", "my photo",
+        "my image", "my video", "my pdf", "my report", "my project",
+        "show resume", "find resume", "open resume", "open cv",
+        "show my", "find my", "where is my",
+    ]
+    _open_intents = [
+        "open", "show", "find", "display", "launch", "pull up",
+        "bring up", "view", "look at", "see my", "access"
+    ]
+    _has_file_intent = any(t in clean_in for t in _file_intent_triggers)
+    _has_open_intent = any(t in clean_in for t in _open_intents)
+
+    _has_file_query = (
+        any(fw in clean_in for fw in _file_type_words)
+        and any(q in clean_in for q in [
+            "how many", "do i have", "any", "list", "show all",
+            "find all", "what files", "search for"
+        ])
+    )
+
+    _cmd_paths_check   = config.KEY.get("commands", {}).get("app_paths", {})
+    _cmd_aliases_check = config.KEY.get("commands", {}).get("app_aliases", {})
+    _is_configured     = any(k in clean_in for k in _cmd_paths_check) or \
+                         any(k in clean_in for k in _cmd_aliases_check)
+
+    _has_file_type = any(fw in clean_in for fw in _file_type_words)
+
+    # File intent overrides is_command when the phrase clearly refers to a file
+    # "open my resume" — "my resume" is a file phrase, not an app name
+    # "open cv folder" — "folder" signals filesystem, not app launcher
+    # Words that are NEVER app names — always file/folder references
+    _always_file_words = {
+        "resume", "cv", "folder", "pdf", "document", "photo",
+        "image", "screenshot", "video", "report", "invoice",
+        "contract", "presentation", "spreadsheet",
+    }
+    _clear_file_phrase = _has_file_intent or _has_file_query or (
+        _has_file_type and (
+            any(w in clean_in for w in ["my ", "folder", "file"]) or
+            any(w in clean_in for w in _always_file_words)
+        )
+    )
+    if _has_file_type and _clear_file_phrase and not _is_configured:
+        try:
+            from hands.files import search_files, open_file, format_results_for_speech, format_results_for_chat
+
+            _search_terms = [fw for fw in _file_type_words if fw in clean_in]
+            _orig_words = prompt_text.split()
+            _proper = [w.lower() for w in _orig_words
+                       if w[0].isupper() and w.lower() not in
+                       {"open", "show", "find", "my", "the", "a", "can", "you"}]
+            _search_query = " ".join(_search_terms + _proper) or clean_in
+
+            _uname = config.KEY.get("identity", {}).get("user_name", "")
+            results = search_files(_search_query, user_name=_uname)
+
+            try:
+                from backend.api_server import set_state as _api_set_file
+                chat_data = format_results_for_chat(results, _search_query)
+                _api_set_file("file_search_results", chat_data)
+            except Exception:
+                pass
+
+            if not results:
+                return (
+                    f"I searched Desktop, Documents, Downloads, and OneDrive "
+                    f"but found nothing matching '{_search_query}'. "
+                    f"Add the exact path in Commands if you know where it is."
+                )
+
+            # Build voice response listing actual file names found
+            _names = [r["name"] for r in results]
+            _count = len(results)
+
+            if _count == 1:
+                _list_str = f"one file: {_names[0]}"
+            elif _count == 2:
+                _list_str = f"two files: {_names[0]} and {_names[1]}"
+            else:
+                _list_str = f"{_count} files: {', '.join(_names[:3])}"
+                if _count > 3:
+                    _list_str += f" and {_count - 3} more"
+
+            # Open if user asked to open
+            if _has_open_intent or _has_file_intent:
+                open_file(results[0]["path"])
+                if _count == 1:
+                    return f"Found and opened {_names[0]}. Path is in the chat."
+                else:
+                    return (
+                        f"Found {_list_str}. "
+                        f"Opened the top match: {_names[0]}. "
+                        f"All paths are in the chat."
+                    )
+
+            # Count/list query — just report
+            return (
+                f"Found {_list_str}. "
+                f"Full paths and details are in the chat below."
+            )
+
+        except Exception as _file_err:
+            import traceback
+            print(Fore.YELLOW + f"[BRAIN] File search failed: {_file_err}")
+            traceback.print_exc()
+            # Fall through to LLM only on actual error
 
     # ------------------------------------------------------------------
     # LAYER 4.5: COMMAND ROUTING (Python-first, bypasses LLM)
@@ -898,7 +1081,12 @@ def think(prompt_text, speaker_id="default"):
                                "do you know"]
     is_question             = any(clean_in.startswith(w) for w in question_starts)
 
-    if is_question and is_personal_question and not memory_context and not is_command:
+    # Guard: do not block file queries — "how many resumes do i have" is a
+    # file system question, not a personal memory question
+    _is_file_question = any(fw in clean_in for fw in _file_type_words)
+
+    _is_file_question = any(fw in clean_in for fw in _file_type_words)
+    if is_question and is_personal_question and not memory_context and not is_command and not _is_file_question:
         return "You haven't told me that yet."
 
     # ------------------------------------------------------------------
