@@ -257,9 +257,9 @@ def handle_repetition(clean_in, speaker_id, speaker_name,
         # Identity question repeats -- answer immediately without LLM
         if "your name" in clean_in or "who are you" in clean_in:
             return random.choice([
-                "Seven. Same as before.",
-                "Still Seven.",
-                "I am Seven. That has not changed.",
+                "Seven.",
+                "I am Seven.",
+                "Seven. That is my name.",
             ])
 
         if "my name" in clean_in or "who am i" in clean_in:
@@ -370,29 +370,28 @@ def handle_identity(clean_in, words, speaker_id, speaker_name, config):
             return f"You are {speaker_name}."
 
     # --- GREETINGS ---
-    greeting_words = ["hi", "hello", "hey", "hi seven", "hello seven", "hey seven",
-                      "good morning", "good afternoon", "good evening",
-                      "heyy", "heyyy", "heyyyy", "hii", "hiii", "yo", "sup",
-                      "wassup", "whatsup", "what's up"]
-    _is_greeting_like = (
-        clean_in in greeting_words
-        or (len(words) <= 2 and first_word in ["hi", "hey", "hello", "yo", "sup"])
-    )
-    if _is_greeting_like:
-        greetings = [
-            "Yeah?",
-            "What's up?",
-            "Go ahead.",
-            "Hey.",
-            "What do you need?",
-        ]
+    # Only intercept greetings that are pure single-word greetings
+    # Multi-word or contextual greetings go to LLM for natural response
+    _pure_greetings = {"hi", "hello", "hey", "yo", "sup"}
+    if clean_in in _pure_greetings:
+        # Single word greeting — respond instantly without LLM
+        # But vary responses so it does not feel scripted
+        _hour = datetime.now().hour
+        if _hour < 12:
+            _time_greet = ["Morning.", "Up early."]
+        elif _hour < 17:
+            _time_greet = ["Afternoon.", "Hey."]
+        else:
+            _time_greet = ["Evening.", "Hey."]
+
+        _base = ["Yeah?", "Hey.", "What's up?"]
         if speaker_name and speaker_name.lower() not in ("there", "admin", "default"):
-            greetings += [
-                f"What is it, {speaker_name}?",
-                f"Yeah, {speaker_name}?",
-                f"What's up, {speaker_name}?",
-            ]
-        return random.choice(greetings)
+            _base += [f"Yeah, {speaker_name}?", f"What's up, {speaker_name}?"]
+
+        return random.choice(_base + _time_greet)
+
+    # "good morning", "good evening" etc — let LLM respond naturally
+    # This avoids the scripted loop feeling
 
     # --- FAREWELLS ---
     farewell_words = ["bye", "goodbye", "bye seven", "goodbye seven", "see you",
@@ -472,19 +471,19 @@ def handle_identity(clean_in, words, speaker_id, speaker_name, config):
             "You can see your current plan and upgrade options there."
         )
 
-    # --- VAGUE OPINION QUESTIONS ---
-    _opinion_triggers = (
-        clean_in in ["what you think", "what do you think", "your thoughts",
-                     "what are your thoughts", "your opinion", "what is your opinion",
-                     "what do you think about it", "thoughts"]
-        or (clean_in.startswith("what") and "think" in clean_in and len(words) <= 5)
-    )
-    if _opinion_triggers:
+    # --- VAGUE PHILOSOPHICAL / MEANINGLESS QUESTIONS ---
+    _vague_questions = {
+        "why me", "why not", "why though", "why you",
+        "what now", "what next", "so what", "now what",
+        "you there", "still there", "anyone there",
+        "what is this", "what is that", "what is it",
+    }
+    if clean_in in _vague_questions or (len(words) <= 2 and words[0] in {"why", "how", "what", "when", "where"} and len(words) == 1):
         return random.choice([
-            "About what specifically?",
-            "Need more context. Think about what?",
-            "That is a broad question. Narrow it down.",
-            "You will need to be more specific.",
+            "You need to give me more than that.",
+            "Context. What are you actually asking?",
+            "That is not enough for me to work with.",
+            "Finish the question.",
         ])
 
     # --- MEMORY HOW QUESTIONS ---
