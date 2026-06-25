@@ -528,9 +528,29 @@ def seven_logic():
                 except Exception:
                     pass
 
+            # For questions going to LLM — say "just a moment" naturally
+            _needs_llm_hint = (
+                len(user_input.split()) > 4
+                and not any(user_input.lower().startswith(cmd) for cmd in
+                           ["open", "close", "volume", "set", "play", "pause",
+                            "mute", "brightness", "remind", "timer", "alarm"])
+            )
+            if _needs_llm_hint:
+                import random as _rand
+                _thinking_phrases = [
+                    "One moment.",
+                    "Let me check.",
+                    "Give me a second.",
+                    "On it.",
+                ]
+                mouth.speak(_rand.choice(_thinking_phrases))
+
             response = brain.think(user_input, speaker_id=speaker_id)
             telemetry.log_activity()
 
+            if response == "":
+                # Empty string = intentional silence (acknowledgement filtered)
+                continue
             if not response:
                 response = "Processing error."
 
