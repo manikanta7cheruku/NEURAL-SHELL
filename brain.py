@@ -819,6 +819,11 @@ def think(prompt_text, speaker_id="default"):
                 remaining = remaining[len(_art):].strip()
                 break
 
+        # Self-referential open commands
+        _self_words = {"seven", "yourself", "self", "you", "assistant", "ai"}
+        if remaining.lower().strip() in _self_words and tag == "OPEN":
+            return "I am already running. You are talking to me right now."
+
         if remaining:
             _normalized = remaining.replace(" and ", ",").replace(" & ", ",")
             apps        = [a.strip() for a in _normalized.split(",") if a.strip()]
