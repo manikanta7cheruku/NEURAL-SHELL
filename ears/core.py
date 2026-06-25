@@ -359,20 +359,37 @@ def listen():
 
             # --- AUTOCORRECT ---
             corrections = {
-                "semen": "Seven", "savin": "Seven", "sibin": "Seven",
-                "simon": "Seven", "siman": "Seven", "heaven": "Seven",
-                "siwen": "Seven", "so when": "Seven", "servant": "Seven",
-                "sir'en": "Seven", "siren": "Seven", "sevan": "Seven",
-                "i7": "Hi Seven", "i 7": "Hi Seven",
-                "fight explorer": "File Explorer",
-                "five explorer": "File Explorer",
-                "aye": "Hi", "alo": "Hello",
-                  "and roll my voice": "enroll my voice",
+                # Seven mishearings
+                "semen": "seven", "savin": "seven", "sibin": "seven",
+                "simon": "seven", "siman": "seven", "heaven": "seven",
+                "siwen": "seven", "so when": "seven", "servant": "seven",
+                "sir'en": "seven", "siren": "seven", "sevan": "seven",
+                "i7": "hi seven", "i 7": "hi seven",
+                # Common command mishearings
+                "fight explorer": "file explorer",
+                "five explorer": "file explorer",
+                "aye": "hi", "alo": "hello",
+                "and roll my voice": "enroll my voice",
                 "and roll": "enroll",
                 "in role": "enroll",
                 "in roll": "enroll",
                 "unroll": "enroll",
                 "un roll": "enroll",
+                # App name mishearings
+                "candle": "camera",
+                "candor": "camera",
+                "camera up": "camera",
+                "hit": "hey",
+                "had": "hey",
+                "hate": "hey",
+                # Common command mishearings
+                "open camera": "open camera",  # protect this phrase
+                "closer": "close",
+                "clothes": "close",
+                "volume up to": "volume",
+                "what's the whether": "what is the weather",
+                "what's the weather": "what is the weather",
+                "whether": "weather",
             }
 
             
