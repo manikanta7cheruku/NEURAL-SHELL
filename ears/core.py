@@ -60,7 +60,7 @@ audio_model = _load_whisper_model(MODEL_SIZE)
 # 800 works for most laptop mics at normal speaking distance (30-50cm)
 # If you are far from laptop, lower this to 400
 # If background noise is loud, raise this to 1200
-RMS_THRESHOLD = 300  # Lower — catches quiet voice. Crest factor discriminates noise.
+RMS_THRESHOLD = 400  # Raises floor slightly to reject distant room audio
 
 
 def listen():
@@ -107,6 +107,13 @@ def listen():
 
                 if rms < RMS_THRESHOLD:
                     print(Fore.YELLOW + f"[EARS] RMS too low ({rms:.0f} < {RMS_THRESHOLD}) — background noise, skipping")
+                    return None, None
+
+                # Duration check — very short audio clips are noise, not commands
+                # At 16kHz, 1 second = 16000 samples
+                _min_samples = 16000 * 0.8  # minimum 0.8 seconds of audio
+                if len(audio_np) < _min_samples:
+                    print(Fore.YELLOW + f"[EARS] Audio too short ({len(audio_np)/16000:.2f}s) — noise, skipping")
                     return None, None
 
                 # Crest factor = peak / RMS
