@@ -438,6 +438,33 @@ def handle_identity(clean_in, words, speaker_id, speaker_name, config):
     if (("instead of" in clean_in or "other than" in clean_in
          or "besides" in clean_in) and "seven" in clean_in):
         return "Seven is my name. That is the only one I have."
+    
+    # --- HOW TO USE SEVEN QUESTIONS ---
+    _how_commands = (
+        "add command" in clean_in
+        or "add to commands" in clean_in
+        or ("how" in clean_in and "command" in clean_in)
+        or ("how" in clean_in and "add" in clean_in and 
+            any(w in clean_in for w in ["path", "app", "file", "folder", "url"]))
+        or "commands section" in clean_in
+        or "how do i add" in clean_in
+    )
+    if _how_commands:
+        return (
+            "Go to the Commands section in the right sidebar. "
+            "There you can add file paths, folder paths, URLs, and name them anything. "
+            "Then just say that name and I open it instantly."
+        )
+
+    _how_plans = (
+        ("upgrade" in clean_in or "plan" in clean_in or "pro" in clean_in)
+        and any(w in clean_in for w in ["how", "where", "what"])
+    )
+    if _how_plans:
+        return (
+            "Go to Plans in the sidebar. "
+            "You can see your current plan and upgrade options there."
+        )
 
     # --- VAGUE OPINION QUESTIONS ---
     _opinion_triggers = (
