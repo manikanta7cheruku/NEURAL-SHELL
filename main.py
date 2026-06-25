@@ -246,7 +246,8 @@ def seven_logic():
 
     WAKE_WORDS  = ["wake up", "seven", "hey seven", "listen", "online", "resume"]
     PAUSE_WORDS = ["not you", "hold it", "hold on", "just a moment", "wait",
-                   "pause", "stop listening", "sleep", "silence"]
+                   "pause", "stop listening", "sleep", "silence", "stop",
+                   "enough", "quiet", "shut up", "be quiet"]
     KILL_WORDS  = ["shut down", "shutdown", "kill system", "go to sleep", "terminate"]
 
     def speak_with_interrupt(text):
