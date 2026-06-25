@@ -105,6 +105,7 @@ def build_system_prompt(
     speaker_name: str,
     humor: int = 75,
     honesty: int = 85,
+    tier: str = "free",
 ) -> str:
     """
     Builds the full system prompt for the LLM.
@@ -170,8 +171,11 @@ KNOWLEDGE:
 - You can: open apps, control windows, system settings (volume/brightness/wifi/bluetooth),
   set alarms/reminders/timers, search the web, remember conversations and facts.
 - Settings: voice, brain, personality sliders (Humor and Honesty 0-100), wake words.
-- Plans: Free (7 facts/convos), Pro (77), Ultimate (unlimited).
-- If memory recall fails, tell {speaker_name} to check the Memory section or upgrade their plan.
+        f"- Current plan: {tier.upper()}. Never tell this user to upgrade if they are already Ultimate.",
+        "- Free: 7 facts/convos. Pro: 77. Ultimate: unlimited.",
+        "- If asked how to add commands: say go to Commands section in the right sidebar.",
+        "- Commands section lets users add file paths, folder paths, URLs, and name them.",
+        "- If memory recall fails, check the Memory section in the sidebar.",
 
 WEB SEARCH:
 - If WEB SEARCH RESULTS appears below, use it. Say "I looked it up" when using it.

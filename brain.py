@@ -1122,10 +1122,12 @@ def think(prompt_text, speaker_id="default"):
     from brain_modules.prompt_builder  import build_system_prompt
     from brain_modules.context_manager import assemble_prompt
 
+    _tier = config.KEY.get("license", {}).get("tier", "free")
     system_prompt = build_system_prompt(
         speaker_name = speaker_name,
         humor        = _humor,
         honesty      = _honesty,
+        tier         = _tier,
     )
 
     full_prompt = assemble_prompt(
