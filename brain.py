@@ -65,6 +65,51 @@ import colorama
 from colorama import Fore
 colorama.init(autoreset=True)
 
+
+def _clean_response(text: str) -> str:
+    """
+    Strip robotic trailing phrases that LLMs append regardless of system prompt.
+    These come from RLHF training — the model learned to end responses with
+    assistant-style prompts. We remove them post-generation.
+    """
+    if not text:
+        return text
+
+    # Trailing phrases to strip — order matters, check longest first
+    _trailers = [
+        "go ahead.", "go ahead",
+        "what do you need?", "what do you need",
+        "what's your next request?", "whats your next request",
+        "how can i help?", "how can i help you?",
+        "is there anything else?", "is there anything else i can help",
+        "let me know if you need anything", "let me know if",
+        "feel free to ask", "feel free to",
+        "anything else?", "anything else i can",
+        "what would you like", "what else can i",
+        "i'm here if you need", "im here if",
+        "just let me know", "just ask if",
+        "what's next?", "whats next",
+        "what can i do for you", "how may i help",
+        "ready when you are", "standing by",
+        "awaiting your", "next command",
+    ]
+
+    text_lower = text.lower().rstrip()
+
+    for trailer in _trailers:
+        if text_lower.endswith(trailer):
+            # Remove the trailer and clean up punctuation
+            cut = len(text) - len(trailer)
+            text = text[:cut].rstrip(" .,!-—")
+            text_lower = text.lower().rstrip()
+            break  # Only strip one trailer per response
+
+    # Strip slash artifacts like "/ /" or "// " at end
+    import re
+    text = re.sub(r'\s*[/\\]+\s*$', '', text).strip()
+
+    return text.strip()
+
 # ---------------------------------------------------------------------------
 # MEMORY IMPORTS
 # Imported at module level so they are ready when think() is first called.
@@ -268,6 +313,27 @@ def think(prompt_text, speaker_id="default"):
 
     words      = clean_in.split()
     first_word = words[0] if words else ""
+
+    # ── SHORT INPUT FILTER ──────────────────────────────────────────
+    # Single words or very short phrases with no actionable content
+    # should not reach the LLM. LLM has no context for "good", "okay",
+    # "yeah", "alright" and will hallucinate a response.
+    _acknowledgements = {
+        "good", "okay", "ok", "alright", "yeah", "yep", "yup",
+        "sure", "fine", "nice", "cool", "great", "perfect",
+        "right", "correct", "exactly", "indeed", "absolutely",
+        "understood", "noted", "got it", "i see", "i know",
+        "no", "nope", "never mind", "nevermind", "forget it",
+        "nothing", "nah", "not really", "not now", "maybe later",
+        "that's fine", "thats fine", "that's it", "thats it",
+        "that's all", "thats all", "that's good", "thats good",
+        "well", "anyway", "moving on", "never mind",
+    }
+    if clean_in in _acknowledgements or (len(words) == 1 and words[0] in _acknowledgements):
+        # Pure acknowledgement — no response needed
+        # Seven listens but does not speak for filler words
+        print(Fore.YELLOW + f"[BRAIN] Acknowledgement filtered: '{clean_in}'")
+        return ""
 
     # Words that are NEVER app names — always file/folder references
     # Defined here once — used by is_command check AND Layer 4.3
@@ -623,7 +689,20 @@ def think(prompt_text, speaker_id="default"):
     # Use _is_app_cmd_only instead of is_command so system words like
     # "volume", "mute" are not blocked by the app-command classifier.
     _is_app_cmd_only = first_word in ["open", "close", "start", "kill", "launch"]
-    if (_has_sys and not _is_app_cmd_only) or _has_context_ref:
+    # Strip polite prefixes before system command check
+    # "can you take the volume" → "volume" → system command
+    _politeness_prefixes = [
+        "can you ", "could you ", "please ", "would you ",
+        "will you ", "can you please ", "could you please ",
+    ]
+    _clean_for_sys = clean_in
+    for _pfx in _politeness_prefixes:
+        if _clean_for_sys.startswith(_pfx):
+            _clean_for_sys = _clean_for_sys[len(_pfx):]
+            break
+    _has_sys_clean = any(t in _clean_for_sys for t in SYSTEM_TRIGGER_WORDS)
+
+    if (_has_sys and not _is_app_cmd_only) or _has_context_ref or (_has_sys_clean and not _is_app_cmd_only):
         sys_tag = _build_system_tag(clean_in)
         if sys_tag:
             is_command = True
@@ -1061,22 +1140,20 @@ def think(prompt_text, speaker_id="default"):
             ]
         else:
             cap_facts = [
-                "I open and close apps by name with alias support.",
-                "I control windows: snap, resize, minimize, maximize, pin, transparency, swap, fullscreen, undo.",
-                "I do split-screen layouts with multiple windows.",
-                "I remember conversations and facts about people long-term.",
-                "I search the web for live data: prices, weather, news via DuckDuckGo.",
-                "I control system settings: volume, brightness, battery, WiFi, Bluetooth, media playback, dark mode, night light, and do not disturb.",
-                "I recognize different speakers by their voice.",
-                "Users can interrupt me mid-sentence.",
-                "Everything runs 100% locally. Nothing leaves this machine.",
-                "I set alarms, reminders, timers, and calendar events. I handle recurring schedules.",
+                "Open and close any app by name.",
+                "Control windows: snap, resize, minimize, maximize, pin, transparency, swap, fullscreen.",
+                "Split-screen layouts with multiple windows at once.",
+                "Remember conversations and facts about you long-term.",
+                "Search the web for live data: prices, weather, news.",
+                "Control system: volume, brightness, battery, WiFi, Bluetooth, media, dark mode.",
+                "Recognize different speakers by voice.",
+                "Set alarms, reminders, timers, and calendar events.",
+                "Everything runs locally. Nothing leaves this machine.",
             ]
 
-        facts_block = "=== YOUR CAPABILITIES (answer from these) ===\n"
-        for fact in cap_facts:
-            facts_block += f"- {fact}\n"
-        facts_block += "=== END CAPABILITIES ===\nSummarize these naturally. Be concise."
+        facts_block = "YOUR CAPABILITIES — answer from these facts only, naturally, no list format:\n"
+        facts_block += " ".join(cap_facts)
+        facts_block += "\nAnswer in 2 sentences maximum. Do not use bullet points or slashes."
         prompt_text = f"{facts_block}\n\nUser asked: {prompt_text}"
 
     # ------------------------------------------------------------------
@@ -1242,6 +1319,7 @@ def think(prompt_text, speaker_id="default"):
 
         if r.status_code == 200:
             reply = r.json().get("response", "").strip() or "Listening."
+            reply = _clean_response(reply)
 
             if "VISUAL_REPORT:" not in prompt_text:
                 from brain_modules.context_manager import add_seven_turn
