@@ -973,6 +973,23 @@ def think(prompt_text, speaker_id="default"):
         should_search, search_query = needs_web_search(prompt_text)
 
         if should_search and search_query:
+            # Add location to weather queries
+            _weather_words = ["weather", "temperature", "forecast", "rain",
+                              "sunny", "cloudy", "humidity", "wind"]
+            _is_weather = any(w in search_query.lower() for w in _weather_words)
+            if _is_weather and "in " not in search_query.lower():
+                try:
+                    _city = config.KEY.get("identity", {}).get("city", "")
+                    if not _city:
+                        # Try to get from previous IP-based detection
+                        _city = config.KEY.get("identity", {}).get("location", "")
+                    if _city:
+                        search_query = f"weather in {_city} today"
+                    else:
+                        search_query = "current weather today"
+                except Exception:
+                    pass
+
             print(Fore.CYAN + f"[BRAIN] Web search: '{search_query}'")
             news_words = ["news", "latest", "happened", "breaking", "update"]
             is_news    = any(w in clean_in for w in news_words)
