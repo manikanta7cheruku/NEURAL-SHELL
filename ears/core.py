@@ -60,7 +60,7 @@ audio_model = _load_whisper_model(MODEL_SIZE)
 # 800 works for most laptop mics at normal speaking distance (30-50cm)
 # If you are far from laptop, lower this to 400
 # If background noise is loud, raise this to 1200
-RMS_THRESHOLD = 500
+RMS_THRESHOLD = 300  # Lower — catches quiet voice. Crest factor discriminates noise.
 
 
 def listen():
@@ -84,14 +84,15 @@ def listen():
         # Keep energy_threshold low — let audio through, crest factor does discrimination
         # 300 catches silence. Crest factor 30-44 catches your voice vs speaker bleed.
         # Calibrated: ambient noise threshold on this machine = ~119
-        # Voice RMS = 3049, Crest = 10.69
+        # Voice RMS = 3049, Crest = 10.69   
         # Keep threshold low — crest factor handles speaker bleed discrimination
         recognizer.energy_threshold = max(recognizer.energy_threshold, 200)
-        recognizer.pause_threshold = 0.6   # was 0.8 — faster end-of-speech detection
-        recognizer.non_speaking_duration = 0.3  # was 0.4
+        recognizer.pause_threshold = 0.7       # Back to 0.7 — 0.5 was cutting off words
+        recognizer.non_speaking_duration = 0.3
+        recognizer.phrase_threshold = 0.1
 
         try:
-            audio = recognizer.listen(source, timeout=None, phrase_time_limit=10)
+            audio = recognizer.listen(source, timeout=None, phrase_time_limit=7)
             wav_data = audio.get_wav_data()
 
             # --- RMS ENERGY CHECK ---
@@ -126,17 +127,24 @@ def listen():
 
             segments_list = list(audio_model.transcribe(
                 AUDIO_TEMP_PATH,
-                beam_size=3,        # was 5 — 3 is 40% faster, negligible accuracy loss
+                beam_size=3,
                 language="en",
                 condition_on_previous_text=False,
-                no_speech_threshold=0.7,
-                log_prob_threshold=-0.5,
-                vad_filter=True,    # built-in Whisper VAD — skips silent segments
+                no_speech_threshold=0.6,
+                log_prob_threshold=-0.7,
+                vad_filter=True,
                 vad_parameters={
-                    "threshold": 0.5,           # speech probability threshold
-                    "min_speech_duration_ms": 200,   # ignore clips under 200ms
-                    "min_silence_duration_ms": 300,  # merge gaps under 300ms
+                    "threshold": 0.4,
+                    "min_speech_duration_ms": 150,
+                    "min_silence_duration_ms": 250,
                 },
+                # Tell Whisper what kind of speech to expect
+                # This dramatically reduces hallucination on short commands
+                initial_prompt=(
+                    "Voice assistant commands. Short phrases. "
+                    "Examples: open chrome, volume up, set reminder, "
+                    "what is the weather, close spotify."
+                ),
             ))
             segments = segments_list[0]
 
@@ -303,6 +311,48 @@ def listen():
             _ty_count = clean.count("thank you") + clean.count("thanks")
             if _ty_count >= 1 and len(words) > 5:
                 print(Fore.YELLOW + f"[EARS] Thank-you pattern in long sentence filtered: '{clean}'")
+                return None, None
+            
+            # --- COMMAND SANITY CHECK ---
+            # Voice assistant commands have a specific structure.
+            # Narration/presentation sentences do not.
+            # Reject if it reads like dictated text, not a command.
+
+            # Pattern 1: "of the X of the Y" — narration pattern, not a command
+            _of_the_count = clean.count("of the")
+            if _of_the_count >= 2:
+                print(Fore.YELLOW + f"[EARS] Narration pattern filtered: '{clean}'")
+                return None, None
+
+            # Pattern 2: Passive voice constructions — "was a presentation of"
+            _passive_markers = [
+                "was a ", "were a ", "is a presentation",
+                "was the ", "this was", "that was",
+                "reading of", "parts response", "positive parts",
+            ]
+            if any(p in clean for p in _passive_markers) and len(words) > 6:
+                print(Fore.YELLOW + f"[EARS] Passive/narration pattern filtered: '{clean}'")
+                return None, None
+
+            # Pattern 3: Commands start with action verbs or question words
+            # If first word is not a known command/question starter AND sentence
+            # is longer than 8 words — likely hallucination
+            _valid_starters = {
+                "open", "close", "start", "stop", "play", "pause", "skip",
+                "set", "get", "show", "find", "tell", "what", "how", "why",
+                "when", "where", "who", "which", "can", "could", "will",
+                "volume", "mute", "unmute", "brightness", "remind", "schedule",
+                "add", "delete", "remove", "create", "make", "turn", "switch",
+                "enable", "disable", "check", "search", "list", "hey", "hi",
+                "hello", "ok", "okay", "yes", "no", "cancel", "clear",
+                "increase", "decrease", "raise", "lower", "maximize", "minimize",
+                "snap", "move", "resize", "pin", "unpin", "restart", "shutdown",
+                "lock", "sleep", "wake", "timer", "alarm", "note", "write",
+                "read", "send", "call", "message", "email", "my", "do",
+                "is", "are", "was", "i", "the", "a",
+            }
+            if words and words[0] not in _valid_starters and len(words) > 8:
+                print(Fore.YELLOW + f"[EARS] Unknown starter + long sentence filtered: '{clean[:60]}'")
                 return None, None
 
             # --- AUTOCORRECT ---
