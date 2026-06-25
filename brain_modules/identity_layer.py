@@ -379,12 +379,18 @@ def handle_identity(clean_in, words, speaker_id, speaker_name, config):
         or (len(words) <= 2 and first_word in ["hi", "hey", "hello", "yo", "sup"])
     )
     if _is_greeting_like:
-        greetings = ["Yeah?", "Go ahead.", "Listening.", "What do you need?", "Here."]
+        greetings = [
+            "Yeah?",
+            "What's up?",
+            "Go ahead.",
+            "Hey.",
+            "What do you need?",
+        ]
         if speaker_name and speaker_name.lower() not in ("there", "admin", "default"):
             greetings += [
                 f"What is it, {speaker_name}?",
-                f"{speaker_name}.",
                 f"Yeah, {speaker_name}?",
+                f"What's up, {speaker_name}?",
             ]
         return random.choice(greetings)
 
