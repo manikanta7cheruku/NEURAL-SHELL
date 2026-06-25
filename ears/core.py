@@ -221,6 +221,8 @@ def listen():
             # it is background audio bleed, not user speech
             forbidden = [
                 "subscribe", "amara.org", "caption", "copyright",
+                "mooji.org", "visit us at", "www.", ".org", ".com/",
+                "for more information",
                 "all rights reserved", "bada ba", "ba ba ba ba",
                 "da da da", "la la la la",
                 "next video", "see you guys", "see you in the",
