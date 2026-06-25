@@ -55,79 +55,91 @@ def _load_whisper_model(model_size: str) -> WhisperModel:
 
 print(Fore.CYAN + f"[EARS] Loading Whisper Model ({MODEL_SIZE})...")
 audio_model = _load_whisper_model(MODEL_SIZE)
+_calibrate_noise_floor()
 
 # RMS threshold — calibrated to distinguish direct speech from background noise
 # 800 works for most laptop mics at normal speaking distance (30-50cm)
 # If you are far from laptop, lower this to 400
 # If background noise is loud, raise this to 1200
-RMS_THRESHOLD = 400  # Raises floor slightly to reject distant room audio
+# Dynamic threshold — set at startup by _calibrate_noise_floor()
+# Relative to actual ambient noise, not a hardcoded value
+NOISE_FLOOR_RMS  = 500   # updated by calibration
+NOISE_MULTIPLIER = 2.5   # voice must be 2.5x louder than noise floor
+MIN_CREST        = 4.0   # minimum crest factor for voice
+
+
+def _calibrate_noise_floor() -> float:
+    """
+    Measure ambient noise RMS for 2 seconds at startup.
+    Returns the noise floor RMS value.
+    This is called once when Seven starts.
+    """
+    global NOISE_FLOOR_RMS
+    try:
+        recognizer = sr.Recognizer()
+        with sr.Microphone() as source:
+            print(Fore.CYAN + "[EARS] Calibrating noise floor — 2 seconds...")
+            audio = recognizer.record(source, duration=2)
+            wav = audio.get_wav_data()
+            arr = np.frombuffer(wav, dtype=np.int16).astype(np.float32)
+            rms = float(np.sqrt(np.mean(arr ** 2)))
+            NOISE_FLOOR_RMS = max(rms, 100)
+            print(Fore.GREEN + f"[EARS] Noise floor: {NOISE_FLOOR_RMS:.0f} RMS")
+            return NOISE_FLOOR_RMS
+    except Exception as e:
+        print(Fore.YELLOW + f"[EARS] Calibration failed: {e} — using default {NOISE_FLOOR_RMS}")
+        return NOISE_FLOOR_RMS
 
 
 def listen():
     """
     Listen for speech and transcribe it.
-    
+
     Returns:
         tuple: (transcribed_text, audio_file_path) or (None, None)
-        
-    V1.2 Change: Returns tuple instead of just string.
-    The audio_path is needed by voice_id.py to identify the speaker.
-    main.py handles cleanup of the audio file after identification.
     """
     recognizer = sr.Recognizer()
 
     with sr.Microphone() as source:
-        # Short calibration — 0.2s is enough for ambient noise baseline
-        recognizer.adjust_for_ambient_noise(source, duration=0.2)
-        recognizer.dynamic_energy_threshold = True
-
-        # Keep energy_threshold low — let audio through, crest factor does discrimination
-        # 300 catches silence. Crest factor 30-44 catches your voice vs speaker bleed.
-        # Calibrated: ambient noise threshold on this machine = ~119
-        # Voice RMS = 3049, Crest = 10.69   
-        # Keep threshold low — crest factor handles speaker bleed discrimination
-        recognizer.energy_threshold = max(recognizer.energy_threshold, 200)
-        recognizer.pause_threshold = 0.7       # Back to 0.7 — 0.5 was cutting off words
-        recognizer.non_speaking_duration = 0.3
-        recognizer.phrase_threshold = 0.1
+        recognizer.adjust_for_ambient_noise(source, duration=0.1)
+        recognizer.dynamic_energy_threshold = False
+        # Set threshold relative to calibrated noise floor
+        # Voice must be NOISE_MULTIPLIER times louder than ambient noise
+        recognizer.energy_threshold = NOISE_FLOOR_RMS * NOISE_MULTIPLIER
+        recognizer.pause_threshold        = 0.7
+        recognizer.non_speaking_duration  = 0.3
+        recognizer.phrase_threshold       = 0.1
 
         try:
             audio = recognizer.listen(source, timeout=None, phrase_time_limit=7)
             wav_data = audio.get_wav_data()
 
-            # --- RMS ENERGY CHECK ---
-            # Check actual audio amplitude before sending to Whisper.
-            # Background TV/YouTube has low RMS even if recognizer passes it.
-            # Your voice close to mic has 3-5x higher RMS than background audio.
-            # This is the single most effective hallucination filter.
             try:
                 audio_np = np.frombuffer(wav_data, dtype=np.int16).astype(np.float32)
-                rms  = np.sqrt(np.mean(audio_np ** 2))
-                peak = np.max(np.abs(audio_np))
+                rms  = float(np.sqrt(np.mean(audio_np ** 2)))
+                peak = float(np.max(np.abs(audio_np)))
+                dur  = len(audio_np) / 16000.0
 
-                if rms < RMS_THRESHOLD:
-                    print(Fore.YELLOW + f"[EARS] RMS too low ({rms:.0f} < {RMS_THRESHOLD}) — background noise, skipping")
+                # Must exceed noise floor by multiplier
+                _threshold = NOISE_FLOOR_RMS * NOISE_MULTIPLIER
+                if rms < _threshold:
+                    print(Fore.YELLOW + f"[EARS] RMS {rms:.0f} below threshold {_threshold:.0f} — noise")
                     return None, None
 
-                # Duration check — very short audio clips are noise, not commands
-                # At 16kHz, 1 second = 16000 samples
-                _min_samples = 16000 * 0.8  # minimum 0.8 seconds of audio
-                if len(audio_np) < _min_samples:
-                    print(Fore.YELLOW + f"[EARS] Audio too short ({len(audio_np)/16000:.2f}s) — noise, skipping")
+                # Minimum duration — fan noise creates short bursts
+                if dur < 0.5:
+                    print(Fore.YELLOW + f"[EARS] Too short ({dur:.2f}s) — noise burst")
                     return None, None
 
-                # Crest factor = peak / RMS
-                # Direct voice: crest factor typically 4-15 (sharp consonant peaks)
-                # Speaker bleed: crest factor typically 1.5-3 (diffuse, averaged out)
-                # If crest factor is very low, audio is diffuse = speaker bleed
+                # Crest factor
                 crest = peak / rms if rms > 0 else 0
-                if crest < 2.5:
-                    print(Fore.YELLOW + f"[EARS] Low crest factor ({crest:.2f}) — diffuse audio, likely speaker bleed, skipping")
+                if crest < MIN_CREST:
+                    print(Fore.YELLOW + f"[EARS] Crest {crest:.2f} < {MIN_CREST} — diffuse noise")
                     return None, None
 
-                print(Fore.CYAN + f"[EARS] RMS: {rms:.0f} | Crest: {crest:.2f} — proceeding to Whisper")
-            except Exception as _rms_err:
-                print(Fore.YELLOW + f"[EARS] Audio check skipped: {_rms_err}")
+                print(Fore.CYAN + f"[EARS] RMS: {rms:.0f} | Crest: {crest:.2f} | Dur: {dur:.2f}s — Whisper")
+            except Exception as _e:
+                print(Fore.YELLOW + f"[EARS] Signal check failed: {_e}")
 
             with open(AUDIO_TEMP_PATH, "wb") as f:
                 f.write(wav_data)
