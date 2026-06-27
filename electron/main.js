@@ -102,6 +102,10 @@ function startPython() {
     stdio: ['pipe', 'pipe', 'pipe'],
     env: {
       ...process.env,
+      // Tell Windows audio subsystem Python is a standalone audio app
+      // Prevents Electron from intercepting microphone access
+      ELECTRON_RUN_AS_NODE: undefined,
+      ELECTRON_NO_ASAR: '1',
       PYTHONIOENCODING:   'utf-8',
       PYTHONUNBUFFERED:   '1',
       PYTHONUTF8:         '1',        
