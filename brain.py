@@ -330,9 +330,9 @@ def think(prompt_text, speaker_id="default"):
         "well", "anyway", "moving on", "never mind",
     }
     if clean_in in _acknowledgements or (len(words) == 1 and words[0] in _acknowledgements):
-        # Pure acknowledgement — no response needed
-        # Seven listens but does not speak for filler words
         print(Fore.YELLOW + f"[BRAIN] Acknowledgement filtered: '{clean_in}'")
+        # Voice: empty string = intentional silence (main.py continues loop)
+        # Chat API: return minimal response to avoid 500 error
         return ""
 
     # Words that are NEVER app names — always file/folder references

@@ -129,15 +129,21 @@ def _resolve_alias(app_name):
 # Maps custom alias -> process name that opened it
 # So "close pic" can find "Microsoft.Photos.exe" or "vlc.exe"
 _EXTENSION_PROCESS_MAP = {
-    # Single entry per extension — use what we actually open with
-    # mspaint for images (we use ShellExecuteW which opens default app)
-    # If user has different default, _watch_new_process will override this
-    ".jpg":  ["mspaint", "Photos", "Microsoft.Photos"],
-    ".jpeg": ["mspaint", "Photos", "Microsoft.Photos"],
-    ".png":  ["mspaint", "Photos", "Microsoft.Photos"],
-    ".gif":  ["Photos", "Microsoft.Photos"],
+    # mspaint first — we open images with mspaint directly
+    ".jpg":  ["mspaint"],
+    ".jpeg": ["mspaint"],
+    ".png":  ["mspaint"],
+    ".gif":  ["mspaint"],
     ".bmp":  ["mspaint"],
+    ".heic": ["mspaint"],
+    ".webp": ["mspaint"],
+    ".raw":  ["mspaint"],
     ".mp4":  ["vlc", "wmplayer", "Movies"],
+    ".mp3":  ["vlc", "wmplayer", "Groove"],
+    ".pdf":  ["AcroRd32", "Acrobat", "FoxitReader", "edge", "chrome"],
+    ".docx": ["WINWORD"],
+    ".xlsx": ["EXCEL"],
+    ".pptx": ["POWERPNT"],
     ".mp3": ["vlc", "wmplayer", "Groove", "Music"],
     ".pdf": ["AcroRd32", "Acrobat", "FoxitReader", "edge", "chrome"],
     ".docx": ["WINWORD"],
@@ -205,14 +211,11 @@ def _try_custom_path(app_name):
                 except Exception:
                     pass
             import threading as _thr
-            _thr.Thread(target=_focus_explorer, daemon=True).start()
+            _thr.Thread(target=_focus_explorer, daemon=True).start()    
         elif ext in {'.jpg', '.jpeg', '.png', '.bmp', '.gif', '.heic', '.webp', '.raw'}:
-            # Open specific image file without triggering gallery
-            # ShellExecute with explicit verb opens in default app for that file
-            import ctypes as _ctypes
-            _ctypes.windll.shell32.ShellExecuteW(
-                None, "open", exe_path, None, None, 1
-            )
+            # Use mspaint directly — guaranteed new process, guaranteed closeable
+            # Photos app reuses existing process making close unreliable
+            subprocess.Popen(['mspaint', exe_path])
         else:
             os.startfile(exe_path)
 
@@ -220,46 +223,56 @@ def _try_custom_path(app_name):
         def _focus_new_window(before_pids_snap):
             import time
             import ctypes
-            time.sleep(2.0)
+            # Wait longer — video players take 3-5 seconds to fully load
+            time.sleep(3.5)
             try:
-                # Find new process that was not there before
-                new_pid = None
+                user32 = ctypes.windll.user32
+
+                # Find new PIDs
+                new_pids = set()
                 for p in psutil.process_iter(['pid', 'name']):
                     try:
                         if p.pid not in before_pids_snap:
-                            new_pid = p.pid
-                            break
+                            new_pids.add(p.pid)
                     except Exception:
                         continue
 
-                if new_pid:
-                    # Enumerate windows to find one belonging to new process
-                    result_hwnd = [None]
-                    def _enum_cb(hwnd, _):
-                        try:
-                            import ctypes as _ct
-                            pid = ctypes.c_ulong(0)
-                            _ct.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-                            if pid.value == new_pid and ctypes.windll.user32.IsWindowVisible(hwnd):
-                                result_hwnd[0] = hwnd
-                        except Exception:
-                            pass
-                        return True
-                    ctypes.windll.user32.EnumWindows(
-                        ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_int, ctypes.c_int)(_enum_cb),
-                        0
-                    )
-                    if result_hwnd[0]:
-                        ctypes.windll.user32.ShowWindow(result_hwnd[0], 9)
-                        ctypes.windll.user32.SetForegroundWindow(result_hwnd[0])
-                        return
+                # Find visible window belonging to any new process
+                best_hwnd = [None]
 
-                # Fallback — just bring whatever is foreground to front
-                hwnd = ctypes.windll.user32.GetForegroundWindow()
-                ctypes.windll.user32.ShowWindow(hwnd, 9)
-                ctypes.windll.user32.SetForegroundWindow(hwnd)
-            except Exception:
-                pass
+                def _enum_cb(hwnd, _):
+                    try:
+                        if not user32.IsWindowVisible(hwnd):
+                            return True
+                        pid = ctypes.c_ulong(0)
+                        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+                        if pid.value in new_pids:
+                            # Check window has a title (not a background helper window)
+                            length = user32.GetWindowTextLengthW(hwnd)
+                            if length > 0:
+                                best_hwnd[0] = hwnd
+                    except Exception:
+                        pass
+                    return True
+
+                enum_func = ctypes.WINFUNCTYPE(
+                    ctypes.c_bool, ctypes.c_size_t, ctypes.c_size_t
+                )
+                user32.EnumWindows(enum_func(_enum_cb), 0)
+
+                if best_hwnd[0]:
+                    # Allow this process to set foreground
+                    user32.AllowSetForegroundWindow(0xFFFFFFFF)
+                    # Restore if minimized
+                    user32.ShowWindow(best_hwnd[0], 9)   # SW_RESTORE
+                    # Bring to front
+                    user32.SetForegroundWindow(best_hwnd[0])
+                    user32.BringWindowToTop(best_hwnd[0])
+                    print(Fore.GREEN + f"   -> Window brought to foreground: {best_hwnd[0]}")
+                else:
+                    print(Fore.YELLOW + f"   -> No new window found after 3.5s — app may still be loading")
+            except Exception as _fe:
+                print(Fore.YELLOW + f"   -> Focus failed: {_fe}")
 
         threading.Thread(target=_focus_new_window, args=(_before_launch,), daemon=True).start()
 

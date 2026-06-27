@@ -68,8 +68,10 @@ def chat(req: ChatRequest):
 
         # Clean response (remove tags for display)
         clean_response = re.sub(r"###\w+:\s*[^\n]*", "", full_response).strip()
-        if not clean_response:
-            clean_response = "Done."
+        if not clean_response or clean_response == "":
+            # Empty = acknowledgement word, Seven stays silent in voice
+            # In chat UI, show a minimal response instead of error
+            clean_response = "."
 
         # Execute commands if present
         _execute_actions(action_list, full_response, req.speaker_id)
