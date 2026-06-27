@@ -14,6 +14,7 @@ CHANGES FROM V1.1.1:
 """
 
 import os
+import threading
 import webbrowser
 import pyautogui
 import datetime
@@ -181,27 +182,33 @@ def _try_custom_path(app_name):
 
     try:
         ext = os.path.splitext(exe_path)[1].lower()
-            # Open image in default viewer — avoid Photos app gallery
-            # Use mspaint as single-file viewer, or default association
-        try:
-            subprocess.Popen(['mspaint', exe_path])
-        except Exception:
+
+        if ext == '.exe':
+            subprocess.Popen([exe_path])
+        elif os.path.isdir(exe_path):
+            import ctypes as _ctypes
+            subprocess.Popen(f'explorer "{exe_path}"', shell=True)
+            def _focus_explorer():
+                import time
+                time.sleep(1.5)
+                try:
+                    hwnd = _ctypes.windll.user32.FindWindowW("CabinetWClass", None)
+                    if hwnd:
+                        _ctypes.windll.user32.ShowWindow(hwnd, 9)
+                        _ctypes.windll.user32.SetForegroundWindow(hwnd)
+                except Exception:
+                    pass
+            import threading as _thr
+            _thr.Thread(target=_focus_explorer, daemon=True).start()
+        elif ext in {'.jpg', '.jpeg', '.png', '.bmp', '.gif', '.heic', '.webp', '.raw'}:
+            # Open specific image file without triggering gallery
+            # ShellExecute with explicit verb opens in default app for that file
+            import ctypes as _ctypes
+            _ctypes.windll.shell32.ShellExecuteW(
+                None, "open", exe_path, None, None, 1
+            )
+        else:
             os.startfile(exe_path)
-
-        # Bring window to foreground after short delay
-        def _bring_to_front():
-            import time, ctypes
-            time.sleep(1.5)
-            try:
-                # Find the most recently active window and bring it forward
-                hwnd = ctypes.windll.user32.GetForegroundWindow()
-                ctypes.windll.user32.ShowWindow(hwnd, 9)  # SW_RESTORE
-                ctypes.windll.user32.SetForegroundWindow(hwnd)
-            except Exception:
-                pass
-        threading.Thread(target=_bring_to_front, daemon=True).start()
-
-        # No focus thread needed — os.startfile brings window to front natively
 
         print(Fore.GREEN + f"   -> Launched via custom path: {exe_path}")
         command_log.log_command("OPEN", clean, True, f"Custom path: {exe_path}")
@@ -719,18 +726,22 @@ def open_app(app_name):
             mood_engine.on_command_result(True)
             return True
 
-        # Try raw OS execution immediately (handles native exes in PATH instantly)
-        try:
-            os.startfile(clean_name)
-            command_log.log_command("OPEN", clean_name, True, "OS Kernel Startfile")
-            mood_engine.on_command_result(True)
-            return True
-        except Exception:
-            pass
-
-        # Try custom paths before hitting heavy AppOpener
+        # Try custom paths FIRST — user-defined paths take priority over everything
         if _try_custom_path(clean_name):
             return True
+        if original_name != clean_name and _try_custom_path(original_name):
+            return True
+
+        # Only try raw OS execution for names that look like executables
+        # Prevents "work" from opening Word, "files" from opening Explorer, etc.
+        if clean_name.endswith('.exe') or '\\' in clean_name or '/' in clean_name:
+            try:
+                os.startfile(clean_name)
+                command_log.log_command("OPEN", clean_name, True, "OS Kernel Startfile")
+                mood_engine.on_command_result(True)
+                return True
+            except Exception:
+                pass
         if original_name != clean_name and _try_custom_path(original_name):
             return True
 
