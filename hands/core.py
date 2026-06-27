@@ -276,8 +276,7 @@ def _try_custom_path(app_name):
                     return True
                 return False
 
-            # Poll every second for up to 8 seconds
-            # Video players (VLC, MPC) can take 5-7 seconds on first cold start
+            # Poll every second for up to 8 seconds for new process window
             for attempt in range(8):
                 time.sleep(1.0)
                 try:
@@ -286,7 +285,43 @@ def _try_custom_path(app_name):
                 except Exception:
                     pass
 
-            print(Fore.YELLOW + "   -> Could not bring window to front after 8s")
+            # New process not found — app reused existing instance
+            # Try to find window by known media player class names
+            try:
+                _player_classes = ["Qt5152QWindowIcon", "MediaPlayerClassicW",
+                                   "VLC VideoLanClt"]  # VLC main window class
+                for _cls in _player_classes:
+                    hwnd = user32.FindWindowW(_cls, None)
+                    if hwnd:
+                        user32.ShowWindow(hwnd, 9)
+                        user32.SetForegroundWindow(hwnd)
+                        user32.BringWindowToTop(hwnd)
+                        print(Fore.GREEN + f"   -> Found media player by class: {hwnd}")
+                        return
+                # Last resort — find any visible window with media player process
+                for proc in psutil.process_iter(['pid', 'name']):
+                    try:
+                        pn = proc.info['name'].lower()
+                        if any(mp in pn for mp in ['vlc', 'wmplayer', 'mpc']):
+                            found_vlc = [0]
+                            def _vlc_cb(hwnd, _):
+                                pid = ctypes.wintypes.DWORD(0)
+                                user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+                                if pid.value == proc.pid and user32.IsWindowVisible(hwnd):
+                                    if user32.GetWindowTextLengthW(hwnd) > 0:
+                                        found_vlc[0] = hwnd
+                                return True
+                            user32.EnumWindows(WNDENUMPROC(_vlc_cb), 0)
+                            if found_vlc[0]:
+                                user32.ShowWindow(found_vlc[0], 9)
+                                user32.SetForegroundWindow(found_vlc[0])
+                                print(Fore.GREEN + f"   -> Found VLC window: {found_vlc[0]}")
+                                return
+                    except Exception:
+                        continue
+            except Exception as _e:
+                print(Fore.YELLOW + f"   -> Media window search failed: {_e}")
+            print(Fore.YELLOW + "   -> Could not bring window to front")
 
         threading.Thread(target=_focus_new_window, args=(_before_launch,), daemon=True).start()
 
@@ -298,38 +333,77 @@ def _try_custom_path(app_name):
         # so close_app knows exactly which process to kill
         def _watch_new_process(alias, path):
             import time
-            # Snapshot processes before
             before_pids = {p.pid for p in psutil.process_iter(['pid'])}
-            time.sleep(2.5)  # Wait for app to launch
-            # Find new processes
-            # Filter out system processes — only real app processes
-            _system_procs = {'svchost.exe', 'conhost.exe', 'RuntimeBroker.exe',
-                            'SearchIndexer.exe', 'WmiPrvSE.exe', 'dllhost.exe',
-                            'backgroundTaskHost.exe', 'sihost.exe', 'taskhostw.exe'}
-            for p in psutil.process_iter(['pid', 'name', 'exe']):
+            time.sleep(3.0)
+
+            _system_procs = {
+                'svchost.exe', 'conhost.exe', 'RuntimeBroker.exe',
+                'SearchIndexer.exe', 'WmiPrvSE.exe', 'dllhost.exe',
+                'backgroundTaskHost.exe', 'sihost.exe', 'taskhostw.exe',
+                'ApplicationFrameHost.exe', 'ShellExperienceHost.exe',
+            }
+
+            # Find new process — must be a real app process
+            for p in psutil.process_iter(['pid', 'name']):
                 try:
                     if p.pid not in before_pids:
                         pname = p.info['name']
                         if pname in _system_procs:
                             continue
-                        if not pname.endswith('.exe'):
+                        if not pname.lower().endswith('.exe'):
                             continue
+                        # Register as single string, not list
                         _custom_alias_to_process[alias] = [pname]
-                        # Persist so it survives Seven restart
                         try:
                             _apm = config.KEY.get("commands", {}).get("alias_process_map", {})
-                            _apm[alias] = [p.info['name']]
+                            _apm[alias] = [pname]
                             if "commands" not in config.KEY:
                                 config.KEY["commands"] = {}
                             config.KEY["commands"]["alias_process_map"] = _apm
                             config.save_config()
                         except Exception:
                             pass
-                        print(Fore.GREEN + f"   -> Registered '{alias}' -> '{p.info['name']}'")
+                        print(Fore.GREEN + f"   -> Registered '{alias}' -> '{pname}'")
                         return
                 except Exception:
                     continue
-            # Fallback to extension map
+
+            # No new process found — app reused existing instance (VLC, Photos)
+            # For media files, scan running processes for known players
+            ext = os.path.splitext(path)[1].lower()
+            _media_map = {
+                '.mp4': ['vlc.exe', 'wmplayer.exe', 'Movies.exe'],
+                '.avi': ['vlc.exe', 'wmplayer.exe'],
+                '.mkv': ['vlc.exe', 'wmplayer.exe'],
+                '.mov': ['vlc.exe', 'wmplayer.exe'],
+                '.mp3': ['vlc.exe', 'wmplayer.exe', 'Groove.exe'],
+                '.jpg': ['Photos.exe', 'Microsoft.Photos.exe'],
+                '.jpeg': ['Photos.exe', 'Microsoft.Photos.exe'],
+                '.png': ['Photos.exe', 'Microsoft.Photos.exe'],
+            }
+            if ext in _media_map:
+                for candidate in _media_map[ext]:
+                    cname = candidate.lower().replace('.exe', '')
+                    for proc in psutil.process_iter(['pid', 'name']):
+                        try:
+                            if cname in proc.info['name'].lower():
+                                actual_name = proc.info['name']
+                                _custom_alias_to_process[alias] = [actual_name]
+                                try:
+                                    _apm = config.KEY.get("commands", {}).get("alias_process_map", {})
+                                    _apm[alias] = [actual_name]
+                                    if "commands" not in config.KEY:
+                                        config.KEY["commands"] = {}
+                                    config.KEY["commands"]["alias_process_map"] = _apm
+                                    config.save_config()
+                                except Exception:
+                                    pass
+                                print(Fore.GREEN + f"   -> Registered '{alias}' -> '{actual_name}' (existing process)")
+                                return
+                        except Exception:
+                            continue
+
+            # Final fallback
             _register_custom_process(alias, path)
 
         threading.Thread(
@@ -491,9 +565,18 @@ def close_app(app_name):
     )
 
     if process_names_to_try:
-        # Try each process name — stop at FIRST successful kill
-        # Do not iterate all names — that causes multiple kills
+        # Flatten in case _register_custom_process stored a list-of-lists
+        _flat = []
+        for item in process_names_to_try:
+            if isinstance(item, list):
+                _flat.extend(item)
+            else:
+                _flat.append(item)
+        process_names_to_try = _flat
+
         for proc_name in process_names_to_try:
+            if not isinstance(proc_name, str):
+                continue
             pn_lower = proc_name.lower().replace('.exe', '')
             for proc in psutil.process_iter(['pid', 'name']):
                 try:
@@ -541,8 +624,16 @@ def close_app(app_name):
 
     # 1. SPECIAL CASE: ACTIVE WINDOW
     if clean_name in ["current", "this", "it", "active window"]:
-        pyautogui.hotkey('alt', 'f4')
-        command_log.log_command("CLOSE", clean_name, True, "Active window (Alt+F4)")
+        try:
+            import ctypes
+            hwnd = ctypes.windll.user32.GetForegroundWindow()
+            if hwnd:
+                # WM_CLOSE = 0x0010 — instant, no Alt+F4 keypress delay
+                ctypes.windll.user32.PostMessageW(hwnd, 0x0010, 0, 0)
+                print(Fore.GREEN + f"   -> WM_CLOSE sent to hwnd: {hwnd}")
+        except Exception:
+            pyautogui.hotkey('alt', 'f4')  # fallback
+        command_log.log_command("CLOSE", clean_name, True, "Active window WM_CLOSE")
         mood_engine.on_command_result(True)
         return True
 
