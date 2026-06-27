@@ -338,11 +338,15 @@ def think(prompt_text, speaker_id="default"):
     # Words that are NEVER app names — always file/folder references
     # Defined here once — used by is_command check AND Layer 4.3
     _FILE_WORDS = {
-        "resume", "cv", "folder", "pdf", "document", "photo",
+        "resume", "cv", "pdf", "document", "photo",
         "image", "screenshot", "video", "report", "invoice",
         "contract", "presentation", "spreadsheet", "edit",
-        "itinerary", "trip", "travel", "gokarna", "file",
+        "itinerary", "trip", "travel",
     }
+    # Note: "file", "folder", "gokarna" removed
+    # "file" caused "close file explorer" to trigger file search
+    # "folder" caused window commands to trigger file search
+    # Specific place names like "gokarna" should not be hardcoded   
     _has_file_word = any(w in _FILE_WORDS for w in words)
 
     # Pre-classify to skip unnecessary layers for commands/greetings
@@ -1084,7 +1088,11 @@ def think(prompt_text, speaker_id="default"):
     capability_triggers = ["what can you do", "what you can do", "your capabilities",
                            "what are you capable", "what do you do", "capable of",
                            "tell me what you can", "what are your abilities",
-                           "list your capabilities", "what are your features"]
+                           "list your capabilities", "what are your features",
+                           "what you do normally", "what do you do normally",
+                           "what can you do for me", "what do you do for me",
+                           "what are you for", "what is your purpose",
+                           "what do you do exactly", "tell me what you do"]
     is_capability_q = any(t in clean_in for t in capability_triggers)
 
     if is_capability_q:
