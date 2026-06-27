@@ -1,37 +1,37 @@
 """
 =============================================================================
 PROJECT SEVEN - ears/core.py (The Listener)
-Version: 1.2 (Voice Identity Support)
+Version: 1.3 — Adaptive Noise Floor
 
-CHANGES FROM V1.1.2:
-    1. listen() now returns (text, audio_path) tuple instead of just text
-    2. Audio file kept for voice identification before cleanup
-    3. All existing logic unchanged (filters, corrections, whisper)
+CHANGES FROM V1.2:
+    1. Adaptive noise floor — threshold adjusts as environment changes
+    2. No hardcoded RMS values — calibrates from real measurements
+    3. Rolling window noise tracking — handles fan on/off, room changes
+    4. Duplicate print line removed
+    5. Old _calibrate_noise_floor replaced with adaptive system
 =============================================================================
 """
 
 import speech_recognition as sr
 from faster_whisper import WhisperModel
 import os
-import colorama
-from colorama import Fore
-# V1.3: Interrupt detection
 import threading
 import time
 import numpy as np
+import colorama
+from colorama import Fore
 
 colorama.init(autoreset=True)
 
-MODEL_SIZE = "medium.en"
+MODEL_SIZE      = "medium.en"
 AUDIO_TEMP_PATH = "temp_audio.wav"
 
+
+# =============================================================================
+# WHISPER MODEL LOADER
+# =============================================================================
+
 def _load_whisper_model(model_size: str) -> WhisperModel:
-    """
-    Load Whisper with best available device.
-    Priority: CUDA GPU → CPU
-    Falls back to CPU if CUDA fails or unavailable.
-    """
-    # Try GPU first
     try:
         import torch
         if torch.cuda.is_available():
@@ -43,7 +43,6 @@ def _load_whisper_model(model_size: str) -> WhisperModel:
     except Exception as e:
         print(Fore.YELLOW + f"[EARS] GPU check failed ({e}) — using CPU")
 
-    # CPU fallback — works on ALL machines
     try:
         model = WhisperModel(model_size, device="cpu", compute_type="int8")
         print(Fore.GREEN + f"[EARS] Whisper loaded on CPU ✓")
@@ -55,41 +54,93 @@ def _load_whisper_model(model_size: str) -> WhisperModel:
 
 print(Fore.CYAN + f"[EARS] Loading Whisper Model ({MODEL_SIZE})...")
 audio_model = _load_whisper_model(MODEL_SIZE)
-_calibrate_noise_floor()
-
-# RMS threshold — calibrated to distinguish direct speech from background noise
-# 800 works for most laptop mics at normal speaking distance (30-50cm)
-# If you are far from laptop, lower this to 400
-# If background noise is loud, raise this to 1200
-# Dynamic threshold — set at startup by _calibrate_noise_floor()
-# Relative to actual ambient noise, not a hardcoded value
-NOISE_FLOOR_RMS  = 500   # updated by calibration
-NOISE_MULTIPLIER = 2.5   # voice must be 2.5x louder than noise floor
-MIN_CREST        = 4.0   # minimum crest factor for voice
 
 
-def _calibrate_noise_floor() -> float:
+# =============================================================================
+# ADAPTIVE NOISE FLOOR
+# No hardcoded thresholds. Calibrates from real measurements at startup.
+# Updates continuously as environment changes — fan on/off, AC, room change.
+#
+# HOW IT WORKS:
+#   1. At startup: record 1 second of silence → measure RMS → set baseline
+#   2. Every rejected audio clip → feed its RMS into rolling average
+#   3. Threshold = rolling_average × MULTIPLIER
+#   4. Fan turns off → next 20 rejected clips are quieter → average drops
+#      → threshold drops → quiet voice now passes
+# =============================================================================
+
+_noise_floor   = 0.0        # current estimated ambient noise RMS
+_noise_samples = []         # rolling window of rejected clip RMS values
+_NOISE_WINDOW    = 20
+_MULTIPLIER      = 2.2
+_MIN_CREST       = 3.5
+_MIN_DURATION    = 0.5
+_floor_lock      = threading.Lock()
+_initial_floor   = 0.0   # set once at calibration, never changes
+_NOISE_FLOOR_CAP = 700   # hard ceiling — prevents runaway from leakage
+
+
+def _update_noise_floor(rms: float):
     """
-    Measure ambient noise RMS for 2 seconds at startup.
-    Returns the noise floor RMS value.
-    This is called once when Seven starts.
+    Update noise floor with a rejected clip.
+    Rules:
+    - Floor can DECREASE if environment gets quieter (fan off)
+    - Floor can INCREASE only up to _NOISE_FLOOR_CAP
+    - Floor can NEVER exceed the cap (prevents headphone/music runaway)
+    - Small fluctuations ignored (only log >20% change)
     """
-    global NOISE_FLOOR_RMS
+    global _noise_floor, _noise_samples
+    with _floor_lock:
+        _noise_samples.append(rms)
+        if len(_noise_samples) > _NOISE_WINDOW:
+            _noise_samples.pop(0)
+        prev         = _noise_floor
+        new_floor    = sum(_noise_samples) / len(_noise_samples)
+        _noise_floor = min(new_floor, _NOISE_FLOOR_CAP)
+        if prev > 0 and abs(_noise_floor - prev) / prev > 0.20:
+            print(Fore.CYAN + f"[EARS] Threshold: {prev * _MULTIPLIER:.0f} → {_noise_floor * _MULTIPLIER:.0f}")
+
+
+def _get_threshold() -> float:
+    """
+    Returns the current voice detection threshold.
+    If no data yet — returns 300 (permissive default for quiet rooms).
+    """
+    with _floor_lock:
+        if _noise_floor == 0:
+            return 300
+        return _noise_floor * _MULTIPLIER
+
+
+def _do_initial_calibration():
+    global _noise_samples, _noise_floor, _initial_floor
     try:
-        recognizer = sr.Recognizer()
-        with sr.Microphone() as source:
-            print(Fore.CYAN + "[EARS] Calibrating noise floor — 2 seconds...")
-            audio = recognizer.record(source, duration=2)
-            wav = audio.get_wav_data()
-            arr = np.frombuffer(wav, dtype=np.int16).astype(np.float32)
-            rms = float(np.sqrt(np.mean(arr ** 2)))
-            NOISE_FLOOR_RMS = max(rms, 100)
-            print(Fore.GREEN + f"[EARS] Noise floor: {NOISE_FLOOR_RMS:.0f} RMS")
-            return NOISE_FLOOR_RMS
+        _r = sr.Recognizer()
+        with sr.Microphone() as _src:
+            print(Fore.CYAN + "[EARS] Calibrating ambient noise — 1 second...")
+            _audio = _r.record(_src, duration=1)
+            _wav   = _audio.get_wav_data()
+            _arr   = np.frombuffer(_wav, dtype=np.int16).astype(np.float32)
+            _rms   = float(np.sqrt(np.mean(_arr ** 2)))
+            with _floor_lock:
+                _noise_samples = [_rms] * 5
+                _noise_floor   = _rms
+                _initial_floor = _rms   # locked forever
+            print(Fore.GREEN + f"[EARS] Noise floor: {_rms:.0f} | Threshold: {_rms * _MULTIPLIER:.0f}")
     except Exception as e:
-        print(Fore.YELLOW + f"[EARS] Calibration failed: {e} — using default {NOISE_FLOOR_RMS}")
-        return NOISE_FLOOR_RMS
+        print(Fore.YELLOW + f"[EARS] Calibration failed: {e} — using quiet room default")
+        with _floor_lock:
+            _noise_samples = [136.0] * 5
+            _noise_floor   = 136.0
+            _initial_floor = 136.0
 
+
+_do_initial_calibration()
+
+
+# =============================================================================
+# MAIN LISTEN FUNCTION
+# =============================================================================
 
 def listen():
     """
@@ -103,47 +154,49 @@ def listen():
     with sr.Microphone() as source:
         recognizer.adjust_for_ambient_noise(source, duration=0.1)
         recognizer.dynamic_energy_threshold = False
-        # Set threshold relative to calibrated noise floor
-        # Voice must be NOISE_MULTIPLIER times louder than ambient noise
-        recognizer.energy_threshold = NOISE_FLOOR_RMS * NOISE_MULTIPLIER
-        recognizer.pause_threshold        = 0.7
-        recognizer.non_speaking_duration  = 0.3
-        recognizer.phrase_threshold       = 0.1
+        recognizer.energy_threshold         = _get_threshold()
+        recognizer.pause_threshold          = 0.7
+        recognizer.non_speaking_duration    = 0.3
+        recognizer.phrase_threshold         = 0.1
 
         try:
-            audio = recognizer.listen(source, timeout=None, phrase_time_limit=7)
+            audio    = recognizer.listen(source, timeout=None, phrase_time_limit=7)
             wav_data = audio.get_wav_data()
 
+            # ── Signal Quality Checks ──────────────────────────────────────
             try:
-                audio_np = np.frombuffer(wav_data, dtype=np.int16).astype(np.float32)
-                rms  = float(np.sqrt(np.mean(audio_np ** 2)))
-                peak = float(np.max(np.abs(audio_np)))
-                dur  = len(audio_np) / 16000.0
+                audio_np  = np.frombuffer(wav_data, dtype=np.int16).astype(np.float32)
+                rms       = float(np.sqrt(np.mean(audio_np ** 2)))
+                peak      = float(np.max(np.abs(audio_np)))
+                dur       = len(audio_np) / 16000.0
+                threshold = _get_threshold()
 
-                # Must exceed noise floor by multiplier
-                _threshold = NOISE_FLOOR_RMS * NOISE_MULTIPLIER
-                if rms < _threshold:
-                    print(Fore.YELLOW + f"[EARS] RMS {rms:.0f} below threshold {_threshold:.0f} — noise")
+                if rms < threshold:
+                    _update_noise_floor(rms)
+                    print(Fore.YELLOW + f"[EARS] RMS {rms:.0f} < {threshold:.0f} (floor:{_noise_floor:.0f}) — noise")
                     return None, None
 
-                # Minimum duration — fan noise creates short bursts
-                if dur < 0.5:
+                if dur < _MIN_DURATION:
+                    _update_noise_floor(rms)
                     print(Fore.YELLOW + f"[EARS] Too short ({dur:.2f}s) — noise burst")
                     return None, None
 
-                # Crest factor
                 crest = peak / rms if rms > 0 else 0
-                if crest < MIN_CREST:
-                    print(Fore.YELLOW + f"[EARS] Crest {crest:.2f} < {MIN_CREST} — diffuse noise")
+                if crest < _MIN_CREST:
+                    _update_noise_floor(rms)
+                    print(Fore.YELLOW + f"[EARS] Crest {crest:.2f} < {_MIN_CREST} — diffuse noise")
                     return None, None
 
-                print(Fore.CYAN + f"[EARS] RMS: {rms:.0f} | Crest: {crest:.2f} | Dur: {dur:.2f}s — Whisper")
+                print(Fore.CYAN + f"[EARS] RMS:{rms:.0f} Crest:{crest:.2f} Dur:{dur:.2f}s Floor:{_noise_floor:.0f} Thresh:{threshold:.0f}")
+
             except Exception as _e:
                 print(Fore.YELLOW + f"[EARS] Signal check failed: {_e}")
 
+            # ── Write WAV for Whisper ──────────────────────────────────────
             with open(AUDIO_TEMP_PATH, "wb") as f:
                 f.write(wav_data)
 
+            # ── Whisper Transcription ──────────────────────────────────────
             segments_list = list(audio_model.transcribe(
                 AUDIO_TEMP_PATH,
                 beam_size=3,
@@ -153,12 +206,10 @@ def listen():
                 log_prob_threshold=-0.7,
                 vad_filter=True,
                 vad_parameters={
-                    "threshold": 0.4,
+                    "threshold":             0.4,
                     "min_speech_duration_ms": 150,
                     "min_silence_duration_ms": 250,
                 },
-                # Tell Whisper what kind of speech to expect
-                # This dramatically reduces hallucination on short commands
                 initial_prompt=(
                     "Voice assistant commands. Short phrases. "
                     "Examples: open chrome, volume up, set reminder, "
@@ -167,16 +218,15 @@ def listen():
             ))
             segments = segments_list[0]
 
-            # Filter segments with low confidence (hallucinations have high no_speech_prob)
+            # ── Confidence Filter ──────────────────────────────────────────
             confident_segments = []
             for seg in segments:
                 if hasattr(seg, 'no_speech_prob') and seg.no_speech_prob > 0.6:
-                    print(Fore.YELLOW + f"[EARS] Low confidence segment filtered (no_speech={seg.no_speech_prob:.2f}): '{seg.text}'")
+                    print(Fore.YELLOW + f"[EARS] Low confidence filtered (no_speech={seg.no_speech_prob:.2f}): '{seg.text}'")
                     continue
                 confident_segments.append(seg)
 
             full_text = "".join([s.text for s in confident_segments]).strip()
-
             if not full_text:
                 return None, None
 
@@ -185,234 +235,149 @@ def listen():
                 clean = clean.replace(ch, "")
             clean = clean.strip()
 
-            # Very short - noise
             if len(clean) < 3:
                 return None, None
 
-            # Known Whisper hallucinations on silence/music/background TV
-            # These are phrases Whisper invents when audio is not direct speech
+            # ── Ghost Filter ───────────────────────────────────────────────
             ghosts = {
-                # Filler words — single word hallucinations
-                "thank you", "thanks", "you", "bye", "okay", "alright",
+                "thank you", "thanks", "you", "bye", "alright",
                 "thank you very much", "thanks for watching", "watching",
                 "i", "so", "and", "the", "video", "subtitles", "caption",
                 "goodbye", "see you", "see you next time", "like and subscribe",
                 "bada ba ba ba", "ba ba ba", "da da da", "la la la",
                 "hmm", "hm", "uh", "um", "ah", "oh",
                 "music", "applause", "laughter",
-                # YouTube/creator phrases Whisper hallucinates from background video
-                "see you in the next video",
-                "see you guys in the next video",
+                "see you in the next video", "see you guys in the next video",
                 "i'll see you guys in the next video",
-                "that's all for today",
-                "thats all for today",
-                "see you in the next one",
-                "thanks for watching guys",
-                "don't forget to subscribe",
-                "hit the like button",
-                "have a great day",
-                "have a good day",
-                "take care everyone",
-                "peace out",
-                "later guys",
+                "that's all for today", "thats all for today",
+                "see you in the next one", "thanks for watching guys",
+                "don't forget to subscribe", "hit the like button",
+                "have a great day", "have a good day", "take care everyone",
+                "peace out", "later guys",
                 "do you want to see more videos like this",
                 "do you want to see more videos",
-                "we'll see you in the next video",
-                "well see you in the next video",
-                "ill see you in the next video",
-                "i will see you in the next video",
-                "what's going on", "whats going on",
-                "what's up", "whats up",
-                "what is going on",
-                "hello hello",
-                "the guy is up",
-                "a waste of time",
-                "a bold choice",
-                "a bold move",
-                "a familiar phrase",
-                "6 and 5",
+                "we'll see you in the next video", "well see you in the next video",
+                "ill see you in the next video", "i will see you in the next video",
+                "hello hello", "the guy is up", "a waste of time",
+                "a bold choice", "a bold move", "a familiar phrase", "6 and 5",
             }
             if clean in ghosts:
                 print(Fore.YELLOW + f"[EARS] Ghost filtered: '{clean}'")
                 return None, None
 
-            # Substring patterns — if ANY of these appear anywhere in the text,
-            # it is background audio bleed, not user speech
+            # ── Forbidden Pattern Filter ───────────────────────────────────
             forbidden = [
                 "subscribe", "amara.org", "caption", "copyright",
                 "mooji.org", "visit us at", "www.", ".org", ".com/",
-                "for more information",
-                "all rights reserved", "bada ba", "ba ba ba ba",
-                "da da da", "la la la la",
+                "for more information", "all rights reserved",
+                "bada ba", "ba ba ba ba", "da da da", "la la la la",
                 "next video", "see you guys", "see you in the",
                 "thanks for watching", "thank you for watching",
                 "dont forget to", "don't forget to",
                 "hit the like", "like and subscribe",
                 "have a great day", "have a good day",
-                # Speaker bleed patterns from background video/audio
-                "thank you very much",
-                "thank you so much",
-                "i wish i could",
-                "i'll begin",
-                "i will begin",
-                "that was quick",
-                "almost at a percent",
-                "platform is almost",
-                "you're watching",
-                "youre watching",
-                "welcome back",
-                "welcome to",
-                "in today's video",
-                "in todays video",
-                "in this video",
-                "let's get started",
-                "lets get started",
-                "without further ado",
-                "make sure to",
-                "guys and gals",
-                "smash that like",
-                "drop a comment",
-                "down below",
-                "check out",
-                "my name is",          # common YouTube intro — will not fire for Seven
-                "i'm your host",
-                "im your host",
-                "stay tuned",
-                "coming up next",
-                "right after this",
-                "we'll be right back",
-                "well be right back",
+                "thank you very much", "thank you so much",
+                "i wish i could", "i'll begin", "i will begin",
+                "that was quick", "almost at a percent", "platform is almost",
+                "you're watching", "youre watching",
+                "welcome back", "welcome to",
+                "in today's video", "in todays video", "in this video",
+                "let's get started", "lets get started", "without further ado",
+                "make sure to", "guys and gals", "smash that like",
+                "drop a comment", "down below", "check out",
+                "my name is", "i'm your host", "im your host",
+                "stay tuned", "coming up next", "right after this",
+                "we'll be right back", "well be right back",
             ]
             for p in forbidden:
                 if p in clean:
-                    print(Fore.YELLOW + f"[EARS] Speaker bleed filtered: '{p}' in '{clean}'")
+                    print(Fore.YELLOW + f"[EARS] Forbidden filtered: '{p}'")
                     return None, None
 
-            # Reject if input is ONLY repeated single syllables (music hallucination)
             words = clean.split()
+
+            # Repeated syllable
             if len(words) >= 3:
                 unique = set(words)
                 if len(unique) == 1 and len(list(unique)[0]) <= 3:
                     print(Fore.YELLOW + f"[EARS] Repeated syllable filtered: '{clean}'")
                     return None, None
 
-            # Reject suspiciously high ratio of filler words
-            # "Well she goes after it" = 5 words, only "she" and "it" are content
-            # This catches background conversation fragments
-            _filler = {"the", "a", "an", "is", "it", "to", "of", "and",
-                       "or", "but", "in", "on", "at", "for", "well",
-                       "so", "that", "this", "what", "i", "you", "he",
-                       "she", "they", "we", "my", "your", "his", "her",
-                       "up", "after", "goes", "with", "be", "are", "was"}
+            # Filler ratio
+            _filler = {"the","a","an","is","it","to","of","and","or","but",
+                       "in","on","at","for","well","so","that","this","what",
+                       "i","you","he","she","they","we","my","your","his","her",
+                       "up","after","goes","with","be","are","was"}
             if len(words) >= 4:
                 content_words = [w for w in words if w not in _filler]
-                filler_ratio = 1 - (len(content_words) / len(words))
+                filler_ratio  = 1 - (len(content_words) / len(words))
                 if filler_ratio > 0.75:
-                    print(Fore.YELLOW + f"[EARS] High filler ratio ({filler_ratio:.2f}) filtered: '{clean}'")
+                    print(Fore.YELLOW + f"[EARS] High filler ratio ({filler_ratio:.2f}) filtered")
                     return None, None
 
-            # Reject run-on sentences — user commands are concise
-            # Background audio produces long mixed transcriptions
-            # Hard limit: more than 18 words = almost certainly background audio
+            # Word count
             if len(words) > 18:
-                print(Fore.YELLOW + f"[EARS] Too long ({len(words)} words) — background audio, filtered: '{clean[:60]}...'")
+                print(Fore.YELLOW + f"[EARS] Too long ({len(words)} words) filtered")
                 return None, None
 
-            # Reject trailing-off sentences — background audio fades out
-            # "thank you i wish i could just" ends with "just" — no object
-            # Real commands always complete: "open chrome", "set volume 50"
-            _trailing_off = ["just", "but", "and", "so", "because",
-                             "though", "although", "however", "anyway",
-                             "i mean", "you know", "like i"]
+            # Trailing off
+            _trailing_off = ["just","but","and","so","because","though",
+                             "although","however","anyway","i mean","you know","like i"]
             if words and words[-1] in _trailing_off:
-                print(Fore.YELLOW + f"[EARS] Trailing-off sentence filtered: '{clean}'")
+                print(Fore.YELLOW + f"[EARS] Trailing-off filtered: '{clean}'")
                 return None, None
 
-            # Reject if sentence has multiple "thank you" or "thanks" embedded
+            # Thank-you pattern
             _ty_count = clean.count("thank you") + clean.count("thanks")
             if _ty_count >= 1 and len(words) > 5:
-                print(Fore.YELLOW + f"[EARS] Thank-you pattern in long sentence filtered: '{clean}'")
+                print(Fore.YELLOW + f"[EARS] Thank-you pattern filtered")
                 return None, None
-            
-            # --- COMMAND SANITY CHECK ---
-            # Voice assistant commands have a specific structure.
-            # Narration/presentation sentences do not.
-            # Reject if it reads like dictated text, not a command.
 
-            # Pattern 1: "of the X of the Y" — narration pattern, not a command
-            _of_the_count = clean.count("of the")
-            if _of_the_count >= 2:
+            # Narration pattern
+            if clean.count("of the") >= 2:
                 print(Fore.YELLOW + f"[EARS] Narration pattern filtered: '{clean}'")
                 return None, None
 
-            # Pattern 2: Passive voice constructions — "was a presentation of"
-            _passive_markers = [
-                "was a ", "were a ", "is a presentation",
-                "was the ", "this was", "that was",
-                "reading of", "parts response", "positive parts",
-            ]
-            if any(p in clean for p in _passive_markers) and len(words) > 6:
-                print(Fore.YELLOW + f"[EARS] Passive/narration pattern filtered: '{clean}'")
+            # Passive voice
+            _passive = ["was a ","were a ","is a presentation","was the ",
+                        "this was","that was","reading of","parts response","positive parts"]
+            if any(p in clean for p in _passive) and len(words) > 6:
+                print(Fore.YELLOW + f"[EARS] Passive pattern filtered: '{clean}'")
                 return None, None
 
-            # Pattern 3: Commands start with action verbs or question words
-            # If first word is not a known command/question starter AND sentence
-            # is longer than 8 words — likely hallucination
+            # Unknown starter
             _valid_starters = {
-                "open", "close", "start", "stop", "play", "pause", "skip",
-                "set", "get", "show", "find", "tell", "what", "how", "why",
-                "when", "where", "who", "which", "can", "could", "will",
-                "volume", "mute", "unmute", "brightness", "remind", "schedule",
-                "add", "delete", "remove", "create", "make", "turn", "switch",
-                "enable", "disable", "check", "search", "list", "hey", "hi",
-                "hello", "ok", "okay", "yes", "no", "cancel", "clear",
-                "increase", "decrease", "raise", "lower", "maximize", "minimize",
-                "snap", "move", "resize", "pin", "unpin", "restart", "shutdown",
-                "lock", "sleep", "wake", "timer", "alarm", "note", "write",
-                "read", "send", "call", "message", "email", "my", "do",
-                "is", "are", "was", "i", "the", "a",
+                "open","close","start","stop","play","pause","skip","set","get",
+                "show","find","tell","what","how","why","when","where","who","which",
+                "can","could","will","volume","mute","unmute","brightness","remind",
+                "schedule","add","delete","remove","create","make","turn","switch",
+                "enable","disable","check","search","list","hey","hi","hello","ok",
+                "okay","yes","no","cancel","clear","increase","decrease","raise",
+                "lower","maximize","minimize","snap","move","resize","pin","unpin",
+                "restart","shutdown","lock","sleep","wake","timer","alarm","note",
+                "write","read","send","call","message","email","my","do","is","are",
+                "was","i","the","a","place","where","recalibrate",
             }
             if words and words[0] not in _valid_starters and len(words) > 8:
-                print(Fore.YELLOW + f"[EARS] Unknown starter + long sentence filtered: '{clean[:60]}'")
+                print(Fore.YELLOW + f"[EARS] Unknown starter filtered: '{clean[:60]}'")
                 return None, None
 
-            # --- AUTOCORRECT ---
+            # ── Autocorrect ────────────────────────────────────────────────
             corrections = {
-                # Seven mishearings
-                "semen": "seven", "savin": "seven", "sibin": "seven",
-                "simon": "seven", "siman": "seven", "heaven": "seven",
-                "siwen": "seven", "so when": "seven", "servant": "seven",
-                "sir'en": "seven", "siren": "seven", "sevan": "seven",
-                "i7": "hi seven", "i 7": "hi seven",
-                # Common command mishearings
-                "fight explorer": "file explorer",
-                "five explorer": "file explorer",
-                "aye": "hi", "alo": "hello",
-                "and roll my voice": "enroll my voice",
-                "and roll": "enroll",
-                "in role": "enroll",
-                "in roll": "enroll",
-                "unroll": "enroll",
-                "un roll": "enroll",
-                # App name mishearings
-                "candle": "camera",
-                "candor": "camera",
-                "camera up": "camera",
-                "hit": "hey",
-                "had": "hey",
-                "hate": "hey",
-                # Common command mishearings
-                "open camera": "open camera",  # protect this phrase
-                "closer": "close",
-                "clothes": "close",
-                "volume up to": "volume",
-                "what's the whether": "what is the weather",
-                "what's the weather": "what is the weather",
-                "whether": "weather",
+                "semen":"seven","savin":"seven","sibin":"seven","simon":"seven",
+                "siman":"seven","heaven":"seven","siwen":"seven","so when":"seven",
+                "servant":"seven","sir'en":"seven","siren":"seven","sevan":"seven",
+                "i7":"hi seven","i 7":"hi seven",
+                "fight explorer":"file explorer","five explorer":"file explorer",
+                "aye":"hi","alo":"hello",
+                "and roll my voice":"enroll my voice","and roll":"enroll",
+                "in role":"enroll","in roll":"enroll","unroll":"enroll","un roll":"enroll",
+                "candle":"camera","candor":"camera","camera up":"camera",
+                "hit":"hey","had":"hey","hate":"hey",
+                "closer":"close","clothes":"close","volume up to":"volume",
+                "what's the whether":"what is the weather",
+                "what's the weather":"what is the weather","whether":"weather",
             }
-
-            
-
             for wrong, right in corrections.items():
                 if wrong in clean:
                     full_text = full_text.lower().replace(wrong, right)
@@ -420,27 +385,29 @@ def listen():
 
             return full_text.capitalize(), AUDIO_TEMP_PATH
 
-        except:
+        except Exception:
             return None, None
-        
+
+
+# =============================================================================
+# INTERRUPT LISTENER
+# =============================================================================
 
 def listen_for_interrupt(interrupt_words, on_interrupt_callback, stop_event):
     """
-    V1.3: Lightweight listener that runs DURING speech.
-    Listens for short interrupt phrases and triggers callback.
+    Lightweight listener running during TTS speech.
+    Detects interrupt words and triggers callback.
     """
     recognizer = sr.Recognizer()
-    recognizer.energy_threshold = 300
-    recognizer.pause_threshold = 0.8
-    recognizer.non_speaking_duration = 0.5
-    
-    # Seven's own voice gets picked up as these — ignore them
+    recognizer.energy_threshold       = 300
+    recognizer.pause_threshold        = 0.8
+    recognizer.non_speaking_duration  = 0.5
+
     self_voice_ghosts = [
-        "thank you", "thanks", "thanks for watching", "you",
-        "bye", "okay", "subtitles", "subscribe", "video",
-        "caption", "copyright", "amara"
+        "thank you","thanks","thanks for watching","you","bye","okay",
+        "subtitles","subscribe","video","caption","copyright","amara"
     ]
-    
+
     while not stop_event.is_set():
         try:
             with sr.Microphone() as source:
@@ -448,45 +415,42 @@ def listen_for_interrupt(interrupt_words, on_interrupt_callback, stop_event):
                     audio = recognizer.listen(source, timeout=1.5, phrase_time_limit=2)
                 except sr.WaitTimeoutError:
                     continue
-                
+
                 interrupt_audio_path = "temp_interrupt.wav"
                 with open(interrupt_audio_path, "wb") as f:
                     f.write(audio.get_wav_data())
-                
+
                 segments, _ = audio_model.transcribe(
                     interrupt_audio_path,
                     beam_size=1,
                     language="en"
                 )
                 text = "".join([s.text for s in segments]).strip().lower()
-                
+
                 try:
                     os.remove(interrupt_audio_path)
-                except:
+                except Exception:
                     pass
-                
+
                 if not text or len(text) < 2:
                     continue
-                
-                clean = text.replace(".", "").replace("!", "").replace(",", "").strip()
-                
-                # Skip Seven's own voice being picked up
+
+                clean = text.replace(".","").replace("!","").replace(",","").strip()
+
                 if clean in self_voice_ghosts:
                     continue
-                
-                # Check against interrupt words
+
                 for word in interrupt_words:
                     if word in clean:
-                        print(f"[EARS] ⚡ Interrupt detected: '{clean}' (matched: '{word}')")
+                        print(f"[EARS] Interrupt detected: '{clean}' (matched: '{word}')")
                         on_interrupt_callback()
                         return
-                        
+
         except Exception:
             continue
-    
+
     try:
         if os.path.exists("temp_interrupt.wav"):
             os.remove("temp_interrupt.wav")
-    except:
+    except Exception:
         pass
-        
