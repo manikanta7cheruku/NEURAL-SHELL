@@ -617,6 +617,8 @@ def seven_logic():
                         ).start()
                         _pre_executed_open = True
 
+            _pre_executed_close = False
+            _pre_executed_close = False
             if isinstance(response, str) and "###CLOSE:" in response:
                 import re as _re_preclose
                 _pre_closes = _re_preclose.findall(r"###CLOSE:\s*(.*?)(?=###|$)", response)
@@ -628,6 +630,7 @@ def seven_logic():
                             args=(_app,),
                             daemon=True
                         ).start()
+                        _pre_executed_close = True
 
             api_set_state("speaking", True)
             if _silence_watcher:
@@ -776,9 +779,13 @@ def seven_logic():
                         mouth.speak(msg)
                         app_ui.update_status(f"System failed: {msg}", "#ff0000")
 
-            # App commands — skip OPEN if already pre-executed
-            if _pre_executed_open:
+            # App commands — skip if already pre-executed
+            if _pre_executed_open and _pre_executed_close:
+                commands = re.findall(r"###(SEARCH):\s*(.*?)(?=###|$)", response)
+            elif _pre_executed_open:
                 commands = re.findall(r"###(CLOSE|SEARCH):\s*(.*?)(?=###|$)", response)
+            elif _pre_executed_close:
+                commands = re.findall(r"###(OPEN|SEARCH):\s*(.*?)(?=###|$)", response)
             else:
                 commands = re.findall(r"###(OPEN|CLOSE|SEARCH):\s*(.*?)(?=###|$)", response)
             for cmd_type, arg in commands:
