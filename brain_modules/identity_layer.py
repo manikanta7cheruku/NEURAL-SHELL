@@ -46,6 +46,7 @@ ALTERNATIVE PATTERN (interviewer might ask):
 import os
 import re
 import random
+from datetime import datetime
 
 import config
 from colorama import Fore
@@ -202,15 +203,14 @@ def handle_name_setting(prompt_text, clean_in, speaker_id, speaker_name,
 
 # Groups of semantically similar questions
 # If user asks anything from the same group twice, we detect it
-SIMILAR_GROUPS = [
-    ["introduce yourself", "tell me what you can do", "what can you do",
-     "what you can do", "what are your capabilities", "tell me about yourself",
-     "what do you do", "list your capabilities"],
-    ["whats your name", "who are you", "what should i call you", "tell me your name",
-     "your name", "yuor name"],
-    ["whats my name", "who am i", "do you know my name", "do you know me"],
-    ["who created you", "who made you", "who built you", "who is your creator"],
-]
+    SIMILAR_GROUPS = [
+        ["introduce yourself", "tell me what you can do", "what can you do",
+         "what you can do", "what are your capabilities", "tell me about yourself",
+         "list your capabilities"],
+        ["whats your name", "who are you", "what should i call you", "tell me your name"],
+        ["whats my name", "who am i", "do you know my name", "do you know me"],
+        ["who created you", "who made you", "who built you", "who is your creator"],
+    ]
 
 
 def handle_repetition(clean_in, speaker_id, speaker_name,
@@ -443,6 +443,20 @@ def handle_identity(clean_in, words, speaker_id, speaker_name, config):
     if (("instead of" in clean_in or "other than" in clean_in
          or "besides" in clean_in) and "seven" in clean_in):
         return "Seven is my name. That is the only one I have."
+    
+
+    # --- RECALIBRATION ---
+    if any(p in clean_in for p in [
+        "recalibrate", "calibrate mic", "calibrate microphone",
+        "reset mic", "reset microphone", "fix mic", "fix microphone",
+        "can't hear me", "cannot hear me", "not hearing me"
+    ]):
+        try:
+            from ears.core import _calibrate_noise_floor
+            _calibrate_noise_floor()
+            return "Done. Noise floor recalibrated to current environment."
+        except Exception:
+            return "Could not recalibrate right now. Try restarting Seven."
     
     # --- HOW TO USE SEVEN QUESTIONS ---
     _how_commands = (
