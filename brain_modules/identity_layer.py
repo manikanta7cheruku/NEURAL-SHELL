@@ -372,10 +372,15 @@ def handle_identity(clean_in, words, speaker_id, speaker_name, config):
     # --- GREETINGS ---
     # Only intercept greetings that are pure single-word greetings
     # Multi-word or contextual greetings go to LLM for natural response
-    _pure_greetings = {"hi", "hello", "hey", "yo", "sup",
-                       "heyy", "heyyy", "heyyyy", "hii", "hiii",
-                       "hiiii", "helo", "heloo", "hai"}
-    if clean_in in _pure_greetings:
+    # Pattern-based greeting detection — no hardcoded list
+    # Catches: hi, hey, hello, heyy, hiii, yo, sup, hola, hiya, howdy
+    # Logic: short input (1-2 words) that starts with a greeting root
+    _greeting_roots = {"h", "hey", "hel", "hi", "yo", "sup", "hol", "hiy", "how"}
+    _is_short = len(words) <= 2
+    _starts_greeting = any(clean_in.startswith(root) for root in _greeting_roots)
+    _is_pure_greeting = _is_short and _starts_greeting and len(clean_in) <= 12
+
+    if _is_pure_greeting:
         # Single word greeting — respond instantly without LLM
         # But vary responses so it does not feel scripted
         _hour = datetime.now().hour
