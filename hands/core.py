@@ -210,6 +210,20 @@ def _try_custom_path(app_name):
         else:
             os.startfile(exe_path)
 
+        # Bring window to foreground for all file types
+        def _focus_new_window():
+            import time
+            import ctypes
+            time.sleep(2.0)
+            try:
+                # Get the foreground window after app launches
+                hwnd = ctypes.windll.user32.GetForegroundWindow()
+                ctypes.windll.user32.ShowWindow(hwnd, 9)   # SW_RESTORE
+                ctypes.windll.user32.SetForegroundWindow(hwnd)
+            except Exception:
+                pass
+        threading.Thread(target=_focus_new_window, daemon=True).start()
+
         print(Fore.GREEN + f"   -> Launched via custom path: {exe_path}")
         command_log.log_command("OPEN", clean, True, f"Custom path: {exe_path}")
         mood_engine.on_command_result(True)
@@ -222,10 +236,19 @@ def _try_custom_path(app_name):
             before_pids = {p.pid for p in psutil.process_iter(['pid'])}
             time.sleep(2.5)  # Wait for app to launch
             # Find new processes
-            for p in psutil.process_iter(['pid', 'name']):
+            # Filter out system processes — only real app processes
+            _system_procs = {'svchost.exe', 'conhost.exe', 'RuntimeBroker.exe',
+                            'SearchIndexer.exe', 'WmiPrvSE.exe', 'dllhost.exe',
+                            'backgroundTaskHost.exe', 'sihost.exe', 'taskhostw.exe'}
+            for p in psutil.process_iter(['pid', 'name', 'exe']):
                 try:
                     if p.pid not in before_pids:
-                        _custom_alias_to_process[alias] = [p.info['name']]
+                        pname = p.info['name']
+                        if pname in _system_procs:
+                            continue
+                        if not pname.endswith('.exe'):
+                            continue
+                        _custom_alias_to_process[alias] = [pname]
                         # Persist so it survives Seven restart
                         try:
                             _apm = config.KEY.get("commands", {}).get("alias_process_map", {})
@@ -704,9 +727,9 @@ def open_app(app_name):
             mood_engine.on_command_result(True)
             return True
             
-        if "explorer" in clean_name:
-            os.startfile("explorer")
-            command_log.log_command("OPEN", "explorer", True, "os.startfile")
+        if any(x in clean_name for x in ["explorer", "file explorer", "files", "file manager"]):
+            subprocess.Popen("explorer.exe", shell=False)
+            command_log.log_command("OPEN", "explorer", True, "subprocess explorer")
             mood_engine.on_command_result(True)
             return True
             
