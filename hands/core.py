@@ -129,17 +129,20 @@ def _resolve_alias(app_name):
 # Maps custom alias -> process name that opened it
 # So "close pic" can find "Microsoft.Photos.exe" or "vlc.exe"
 _EXTENSION_PROCESS_MAP = {
-    # mspaint first — we open images with mspaint directly
-    ".jpg":  ["mspaint"],
-    ".jpeg": ["mspaint"],
-    ".png":  ["mspaint"],
-    ".gif":  ["mspaint"],
-    ".bmp":  ["mspaint"],
-    ".heic": ["mspaint"],
-    ".webp": ["mspaint"],
-    ".raw":  ["mspaint"],
-    ".mp4":  ["vlc", "wmplayer", "Movies"],
-    ".mp3":  ["vlc", "wmplayer", "Groove"],
+    # Default app order — _watch_new_process will register the exact one used
+    ".jpg":  ["Microsoft.Photos", "Photos", "mspaint", "gimp"],
+    ".jpeg": ["Microsoft.Photos", "Photos", "mspaint"],
+    ".png":  ["Microsoft.Photos", "Photos", "mspaint", "gimp"],
+    ".gif":  ["Microsoft.Photos", "Photos"],
+    ".bmp":  ["mspaint", "Microsoft.Photos"],
+    ".heic": ["Microsoft.Photos", "Photos"],
+    ".webp": ["Microsoft.Photos", "Photos", "mspaint"],
+    ".raw":  ["Microsoft.Photos", "Photos"],
+    ".mp4":  ["vlc", "vlc.exe", "wmplayer", "WindowsMediaPlayer", "Movies"],
+    ".mp3":  ["vlc", "vlc.exe", "wmplayer", "Groove", "Music"],
+    ".avi":  ["vlc", "vlc.exe", "wmplayer"],
+    ".mkv":  ["vlc", "vlc.exe", "wmplayer"],
+    ".mov":  ["vlc", "vlc.exe", "wmplayer"],
     ".pdf":  ["AcroRd32", "Acrobat", "FoxitReader", "edge", "chrome"],
     ".docx": ["WINWORD"],
     ".xlsx": ["EXCEL"],
@@ -213,9 +216,9 @@ def _try_custom_path(app_name):
             import threading as _thr
             _thr.Thread(target=_focus_explorer, daemon=True).start()    
         elif ext in {'.jpg', '.jpeg', '.png', '.bmp', '.gif', '.heic', '.webp', '.raw'}:
-            # Use mspaint directly — guaranteed new process, guaranteed closeable
-            # Photos app reuses existing process making close unreliable
-            subprocess.Popen(['mspaint', exe_path])
+            # os.startfile opens in user's default image app
+            # Pass absolute path — Windows opens the specific file, not gallery
+            os.startfile(os.path.abspath(exe_path))
         else:
             os.startfile(exe_path)
 
@@ -223,56 +226,67 @@ def _try_custom_path(app_name):
         def _focus_new_window(before_pids_snap):
             import time
             import ctypes
-            # Wait longer — video players take 3-5 seconds to fully load
-            time.sleep(3.5)
-            try:
-                user32 = ctypes.windll.user32
+            import ctypes.wintypes
 
-                # Find new PIDs
+            user32  = ctypes.windll.user32
+            WNDENUMPROC = ctypes.WINFUNCTYPE(
+                ctypes.wintypes.BOOL,
+                ctypes.wintypes.HWND,
+                ctypes.wintypes.LPARAM,
+            )
+
+            def _try_focus():
+                """Find visible titled window in new processes and bring to front."""
                 new_pids = set()
-                for p in psutil.process_iter(['pid', 'name']):
+                for p in psutil.process_iter(['pid']):
                     try:
                         if p.pid not in before_pids_snap:
                             new_pids.add(p.pid)
                     except Exception:
                         continue
 
-                # Find visible window belonging to any new process
-                best_hwnd = [None]
+                if not new_pids:
+                    return False
 
-                def _enum_cb(hwnd, _):
+                found = [0]
+
+                def _cb(hwnd, _):
                     try:
                         if not user32.IsWindowVisible(hwnd):
                             return True
-                        pid = ctypes.c_ulong(0)
+                        pid = ctypes.wintypes.DWORD(0)
                         user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-                        if pid.value in new_pids:
-                            # Check window has a title (not a background helper window)
-                            length = user32.GetWindowTextLengthW(hwnd)
-                            if length > 0:
-                                best_hwnd[0] = hwnd
+                        if pid.value not in new_pids:
+                            return True
+                        length = user32.GetWindowTextLengthW(hwnd)
+                        if length < 1:
+                            return True
+                        found[0] = hwnd
+                        return False   # Stop enumeration — found it
                     except Exception:
-                        pass
+                        return True
+
+                user32.EnumWindows(WNDENUMPROC(_cb), 0)
+
+                if found[0]:
+                    user32.ShowWindow(found[0], 9)        # SW_RESTORE
+                    user32.SetForegroundWindow(found[0])
+                    user32.BringWindowToTop(found[0])
+                    print(Fore.GREEN + f"   -> Window focused: hwnd={found[0]}")
                     return True
+                return False
 
-                enum_func = ctypes.WINFUNCTYPE(
-                    ctypes.c_bool, ctypes.c_size_t, ctypes.c_size_t
-                )
-                user32.EnumWindows(enum_func(_enum_cb), 0)
+            # Poll every second for up to 8 seconds
+            # Video players (VLC, MPC) can take 5-7 seconds on first cold start
+            for attempt in range(8):
+                time.sleep(1.0)
+                try:
+                    if _try_focus():
+                        return
+                except Exception:
+                    pass
 
-                if best_hwnd[0]:
-                    # Allow this process to set foreground
-                    user32.AllowSetForegroundWindow(0xFFFFFFFF)
-                    # Restore if minimized
-                    user32.ShowWindow(best_hwnd[0], 9)   # SW_RESTORE
-                    # Bring to front
-                    user32.SetForegroundWindow(best_hwnd[0])
-                    user32.BringWindowToTop(best_hwnd[0])
-                    print(Fore.GREEN + f"   -> Window brought to foreground: {best_hwnd[0]}")
-                else:
-                    print(Fore.YELLOW + f"   -> No new window found after 3.5s — app may still be loading")
-            except Exception as _fe:
-                print(Fore.YELLOW + f"   -> Focus failed: {_fe}")
+            print(Fore.YELLOW + "   -> Could not bring window to front after 8s")
 
         threading.Thread(target=_focus_new_window, args=(_before_launch,), daemon=True).start()
 
@@ -497,7 +511,29 @@ def close_app(app_name):
         # Nothing found running
         print(Fore.YELLOW + f"   -> No running process found for alias '{clean_name}'")
         if _is_custom_alias:
-            # Do not fall through to smart closer for custom aliases
+            # Try one more approach — scan all processes for video/image players
+            _media_procs = ["vlc", "wmplayer", "movies", "groove",
+                           "mspaint", "photos", "microsoft.photos"]
+            custom_paths = _get_custom_paths()
+            if clean_name in custom_paths:
+                _file_ext = os.path.splitext(custom_paths[clean_name])[1].lower()
+                _is_media = _file_ext in {
+                    '.mp4', '.avi', '.mkv', '.mov', '.mp3',
+                    '.jpg', '.jpeg', '.png', '.gif', '.bmp'
+                }
+                if _is_media:
+                    for _proc in psutil.process_iter(['pid', 'name']):
+                        try:
+                            _pn = _proc.info['name'].lower().replace('.exe', '')
+                            if any(_pn.startswith(mp) or mp in _pn
+                                   for mp in _media_procs):
+                                _proc.kill()
+                                print(Fore.GREEN + f"   -> Closed media player: {_proc.info['name']}")
+                                command_log.log_command("CLOSE", clean_name, True, "Media player kill")
+                                mood_engine.on_command_result(True)
+                                return True
+                        except Exception:
+                            continue
             command_log.log_command("CLOSE", clean_name, False, "Process not running")
             mood_engine.on_command_result(False)
             return False
