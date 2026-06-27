@@ -203,14 +203,14 @@ def handle_name_setting(prompt_text, clean_in, speaker_id, speaker_name,
 
 # Groups of semantically similar questions
 # If user asks anything from the same group twice, we detect it
-    SIMILAR_GROUPS = [
-        ["introduce yourself", "tell me what you can do", "what can you do",
-         "what you can do", "what are your capabilities", "tell me about yourself",
-         "list your capabilities"],
-        ["whats your name", "who are you", "what should i call you", "tell me your name"],
-        ["whats my name", "who am i", "do you know my name", "do you know me"],
-        ["who created you", "who made you", "who built you", "who is your creator"],
-    ]
+SIMILAR_GROUPS = [
+    ["introduce yourself", "tell me what you can do", "what can you do",
+     "what you can do", "what are your capabilities", "tell me about yourself",
+     "list your capabilities"],
+    ["whats your name", "who are you", "what should i call you", "tell me your name"],
+    ["whats my name", "who am i", "do you know my name", "do you know me"],
+    ["who created you", "who made you", "who built you", "who is your creator"],
+]
 
 
 def handle_repetition(clean_in, speaker_id, speaker_name,
