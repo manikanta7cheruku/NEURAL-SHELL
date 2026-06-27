@@ -129,12 +129,15 @@ def _resolve_alias(app_name):
 # Maps custom alias -> process name that opened it
 # So "close pic" can find "Microsoft.Photos.exe" or "vlc.exe"
 _EXTENSION_PROCESS_MAP = {
-    ".jpg": ["Photos", "Microsoft.Photos", "mspaint", "gimp"],
-    ".jpeg": ["Photos", "Microsoft.Photos", "mspaint"],
-    ".png": ["Photos", "Microsoft.Photos", "mspaint", "gimp"],
-    ".gif": ["Photos", "Microsoft.Photos"],
-    ".bmp": ["Photos", "Microsoft.Photos", "mspaint"],
-    ".mp4": ["vlc", "wmplayer", "Movies", "Microsoft.Media.Player"],
+    # Single entry per extension — use what we actually open with
+    # mspaint for images (we use ShellExecuteW which opens default app)
+    # If user has different default, _watch_new_process will override this
+    ".jpg":  ["mspaint", "Photos", "Microsoft.Photos"],
+    ".jpeg": ["mspaint", "Photos", "Microsoft.Photos"],
+    ".png":  ["mspaint", "Photos", "Microsoft.Photos"],
+    ".gif":  ["Photos", "Microsoft.Photos"],
+    ".bmp":  ["mspaint"],
+    ".mp4":  ["vlc", "wmplayer", "Movies"],
     ".mp3": ["vlc", "wmplayer", "Groove", "Music"],
     ".pdf": ["AcroRd32", "Acrobat", "FoxitReader", "edge", "chrome"],
     ".docx": ["WINWORD"],
@@ -183,6 +186,9 @@ def _try_custom_path(app_name):
     try:
         ext = os.path.splitext(exe_path)[1].lower()
 
+        # Snapshot PIDs BEFORE launch so _focus_new_window can find the new process
+        _before_launch = {p.pid for p in psutil.process_iter(['pid'])}
+
         if ext == '.exe':
             subprocess.Popen([exe_path])
         elif os.path.isdir(exe_path):
@@ -210,19 +216,52 @@ def _try_custom_path(app_name):
         else:
             os.startfile(exe_path)
 
-        # Bring window to foreground for all file types
-        def _focus_new_window():
+        # Bring new window to foreground by finding it via new process PID
+        def _focus_new_window(before_pids_snap):
             import time
             import ctypes
             time.sleep(2.0)
             try:
-                # Get the foreground window after app launches
+                # Find new process that was not there before
+                new_pid = None
+                for p in psutil.process_iter(['pid', 'name']):
+                    try:
+                        if p.pid not in before_pids_snap:
+                            new_pid = p.pid
+                            break
+                    except Exception:
+                        continue
+
+                if new_pid:
+                    # Enumerate windows to find one belonging to new process
+                    result_hwnd = [None]
+                    def _enum_cb(hwnd, _):
+                        try:
+                            import ctypes as _ct
+                            pid = ctypes.c_ulong(0)
+                            _ct.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+                            if pid.value == new_pid and ctypes.windll.user32.IsWindowVisible(hwnd):
+                                result_hwnd[0] = hwnd
+                        except Exception:
+                            pass
+                        return True
+                    ctypes.windll.user32.EnumWindows(
+                        ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_int, ctypes.c_int)(_enum_cb),
+                        0
+                    )
+                    if result_hwnd[0]:
+                        ctypes.windll.user32.ShowWindow(result_hwnd[0], 9)
+                        ctypes.windll.user32.SetForegroundWindow(result_hwnd[0])
+                        return
+
+                # Fallback — just bring whatever is foreground to front
                 hwnd = ctypes.windll.user32.GetForegroundWindow()
-                ctypes.windll.user32.ShowWindow(hwnd, 9)   # SW_RESTORE
+                ctypes.windll.user32.ShowWindow(hwnd, 9)
                 ctypes.windll.user32.SetForegroundWindow(hwnd)
             except Exception:
                 pass
-        threading.Thread(target=_focus_new_window, daemon=True).start()
+
+        threading.Thread(target=_focus_new_window, args=(_before_launch,), daemon=True).start()
 
         print(Fore.GREEN + f"   -> Launched via custom path: {exe_path}")
         command_log.log_command("OPEN", clean, True, f"Custom path: {exe_path}")
@@ -417,25 +456,39 @@ def close_app(app_name):
             process_names_to_try = _EXTENSION_PROCESS_MAP.get(ext, [])
             print(Fore.CYAN + f"   -> Inferred process list from extension {ext}: {process_names_to_try}")
 
+    # If this is a known custom alias, only use alias-based close
+    # Do not fall through to smart process closer — that causes double close
+    _is_custom_alias = (
+        clean_name in _custom_alias_to_process or
+        clean_name in _get_custom_paths()
+    )
+
     if process_names_to_try:
+        # Try each process name — stop at FIRST successful kill
+        # Do not iterate all names — that causes multiple kills
         for proc_name in process_names_to_try:
+            pn_lower = proc_name.lower().replace('.exe', '')
             for proc in psutil.process_iter(['pid', 'name']):
                 try:
                     p_lower = proc.info['name'].lower()
-                    pn_lower = proc_name.lower().replace('.exe', '')
                     if pn_lower in p_lower or p_lower.startswith(pn_lower):
-                        proc.kill()  # kill not terminate — faster, no grace period
+                        proc.kill()
                         print(Fore.GREEN + f"   -> Closed {proc.info['name']} for '{clean_name}'")
                         command_log.log_command("CLOSE", clean_name, True, f"Via alias -> {proc.info['name']}")
                         mood_engine.on_command_result(True)
-                        return True
+                        return True  # Hard return — never try next process name
                 except Exception:
                     continue
-        # Process map had entries but nothing running — tell caller
+            # This process name not running — try next in list
+            continue
+        # Nothing found running
         print(Fore.YELLOW + f"   -> No running process found for alias '{clean_name}'")
-        command_log.log_command("CLOSE", clean_name, False, "Process not running")
-        mood_engine.on_command_result(False)
-        return False
+        if _is_custom_alias:
+            # Do not fall through to smart closer for custom aliases
+            command_log.log_command("CLOSE", clean_name, False, "Process not running")
+            mood_engine.on_command_result(False)
+            return False
+        # Not a custom alias — fall through to special cases and smart closer
 
     # 1. SPECIAL CASE: ACTIVE WINDOW
     if clean_name in ["current", "this", "it", "active window"]:
@@ -765,9 +818,6 @@ def open_app(app_name):
                 return True
             except Exception:
                 pass
-        if original_name != clean_name and _try_custom_path(original_name):
-            return True
-
         # TIER 2: AppOpener — Wrapped in Background Thread for ZERO UI Blocking
         print(Fore.YELLOW + f"   -> Dispatched async AppOpener crawl for '{clean_name}'...")
         import threading
