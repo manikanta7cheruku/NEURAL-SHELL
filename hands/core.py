@@ -181,27 +181,25 @@ def _try_custom_path(app_name):
 
     try:
         ext = os.path.splitext(exe_path)[1].lower()
-
-        if ext == '.exe':
-            subprocess.Popen([exe_path])
-        elif os.path.isdir(exe_path):
-            # Folder — open Explorer and force foreground
-            import ctypes
-            subprocess.Popen(f'explorer "{exe_path}"', shell=True)
-            # Give Explorer time to open then bring to front
-            import threading
-            def _focus_explorer():
-                import time
-                time.sleep(1.5)
-                try:
-                    ctypes.windll.user32.SetForegroundWindow(
-                        ctypes.windll.user32.FindWindowW("CabinetWClass", None)
-                    )
-                except Exception:
-                    pass
-            threading.Thread(target=_focus_explorer, daemon=True).start()
-        else:
+            # Open image in default viewer — avoid Photos app gallery
+            # Use mspaint as single-file viewer, or default association
+        try:
+            subprocess.Popen(['mspaint', exe_path])
+        except Exception:
             os.startfile(exe_path)
+
+        # Bring window to foreground after short delay
+        def _bring_to_front():
+            import time, ctypes
+            time.sleep(1.5)
+            try:
+                # Find the most recently active window and bring it forward
+                hwnd = ctypes.windll.user32.GetForegroundWindow()
+                ctypes.windll.user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+                ctypes.windll.user32.SetForegroundWindow(hwnd)
+            except Exception:
+                pass
+        threading.Thread(target=_bring_to_front, daemon=True).start()
 
         # No focus thread needed — os.startfile brings window to front natively
 
