@@ -372,7 +372,9 @@ def handle_identity(clean_in, words, speaker_id, speaker_name, config):
     # --- GREETINGS ---
     # Only intercept greetings that are pure single-word greetings
     # Multi-word or contextual greetings go to LLM for natural response
-    _pure_greetings = {"hi", "hello", "hey", "yo", "sup"}
+    _pure_greetings = {"hi", "hello", "hey", "yo", "sup",
+                       "heyy", "heyyy", "heyyyy", "hii", "hiii",
+                       "hiiii", "helo", "heloo", "hai"}
     if clean_in in _pure_greetings:
         # Single word greeting — respond instantly without LLM
         # But vary responses so it does not feel scripted
