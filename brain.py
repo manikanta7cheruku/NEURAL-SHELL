@@ -913,15 +913,24 @@ def think(prompt_text, speaker_id="default"):
                 apps = [remaining.strip()]
 
             # Known system apps always closeable without a configured path
+            # Common apps that can be opened/closed without a configured path
+            # AppOpener handles these via system search
             _ALWAYS_CLOSEABLE = {
                 "chrome", "firefox", "edge", "notepad", "explorer", "calculator",
                 "camera", "photos", "settings", "paint", "word", "excel",
                 "powerpoint", "outlook", "teams", "discord", "spotify",
                 "whatsapp", "telegram", "zoom", "obs", "vlc", "code",
-                "vscode", "terminal", "cmd", "powershell", "copilot",
-                "clock", "calendar", "mail", "maps", "store", "xbox",
-                "brave", "opera", "skype", "slack", "notepad++", "winamp",
-                "snipping tool", "task manager", "paint 3d", "media player",
+                "vscode", "terminal", "cmd", "powershell", "task manager",
+                "snipping tool", "copilot", "clock", "calendar", "mail",
+                "maps", "store", "xbox", "winamp", "notepad++", "brave",
+                "opera", "skype", "slack", "premiere", "premiere pro",
+                "adobe premiere", "adobe premiere pro", "after effects",
+                "photoshop", "illustrator", "lightroom", "audacity",
+                "davinci", "davinci resolve", "figma", "blender",
+                "autocad", "solidworks", "matlab", "android studio",
+                "intellij", "pycharm", "webstorm", "rider", "clion",
+                "unity", "unreal", "godot", "steam", "epic games",
+                "origin", "battle.net", "valorant", "minecraft",
             }
 
             _cmd_paths   = config.KEY.get("commands", {}).get("app_paths", {})
@@ -943,21 +952,37 @@ def think(prompt_text, speaker_id="default"):
                     # Common system app — allow through
                     if _app_clean in _ALWAYS_CLOSEABLE:
                         continue
-                    # Everything else — block with human message
-                    # (AppOpener async silently fails, user gets no feedback)
+                    # Allow if it looks like real software name
+                    # Real software: multiple words, or known suffixes, or long enough
+                    _words = _app_clean.split()
+                    _looks_real = (
+                        len(_words) >= 2 or          # "premiere pro", "after effects"
+                        len(_app_clean) >= 6 or      # "spotify", "discord"
+                        _app_clean.endswith('.exe')   # explicit exe
+                    )
+                    if _looks_real:
+                        continue  # Let AppOpener try it
+                    # Short single unknown word — block
                     return (
-                        f"I don't have '{_app}' in my commands. "
-                        f"Go to Commands and add the path, "
-                        f"then I can open it."
+                        f"I don't see '{_app}' installed. "
+                        f"If it is a custom file or folder, add it in Commands."
                     )
 
             if tag == "CLOSE":
                 for _app in apps:
                     _app_clean = _app.lower().strip()
 
-                    # Reject pronouns — "close me", "close it", "close that"
+                    # "close it", "close this", "close that" = close active window
+                    _active_window_words = {"it", "this", "that", "the window",
+                                           "current", "active", "foreground"}
+                    if _app_clean in _active_window_words:
+                        import pyautogui as _pag
+                        _pag.hotkey('alt', 'f4')
+                        return "Closed."
+
+                    # Reject other pronouns
                     if _app_clean in _INVALID_TARGETS:
-                        return (f"Close what exactly? I did not catch a specific app name.")
+                        return "Close which app? Be specific."
 
                     # Reject gibberish — no vowels and longer than 3 chars
                     _has_vowel = any(v in _app_clean for v in "aeiou")
