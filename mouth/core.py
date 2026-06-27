@@ -56,17 +56,21 @@ def _build_run_cmd():
 def _spawn_speaker(text):
     """
     Spawn speaker.py subprocess for one piece of text.
-    Returns Popen object.
+    Passes text via environment variable — no string escaping issues.
+    Apostrophes, quotes, special chars all safe.
     """
     here, app_path, env = _build_run_cmd()
-    safe_text = text.replace("'", "\\'").replace("\n", " ")
+
+    # Pass text via env var — avoids ALL quote/escape issues in -c command
+    env["SEVEN_SPEAK_TEXT"] = text.replace("\n", " ")
 
     run_cmd = (
-        f"import sys; "
+        f"import sys, os; "
         f"sys.path.insert(0, r'{app_path}'); "
         f"sys.path.insert(0, r'{here}'); "
+        f"_text = os.environ.pop('SEVEN_SPEAK_TEXT', ''); "
         f"from mouth.speaker import speak_text; "
-        f"speak_text('{safe_text}')"
+        f"speak_text(_text)"
     )
 
     proc = subprocess.Popen(
