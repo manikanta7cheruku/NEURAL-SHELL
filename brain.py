@@ -340,8 +340,7 @@ def think(prompt_text, speaker_id="default"):
     _FILE_WORDS = {
         "resume", "cv", "pdf", "document", "photo",
         "image", "screenshot", "video", "report", "invoice",
-        "contract", "presentation", "spreadsheet", "edit",
-        "itinerary", "trip", "travel",
+        "contract", "presentation", "spreadsheet", "edit", "travel",
     }
     # Note: "file", "folder", "gokarna" removed
     # "file" caused "close file explorer" to trigger file search
@@ -1082,87 +1081,9 @@ def think(prompt_text, speaker_id="default"):
                 web_searched = True
                 print(Fore.GREEN + "[BRAIN] Web results injected.")
 
-    # ------------------------------------------------------------------
-    # LAYER 5.7: CAPABILITY INJECTION
-    # ------------------------------------------------------------------
-    capability_triggers = ["what can you do", "what you can do", "your capabilities",
-                           "what are you capable", "what do you do", "capable of",
-                           "tell me what you can", "what are your abilities",
-                           "list your capabilities", "what are your features",
-                           "what you do normally", "what do you do normally",
-                           "what can you do for me", "what do you do for me",
-                           "what are you for", "what is your purpose",
-                           "what do you do exactly", "tell me what you do"]
-    is_capability_q = any(t in clean_in for t in capability_triggers)
-
-    if is_capability_q:
-        # Build capability facts block -- LLM answers naturally from these
-        is_window_q = any(w in clean_in for w in ["window", "windows", "screen", "display"])
-        is_app_q    = any(w in clean_in for w in ["app", "apps", "application", "program"])
-        is_system_q = any(w in clean_in for w in ["system", "control", "volume", "brightness",
-                                                    "battery", "wifi", "bluetooth", "media"])
-        is_sched_q  = any(w in clean_in for w in ["schedule", "scheduler", "alarm", "reminder",
-                                                    "timer", "calendar", "remind"])
-
-        if is_window_q:
-            cap_facts = [
-                "I can minimize, maximize, restore, and center any window.",
-                "I snap windows to any side or corner of the screen.",
-                "I do split-screen layouts: side by side, stacked, or four corners.",
-                "I can pin any window on top so it stays above everything.",
-                "I adjust window transparency to any percentage.",
-                "I swap two windows positions instantly.",
-                "I toggle fullscreen on any window.",
-                "I undo my last window action.",
-                "I understand 'this' as whatever window is currently focused.",
-                "I show desktop and minimize all windows.",
-                "I move windows between monitors.",
-            ]
-        elif is_system_q:
-            cap_facts = [
-                "I control system volume: up, down, mute, unmute, set to specific percentage.",
-                "I adjust screen brightness: up, down, set to specific percentage.",
-                "I check battery status: percentage, plugged in, time remaining.",
-                "I check and toggle WiFi on or off.",
-                "I toggle Bluetooth on or off.",
-                "I control media playback: play, pause, next track, previous track, stop.",
-                "I switch between dark mode and light mode.",
-                "I toggle night light and blue light filter.",
-                "I toggle do not disturb and focus assist.",
-                "I toggle airplane mode.",
-            ]
-        elif is_sched_q:
-            cap_facts = [
-                "I set alarms for specific times with optional recurring patterns.",
-                "I set reminders with custom messages at specific times or after a delay.",
-                "I set timers that count down and alert when done.",
-                "I schedule calendar events and meetings.",
-                "I support recurring schedules: daily, weekly, specific weekdays.",
-                "I can list all active schedules and cancel them by voice.",
-            ]
-        elif is_app_q:
-            cap_facts = [
-                "I open any app by name.",
-                "I close one instance or all instances of an app.",
-                "I know aliases: browser means chrome, files means explorer.",
-            ]
-        else:
-            cap_facts = [
-                "Open and close any app by name.",
-                "Control windows: snap, resize, minimize, maximize, pin, transparency, swap, fullscreen.",
-                "Split-screen layouts with multiple windows at once.",
-                "Remember conversations and facts about you long-term.",
-                "Search the web for live data: prices, weather, news.",
-                "Control system: volume, brightness, battery, WiFi, Bluetooth, media, dark mode.",
-                "Recognize different speakers by voice.",
-                "Set alarms, reminders, timers, and calendar events.",
-                "Everything runs locally. Nothing leaves this machine.",
-            ]
-
-        facts_block = "YOUR CAPABILITIES — answer from these facts only, naturally, no list format:\n"
-        facts_block += " ".join(cap_facts)
-        facts_block += "\nAnswer in 2 sentences maximum. Do not use bullet points or slashes."
-        prompt_text = f"{facts_block}\n\nUser asked: {prompt_text}"
+    # LAYER 5.7: CAPABILITY — handled by system prompt knowledge block
+    # No injection needed. LLM answers from system prompt context.
+    # Removed hardcoded trigger list and facts block.
 
     # ------------------------------------------------------------------
     # LAYER 5.9: APP HISTORY QUERY
