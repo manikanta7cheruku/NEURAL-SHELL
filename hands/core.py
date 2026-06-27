@@ -639,12 +639,12 @@ def open_app(app_name):
         
         # Windows native apps (manual overrides — these don't work with AppOpener)
         if "camera" in clean_name:
-            # Start-Process is faster than explorer.exe URI launch for UWP apps
+            # Direct registry launch — faster than explorer URI
             subprocess.Popen(
-                ['powershell', '-command', 'Start-Process "microsoft.windows.camera:"'],
+                'start microsoft.windows.camera:',
+                shell=True,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-                creationflags=0x08000000
             )
             # Give camera time to launch then bring to front
             import threading, time
