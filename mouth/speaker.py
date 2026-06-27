@@ -29,12 +29,9 @@ def _get_config():
     try:
         appdata     = os.environ.get("APPDATA", os.path.expanduser("~"))
         config_path = os.path.join(appdata, "SEVEN", "config.json")
-        print(f"[SPEAKER] Reading config: {config_path}", file=sys.stderr)
-        print(f"[SPEAKER] Config exists: {os.path.exists(config_path)}", file=sys.stderr)
         if os.path.exists(config_path):
             with open(config_path, "r") as f:
                 data = json.load(f)
-            print(f"[SPEAKER] Voice config: {data.get('voice', 'NOT FOUND')}", file=sys.stderr)
             return data
     except Exception as e:
         print(f"[SPEAKER] Config read error: {e}", file=sys.stderr)
@@ -111,8 +108,7 @@ def _get_piper_dir():
     for c in candidates:
         exe = os.path.join(c, "piper.exe")
         if os.path.exists(exe):
-            print(f"[SPEAKER] Piper found at: {c}", file=sys.stderr)
-            return c
+            return c   # Remove the print — it runs 3x per speak call
 
     print(f"[SPEAKER] Piper NOT found. Searched:", file=sys.stderr)
     for c in candidates:
@@ -137,7 +133,7 @@ def _get_voice_model_path(voice_id):
 def _speak_piper(text, voice_id, speed=165):
     """
     Speak text using Piper TTS.
-    Piper reads from stdin, outputs WAV, we play via Windows built-in player.
+    Piper reads from stdin, outputs WAV, we play via Windo  ws built-in player.
     Returns True on success, False on failure.
     """
     piper_dir  = _get_piper_dir()
@@ -258,14 +254,29 @@ def _speak_sapi(text, voice_index=0, speed=165):
 
 # ── Main entry ────────────────────────────────────────────────────────────
 
+# Module-level cache — config read once per process, not once per word
+_VOICE_CACHE = None
+
+def _get_voice_cached():
+    """
+    Read voice config once and cache it.
+    speaker.py runs as a subprocess — process lives for one speak call.
+    Cache is valid for the entire process lifetime.
+    """
+    global _VOICE_CACHE
+    if _VOICE_CACHE is None:
+        cfg          = _get_config()
+        engine, voice_id, sapi_idx = _get_voice_setting()
+        speed        = cfg.get("voice", {}).get("speed", 165)
+        _VOICE_CACHE = (engine, voice_id, sapi_idx, speed)
+    return _VOICE_CACHE
+
+
 def speak_text(text):
     """
     Speak text. Uses Piper if available, falls back to pyttsx3.
-    Speed read from config and applied to both engines.
     """
-    engine, voice_id, sapi_idx = _get_voice_setting()
-    cfg   = _get_config()
-    speed = cfg.get("voice", {}).get("speed", 165)
+    engine, voice_id, sapi_idx, speed = _get_voice_cached()
 
     if engine == "piper":
         success = _speak_piper(text, voice_id, speed=speed)
@@ -276,8 +287,8 @@ def speak_text(text):
         _speak_sapi(text, sapi_idx, speed=speed)
 
 
-if __name__ == "__main__" or os.environ.get("SEVEN_SPEAK_TEXT"):
-    # Get text from env var (set by core.py) or command line args
+if __name__ == "__main__":
+    # Only run when executed directly, not when imported by -c command
     text = os.environ.get("SEVEN_SPEAK_TEXT", "")
     if not text and len(sys.argv) > 1:
         text = " ".join(sys.argv[1:])
