@@ -530,19 +530,23 @@ def seven_logic():
                     pass
 
             # For questions going to LLM — say "just a moment" naturally
-            _needs_llm_hint = (
-                len(user_input.split()) > 4
-                and not any(user_input.lower().startswith(cmd) for cmd in
-                           ["open", "close", "volume", "set", "play", "pause",
-                            "mute", "brightness", "remind", "timer", "alarm"])
-            )
-            if _needs_llm_hint:
+            # Only say "one moment" for web searches and long factual questions
+            # Not for conversation or capability questions
+            _web_needed = any(w in user_input.lower() for w in [
+                "weather", "news", "price", "score", "latest",
+                "what is", "who is", "when did", "how much",
+                "tell me about", "explain", "define",
+            ])
+            _is_convo = any(w in user_input.lower() for w in [
+                "yourself", "you are", "about you", "who are you",
+                "what are you", "place", "feel", "think",
+            ])
+            if _web_needed and not _is_convo and len(user_input.split()) > 5:
                 import random as _rand
                 _thinking_phrases = [
                     "One moment.",
                     "Let me check.",
-                    "Give me a second.",
-                    "On it.",
+                    "Checking.",
                 ]
                 mouth.speak(_rand.choice(_thinking_phrases))
 
@@ -576,6 +580,54 @@ def seven_logic():
 
             if not is_streaming and speech_part:
                 api_set_state("seven_text", speech_part)
+
+            # Pre-execute SYS commands before speaking
+            # Mark as pre-executed so main handler skips them
+                       # Pre-execute OPEN and CLOSE commands before speaking
+            _pre_executed_sys  = False
+            _pre_executed_open = False
+            if isinstance(response, str) and "###SYS:" in response:
+                import re as _re_presys
+                _pre_sys = _re_presys.findall(r"###SYS:\s*(.*?)(?=###|$)", response)
+                for _ps in _pre_sys:
+                    _ps_params = {}
+                    for _pair in _ps.strip().split():
+                        if "=" in _pair:
+                            _k, _v = _pair.split("=", 1)
+                            _ps_params[_k] = _v
+                    if _ps_params:
+                        try:
+                            system_mod.manage_system(_ps_params)
+                            _pre_executed_sys = True
+                        except Exception as _pre_err:
+                            print(f"[PRE-EXEC] SYS error: {_pre_err}")
+
+            # Pre-execute OPEN and CLOSE commands before speaking
+            # User hears confirmation while app is already launching
+            if isinstance(response, str) and "###OPEN:" in response:
+                import re as _re_preopen
+                _pre_opens = _re_preopen.findall(r"###OPEN:\s*(.*?)(?=###|$)", response)
+                for _app in _pre_opens:
+                    _app = _app.strip().replace('"','').replace("'","")
+                    if _app:
+                        threading.Thread(
+                            target=core.open_app,
+                            args=(_app,),
+                            daemon=True
+                        ).start()
+                        _pre_executed_open = True
+
+            if isinstance(response, str) and "###CLOSE:" in response:
+                import re as _re_preclose
+                _pre_closes = _re_preclose.findall(r"###CLOSE:\s*(.*?)(?=###|$)", response)
+                for _app in _pre_closes:
+                    _app = _app.strip().replace('"','').replace("'","")
+                    if _app:
+                        threading.Thread(
+                            target=core.close_app,
+                            args=(_app,),
+                            daemon=True
+                        ).start()
 
             api_set_state("speaking", True)
             if _silence_watcher:
@@ -648,10 +700,11 @@ def seven_logic():
                         success, msg = hands_windows.manage_window(params)
                         if success:
                             app_ui.update_status(f"Window: {msg}", "#00ff00")
-                            if params.get("action") == "list" and msg:
+                            if params.get("action") == "list" and msg and not speech_part:
                                 speak_with_interrupt(msg)
                         else:
-                            mouth.speak(msg)
+                            if not speech_part:
+                                mouth.speak(msg)
                             app_ui.update_status(f"Window failed: {msg}", "#ff0000")
                     except Exception as e:
                         print(Fore.RED + f"[WINDOW ERROR] {e}")
@@ -688,7 +741,9 @@ def seven_logic():
                     telemetry.log_activity()
                     if success:
                         app_ui.update_status(f"Schedule: {msg}", "#00ff00")
-                        if msg and any(x in msg for x in [
+                        # Only speak scheduler confirmation if brain gave no speech part
+                        # brain already said "On it." or "Locked in." before the tag
+                        if msg and not speech_part and any(x in msg for x in [
                             "AM", "PM", "today", "tomorrow", "minutes", "seconds",
                             "hours", "Monday", "Tuesday", "Wednesday", "Thursday",
                             "Friday", "Saturday", "Sunday"
@@ -698,8 +753,11 @@ def seven_logic():
                         mouth.speak(msg)
                         app_ui.update_status(f"Schedule failed: {msg}", "#ff0000")
 
-            # System commands
-            sys_cmds = re.findall(r"###SYS:\s*(.*?)(?=###|$)", response)
+            # System commands — skip if already pre-executed before speaking
+            if _pre_executed_sys:
+                sys_cmds = []
+            else:
+                sys_cmds = re.findall(r"###SYS:\s*(.*?)(?=###|$)", response)
             for param_str in sys_cmds:
                 params = {}
                 for pair in param_str.strip().split():
@@ -718,8 +776,11 @@ def seven_logic():
                         mouth.speak(msg)
                         app_ui.update_status(f"System failed: {msg}", "#ff0000")
 
-            # App commands
-            commands = re.findall(r"###(OPEN|CLOSE|SEARCH):\s*(.*?)(?=###|$)", response)
+            # App commands — skip OPEN if already pre-executed
+            if _pre_executed_open:
+                commands = re.findall(r"###(CLOSE|SEARCH):\s*(.*?)(?=###|$)", response)
+            else:
+                commands = re.findall(r"###(OPEN|CLOSE|SEARCH):\s*(.*?)(?=###|$)", response)
             for cmd_type, arg in commands:
                 clean_arg = arg.replace('"','').replace("'","").replace(".","").strip()
                 if not clean_arg:
@@ -733,13 +794,11 @@ def seven_logic():
 
                 if cmd_type == "OPEN":
                     if len(sub_apps) > 1:
-                        # Open multiple in parallel
                         def _open_one(name):
                             if not name:
                                 return
-                            if not core._check_already_running(name):
-                                core.open_app(name)
-                                telemetry.log_activity()
+                            core.open_app(name)
+                            telemetry.log_activity()
                         _threads = []
                         for _app in sub_apps:
                             _t = threading.Thread(target=_open_one, args=(_app.strip(),), daemon=True)
@@ -751,13 +810,7 @@ def seven_logic():
                     else:
                         app_name = sub_apps[0]
                         app_ui.update_status(f"Opening: {app_name}", "#00ff00")
-                        if core._check_already_running(app_name):
-                            mouth.speak(f"{app_name} is already running.")
-                        else:
-                            success = core.open_app(app_name)
-                            telemetry.log_activity()
-                            if not success:
-                                mouth.speak(f"Cannot find {app_name}. Set it up in Commands if it is a file.")
+                        telemetry.log_activity()
 
                 elif cmd_type == "CLOSE":
                     for app_name in sub_apps:
