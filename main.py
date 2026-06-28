@@ -619,6 +619,7 @@ def seven_logic():
 
             _pre_executed_close = False
             _pre_executed_close = False
+            _pre_executed_close = False
             if isinstance(response, str) and "###CLOSE:" in response:
                 import re as _re_preclose
                 _pre_closes = _re_preclose.findall(r"###CLOSE:\s*(.*?)(?=###|$)", response)
@@ -630,6 +631,7 @@ def seven_logic():
                             args=(_app,),
                             daemon=True
                         ).start()
+                        _pre_executed_close = True
                         _pre_executed_close = True
 
             api_set_state("speaking", True)
