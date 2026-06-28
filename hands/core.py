@@ -276,8 +276,8 @@ def _try_custom_path(app_name):
                     return True
                 return False
 
-            # Poll every second for up to 8 seconds for new process window
-            for attempt in range(8):
+            # Poll every second for up to 12 seconds for new process window
+            for attempt in range(12):
                 time.sleep(1.0)
                 try:
                     if _try_focus():
@@ -285,11 +285,15 @@ def _try_custom_path(app_name):
                 except Exception:
                     pass
 
-            # New process not found — app reused existing instance
-            # Try to find window by known media player class names
+            # Try known media player window classes
             try:
-                _player_classes = ["Qt5152QWindowIcon", "MediaPlayerClassicW",
-                                   "VLC VideoLanClt"]  # VLC main window class
+                _player_classes = [
+                    "Qt5152QWindowIcon",        # VLC
+                    "MediaPlayerClassicW",       # MPC-HC
+                    "VLC VideoLanClt",           # VLC alternate
+                    "ApplicationFrameWindow",    # Windows Media Player (UWP)
+                    "WMPlayerApp",               # Old Windows Media Player
+                ]
                 for _cls in _player_classes:
                     hwnd = user32.FindWindowW(_cls, None)
                     if hwnd:
@@ -329,11 +333,9 @@ def _try_custom_path(app_name):
         command_log.log_command("OPEN", clean, True, f"Custom path: {exe_path}")
         mood_engine.on_command_result(True)
 
-        # Watch for the new process that opens this file
-        # so close_app knows exactly which process to kill
-        def _watch_new_process(alias, path):
+        # Watch for the new process — pass before_pids from BEFORE launch
+        def _watch_new_process(alias, path, before_pids):
             import time
-            before_pids = {p.pid for p in psutil.process_iter(['pid'])}
             time.sleep(3.0)
 
             _system_procs = {
@@ -408,7 +410,7 @@ def _try_custom_path(app_name):
 
         threading.Thread(
             target=_watch_new_process,
-            args=(clean, exe_path),
+            args=(clean, exe_path, _before_launch),
             daemon=True
         ).start()
         return True
@@ -447,6 +449,8 @@ def _log_failed_app(user_phrase, attempted_name, error_detail):
 # This is why "close camera" works even though process is "WindowsCamera.exe"
 _PROCESS_NAME_MAP = {
     # camera intentionally excluded — UWP app needs psutil PID kill, not taskkill /IM
+    "monitor":       ["perfmon.exe", "resmon.exe"],
+    "resource monitor": ["perfmon.exe", "resmon.exe"],
     "calculator":    ["CalculatorApp.exe", "calc.exe"],
     "photos":        ["Microsoft.Photos.exe", "Photos.exe"],
     "store":         ["WinStore.App.exe"],
