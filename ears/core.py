@@ -159,8 +159,20 @@ def listen():
         recognizer.non_speaking_duration    = 0.3
         recognizer.phrase_threshold         = 0.1
 
+        # Check if enrollment is pending — use short timeout so loop unblocks fast
+        _enrollment_pending = False
         try:
-            audio    = recognizer.listen(source, timeout=None, phrase_time_limit=7)
+            import sys as _sys
+            if 'backend.api_server' in _sys.modules:
+                from backend.api_server import get_state as _listen_gs
+                _enrollment_pending = bool(_listen_gs("pending_enrollment"))
+        except Exception:
+            pass
+
+        _timeout = 2 if _enrollment_pending else None
+
+        try:
+            audio = recognizer.listen(source, timeout=_timeout, phrase_time_limit=7)
             wav_data = audio.get_wav_data()
 
             # ── Signal Quality Checks ──────────────────────────────────────
