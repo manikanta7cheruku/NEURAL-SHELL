@@ -399,6 +399,7 @@ def seven_logic():
     # =========================================================================
     while True:
         try:
+
             # ── Check pending voice enrollment BEFORE listen() ────────
             # Must be here — enrollment needs to intercept the listen() cycle
             try:
@@ -414,33 +415,18 @@ def seven_logic():
                     import wave as _wave, shutil as _shutil, random as _rand
 
                     # Professional enrollment prompts — multiple variants
-                    _ready_phrases = [
-                        f"Starting voice enrollment for {_pending_name}. I will ask you to speak three times. Each time, just talk naturally for about ten seconds. Ready when you are.",
-                        f"Voice enrollment beginning for {_pending_name}. I will guide you through three recordings. Speak naturally — read something, count, or just talk. Let's start.",
-                        f"Alright {_pending_name}, let's capture your voice. Three short recordings. I will tell you when to speak each time.",
-                    ]
-                    mouth.speak(_rand.choice(_ready_phrases))
+                    # Short ready phrase — user already knows what to do from the modal
+                    mouth.speak(f"Ready, {_pending_name}. Three clips.")
                     app_ui.update_status(f"ENROLLING {_pending_name}...", "#ff00ff")
 
                     import time as _enroll_time
-                    _enroll_time.sleep(1)
+                    _enroll_time.sleep(0.5)
 
+                    # Single word prompts — fast, clear, not annoying
                     _clip_prompts = [
-                        [
-                            "Clip one. Speak now. Say anything — your name, count to ten, read a sentence.",
-                            "First recording. Go ahead and speak for about ten seconds.",
-                            "Recording one. Start speaking whenever you are ready.",
-                        ],
-                        [
-                            "Good. Clip two. Keep going — speak again for ten seconds.",
-                            "Second recording. Talk naturally. Anything works.",
-                            "Recording two. Speak now.",
-                        ],
-                        [
-                            "Almost done. Last clip. Speak one more time.",
-                            "Final recording. Ten more seconds of speech.",
-                            "Last one. Speak now and we are done.",
-                        ]
+                        ["Clip one. Speak."],
+                        ["Clip two. Speak."],
+                        ["Last clip. Speak."],
                     ]
 
                     _clips = []
@@ -461,12 +447,7 @@ def seven_logic():
 
                             # Confirm between clips (not after last)
                             if _i < 2:
-                                _between = [
-                                    "Got it.",
-                                    "Captured.",
-                                    "Good, next one.",
-                                ]
-                                mouth.speak(_rand.choice(_between))
+                                mouth.speak("Got it.")
                         else:
                             print(Fore.YELLOW + f"[ENROLL] Clip {_i+1} empty")
                             mouth.speak("I did not catch that. Try again — speak clearly.")
