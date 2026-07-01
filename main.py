@@ -250,27 +250,13 @@ def seven_logic():
                    "enough", "quiet", "shut up", "be quiet"]
     KILL_WORDS  = ["shut down", "shutdown", "kill system", "go to sleep", "terminate"]
 
-    # ── Voice Gate Config ─────────────────────────────────────────────────
-    _gates      = config.KEY.get("voice_gates", {})
-    _ptt_cfg    = _gates.get("push_to_talk",   {})
-    _ww_cfg     = _gates.get("wake_word",      {})
-    _sv_cfg     = _gates.get("speaker_verify", {})
-
-    _ptt_enabled = _ptt_cfg.get("enabled", False)
-    _ww_enabled  = _ww_cfg.get("enabled",  False)
-    _ww_words    = _ww_cfg.get("words", ["hey seven", "ok seven", "seven"])
-    _sv_enabled  = _sv_cfg.get("enabled",  False)
-
-    # Start PTT keyboard listener (runs entire session as daemon thread)
-    _is_ptt_active_fn = lambda: True   # default: always active
+    # Start PTT keyboard listener once — runs for entire session
+    _is_ptt_active_fn = lambda: True
     try:
         from ears.push_to_talk import start as _ptt_start, set_enabled as _ptt_set, is_ptt_active
-        _ptt_set(_ptt_enabled)
         _ptt_start()
         _is_ptt_active_fn = is_ptt_active
-        print(Fore.CYAN + f"[GATES] PTT={'ON' if _ptt_enabled else 'OFF'} | "
-              f"WakeWord={'ON' if _ww_enabled else 'OFF'} | "
-              f"VoiceVerify={'ON' if _sv_enabled else 'OFF'}")
+        print(Fore.CYAN + "[GATES] PTT keyboard listener started")
     except Exception as _ptt_err:
         print(Fore.YELLOW + f"[GATES] PTT init failed: {_ptt_err}")
 
@@ -436,6 +422,20 @@ def seven_logic():
                     pass
                 continue
 
+            # ── Read gates fresh every loop — config can change from Settings UI
+            _vg          = config.KEY.get("voice_gates", {})
+            _ptt_enabled = _vg.get("push_to_talk",   {}).get("enabled", False)
+            _ww_enabled  = _vg.get("wake_word",      {}).get("enabled", False)
+            _ww_words    = _vg.get("wake_word",      {}).get("words", ["hey seven", "ok seven", "seven"])
+            _sv_enabled  = _vg.get("speaker_verify", {}).get("enabled", False)
+
+            # Sync PTT enabled state to keyboard listener
+            try:
+                from ears.push_to_talk import set_enabled as _ptt_set
+                _ptt_set(_ptt_enabled)
+            except Exception:
+                pass
+
             # ── Gate 1: Push to Talk ──────────────────────────────────
             if _ptt_enabled and not _is_ptt_active_fn():
                 print(Fore.YELLOW + "[GATE1-PTT] Shift not held — audio discarded")
@@ -504,20 +504,77 @@ def seven_logic():
 
             if "enroll my voice" in text_lower or "enroll voice" in text_lower:
                 mouth.speak("What name should I save this voice as?")
-                app_ui.update_status("ENROLLING - Speak your name...", "#ff00ff")
-                name_input, name_audio = listen()
-                if name_input:
-                    enroll_name = name_input.strip().replace(".", "").replace("!", "")
-                    mouth.speak(f"Now say a few sentences, {enroll_name}.")
-                    app_ui.update_status(f"ENROLLING {enroll_name}...", "#ff00ff")
-                    enroll_input, enroll_audio = listen()
-                    if enroll_audio:
-                        success = enroll_speaker(enroll_name, enroll_audio)
-                        mouth.speak(f"Got it, {enroll_name}." if success else "Could not capture your voice. Try again.")
-                    else:
-                        mouth.speak("I did not hear anything. Try again.")
-                else:
+                app_ui.update_status("ENROLLING — Say your name...", "#ff00ff")
+                name_input, _ = listen()
+                if not name_input:
                     mouth.speak("I did not catch your name. Try again.")
+                    continue
+
+                enroll_name = name_input.strip().replace(".", "").replace("!", "").strip()
+                if len(enroll_name) < 2:
+                    mouth.speak("Name too short. Try again.")
+                    continue
+
+                # Collect 3 clips for better voice coverage
+                mouth.speak(f"Got it, {enroll_name}. Now speak for about 10 seconds. Say anything — a few sentences work best.")
+                app_ui.update_status(f"ENROLLING {enroll_name} — Speak now...", "#ff00ff")
+
+                import tempfile, wave as _wave, numpy as _np
+
+                collected_audio = []
+                for clip_num in range(3):
+                    if clip_num > 0:
+                        app_ui.update_status(f"ENROLLING — Keep speaking... ({clip_num+1}/3)", "#ff00ff")
+                    _, clip_path = listen()
+                    if clip_path and os.path.exists(clip_path):
+                        collected_audio.append(clip_path)
+
+                if not collected_audio:
+                    mouth.speak("Did not capture any audio. Try again.")
+                    continue
+
+                # Merge audio clips into one file for better embedding
+                try:
+                    merged_path = os.path.join(
+                        os.environ.get('APPDATA', ''), 'SEVEN', 'enroll_temp.wav'
+                    )
+                    frames = []
+                    params = None
+                    for path in collected_audio:
+                        try:
+                            with _wave.open(path, 'rb') as wf:
+                                if params is None:
+                                    params = wf.getparams()
+                                frames.append(wf.readframes(wf.getnframes()))
+                        except Exception:
+                            pass
+
+                    if frames and params:
+                        with _wave.open(merged_path, 'wb') as out:
+                            out.setparams(params)
+                            for f in frames:
+                                out.writeframes(f)
+                        success = enroll_speaker(enroll_name, merged_path)
+                        try:
+                            os.remove(merged_path)
+                        except Exception:
+                            pass
+                    else:
+                        success = enroll_speaker(enroll_name, collected_audio[0])
+
+                except Exception as _enroll_err:
+                    print(Fore.RED + f"[ENROLL] Merge failed: {_enroll_err}")
+                    success = enroll_speaker(enroll_name, collected_audio[0])
+
+                if success:
+                    mouth.speak(f"Voice enrolled. I will recognize {enroll_name} from now on.")
+                    # Push enrolled status to frontend
+                    try:
+                        api_set_state("enrollment_updated", True)
+                    except Exception:
+                        pass
+                else:
+                    mouth.speak("Enrollment failed. Try again with clearer audio.")
                 continue
 
             if any(trigger in text_lower for trigger in KILL_WORDS):
