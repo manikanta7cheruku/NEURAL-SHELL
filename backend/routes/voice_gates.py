@@ -4,6 +4,7 @@ Handles: /api/voice/gates, /api/voice/enrolled
 """
 
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 
 router = APIRouter()
 
@@ -14,7 +15,7 @@ _DEFAULT_GATES = {
 }
 
 
-@router.get("/voice/gates")
+@router.get("/api/voice/gates")
 def get_voice_gates():
     """Get current voice gate configuration."""
     import config
@@ -26,7 +27,7 @@ def get_voice_gates():
     return gates
 
 
-@router.post("/voice/gates")
+@router.post("/api/voice/gates")
 def save_voice_gates(body: dict):
     """Save voice gate configuration."""
     import config
@@ -34,7 +35,7 @@ def save_voice_gates(body: dict):
     return {"ok": True}
 
 
-@router.get("/voice/enrolled")
+@router.get("/api/voice/enrolled")
 def get_enrolled_speakers():
     """Get list of enrolled voice profiles."""
     try:
@@ -44,10 +45,29 @@ def get_enrolled_speakers():
             "enabled":  is_voice_id_enabled()
         }
     except Exception as e:
-        return {"enrolled": [], "enabled": False, "error": str(e)}
+        return {"enrolled": [], "enabled": False, "error": str(e)}    
+    
+class EnrollRequest(BaseModel):
+    name: str
 
+@router.post("/api/voice/enroll")
+def enroll_via_api(req: EnrollRequest):
+    """
+    Trigger enrollment from Settings UI.
+    Sets a flag that main.py picks up on next listen() cycle.
+    The actual voice capture happens in main.py voice loop.
+    Returns instruction to user since recording happens through voice.
+    """
+    import config
+    # Store pending enrollment name so main.py can pick it up
+    config.update_config({"pending_enrollment": req.name.strip()})
+    return {
+        "success": True,
+        "message": f"Say a few sentences now. Seven is listening for {req.name}.",
+        "name": req.name
+    }
 
-@router.delete("/voice/enrolled/{name}")
+@router.delete("/api/voice/enrolled/{name}")
 def delete_enrolled_speaker(name: str):
     """Remove an enrolled voice profile."""
     try:
