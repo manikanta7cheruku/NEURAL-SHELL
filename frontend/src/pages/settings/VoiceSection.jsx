@@ -643,182 +643,305 @@ function VoiceGatesPanel() {
 }
 
 function EnrollModal({ onClose }) {
-  const [step,     setStep]     = useState('name');   // name | speaking | done | error
+  const [step,     setStep]     = useState('form');   // form | recording | done | error
   const [name,     setName]     = useState('');
   const [progress, setProgress] = useState(0);
-  const [message,  setMessage]  = useState('');
+  const [result,   setResult]   = useState(null);
+  const [playing,  setPlaying]  = useState(null);
+  const [enrolled, setEnrolled] = useState([]);
+
+  // Load enrolled voices when modal opens
+  useEffect(() => {
+    api.get('/voice/enrolled')
+       .then(r => setEnrolled(r.data.enrolled || []))
+       .catch(() => {});
+  }, []);
 
   const startEnroll = async () => {
     if (!name.trim()) return;
-    setStep('speaking');
-    setMessage('Seven is listening... Speak naturally for about 10 seconds.');
+    setStep('recording');
+    setProgress(0);
 
-    // Animate progress bar
-    let p = 0;
-    const interval = setInterval(() => {
-      p += 1;
-      setProgress(p);
-      if (p >= 100) clearInterval(interval);
-    }, 300);  // 30 seconds total simulation
-
+    // Signal main.py to start enrollment
     try {
-      // Trigger enrollment via API — Seven's voice loop handles the actual recording
-      const r = await api.post('/voice/enroll', { name: name.trim() });
-      clearInterval(interval);
-      setProgress(100);
-      if (r.data.success) {
-        setStep('done');
-        setMessage(`Voice enrolled successfully for ${name}.`);
-      } else {
-        setStep('error');
-        setMessage(r.data.message || 'Enrollment failed. Try again.');
-      }
+      await api.post('/voice/enroll', { name: name.trim() });
     } catch (e) {
-      clearInterval(interval);
-      // If API not available, give instructions for voice enrollment
-      setStep('speaking');
-      setMessage('Say "enroll my voice" to Seven and follow the voice prompts.');
+      setStep('error');
+      setResult({ message: 'Could not reach Seven. Make sure Seven is running.' });
+      return;
+    }
+
+    // Animate progress — 30 seconds total (3 clips × ~10s each)
+    const _start = Date.now();
+    const _total = 30000;
+    const tick = setInterval(() => {
+      const elapsed = Date.now() - _start;
+      setProgress(Math.min(Math.round((elapsed / _total) * 100), 95));
+    }, 300);
+
+    // Poll for completion
+    const poll = setInterval(async () => {
+      try {
+        const r = await api.get('/voice/enrollment-status');
+        if (r.data.status === 'done' && r.data.done) {
+          clearInterval(tick);
+          clearInterval(poll);
+          setProgress(100);
+          setResult(r.data.done);
+          setStep(r.data.done.success ? 'done' : 'error');
+          // Refresh enrolled list
+          api.get('/voice/enrolled')
+             .then(resp => setEnrolled(resp.data.enrolled || []))
+             .catch(() => {});
+        }
+      } catch (e) {
+        // keep polling
+      }
+    }, 1000);
+
+    // Timeout after 60 seconds
+    setTimeout(() => {
+      clearInterval(tick);
+      clearInterval(poll);
+      if (step === 'recording') {
+        setStep('error');
+        setResult({ message: 'Timed out. Make sure you spoke clearly for 10+ seconds.' });
+      }
+    }, 60000);
+  };
+
+  const deleteVoice = async (voiceName) => {
+    try {
+      await api.delete(`/voice/enrolled/${voiceName}`);
+      setEnrolled(e => e.filter(n => n !== voiceName));
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const playVoice = async (voiceName) => {
+    try {
+      setPlaying(voiceName);
+      await api.post('/voice/play-sample', { name: voiceName });
+      setTimeout(() => setPlaying(null), 3000);
+    } catch (e) {
+      setPlaying(null);
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="bg-s-card border border-s-border rounded-xl p-6 w-80 shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+      <div className="bg-s-card border border-s-border rounded-xl w-full max-w-sm shadow-2xl overflow-hidden">
 
         {/* Header */}
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-s-border">
           <div>
-            <div className="text-[13px] text-s-text font-semibold">Enroll Voice</div>
-            <div className="text-[9px] text-s-text-4 mt-0.5">
-              Register your voice for speaker verification
-            </div>
+            <div className="text-[13px] text-s-text font-semibold">Voice Enrollment</div>
+            <div className="text-[9px] text-s-text-4 mt-0.5">Speaker verification profiles</div>
           </div>
           <button
             onClick={onClose}
-            className="text-s-text-4 hover:text-s-text text-lg leading-none"
+            className="w-6 h-6 flex items-center justify-center text-s-text-4 hover:text-s-text rounded transition-colors"
           >
             ×
           </button>
         </div>
 
-        {/* Step: Name input */}
-        {step === 'name' && (
-          <div className="space-y-4">
+        <div className="p-5 space-y-4">
+
+          {/* Enrolled voices list — always visible */}
+          {enrolled.length > 0 && (
             <div>
-              <label className="text-[9px] text-s-text-4 uppercase tracking-wider block mb-1.5">
-                Your Name
-              </label>
-              <input
-                value={name}
-                onChange={e => setName(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && name.trim() && startEnroll()}
-                placeholder="e.g. Cheruku"
-                className="w-full bg-s-bg border border-s-border rounded px-3 py-2 text-[12px] text-s-text placeholder-s-text-4 focus:outline-none focus:border-s-accent/60"
-                autoFocus
-              />
-            </div>
-            <div className="p-3 bg-s-accent/5 border border-s-accent/20 rounded">
-              <div className="text-[9px] text-s-accent font-medium mb-1">How it works</div>
-              <div className="text-[9px] text-s-text-4 space-y-1">
-                <div>1. Enter your name above</div>
-                <div>2. Click Enroll and speak naturally</div>
-                <div>3. Talk for about 10 seconds</div>
-                <div>4. Seven learns your voice pattern</div>
+              <div className="text-[9px] text-s-text-4 uppercase tracking-wider mb-2">
+                Enrolled Voices
+              </div>
+              <div className="space-y-1.5">
+                {enrolled.map(vname => (
+                  <div
+                    key={vname}
+                    className="flex items-center justify-between px-3 py-2 bg-s-bg border border-s-border/50 rounded-lg"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-2 h-2 rounded-full bg-s-green shrink-0" />
+                      <span className="text-[11px] text-s-text-2 font-medium capitalize">
+                        {vname}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => playVoice(vname)}
+                        className={`text-[9px] px-2 py-0.5 rounded border transition-colors ${
+                          playing === vname
+                            ? 'border-s-accent/60 text-s-accent bg-s-accent/10'
+                            : 'border-s-border/60 text-s-text-4 hover:border-s-accent/40 hover:text-s-accent'
+                        }`}
+                      >
+                        {playing === vname ? '▶ Playing' : '▶ Play'}
+                      </button>
+                      <button
+                        onClick={() => deleteVoice(vname)}
+                        className="text-[9px] text-s-red/50 hover:text-s-red transition-colors px-1"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
-            <button
-              onClick={startEnroll}
-              disabled={!name.trim()}
-              className="w-full py-2.5 bg-s-accent hover:bg-s-accent/90 disabled:bg-s-border disabled:text-s-text-4 text-white text-[11px] font-medium rounded transition-colors"
-            >
-              Start Enrollment
-            </button>
-          </div>
-        )}
+          )}
 
-        {/* Step: Speaking / recording */}
-        {step === 'speaking' && (
-          <div className="space-y-4">
-            <div className="flex flex-col items-center gap-3 py-2">
-              {/* Animated mic indicator */}
-              <div className="relative">
-                <div className="w-14 h-14 rounded-full bg-s-accent/10 border border-s-accent/30 flex items-center justify-center">
-                  <div className="w-8 h-8 rounded-full bg-s-accent/20 animate-ping absolute" />
-                  <div className="text-s-accent text-xl relative z-10">🎙</div>
-                </div>
-              </div>
-              <div className="text-[11px] text-s-text-2 font-medium text-center">
-                Listening to {name}...
-              </div>
-              <div className="text-[9px] text-s-text-4 text-center leading-relaxed">
-                {message}
-              </div>
+          {/* Divider when list exists */}
+          {enrolled.length > 0 && step === 'form' && (
+            <div className="flex items-center gap-2">
+              <div className="flex-1 h-px bg-s-border/50" />
+              <span className="text-[9px] text-s-text-4">Add New</span>
+              <div className="flex-1 h-px bg-s-border/50" />
             </div>
+          )}
 
-            {/* Progress bar */}
-            <div className="space-y-1.5">
-              <div className="flex justify-between text-[9px] text-s-text-4">
-                <span>Recording</span>
-                <span>{Math.min(progress, 100)}%</span>
-              </div>
-              <div className="h-1 bg-s-bg rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-s-accent rounded-full transition-all duration-300"
-                  style={{ width: `${Math.min(progress, 100)}%` }}
+          {/* Step: Form */}
+          {step === 'form' && (
+            <div className="space-y-3">
+              <div>
+                <label className="text-[9px] text-s-text-4 uppercase tracking-wider block mb-1.5">
+                  Name for this voice
+                </label>
+                <input
+                  value={name}
+                  onChange={e => setName(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && name.trim() && startEnroll()}
+                  placeholder="e.g. Cheruku"
+                  className="w-full bg-s-bg border border-s-border rounded-lg px-3 py-2.5 text-[12px] text-s-text placeholder-s-text-4 focus:outline-none focus:border-s-accent/60 transition-colors"
+                  autoFocus
                 />
               </div>
-            </div>
-          </div>
-        )}
 
-        {/* Step: Done */}
-        {step === 'done' && (
-          <div className="space-y-4">
-            <div className="flex flex-col items-center gap-3 py-2">
-              <div className="w-14 h-14 rounded-full bg-s-green/10 border border-s-green/30 flex items-center justify-center text-2xl">
-                ✓
+              <div className="p-3 bg-s-bg border border-s-border/50 rounded-lg">
+                <div className="text-[9px] text-s-text-3 font-medium mb-1.5">How enrollment works</div>
+                <div className="space-y-1">
+                  {[
+                    'Click Start — Seven begins listening',
+                    'Speak naturally for 10-15 seconds',
+                    'Any content works — sentences, counting, anything',
+                    'Seven records 3 clips and builds your voiceprint',
+                  ].map((t, i) => (
+                    <div key={i} className="flex items-start gap-2 text-[9px] text-s-text-4">
+                      <span className="text-s-accent shrink-0 mt-0.5">{i + 1}.</span>
+                      <span>{t}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
-              <div className="text-[11px] text-s-text-2 font-medium text-center">
-                Voice Enrolled
-              </div>
-              <div className="text-[9px] text-s-text-4 text-center">{message}</div>
-            </div>
-            <button
-              onClick={onClose}
-              className="w-full py-2.5 bg-s-accent hover:bg-s-accent/90 text-white text-[11px] font-medium rounded transition-colors"
-            >
-              Done
-            </button>
-          </div>
-        )}
 
-        {/* Step: Error */}
-        {step === 'error' && (
-          <div className="space-y-4">
-            <div className="flex flex-col items-center gap-3 py-2">
-              <div className="w-14 h-14 rounded-full bg-s-red/10 border border-s-red/30 flex items-center justify-center text-2xl">
-                ✕
-              </div>
-              <div className="text-[11px] text-s-text-2 font-medium">Enrollment Failed</div>
-              <div className="text-[9px] text-s-text-4 text-center">{message}</div>
-            </div>
-            <div className="flex gap-2">
               <button
-                onClick={() => setStep('name')}
-                className="flex-1 py-2 border border-s-border text-s-text-3 text-[10px] rounded hover:border-s-accent/40 transition-colors"
+                onClick={startEnroll}
+                disabled={!name.trim()}
+                className="w-full py-2.5 bg-s-accent hover:bg-s-accent/90 disabled:bg-s-border disabled:text-s-text-4 text-white text-[11px] font-medium rounded-lg transition-colors"
               >
-                Try Again
+                Start Enrollment
               </button>
+            </div>
+          )}
+
+          {/* Step: Recording */}
+          {step === 'recording' && (
+            <div className="space-y-4">
+              <div className="flex flex-col items-center gap-3 py-2">
+                <div className="relative w-16 h-16">
+                  <div className="absolute inset-0 rounded-full bg-s-accent/10 animate-ping" />
+                  <div className="absolute inset-2 rounded-full bg-s-accent/20 animate-ping" style={{ animationDelay: '0.3s' }} />
+                  <div className="relative w-16 h-16 rounded-full bg-s-accent/10 border border-s-accent/30 flex items-center justify-center text-2xl">
+                    🎙
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[12px] text-s-text-2 font-medium text-center">
+                    Recording {name}...
+                  </div>
+                  <div className="text-[9px] text-s-text-4 text-center mt-1">
+                    Speak naturally. Seven is capturing your voiceprint.
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <div className="flex justify-between text-[9px] text-s-text-4">
+                  <span>Capturing voice pattern</span>
+                  <span>{progress}%</span>
+                </div>
+                <div className="h-1.5 bg-s-bg rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-s-accent rounded-full transition-all duration-300"
+                    style={{ width: `${progress}%` }}
+                  />
+                </div>
+                <div className="text-[8px] text-s-text-4 text-center">
+                  3 clips × ~10 seconds each
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Step: Done */}
+          {step === 'done' && (
+            <div className="space-y-4">
+              <div className="flex flex-col items-center gap-3 py-2">
+                <div className="w-14 h-14 rounded-full bg-s-green/10 border border-s-green/30 flex items-center justify-center">
+                  <span className="text-s-green text-2xl">✓</span>
+                </div>
+                <div>
+                  <div className="text-[12px] text-s-text-2 font-medium text-center">
+                    Voice Enrolled
+                  </div>
+                  <div className="text-[9px] text-s-text-4 text-center mt-1">
+                    {result?.message || `${name} is now registered.`}
+                  </div>
+                </div>
+              </div>
               <button
                 onClick={onClose}
-                className="flex-1 py-2 bg-s-accent text-white text-[10px] rounded hover:bg-s-accent/90 transition-colors"
+                className="w-full py-2.5 bg-s-accent hover:bg-s-accent/90 text-white text-[11px] font-medium rounded-lg transition-colors"
               >
-                Close
+                Done
               </button>
             </div>
-          </div>
-        )}
+          )}
 
+          {/* Step: Error */}
+          {step === 'error' && (
+            <div className="space-y-4">
+              <div className="flex flex-col items-center gap-3 py-2">
+                <div className="w-14 h-14 rounded-full bg-s-red/10 border border-s-red/30 flex items-center justify-center">
+                  <span className="text-s-red text-2xl">✕</span>
+                </div>
+                <div>
+                  <div className="text-[12px] text-s-text-2 font-medium text-center">
+                    Enrollment Failed
+                  </div>
+                  <div className="text-[9px] text-s-text-4 text-center mt-1">
+                    {result?.message || 'Something went wrong.'}
+                  </div>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => { setStep('form'); setProgress(0); setResult(null); }}
+                  className="flex-1 py-2 border border-s-border text-s-text-3 text-[10px] rounded-lg hover:border-s-accent/40 transition-colors"
+                >
+                  Try Again
+                </button>
+                <button
+                  onClick={onClose}
+                  className="flex-1 py-2 bg-s-accent text-white text-[10px] rounded-lg hover:bg-s-accent/90 transition-colors"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          )}
+
+        </div>
       </div>
     </div>
   );
