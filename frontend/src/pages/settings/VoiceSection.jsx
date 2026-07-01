@@ -660,56 +660,55 @@ function EnrollModal({ onClose }) {
        .catch(() => {});
   }, []);
 
-  const startEnroll = async () => {
-    if (!name.trim()) return;
-    setStep('recording');
-    setProgress(0);
+    const startEnroll = async () => {
+      if (!name.trim()) return;
+      setStep('recording');
+      setProgress(0);
 
-    // Signal main.py to start enrollment
-    try {
-      await api.post('/voice/enroll', { name: name.trim() });
-    } catch (e) {
-      setStep('error');
-      setResult({ message: 'Could not reach Seven. Make sure Seven is running.' });
-      return;
-    }
-
-    // Animate progress — 90 seconds total (3 clips × ~30s each)
-    const _start = Date.now();
-    const _total = 90000;
-    tickRef.current = setInterval(() => {
-      const elapsed = Date.now() - _start;
-      setProgress(Math.min(Math.round((elapsed / _total) * 100), 95));
-    }, 500);
-
-    // Poll for completion every 2 seconds
-    pollRef.current = setInterval(async () => {
+      // Signal main.py to start enrollment
       try {
-        const r = await api.get('/voice/enrollment-status');
-        if (r.data.status === 'done' && r.data.done) {
-          clearInterval(tickRef.current);
-          clearInterval(pollRef.current);
-          clearTimeout(timeoutRef.current);
-          setProgress(100);
-          setResult(r.data.done);
-          setStep(r.data.done.success ? 'done' : 'error');
-          api.get('/voice/enrolled')
-             .then(resp => setEnrolled(resp.data.enrolled || []))
-             .catch(() => {});
-        }
+        await api.post('/voice/enroll', { name: name.trim() });
       } catch (e) {
-        // keep polling
+        setStep('error');
+        setResult({ message: 'Could not reach Seven. Make sure Seven is running.' });
+        return;
       }
-    }, 2000);
 
-    // Timeout after 120 seconds
-    timeoutRef.current = setTimeout(() => {
-      clearInterval(tickRef.current);
-      clearInterval(pollRef.current);
-      setStep('error');
-      setResult({ message: 'Timed out. Seven may still be processing. Check enrolled voices below.' });
-    }, 120000);
-  };
+      // Poll every 2 seconds — progress updates only when clips are captured
+      // No fake timer — progress reflects actual capture state from backend
+      pollRef.current = setInterval(async () => {
+        try {
+          const r = await api.get('/voice/enrollment-status');
+
+          // Update progress based on clips_done from backend
+          if (r.data.clips_done !== undefined) {
+            // 3 clips total: clip 1 = 30%, clip 2 = 65%, clip 3 = 90%
+            const clipProgress = [0, 30, 65, 90];
+            setProgress(clipProgress[Math.min(r.data.clips_done, 3)]);
+          }
+
+          if (r.data.status === 'done' && r.data.done) {
+            clearInterval(pollRef.current);
+            clearTimeout(timeoutRef.current);
+            setProgress(100);
+            setResult(r.data.done);
+            setStep(r.data.done.success ? 'done' : 'error');
+            api.get('/voice/enrolled')
+               .then(resp => setEnrolled(resp.data.enrolled || []))
+               .catch(() => {});
+          }
+        } catch (e) {
+          // keep polling
+        }
+      }, 2000);
+
+      // Timeout after 120 seconds
+      timeoutRef.current = setTimeout(() => {
+        clearInterval(pollRef.current);
+        setStep('error');
+        setResult({ message: 'Timed out. Make sure Seven is running and microphone is working.' });
+      }, 120000);
+    };
 
   const deleteVoice = async (voiceName) => {
     try {
@@ -856,29 +855,38 @@ function EnrollModal({ onClose }) {
                     🎙
                   </div>
                 </div>
-                <div>
-                  <div className="text-[12px] text-s-text-2 font-medium text-center">
-                    Recording {name}...
-                  </div>
-                  <div className="text-[9px] text-s-text-4 text-center mt-1">
-                    Speak naturally. Seven is capturing your voiceprint.
-                  </div>
+              <div>
+                <div className="text-[12px] text-s-text-2 font-medium text-center">
+                  Recording {name}...
                 </div>
+                <div className="text-[9px] text-s-text-4 text-center mt-1 leading-relaxed">
+                  Seven will ask for 3 clips.<br/>
+                  When Seven says <span className="text-s-accent font-mono">"speak now"</span> — talk for 5-10 seconds.<br/>
+                  Any content works: count, read text, speak naturally.
+                </div>
+              </div>
               </div>
 
               <div className="space-y-1.5">
                 <div className="flex justify-between text-[9px] text-s-text-4">
-                  <span>Capturing voice pattern</span>
+                  <span>
+                    {progress === 0 && 'Waiting for Seven to be ready...'}
+                    {progress === 30 && 'Clip 1 captured ✓ — speak for clip 2'}
+                    {progress === 65 && 'Clip 2 captured ✓ — speak for clip 3'}
+                    {progress === 90 && 'Clip 3 captured ✓ — building voiceprint...'}
+                    {progress === 100 && 'Done'}
+                    {progress > 0 && progress !== 30 && progress !== 65 && progress !== 90 && progress !== 100 && 'Capturing...'}
+                  </span>
                   <span>{progress}%</span>
                 </div>
                 <div className="h-1.5 bg-s-bg rounded-full overflow-hidden">
                   <div
-                    className="h-full bg-s-accent rounded-full transition-all duration-300"
+                    className="h-full bg-s-accent rounded-full transition-all duration-500"
                     style={{ width: `${progress}%` }}
                   />
                 </div>
                 <div className="text-[8px] text-s-text-4 text-center">
-                  3 clips × ~10 seconds each
+                  Speak when Seven prompts you · 3 clips required
                 </div>
               </div>
             </div>
