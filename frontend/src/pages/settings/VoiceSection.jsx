@@ -342,7 +342,7 @@ export default function VoiceSection({
 
 // ─── Voice Gates Panel ───────────────────────────────────────────────────────
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import api from '../../api';
 
 function Toggle({ enabled, onToggle }) {
@@ -649,6 +649,9 @@ function EnrollModal({ onClose }) {
   const [result,   setResult]   = useState(null);
   const [playing,  setPlaying]  = useState(null);
   const [enrolled, setEnrolled] = useState([]);
+  const pollRef    = useRef(null);
+  const tickRef    = useRef(null);
+  const timeoutRef = useRef(null);
 
   // Load enrolled voices when modal opens
   useEffect(() => {
@@ -671,25 +674,25 @@ function EnrollModal({ onClose }) {
       return;
     }
 
-    // Animate progress — 30 seconds total (3 clips × ~10s each)
+    // Animate progress — 90 seconds total (3 clips × ~30s each)
     const _start = Date.now();
-    const _total = 30000;
-    const tick = setInterval(() => {
+    const _total = 90000;
+    tickRef.current = setInterval(() => {
       const elapsed = Date.now() - _start;
       setProgress(Math.min(Math.round((elapsed / _total) * 100), 95));
-    }, 300);
+    }, 500);
 
-    // Poll for completion
-    const poll = setInterval(async () => {
+    // Poll for completion every 2 seconds
+    pollRef.current = setInterval(async () => {
       try {
         const r = await api.get('/voice/enrollment-status');
         if (r.data.status === 'done' && r.data.done) {
-          clearInterval(tick);
-          clearInterval(poll);
+          clearInterval(tickRef.current);
+          clearInterval(pollRef.current);
+          clearTimeout(timeoutRef.current);
           setProgress(100);
           setResult(r.data.done);
           setStep(r.data.done.success ? 'done' : 'error');
-          // Refresh enrolled list
           api.get('/voice/enrolled')
              .then(resp => setEnrolled(resp.data.enrolled || []))
              .catch(() => {});
@@ -697,17 +700,15 @@ function EnrollModal({ onClose }) {
       } catch (e) {
         // keep polling
       }
-    }, 1000);
+    }, 2000);
 
-    // Timeout after 60 seconds
-    setTimeout(() => {
-      clearInterval(tick);
-      clearInterval(poll);
-      if (step === 'recording') {
-        setStep('error');
-        setResult({ message: 'Timed out. Make sure you spoke clearly for 10+ seconds.' });
-      }
-    }, 60000);
+    // Timeout after 120 seconds
+    timeoutRef.current = setTimeout(() => {
+      clearInterval(tickRef.current);
+      clearInterval(pollRef.current);
+      setStep('error');
+      setResult({ message: 'Timed out. Seven may still be processing. Check enrolled voices below.' });
+    }, 120000);
   };
 
   const deleteVoice = async (voiceName) => {
