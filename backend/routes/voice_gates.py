@@ -14,7 +14,7 @@ _DEFAULT_GATES = {
 }
 
 
-@router.get("/api/voice/gates")
+@router.get("/voice/gates")
 def get_voice_gates():
     """Get current voice gate configuration."""
     import config
@@ -26,7 +26,7 @@ def get_voice_gates():
     return gates
 
 
-@router.post("/api/voice/gates")
+@router.post("/voice/gates")
 def save_voice_gates(body: dict):
     """Save voice gate configuration."""
     import config
@@ -34,7 +34,7 @@ def save_voice_gates(body: dict):
     return {"ok": True}
 
 
-@router.get("/api/voice/enrolled")
+@router.get("/voice/enrolled")
 def get_enrolled_speakers():
     """Get list of enrolled voice profiles."""
     try:
@@ -47,7 +47,7 @@ def get_enrolled_speakers():
         return {"enrolled": [], "enabled": False, "error": str(e)}
 
 
-@router.delete("/api/voice/enrolled/{name}")
+@router.delete("/voice/enrolled/{name}")
 def delete_enrolled_speaker(name: str):
     """Remove an enrolled voice profile."""
     try:

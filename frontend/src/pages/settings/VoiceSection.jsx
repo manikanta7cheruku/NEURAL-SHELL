@@ -367,10 +367,10 @@ function VoiceGatesPanel() {
   const [saved,    setSaved]    = useState(false);
 
   const loadData = useCallback(() => {
-    api.get('/api/voice/gates')
+    api.get('/voice/gates')
        .then(r => setGates(r.data))
        .catch(() => {});
-    api.get('/api/voice/enrolled')
+    api.get('/voice/enrolled')
        .then(r => setEnrolled(r.data.enrolled || []))
        .catch(() => {});
   }, []);
@@ -380,7 +380,7 @@ function VoiceGatesPanel() {
   const save = async (updated) => {
     setSaving(true);
     try {
-      await api.post('/api/voice/gates', updated);
+      await api.post('/voice/gates', updated);
       setGates(updated);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
@@ -429,7 +429,7 @@ function VoiceGatesPanel() {
 
   const deleteEnrolled = async (name) => {
     try {
-      await api.delete(`/api/voice/enrolled/${name}`);
+      await api.delete(`/voice/enrolled/${name}`);
       setEnrolled(e => e.filter(n => n !== name));
     } catch (e) {
       console.error(e);
