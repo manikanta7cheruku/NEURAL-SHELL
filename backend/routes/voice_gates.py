@@ -55,11 +55,23 @@ class EnrollRequest(BaseModel):
 @router.post("/api/voice/enrollment-welcome")
 def enrollment_welcome():
     """
-    Called when user opens the enrollment modal.
-    Sets a flag so main.py speaks a welcome/explanation immediately.
+    Speak enrollment welcome immediately from a background thread.
+    Does not wait for main.py loop — fires instantly.
     """
-    from backend.api_server import set_state
-    set_state("speak_enrollment_welcome", True)
+    def _speak():
+        import random
+        try:
+            import mouth as _mouth
+            _phrases = [
+                "Voice enrollment. Enter your name in the panel, then click Start Enrollment. I will guide you through three short recordings.",
+                "Sure. Voice enrollment captures your unique voice pattern. Enter your name and click Start Enrollment when you are ready.",
+                "Voice enrollment mode. I will record your voice three times and build your voiceprint. Enter your name in the panel to begin.",
+            ]
+            _mouth.speak(random.choice(_phrases))
+        except Exception as e:
+            print(f"[ENROLL-WELCOME] Speak failed: {e}")
+
+    threading.Thread(target=_speak, daemon=True).start()
     return {"ok": True}
 
 @router.post("/api/voice/enroll")
