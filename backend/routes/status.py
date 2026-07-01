@@ -82,6 +82,16 @@ def get_status():
             "error_debug":    str(e)
         }
 
+@router.post("/api/interrupt")
+def interrupt_speech():
+    """Interrupt Seven's current speech immediately."""
+    try:
+        import mouth as _mouth
+        _mouth.interrupt()
+        return {"ok": True}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+    
 
 @router.get("/api/version")
 def get_version():
