@@ -250,6 +250,30 @@ def seven_logic():
                    "enough", "quiet", "shut up", "be quiet"]
     KILL_WORDS  = ["shut down", "shutdown", "kill system", "go to sleep", "terminate"]
 
+    # ── Voice Gate Config ─────────────────────────────────────────────────
+    _gates      = config.KEY.get("voice_gates", {})
+    _ptt_cfg    = _gates.get("push_to_talk",   {})
+    _ww_cfg     = _gates.get("wake_word",      {})
+    _sv_cfg     = _gates.get("speaker_verify", {})
+
+    _ptt_enabled = _ptt_cfg.get("enabled", False)
+    _ww_enabled  = _ww_cfg.get("enabled",  False)
+    _ww_words    = _ww_cfg.get("words", ["hey seven", "ok seven", "seven"])
+    _sv_enabled  = _sv_cfg.get("enabled",  False)
+
+    # Start PTT keyboard listener (runs entire session as daemon thread)
+    _is_ptt_active_fn = lambda: True   # default: always active
+    try:
+        from ears.push_to_talk import start as _ptt_start, set_enabled as _ptt_set, is_ptt_active
+        _ptt_set(_ptt_enabled)
+        _ptt_start()
+        _is_ptt_active_fn = is_ptt_active
+        print(Fore.CYAN + f"[GATES] PTT={'ON' if _ptt_enabled else 'OFF'} | "
+              f"WakeWord={'ON' if _ww_enabled else 'OFF'} | "
+              f"VoiceVerify={'ON' if _sv_enabled else 'OFF'}")
+    except Exception as _ptt_err:
+        print(Fore.YELLOW + f"[GATES] PTT init failed: {_ptt_err}")
+
     def speak_with_interrupt(text):
         import time as _time
         if not INTERRUPT_ENABLED or (_time.time() - last_interrupt_time[0] < INTERRUPT_COOLDOWN):
@@ -412,9 +436,25 @@ def seven_logic():
                     pass
                 continue
 
+            # ── Gate 1: Push to Talk ──────────────────────────────────
+            if _ptt_enabled and not _is_ptt_active_fn():
+                print(Fore.YELLOW + "[GATE1-PTT] Shift not held — audio discarded")
+                continue
+
             if _silence_watcher:
                 _silence_watcher.on_user_spoke()
             _last_topic_ref[0] = user_input
+
+            # ── Gate 2: Wake Word ─────────────────────────────────────
+            if _ww_enabled:
+                try:
+                    from ears.wake_word import check_and_strip as _ww_check
+                    user_input, _ww_found = _ww_check(user_input, _ww_words)
+                    if not _ww_found:
+                        print(Fore.YELLOW + f"[GATE2-WW] No wake word — discarded: '{user_input[:40]}'")
+                        continue
+                except Exception as _ww_err:
+                    print(Fore.YELLOW + f"[GATE2-WW] Error: {_ww_err}")
 
             text_lower = user_input.lower().strip()
 
@@ -456,6 +496,11 @@ def seven_logic():
                 speaker_id = identify_speaker(audio_path)
                 print(Fore.CYAN + f"[VOICE ID] Speaker: {speaker_id}")
                 api_set_state("current_speaker", speaker_id)
+
+            # ── Gate 3: Speaker Verification ──────────────────────────
+            if _sv_enabled and is_voice_id_enabled() and speaker_id == "unknown":
+                print(Fore.YELLOW + "[GATE3-SV] Unknown speaker — audio discarded")
+                continue
 
             if "enroll my voice" in text_lower or "enroll voice" in text_lower:
                 mouth.speak("What name should I save this voice as?")
