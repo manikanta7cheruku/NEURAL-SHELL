@@ -414,16 +414,19 @@ def seven_logic():
                     import wave as _wave, shutil as _shutil
 
                     _clips = []
+                    _ss("enrollment_clips_done", 0)
                     for _i in range(3):
                         app_ui.update_status(
-                            f"ENROLLING {_pending_name} — clip {_i+1}/3...", "#ff00ff"
+                            f"ENROLLING {_pending_name} — speak now ({_i+1}/3)...", "#ff00ff"
                         )
+                        print(Fore.CYAN + f"[ENROLL] Waiting for clip {_i+1}/3...")
                         _, _clip = listen()
                         if _clip and os.path.exists(_clip):
                             _clips.append(_clip)
-                            print(Fore.CYAN + f"[ENROLL] Clip {_i+1} captured: {_clip}")
+                            _ss("enrollment_clips_done", len(_clips))
+                            print(Fore.GREEN + f"[ENROLL] Clip {_i+1} captured: {_clip}")
                         else:
-                            print(Fore.YELLOW + f"[ENROLL] Clip {_i+1} empty — skipping")
+                            print(Fore.YELLOW + f"[ENROLL] Clip {_i+1} empty — user did not speak")
 
                     _ok = False
                     if _clips:
@@ -457,13 +460,14 @@ def seven_logic():
                             print(Fore.RED + f"[ENROLL] Merge error: {_me}")
                             _ok = enroll_speaker(_pending_name, _clips[0])
 
+                    _ss("enrollment_clips_done", 0)
                     _ss("enrollment_done", {
                         "name":    _pending_name,
                         "success": _ok,
                         "message": (
                             f"Voice enrolled for {_pending_name}."
                             if _ok else
-                            "Enrollment failed. No clear audio captured."
+                            "Enrollment failed. No clear audio captured. Speak clearly for each clip."
                         )
                     })
                     mouth.speak(
