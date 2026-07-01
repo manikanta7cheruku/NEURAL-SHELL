@@ -860,9 +860,9 @@ function EnrollModal({ onClose }) {
                   Recording {name}...
                 </div>
                 <div className="text-[9px] text-s-text-4 text-center mt-1 leading-relaxed">
-                  Seven will ask for 3 clips.<br/>
-                  When Seven says <span className="text-s-accent font-mono">"speak now"</span> — talk for 5-10 seconds.<br/>
-                  Any content works: count, read text, speak naturally.
+                  Seven will guide you through 3 recordings.<br/>
+                  Speak when prompted. Talk for about 10 seconds each time.<br/>
+                  Counting, reading, or speaking naturally all work.
                 </div>
               </div>
               </div>
@@ -906,6 +906,12 @@ function EnrollModal({ onClose }) {
                   <div className="text-[9px] text-s-text-4 text-center mt-1">
                     {result?.message || `${name} is now registered.`}
                   </div>
+                </div>
+              </div>
+              <div className="p-3 bg-s-accent/5 border border-s-accent/20 rounded-lg">
+                <div className="text-[9px] text-s-accent font-medium mb-1">Next step</div>
+                <div className="text-[9px] text-s-text-4 leading-relaxed">
+                  Turn on <span className="text-s-text-2 font-medium">Speaker Verification</span> above to activate it. Once enabled, only registered voices can give Seven commands.
                 </div>
               </div>
               <button
