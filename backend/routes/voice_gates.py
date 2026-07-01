@@ -78,16 +78,23 @@ def enrollment_welcome():
 def enroll_via_api(req: EnrollRequest):
     """
     Signal main.py to begin enrollment.
-    Does NOT capture audio here — that happens in main.py voice loop.
-    Frontend must poll /api/voice/enrollment-status to get result.
+    Also sets force_return so listen() unblocks within 1.5 seconds.
     """
-    from backend.api_server import set_state, get_state
+    from backend.api_server import set_state
     name = req.name.strip()
     if not name:
         raise HTTPException(status_code=400, detail="Name required")
-    # Clear any previous result and set pending
     set_state("pending_enrollment", name)
     set_state("enrollment_done", None)
+    set_state("enrollment_clips_done", 0)
+
+    # Unblock the current listen() call so the enrollment loop runs immediately
+    try:
+        from ears.core import set_force_return
+        set_force_return(True)
+    except Exception as e:
+        print(f"[ENROLL] Could not set force_return: {e}")
+
     return {"queued": True, "name": name}
 
 
