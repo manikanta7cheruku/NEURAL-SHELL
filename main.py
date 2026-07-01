@@ -412,6 +412,13 @@ def seven_logic():
                     api_set_state("listening", False)
                     api_set_state("thinking",  True)
 
+                    # Clear force_return — normal listen() timeout from here
+                    try:
+                        from ears.core import set_force_return as _clr_fr
+                        _clr_fr(False)
+                    except Exception:
+                        pass
+
                     import wave as _wave, shutil as _shutil, random as _rand
 
                     # Professional enrollment prompts — multiple variants
