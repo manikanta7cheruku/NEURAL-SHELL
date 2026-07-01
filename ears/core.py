@@ -26,6 +26,15 @@ colorama.init(autoreset=True)
 MODEL_SIZE      = "medium.en"
 AUDIO_TEMP_PATH = "temp_audio.wav"
 
+# External interrupt flag — set True to make listen() return immediately
+# Used by enrollment to unblock the listening loop
+_force_return = False
+
+def set_force_return(val: bool):
+    """Call this to make the current listen() return immediately."""
+    global _force_return
+    _force_return = val
+
 
 # =============================================================================
 # WHISPER MODEL LOADER
@@ -159,20 +168,10 @@ def listen():
         recognizer.non_speaking_duration    = 0.3
         recognizer.phrase_threshold         = 0.1
 
-        # Check if enrollment is pending — use short timeout so loop unblocks fast
-        _enrollment_pending = False
         try:
-            import sys as _sys
-            if 'backend.api_server' in _sys.modules:
-                from backend.api_server import get_state as _listen_gs
-                _enrollment_pending = bool(_listen_gs("pending_enrollment"))
-        except Exception:
-            pass
-
-        _timeout = 2 if _enrollment_pending else None
-
-        try:
-            audio = recognizer.listen(source, timeout=_timeout, phrase_time_limit=7)
+            # force_return=True means enrollment is waiting — unblock in 1.5s
+            _listen_timeout = 1.5 if _force_return else None
+            audio = recognizer.listen(source, timeout=_listen_timeout, phrase_time_limit=7)
             wav_data = audio.get_wav_data()
 
             # ── Signal Quality Checks ──────────────────────────────────────
@@ -397,6 +396,9 @@ def listen():
 
             return full_text.capitalize(), AUDIO_TEMP_PATH
 
+        except sr.WaitTimeoutError:
+            # Triggered by force_return=True — enrollment waiting for loop
+            return None, None
         except Exception:
             return None, None
 
