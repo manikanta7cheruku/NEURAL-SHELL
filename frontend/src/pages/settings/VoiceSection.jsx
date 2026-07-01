@@ -653,17 +653,27 @@ function EnrollModal({ onClose }) {
   const tickRef    = useRef(null);
   const timeoutRef = useRef(null);
 
-  // Load enrolled voices when modal opens
+  const welcomeFiredRef = useRef(false);
+
   useEffect(() => {
     api.get('/voice/enrolled')
        .then(r => setEnrolled(r.data.enrolled || []))
        .catch(() => {});
+
+    // Fire welcome only once — StrictMode double-invoke guard
+    if (!welcomeFiredRef.current) {
+      welcomeFiredRef.current = true;
+      api.post('/voice/enrollment-welcome').catch(() => {});
+    }
   }, []);
 
     const startEnroll = async () => {
       if (!name.trim()) return;
       setStep('recording');
       setProgress(0);
+
+      // Stop any welcome speech before starting enrollment
+      try { await api.post('/interrupt'); } catch (e) {}
 
       // Signal main.py to start enrollment
       try {
