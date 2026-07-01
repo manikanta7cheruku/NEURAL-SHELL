@@ -453,6 +453,31 @@ def handle_identity(clean_in, words, speaker_id, speaker_name, config):
     
 
     # --- RECALIBRATION ---
+
+    # --- VOICE ENROLLMENT CONTEXT ---
+    # When user says "what", "repeat", "again" during enrollment flow
+    # Seven explains what voice enrollment is
+    _enrollment_questions = {
+        "what is voice enrollment", "what is this", "what are you doing",
+        "explain", "tell me more", "what does this do",
+        "repeat", "say that again", "again", "what", "huh", "what did you say"
+    }
+    if clean_in in _enrollment_questions or any(p in clean_in for p in [
+        "voice enrollment", "what is enrollment", "how does this work",
+        "why do you need", "what for"
+    ]):
+        try:
+            from backend.api_server import get_state as _ges
+            if _ges("pending_enrollment") or _ges("enrollment_clips_done", 0) > 0:
+                return (
+                    "Voice enrollment captures your unique voice pattern. "
+                    "I record three short clips and build a voiceprint — a mathematical signature of your voice. "
+                    "Once enrolled, I can identify you and reject other voices when Speaker Verification is on."
+                )
+        except Exception:
+            pass
+
+
     if any(p in clean_in for p in [
         "recalibrate", "calibrate mic", "calibrate microphone",
         "reset mic", "reset microphone", "fix mic", "fix microphone",
