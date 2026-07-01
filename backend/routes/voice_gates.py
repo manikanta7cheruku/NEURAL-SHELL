@@ -52,6 +52,16 @@ def get_enrolled_speakers():
 class EnrollRequest(BaseModel):
     name: str
 
+@router.post("/api/voice/enrollment-welcome")
+def enrollment_welcome():
+    """
+    Called when user opens the enrollment modal.
+    Sets a flag so main.py speaks a welcome/explanation immediately.
+    """
+    from backend.api_server import set_state
+    set_state("speak_enrollment_welcome", True)
+    return {"ok": True}
+
 @router.post("/api/voice/enroll")
 def enroll_via_api(req: EnrollRequest):
     """

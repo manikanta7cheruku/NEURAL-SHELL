@@ -42,9 +42,10 @@ _state = {
     "status_text":         "SYSTEM ONLINE",
     "status_color":        "#00ff00",
     "file_search_results": None,
-    "pending_enrollment":   None,
-    "enrollment_done":      None,
-    "enrollment_clips_done": 0,
+    "pending_enrollment":        None,
+    "enrollment_done":           None,
+    "enrollment_clips_done":     0,
+    "speak_enrollment_welcome":  False,
 }
 
 _start_time = time.time()
