@@ -95,6 +95,18 @@ def needs_web_search(user_input):
     # RULE 4: Real-time data keywords
     for word in REALTIME_DATA:
         if word in clean:
+            # For weather — add user's city if configured
+            if word in ["weather", "temperature", "forecast"]:
+                try:
+                    import config as _cfg
+                    _city = _cfg.KEY.get("identity", {}).get("city", "")
+                    if _city:
+                        return True, f"weather in {_city} today"
+                    else:
+                        # No city set — search with generic but useful query
+                        return True, "current weather"
+                except Exception:
+                    pass
             return True, clean
     
     # RULE 5: News keywords
