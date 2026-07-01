@@ -5,6 +5,8 @@ Handles: /api/voice/gates, /api/voice/enrolled
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+import threading
+import os
 
 router = APIRouter()
 
@@ -53,19 +55,57 @@ class EnrollRequest(BaseModel):
 @router.post("/api/voice/enroll")
 def enroll_via_api(req: EnrollRequest):
     """
-    Trigger enrollment from Settings UI.
-    Sets a flag that main.py picks up on next listen() cycle.
-    The actual voice capture happens in main.py voice loop.
-    Returns instruction to user since recording happens through voice.
+    Signal main.py to begin enrollment.
+    Does NOT capture audio here — that happens in main.py voice loop.
+    Frontend must poll /api/voice/enrollment-status to get result.
     """
-    import config
-    # Store pending enrollment name so main.py can pick it up
-    config.update_config({"pending_enrollment": req.name.strip()})
+    from backend.api_server import set_state, get_state
+    name = req.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Name required")
+    # Clear any previous result and set pending
+    set_state("pending_enrollment", name)
+    set_state("enrollment_done", None)
+    return {"queued": True, "name": name}
+
+
+@router.get("/api/voice/enrollment-status")
+def get_enrollment_status():
+    """Poll this to check if enrollment completed."""
+    from backend.api_server import get_state
+    state = get_state()
+    pending = state.get("pending_enrollment")
+    done    = state.get("enrollment_done")
     return {
-        "success": True,
-        "message": f"Say a few sentences now. Seven is listening for {req.name}.",
-        "name": req.name
+        "pending": pending,
+        "done":    done,
+        "status":  "done" if done else ("waiting" if pending else "idle")
     }
+
+
+@router.post("/api/voice/play-sample")
+def play_voice_sample(body: dict):
+    """
+    Play back a recorded voice sample for the user to verify.
+    Looks for saved sample in voice_prints directory.
+    """
+    name = body.get("name", "").lower().strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Name required")
+
+    sample_path = os.path.join(".", "seven_data", "voice_prints", f"{name}_sample.wav")
+    if not os.path.exists(sample_path):
+        raise HTTPException(status_code=404, detail="No sample saved for this voice")
+
+    try:
+        import winsound
+        threading.Thread(
+            target=lambda: winsound.PlaySound(sample_path, winsound.SND_FILENAME),
+            daemon=True
+        ).start()
+        return {"playing": True, "name": name}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.delete("/api/voice/enrolled/{name}")
 def delete_enrolled_speaker(name: str):
