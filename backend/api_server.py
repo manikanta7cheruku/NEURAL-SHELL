@@ -42,8 +42,9 @@ _state = {
     "status_text":         "SYSTEM ONLINE",
     "status_color":        "#00ff00",
     "file_search_results": None,
-    "pending_enrollment":  None,   # set by API, read by main.py
-    "enrollment_done":     None,   # set by main.py, read by frontend
+    "pending_enrollment":   None,
+    "enrollment_done":      None,
+    "enrollment_clips_done": 0,
 }
 
 _start_time = time.time()

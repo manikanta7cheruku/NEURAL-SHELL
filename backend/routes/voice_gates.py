@@ -74,12 +74,14 @@ def get_enrollment_status():
     """Poll this to check if enrollment completed."""
     from backend.api_server import get_state
     state = get_state()
-    pending = state.get("pending_enrollment")
-    done    = state.get("enrollment_done")
+    pending    = state.get("pending_enrollment")
+    done       = state.get("enrollment_done")
+    clips_done = state.get("enrollment_clips_done", 0)
     return {
-        "pending": pending,
-        "done":    done,
-        "status":  "done" if done else ("waiting" if pending else "idle")
+        "pending":    pending,
+        "done":       done,
+        "clips_done": clips_done,
+        "status":     "done" if done else ("recording" if clips_done > 0 else ("waiting" if pending else "idle"))
     }
 
 
