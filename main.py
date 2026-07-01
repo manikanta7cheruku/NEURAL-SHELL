@@ -399,41 +399,39 @@ def seven_logic():
     # =========================================================================
     while True:
         try:
-            if is_active:
-                app_ui.update_status("LISTENING...", "#00ff00")
-                api_set_state("listening", True)
-                api_set_state("thinking",  False)
-            else:
-                app_ui.update_status("PAUSED (Say 'Wake Up')", "#555555")
-                api_set_state("listening", False)
-
-            user_input, audio_path = listen()
-            # ── Check pending voice enrollment from Settings UI ────────
+            # ── Check pending voice enrollment BEFORE listen() ────────
+            # Must be here — enrollment needs to intercept the listen() cycle
             try:
                 from backend.api_server import get_state as _gs, set_state as _ss
                 _pending_name = _gs("pending_enrollment")
                 if _pending_name:
-                    _ss("pending_enrollment", None)  # Clear immediately
-                    mouth.speak(f"Ready to enroll {_pending_name}. Say a few sentences now.")
+                    _ss("pending_enrollment", None)  # clear immediately
+                    mouth.speak(f"Ready. Speak now, {_pending_name}. Say a few sentences.")
                     app_ui.update_status(f"ENROLLING {_pending_name}...", "#ff00ff")
+                    api_set_state("listening", False)
+                    api_set_state("thinking",  True)
 
-                    import wave as _wave
+                    import wave as _wave, shutil as _shutil
+
                     _clips = []
                     for _i in range(3):
-                        if _i > 0:
-                            app_ui.update_status(f"ENROLLING — Keep going... ({_i+1}/3)", "#ff00ff")
+                        app_ui.update_status(
+                            f"ENROLLING {_pending_name} — clip {_i+1}/3...", "#ff00ff"
+                        )
                         _, _clip = listen()
                         if _clip and os.path.exists(_clip):
                             _clips.append(_clip)
+                            print(Fore.CYAN + f"[ENROLL] Clip {_i+1} captured: {_clip}")
+                        else:
+                            print(Fore.YELLOW + f"[ENROLL] Clip {_i+1} empty — skipping")
 
+                    _ok = False
                     if _clips:
-                        # Merge clips
                         _merged = os.path.join(
                             os.environ.get('APPDATA', ''), 'SEVEN', 'enroll_merge.wav'
                         )
                         try:
-                            _all_frames = []
-                            _wp = None
+                            _all_frames, _wp = [], None
                             for _cp in _clips:
                                 with _wave.open(_cp, 'rb') as _wf:
                                     if _wp is None:
@@ -444,39 +442,51 @@ def seven_logic():
                                     _out.setparams(_wp)
                                     for _f in _all_frames:
                                         _out.writeframes(_f)
-
-                            # Save a sample for playback
-                            _sample_path = os.path.join(
-                                os.getcwd(), 'seven_data', 'voice_prints',
-                                f"{_pending_name.lower()}_sample.wav"
-                            )
-                            os.makedirs(os.path.dirname(_sample_path), exist_ok=True)
-                            import shutil
-                            shutil.copy(_clips[0], _sample_path)
-
-                            _ok = enroll_speaker(_pending_name, _merged)
-                            try:
-                                os.remove(_merged)
-                            except Exception:
-                                pass
+                                # Save first clip as playback sample
+                                _sample_dir = os.path.join(os.getcwd(), 'seven_data', 'voice_prints')
+                                os.makedirs(_sample_dir, exist_ok=True)
+                                _shutil.copy(_clips[0], os.path.join(
+                                    _sample_dir, f"{_pending_name.lower()}_sample.wav"
+                                ))
+                                _ok = enroll_speaker(_pending_name, _merged)
+                                try:
+                                    os.remove(_merged)
+                                except Exception:
+                                    pass
                         except Exception as _me:
                             print(Fore.RED + f"[ENROLL] Merge error: {_me}")
                             _ok = enroll_speaker(_pending_name, _clips[0])
-                    else:
-                        _ok = False
 
                     _ss("enrollment_done", {
                         "name":    _pending_name,
                         "success": _ok,
-                        "message": f"Voice enrolled for {_pending_name}." if _ok else "Enrollment failed."
+                        "message": (
+                            f"Voice enrolled for {_pending_name}."
+                            if _ok else
+                            "Enrollment failed. No clear audio captured."
+                        )
                     })
                     mouth.speak(
-                        f"Done. I will recognize {_pending_name} from now on." if _ok
-                        else "Enrollment failed. Try again."
+                        f"Done. I will recognize {_pending_name} from now on."
+                        if _ok else
+                        "Enrollment failed. Try speaking more clearly."
                     )
                     app_ui.update_status("SYSTEM ONLINE", "#00ff00")
-            except Exception as _enroll_check_err:
-                print(Fore.YELLOW + f"[ENROLL] Check error: {_enroll_check_err}")
+                    api_set_state("thinking", False)
+                    continue   # Skip normal listen() this iteration
+            except Exception as _enroll_err:
+                print(Fore.YELLOW + f"[ENROLL] Error: {_enroll_err}")
+                import traceback; traceback.print_exc()
+
+            if is_active:
+                app_ui.update_status("LISTENING...", "#00ff00")
+                api_set_state("listening", True)
+                api_set_state("thinking",  False)
+            else:
+                app_ui.update_status("PAUSED (Say 'Wake Up')", "#555555")
+                api_set_state("listening", False)
+
+            user_input, audio_path = listen()
             if not user_input:
                 # Check for pending battery alert
                 try:
@@ -789,8 +799,6 @@ def seven_logic():
                         _pre_executed_open = True
 
             _pre_executed_close = False
-            _pre_executed_close = False
-            _pre_executed_close = False
             if isinstance(response, str) and "###CLOSE:" in response:
                 import re as _re_preclose
                 _pre_closes = _re_preclose.findall(r"###CLOSE:\s*(.*?)(?=###|$)", response)
@@ -802,7 +810,6 @@ def seven_logic():
                             args=(_app,),
                             daemon=True
                         ).start()
-                        _pre_executed_close = True
                         _pre_executed_close = True
 
             api_set_state("speaking", True)
