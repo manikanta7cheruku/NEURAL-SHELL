@@ -334,6 +334,292 @@ export default function VoiceSection({
           </div>
         )}
       </div>
+      {/* Voice Security Gates */}
+      <VoiceGatesPanel />
     </>
+  );
+}
+
+// ─── Voice Gates Panel ───────────────────────────────────────────────────────
+
+import { useState, useEffect, useCallback } from 'react';
+import api from '../../api';
+
+function Toggle({ enabled, onToggle }) {
+  return (
+    <button
+      onClick={onToggle}
+      className={`relative w-9 h-5 rounded-full transition-colors shrink-0 ${
+        enabled ? 'bg-s-accent' : 'bg-s-border'
+      }`}
+    >
+      <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${
+        enabled ? 'translate-x-4' : 'translate-x-0.5'
+      }`} />
+    </button>
+  );
+}
+
+function VoiceGatesPanel() {
+  const [gates,    setGates]    = useState(null);
+  const [enrolled, setEnrolled] = useState([]);
+  const [saving,   setSaving]   = useState(false);
+  const [saved,    setSaved]    = useState(false);
+
+  const loadData = useCallback(() => {
+    api.get('/api/voice/gates')
+       .then(r => setGates(r.data))
+       .catch(() => {});
+    api.get('/api/voice/enrolled')
+       .then(r => setEnrolled(r.data.enrolled || []))
+       .catch(() => {});
+  }, []);
+
+  useEffect(() => { loadData(); }, [loadData]);
+
+  const save = async (updated) => {
+    setSaving(true);
+    try {
+      await api.post('/api/voice/gates', updated);
+      setGates(updated);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (e) {
+      console.error('[GATES] save error:', e);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const setPath = (path, value) => {
+    if (!gates) return;
+    const next = JSON.parse(JSON.stringify(gates));
+    const parts = path.split('.');
+    let node = next;
+    for (let i = 0; i < parts.length - 1; i++) {
+      if (!node[parts[i]]) node[parts[i]] = {};
+      node = node[parts[i]];
+    }
+    node[parts[parts.length - 1]] = value;
+    save(next);
+  };
+
+  const addWord = () => {
+    if (!gates) return;
+    const next = JSON.parse(JSON.stringify(gates));
+    if (!next.wake_word) next.wake_word = { enabled: false, words: [] };
+    if (!next.wake_word.words) next.wake_word.words = [];
+    next.wake_word.words.push('new word');
+    setGates(next);   // local only — save on blur
+  };
+
+  const updateWord = (i, val) => {
+    if (!gates) return;
+    const next = JSON.parse(JSON.stringify(gates));
+    next.wake_word.words[i] = val;
+    setGates(next);
+  };
+
+  const removeWord = (i) => {
+    if (!gates) return;
+    const next = JSON.parse(JSON.stringify(gates));
+    next.wake_word.words.splice(i, 1);
+    save(next);
+  };
+
+  const deleteEnrolled = async (name) => {
+    try {
+      await api.delete(`/api/voice/enrolled/${name}`);
+      setEnrolled(e => e.filter(n => n !== name));
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  if (!gates) {
+    return (
+      <div className="bg-s-card border border-s-border rounded p-4">
+        <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium mb-1">
+          Voice Security
+        </div>
+        <div className="text-[10px] text-s-text-4">Loading...</div>
+      </div>
+    );
+  }
+
+  const ptt = gates.push_to_talk   || { enabled: false };
+  const ww  = gates.wake_word      || { enabled: false, words: ['hey seven'] };
+  const sv  = gates.speaker_verify || { enabled: false };
+
+  return (
+    <div className="bg-s-card border border-s-border rounded p-4 space-y-4">
+
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium">
+            Voice Security
+          </div>
+          <div className="text-[9px] text-s-text-4 mt-0.5">
+            Three noise gates — enable any combination
+          </div>
+        </div>
+        {saving && <span className="text-[9px] text-s-text-4">Saving...</span>}
+        {!saving && saved && <span className="text-[9px] text-s-green">Saved</span>}
+      </div>
+
+      {/* Gate 1 — Push to Talk */}
+      <div className="border border-s-border/50 rounded p-3 space-y-2">
+        <div className="flex items-center justify-between">
+          <div className="flex-1 min-w-0 pr-3">
+            <div className="text-[11px] text-s-text-2 font-medium">Push to Talk</div>
+            <div className="text-[9px] text-s-text-4 mt-0.5 leading-relaxed">
+              Seven only listens while you hold&nbsp;
+              <kbd className="px-1 py-0.5 bg-s-bg border border-s-border rounded text-[8px] font-mono text-s-text-3">
+                Shift
+              </kbd>.
+              &nbsp;Releases automatically when key is released.
+            </div>
+          </div>
+          <Toggle
+            enabled={ptt.enabled}
+            onToggle={() => setPath('push_to_talk.enabled', !ptt.enabled)}
+          />
+        </div>
+        {ptt.enabled && (
+          <div className="flex items-center gap-2 px-2 py-1.5 bg-s-accent/5 border border-s-accent/20 rounded">
+            <div className="w-1.5 h-1.5 rounded-full bg-s-accent shrink-0 animate-pulse" />
+            <span className="text-[9px] text-s-accent">
+              Hold Shift → speak → release. All other audio is ignored.
+            </span>
+          </div>
+        )}
+      </div>
+
+      {/* Gate 2 — Wake Word */}
+      <div className="border border-s-border/50 rounded p-3 space-y-2.5">
+        <div className="flex items-center justify-between">
+          <div className="flex-1 min-w-0 pr-3">
+            <div className="text-[11px] text-s-text-2 font-medium">Wake Word</div>
+            <div className="text-[9px] text-s-text-4 mt-0.5">
+              Say a wake word before every command. Seven ignores everything else.
+            </div>
+          </div>
+          <Toggle
+            enabled={ww.enabled}
+            onToggle={() => setPath('wake_word.enabled', !ww.enabled)}
+          />
+        </div>
+
+        <div>
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-[9px] text-s-text-4 uppercase tracking-wider">
+              Wake Words
+            </span>
+            <button
+              onClick={addWord}
+              className="text-[9px] text-s-accent hover:text-s-accent/70 font-medium transition-colors"
+            >
+              + Add
+            </button>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {(ww.words || []).map((word, i) => (
+              <div
+                key={i}
+                className="flex items-center gap-1 bg-s-bg border border-s-border rounded px-2 py-1"
+              >
+                <input
+                  value={word}
+                  onChange={e => updateWord(i, e.target.value)}
+                  onBlur={() => save(gates)}
+                  className="bg-transparent text-[10px] text-s-accent font-mono w-20 focus:outline-none"
+                  placeholder="wake word"
+                />
+                {(ww.words || []).length > 1 && (
+                  <button
+                    onClick={() => removeWord(i)}
+                    className="text-s-red/50 hover:text-s-red text-[10px] leading-none transition-colors"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+          {ww.enabled && (
+            <div className="mt-2 text-[9px] text-s-text-4 leading-relaxed">
+              Example:&nbsp;
+              <span className="text-s-accent font-mono">"hey seven open chrome"</span>
+              &nbsp;→ Seven hears&nbsp;
+              <span className="text-s-accent font-mono">"open chrome"</span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Gate 3 — Speaker Verification */}
+      <div className="border border-s-border/50 rounded p-3 space-y-2.5">
+        <div className="flex items-center justify-between">
+          <div className="flex-1 min-w-0 pr-3">
+            <div className="text-[11px] text-s-text-2 font-medium">Speaker Verification</div>
+            <div className="text-[9px] text-s-text-4 mt-0.5">
+              Only responds to your enrolled voice. Other voices are ignored.
+            </div>
+          </div>
+          <Toggle
+            enabled={sv.enabled}
+            onToggle={() => setPath('speaker_verify.enabled', !sv.enabled)}
+          />
+        </div>
+
+        {/* Enrolled voices */}
+        <div>
+          <div className="text-[9px] text-s-text-4 uppercase tracking-wider mb-1.5">
+            Enrolled Voices
+          </div>
+          {enrolled.length === 0 ? (
+            <div className="p-2.5 bg-s-bg border border-s-border/40 rounded">
+              <div className="text-[10px] text-s-text-4">No voices enrolled.</div>
+              <div className="text-[9px] text-s-text-4 mt-0.5">
+                Say&nbsp;
+                <span className="text-s-accent font-mono">"enroll my voice"</span>
+                &nbsp;to Seven to register your voice.
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-1">
+              {enrolled.map(name => (
+                <div
+                  key={name}
+                  className="flex items-center justify-between px-2.5 py-2 bg-s-bg border border-s-border/40 rounded"
+                >
+                  <div className="flex items-center gap-2">
+                    <div className="w-1.5 h-1.5 rounded-full bg-s-green shrink-0" />
+                    <span className="text-[10px] text-s-text-2 font-medium capitalize">
+                      {name}
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => deleteEnrolled(name)}
+                    className="text-[9px] text-s-red/50 hover:text-s-red transition-colors"
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {sv.enabled && enrolled.length === 0 && (
+            <div className="mt-1.5 flex items-start gap-1.5 text-[9px] text-yellow-400">
+              <span className="shrink-0 mt-0.5">⚠</span>
+              <span>Gate enabled with no voice enrolled. Seven will reject all audio.</span>
+            </div>
+          )}
+        </div>
+      </div>
+
+    </div>
   );
 }
