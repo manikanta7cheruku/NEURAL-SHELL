@@ -405,28 +405,77 @@ def seven_logic():
                 from backend.api_server import get_state as _gs, set_state as _ss
                 _pending_name = _gs("pending_enrollment")
                 if _pending_name:
-                    _ss("pending_enrollment", None)  # clear immediately
-                    mouth.speak(f"Ready. Speak now, {_pending_name}. Say a few sentences.")
-                    app_ui.update_status(f"ENROLLING {_pending_name}...", "#ff00ff")
+                    _ss("pending_enrollment", None)
+                    _ss("enrollment_clips_done", 0)
+                    _ss("enrollment_done", None)
                     api_set_state("listening", False)
                     api_set_state("thinking",  True)
 
-                    import wave as _wave, shutil as _shutil
+                    import wave as _wave, shutil as _shutil, random as _rand
+
+                    # Professional enrollment prompts — multiple variants
+                    _ready_phrases = [
+                        f"Starting voice enrollment for {_pending_name}. I will ask you to speak three times. Each time, just talk naturally for about ten seconds. Ready when you are.",
+                        f"Voice enrollment beginning for {_pending_name}. I will guide you through three recordings. Speak naturally — read something, count, or just talk. Let's start.",
+                        f"Alright {_pending_name}, let's capture your voice. Three short recordings. I will tell you when to speak each time.",
+                    ]
+                    mouth.speak(_rand.choice(_ready_phrases))
+                    app_ui.update_status(f"ENROLLING {_pending_name}...", "#ff00ff")
+
+                    import time as _enroll_time
+                    _enroll_time.sleep(1)
+
+                    _clip_prompts = [
+                        [
+                            "Clip one. Speak now. Say anything — your name, count to ten, read a sentence.",
+                            "First recording. Go ahead and speak for about ten seconds.",
+                            "Recording one. Start speaking whenever you are ready.",
+                        ],
+                        [
+                            "Good. Clip two. Keep going — speak again for ten seconds.",
+                            "Second recording. Talk naturally. Anything works.",
+                            "Recording two. Speak now.",
+                        ],
+                        [
+                            "Almost done. Last clip. Speak one more time.",
+                            "Final recording. Ten more seconds of speech.",
+                            "Last one. Speak now and we are done.",
+                        ]
+                    ]
 
                     _clips = []
-                    _ss("enrollment_clips_done", 0)
                     for _i in range(3):
+                        # Speak the clip prompt
+                        mouth.speak(_rand.choice(_clip_prompts[_i]))
                         app_ui.update_status(
-                            f"ENROLLING {_pending_name} — speak now ({_i+1}/3)...", "#ff00ff"
+                            f"ENROLLING — Recording {_i+1}/3... speak now", "#ff00ff"
                         )
                         print(Fore.CYAN + f"[ENROLL] Waiting for clip {_i+1}/3...")
+
+                        # Listen for the clip — use direct listen() call
                         _, _clip = listen()
                         if _clip and os.path.exists(_clip):
                             _clips.append(_clip)
                             _ss("enrollment_clips_done", len(_clips))
-                            print(Fore.GREEN + f"[ENROLL] Clip {_i+1} captured: {_clip}")
+                            print(Fore.GREEN + f"[ENROLL] Clip {_i+1} captured")
+
+                            # Confirm between clips (not after last)
+                            if _i < 2:
+                                _between = [
+                                    "Got it.",
+                                    "Captured.",
+                                    "Good, next one.",
+                                ]
+                                mouth.speak(_rand.choice(_between))
                         else:
-                            print(Fore.YELLOW + f"[ENROLL] Clip {_i+1} empty — user did not speak")
+                            print(Fore.YELLOW + f"[ENROLL] Clip {_i+1} empty")
+                            mouth.speak("I did not catch that. Try again — speak clearly.")
+                            # Retry once
+                            _, _clip = listen()
+                            if _clip and os.path.exists(_clip):
+                                _clips.append(_clip)
+                                _ss("enrollment_clips_done", len(_clips))
+                                print(Fore.GREEN + f"[ENROLL] Clip {_i+1} captured on retry")
 
                     _ok = False
                     if _clips:
@@ -465,16 +514,22 @@ def seven_logic():
                         "name":    _pending_name,
                         "success": _ok,
                         "message": (
-                            f"Voice enrolled for {_pending_name}."
+                            f"Voice enrolled for {_pending_name}. Enable Speaker Verification in Voice Security settings to activate it."
                             if _ok else
                             "Enrollment failed. No clear audio captured. Speak clearly for each clip."
                         )
                     })
-                    mouth.speak(
-                        f"Done. I will recognize {_pending_name} from now on."
-                        if _ok else
-                        "Enrollment failed. Try speaking more clearly."
-                    )
+                    if _ok:
+                        mouth.speak(
+                            f"Voice enrollment complete for {_pending_name}. "
+                            f"To activate it, go to Settings, Voice Security, and turn on Speaker Verification. "
+                            f"Once enabled, only registered voices can give me commands."
+                        )
+                    else:
+                        mouth.speak(
+                            "Enrollment did not complete. The audio was unclear. "
+                            "Try again in a quiet environment and speak directly toward the microphone."
+                        )
                     app_ui.update_status("SYSTEM ONLINE", "#00ff00")
                     api_set_state("thinking", False)
                     continue   # Skip normal listen() this iteration
