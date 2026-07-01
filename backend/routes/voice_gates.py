@@ -52,24 +52,24 @@ def get_enrolled_speakers():
 class EnrollRequest(BaseModel):
     name: str
 
+_welcome_spoken = False
+
 @router.post("/api/voice/enrollment-welcome")
 def enrollment_welcome():
-    """
-    Speak enrollment welcome immediately from a background thread.
-    Does not wait for main.py loop — fires instantly.
-    """
+    global _welcome_spoken
+    # Guard against double calls from React StrictMode
+    if _welcome_spoken:
+        _welcome_spoken = False  # Reset for next enrollment session
+        return {"ok": True, "skipped": True}
+    _welcome_spoken = True
+
     def _speak():
-        import random
         try:
             import mouth as _mouth
-            _phrases = [
-                "Voice enrollment. Enter your name in the panel, then click Start Enrollment. I will guide you through three short recordings.",
-                "Sure. Voice enrollment captures your unique voice pattern. Enter your name and click Start Enrollment when you are ready.",
-                "Voice enrollment mode. I will record your voice three times and build your voiceprint. Enter your name in the panel to begin.",
-            ]
-            _mouth.speak(random.choice(_phrases))
+            # Short single sentence — user is looking at the form, not listening to a lecture
+            _mouth.speak("Enter your name, then click Start Enrollment.")
         except Exception as e:
-            print(f"[ENROLL-WELCOME] Speak failed: {e}")
+            print(f"[ENROLL-WELCOME] {e}")
 
     threading.Thread(target=_speak, daemon=True).start()
     return {"ok": True}
