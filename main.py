@@ -404,7 +404,7 @@ def seven_logic():
             # Must be here — enrollment needs to intercept the listen() cycle
             try:
                 from backend.api_server import get_state as _gs, set_state as _ss
-                _pending_name = _gs("pending_enrollment")
+                _pending_name = _gs().get("pending_enrollment")
                 if _pending_name:
                     _ss("pending_enrollment", None)
                     _ss("enrollment_clips_done", 0)
@@ -538,9 +538,9 @@ def seven_logic():
                 # Check for pending battery alert
                 try:
                     from backend.api_server import get_state as _gs
-                    if _gs("battery_alert_pending"):
+                    if _gs().get("battery_alert_pending"):
                         from backend.api_server import set_state as _ss
-                        _bat_msg = _gs("battery_alert_msg") or "Battery low. Please plug in."
+                        _bat_msg = _gs().get("battery_alert_msg") or "Battery low. Please plug in."
                         _ss("battery_alert_pending", False)
                         _ss("battery_alert_msg", "")
                         speak_with_interrupt(_bat_msg)
