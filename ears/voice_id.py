@@ -31,7 +31,7 @@ from colorama import Fore
 
 VOICE_PRINTS_DIR     = os.path.join(".", "seven_data", "voice_prints")
 PROFILES_FILE        = os.path.join(VOICE_PRINTS_DIR, "profiles.json")
-SIMILARITY_THRESHOLD = 0.40
+SIMILARITY_THRESHOLD = 0.70
 
 _titanet_model = None
 
@@ -109,27 +109,60 @@ def _save_profiles(profiles):
 
 
 def enroll_speaker(name: str, audio_path: str) -> bool:
+    """
+    Enroll speaker from a merged WAV or single clip.
+    Also checks for individual clip files and averages them
+    for a more robust voiceprint.
+    """
     name_lower = name.lower().strip()
     print(Fore.CYAN + f"[VOICE ID] Enrolling: {name_lower}...")
 
-    embedding = _audio_to_embedding(audio_path)
-    if embedding is None:
-        print(Fore.RED + "[VOICE ID] Enrollment failed")
-        return False
+    embeddings = []
+
+    # Try individual clip files first — better than merged
+    import os as _os
+    appdata = _os.environ.get('APPDATA', '')
+    clip_files = [
+        _os.path.join(appdata, 'SEVEN', f'enroll_clip_{i}.wav')
+        for i in range(1, 4)
+    ]
+    for clip in clip_files:
+        if _os.path.exists(clip):
+            emb = _audio_to_embedding(clip)
+            if emb is not None:
+                embeddings.append(emb)
+                print(Fore.CYAN + f"[VOICE ID] Clip {clip} embedding OK")
+
+    # Fallback to merged file
+    if not embeddings:
+        embedding = _audio_to_embedding(audio_path)
+        if embedding is None:
+            print(Fore.RED + "[VOICE ID] Enrollment failed — no valid audio")
+            return False
+        embeddings.append(embedding)
+
+    # Average all embeddings — reduces variance, more robust voiceprint
+    avg_embedding = np.mean(embeddings, axis=0)
+
+    # Re-normalize after averaging
+    norm = np.linalg.norm(avg_embedding)
+    if norm > 0:
+        avg_embedding = avg_embedding / norm
 
     _ensure_dirs()
-    np.save(os.path.join(VOICE_PRINTS_DIR, f"{name_lower}.npy"), embedding)
+    np.save(os.path.join(VOICE_PRINTS_DIR, f"{name_lower}.npy"), avg_embedding)
 
     profiles = _load_profiles()
     profiles[name_lower] = {
         "print_file":    f"{name_lower}.npy",
         "enrolled":      True,
-        "version":       "6.0",
-        "embedding_dim": int(embedding.shape[0])
+        "version":       "6.1",
+        "clips_used":    len(embeddings),
+        "embedding_dim": int(avg_embedding.shape[0])
     }
     _save_profiles(profiles)
 
-    print(Fore.GREEN + f"[VOICE ID] {name_lower} enrolled. Dim: {embedding.shape[0]}")
+    print(Fore.GREEN + f"[VOICE ID] {name_lower} enrolled from {len(embeddings)} clips. Dim: {avg_embedding.shape[0]}")
     return True
 
 
