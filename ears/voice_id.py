@@ -88,10 +88,10 @@ def _audio_to_embedding(audio_path: str) -> np.ndarray:
 
         # TitaNet expects: list of audio arrays, sample rate
         with torch.no_grad():
-            audio_tensor = torch.from_numpy(data).unsqueeze(0)  # [1, samples]
-            length       = torch.tensor([data.shape[0]])
+            device       = next(model.parameters()).device
+            audio_tensor = torch.from_numpy(data).unsqueeze(0).to(device)
+            length       = torch.tensor([data.shape[0]]).to(device)
 
-            # Get embedding directly from model
             _, embedding = model.forward(
                 input_signal        = audio_tensor,
                 input_signal_length = length
