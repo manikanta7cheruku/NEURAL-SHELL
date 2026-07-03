@@ -169,6 +169,18 @@ def seven_logic():
         app_ui.update_status("BRAIN ERROR", "#ff0000")
         return
 
+    # Preload TitaNet speaker model at startup in background thread
+    # Avoids 3-5 second delay on first identification
+    try:
+        from ears.voice_id import _get_model as _preload_titanet
+        import threading as _thr
+        def _load_titanet_bg():
+            _preload_titanet()
+            print(Fore.GREEN + "[SYSTEM] TitaNet speaker model ready")
+        _thr.Thread(target=_load_titanet_bg, daemon=True).start()
+    except Exception as _tne:
+        print(Fore.YELLOW + f"[SYSTEM] TitaNet preload skipped: {_tne}")
+
     try:
         import hands.core as core
         import hands.system as system_mod
