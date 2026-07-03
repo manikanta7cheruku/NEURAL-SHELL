@@ -60,44 +60,16 @@ def _audio_to_embedding(audio_path: str) -> np.ndarray:
     Returns L2-normalized numpy array or None.
     """
     try:
-        import soundfile as sf
         import torch
 
         model = _get_model()
         if model is None:
             return None
 
-        # Load audio
-        data, sr = sf.read(audio_path, dtype='float32')
-
-        # Mono
-        if data.ndim > 1:
-            data = data.mean(axis=1)
-
-        # Resample to 16kHz
-        if sr != 16000:
-            import torchaudio.transforms as T
-            waveform = torch.from_numpy(data).unsqueeze(0)
-            waveform = T.Resample(sr, 16000)(waveform)
-            data     = waveform.squeeze(0).numpy()
-
-        # Minimum 1 second
-        if len(data) < 16000:
-            print(Fore.YELLOW + "[VOICE ID] Audio too short")
-            return None
-
-        # TitaNet expects: list of audio arrays, sample rate
+        # get_embedding handles loading, resampling, preprocessing internally
+        # Just pass the file path directly
         with torch.no_grad():
-            device       = next(model.parameters()).device
-            audio_tensor = torch.from_numpy(data).unsqueeze(0).to(device)
-            length       = torch.tensor([data.shape[0]]).to(device)
-
-            # Use get_embedding — the proper speaker embedding extraction method
-            # forward() returns classification logits, not the pure speaker embedding
-            emb = model.get_embedding(
-                input_signal        = audio_tensor,
-                input_signal_length = length
-            )
+            emb = model.get_embedding(audio_path)
 
         emb = emb.squeeze().cpu().numpy()  # [192]
 
