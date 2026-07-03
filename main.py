@@ -449,9 +449,16 @@ def seven_logic():
                     ]
 
                     _clips = []
-                    for _i in range(3):
+                    for _i in range(5):
                         # Speak the clip prompt
-                        mouth.speak(_rand.choice(_clip_prompts[_i]))
+                        _clip_num_prompts = [
+                            ["Clip one. Speak."],
+                            ["Clip two. Speak."],
+                            ["Clip three. Speak."],
+                            ["Clip four. Speak."],
+                            ["Last clip. Speak."],
+                        ]
+                        mouth.speak(_rand.choice(_clip_num_prompts[_i]))
                         app_ui.update_status(
                             f"ENROLLING — Recording {_i+1}/3... speak now", "#ff00ff"
                         )
@@ -495,7 +502,7 @@ def seven_logic():
                             print(Fore.GREEN + f"[ENROLL] Clip {_i+1} captured")
 
                             # Confirm between clips (not after last)
-                            if _i < 2:
+                            if _i < 4:
                                 mouth.speak("Got it.")
                         else:
                             print(Fore.YELLOW + f"[ENROLL] Clip {_i+1} empty")
