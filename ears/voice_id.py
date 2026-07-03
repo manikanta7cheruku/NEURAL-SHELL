@@ -83,6 +83,7 @@ def _audio_to_embedding(audio_path: str) -> np.ndarray:
     try:
         import soundfile as sf
         import numpy as np
+        import ctranslate2
 
         model = _get_whisper_model()
         if model is None:
@@ -135,16 +136,35 @@ def _audio_to_embedding(audio_path: str) -> np.ndarray:
         # Encode with Whisper encoder
         encoded = model.encode(features)
 
-        # Convert to numpy
-        import ctranslate2
-        encoded_np = np.array(encoded)
-        # Shape: [1, time_frames, 1024] or [time_frames, 1024]
+        # StorageView is float16 on cuda:0
+        # Step 1: move to CPU (Device enum required)
+        cpu_storage = encoded.to_device(ctranslate2.Device.cpu)
+        # Step 2: convert float16 to float32 (DataType enum required)
+        f32_storage = cpu_storage.to(ctranslate2.DataType.float32)
+        # Step 3: np.array() works on CPU StorageView directly
+        encoded_np = np.array(f32_storage)   # shape: [1, 1500, 1024]
+        encoded_np = encoded_np[0]           # [1500, 1024]
+        print(Fore.CYAN + f"[VOICE ID] encoded shape: {encoded_np.shape}")
 
-        if encoded_np.ndim == 3:
-            encoded_np = encoded_np[0]  # → [time_frames, 1024]
+        # Flatten to 2D if needed then mean pool
+        if encoded_np.ndim == 0:
+            # Scalar — something went wrong
+            print(Fore.RED + "[VOICE ID] Encoder returned scalar — unexpected")
+            return None
+        elif encoded_np.ndim == 1:
+            # Already 1D — use directly
+            embedding = encoded_np
+        elif encoded_np.ndim == 2:
+            # [time, features] — mean pool over time
+            embedding = encoded_np.mean(axis=0)
+        elif encoded_np.ndim == 3:
+            # [batch, time, features] — remove batch then mean pool
+            embedding = encoded_np[0].mean(axis=0)
+        else:
+            # Unexpected — flatten and use
+            embedding = encoded_np.flatten()
 
-        # Mean pool over time → [1024]
-        embedding = encoded_np.mean(axis=0)
+        print(Fore.CYAN + f"[VOICE ID] embedding shape after pooling: {embedding.shape}")
 
         # L2 normalize
         norm = np.linalg.norm(embedding)
