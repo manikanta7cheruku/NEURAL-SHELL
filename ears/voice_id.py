@@ -109,29 +109,24 @@ def _save_profiles(profiles):
 
 
 def enroll_speaker(name: str, audio_path: str) -> bool:
-    """
-    Enroll speaker from a merged WAV or single clip.
-    Also checks for individual clip files and averages them
-    for a more robust voiceprint.
-    """
     name_lower = name.lower().strip()
     print(Fore.CYAN + f"[VOICE ID] Enrolling: {name_lower}...")
 
     embeddings = []
 
-    # Try individual clip files first — better than merged
+    # Try individual clip files — better than merged for quality control
     import os as _os
     appdata = _os.environ.get('APPDATA', '')
     clip_files = [
         _os.path.join(appdata, 'SEVEN', f'enroll_clip_{i}.wav')
-        for i in range(1, 4)
+        for i in range(1, 6)  # up to 5 clips
     ]
     for clip in clip_files:
         if _os.path.exists(clip):
             emb = _audio_to_embedding(clip)
             if emb is not None:
                 embeddings.append(emb)
-                print(Fore.CYAN + f"[VOICE ID] Clip {clip} embedding OK")
+                print(Fore.CYAN + f"[VOICE ID] Clip embedding extracted")
 
     # Fallback to merged file
     if not embeddings:
@@ -141,13 +136,36 @@ def enroll_speaker(name: str, audio_path: str) -> bool:
             return False
         embeddings.append(embedding)
 
-    # Average all embeddings — reduces variance, more robust voiceprint
+    # Quality control — remove outlier clips that differ too much from the group
+    # This removes bad recordings that would corrupt the average
+    if len(embeddings) >= 3:
+        # Compute pairwise similarities
+        good_embeddings = []
+        for i, emb in enumerate(embeddings):
+            similarities = []
+            for j, other in enumerate(embeddings):
+                if i != j:
+                    sim = float(np.dot(emb, other))
+                    similarities.append(sim)
+            avg_sim = np.mean(similarities)
+            if avg_sim > 0.30:  # clip must agree with at least 30% of other clips
+                good_embeddings.append(emb)
+                print(Fore.GREEN + f"[VOICE ID] Clip {i+1} accepted (avg similarity: {avg_sim:.3f})")
+            else:
+                print(Fore.YELLOW + f"[VOICE ID] Clip {i+1} rejected as outlier (avg similarity: {avg_sim:.3f})")
+
+        if good_embeddings:
+            embeddings = good_embeddings
+
+    # Average remaining embeddings
     avg_embedding = np.mean(embeddings, axis=0)
 
-    # Re-normalize after averaging
+    # Re-normalize
     norm = np.linalg.norm(avg_embedding)
     if norm > 0:
         avg_embedding = avg_embedding / norm
+
+    print(Fore.GREEN + f"[VOICE ID] Final voiceprint from {len(embeddings)} clips")
 
     _ensure_dirs()
     np.save(os.path.join(VOICE_PRINTS_DIR, f"{name_lower}.npy"), avg_embedding)
