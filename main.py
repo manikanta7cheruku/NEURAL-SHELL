@@ -434,8 +434,7 @@ def seven_logic():
                     import wave as _wave, shutil as _shutil, random as _rand
 
                     # Professional enrollment prompts — multiple variants
-                    # Short ready phrase — user already knows what to do from the modal
-                    mouth.speak(f"Ready, {_pending_name}. Three clips.")
+                    mouth.speak(f"Ready, {_pending_name}. Five clips.")
                     app_ui.update_status(f"ENROLLING {_pending_name}...", "#ff00ff")
 
                     import time as _enroll_time
@@ -445,24 +444,18 @@ def seven_logic():
                     _clip_prompts = [
                         ["Clip one. Speak."],
                         ["Clip two. Speak."],
+                        ["Clip three. Speak."],
+                        ["Clip four. Speak."],
                         ["Last clip. Speak."],
                     ]
 
                     _clips = []
                     for _i in range(5):
-                        # Speak the clip prompt
-                        _clip_num_prompts = [
-                            ["Clip one. Speak."],
-                            ["Clip two. Speak."],
-                            ["Clip three. Speak."],
-                            ["Clip four. Speak."],
-                            ["Last clip. Speak."],
-                        ]
-                        mouth.speak(_rand.choice(_clip_num_prompts[_i]))
+                        mouth.speak(_rand.choice(_clip_prompts[_i]))
                         app_ui.update_status(
-                            f"ENROLLING — Recording {_i+1}/3... speak now", "#ff00ff"
+                            f"ENROLLING — Recording {_i+1}/5... speak now", "#ff00ff"
                         )
-                        print(Fore.CYAN + f"[ENROLL] Waiting for clip {_i+1}/3...")
+                        print(Fore.CYAN + f"[ENROLL] Waiting for clip {_i+1}/5...")
 
                         # Use direct recognizer for enrollment — bypass all filters
                         # Resemblyzer handles quality internally
@@ -484,13 +477,11 @@ def seven_logic():
                                     os.environ.get('APPDATA', ''), 'SEVEN',
                                     f'enroll_clip_{_i+1}.wav'
                                 )
-                                # Save raw WAV bytes directly — no manipulation
-                                # TitaNet get_embedding() handles resampling internally
+                                _wav_bytes = _audio_enroll.get_wav_data()   
                                 with open(_clip_path, 'wb') as _cf:
                                     _cf.write(_wav_bytes)
                                 _clip = _clip_path
-                                print(Fore.CYAN + f"[ENROLL] Clip {_i+1} saved: {len(_wav_bytes)} bytes")
-                                print(Fore.GREEN + f"[ENROLL] Clip {_i+1} captured")
+                                print(Fore.GREEN + f"[ENROLL] Clip {_i+1} captured: {len(_wav_bytes)} bytes")
                         except _sr_enroll.WaitTimeoutError:
                             print(Fore.YELLOW + f"[ENROLL] Clip {_i+1} timeout — user did not speak")
                             mouth.speak("I did not hear anything. Try again.")
@@ -699,9 +690,10 @@ def seven_logic():
                 import tempfile, wave as _wave, numpy as _np
 
                 collected_audio = []
-                for clip_num in range(3):
+                for clip_num in range(5):
                     if clip_num > 0:
-                        app_ui.update_status(f"ENROLLING — Keep speaking... ({clip_num+1}/3)", "#ff00ff")
+                        mouth.speak("Got it. Keep going.")
+                        app_ui.update_status(f"ENROLLING — Keep speaking... ({clip_num+1}/5)", "#ff00ff")
                     _, clip_path = listen()
                     if clip_path and os.path.exists(clip_path):
                         collected_audio.append(clip_path)
