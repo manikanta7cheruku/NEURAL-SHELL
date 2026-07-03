@@ -692,9 +692,9 @@ function EnrollModal({ onClose }) {
 
           // Update progress based on clips_done from backend
           if (r.data.clips_done !== undefined) {
-            // 3 clips total: clip 1 = 30%, clip 2 = 65%, clip 3 = 90%
-            const clipProgress = [0, 30, 65, 90];
-            setProgress(clipProgress[Math.min(r.data.clips_done, 3)]);
+            // 5 clips: 20%, 40%, 60%, 80%, 95%
+            const clipProgress = [0, 20, 40, 60, 80, 95];
+            setProgress(clipProgress[Math.min(r.data.clips_done, 5)]);
           }
 
           if (r.data.status === 'done' && r.data.done) {
@@ -834,7 +834,7 @@ function EnrollModal({ onClose }) {
                     'Click Start — Seven begins listening',
                     'Speak naturally for 10-15 seconds',
                     'Any content works — sentences, counting, anything',
-                    'Seven records 3 clips and builds your voiceprint',
+                    'Seven records 5 clips and builds your voiceprint',
                   ].map((t, i) => (
                     <div key={i} className="flex items-start gap-2 text-[9px] text-s-text-4">
                       <span className="text-s-accent shrink-0 mt-0.5">{i + 1}.</span>
@@ -870,7 +870,7 @@ function EnrollModal({ onClose }) {
                   Recording {name}...
                 </div>
                 <div className="text-[9px] text-s-text-4 text-center mt-1 leading-relaxed">
-                  Seven will guide you through 3 recordings.<br/>
+                  Seven will guide you through 5 recordings.<br/>
                   Speak when prompted. Talk for about 10 seconds each time.<br/>
                   Counting, reading, or speaking naturally all work.
                 </div>
@@ -881,11 +881,13 @@ function EnrollModal({ onClose }) {
                 <div className="flex justify-between text-[9px] text-s-text-4">
                   <span>
                     {progress === 0 && 'Waiting for Seven to be ready...'}
-                    {progress === 30 && 'Clip 1 captured ✓ — speak for clip 2'}
-                    {progress === 65 && 'Clip 2 captured ✓ — speak for clip 3'}
-                    {progress === 90 && 'Clip 3 captured ✓ — building voiceprint...'}
+                    {progress === 20 && 'Clip 1 captured ✓'}
+                    {progress === 40 && 'Clip 2 captured ✓'}
+                    {progress === 60 && 'Clip 3 captured ✓'}
+                    {progress === 80 && 'Clip 4 captured ✓'}
+                    {progress === 95 && 'Clip 5 captured ✓ — building voiceprint...'}
                     {progress === 100 && 'Done'}
-                    {progress > 0 && progress !== 30 && progress !== 65 && progress !== 90 && progress !== 100 && 'Capturing...'}
+                    {progress > 0 && ![20,40,60,80,95,100].includes(progress) && 'Capturing...'}
                   </span>
                   <span>{progress}%</span>
                 </div>
@@ -896,7 +898,7 @@ function EnrollModal({ onClose }) {
                   />
                 </div>
                 <div className="text-[8px] text-s-text-4 text-center">
-                  Speak when Seven prompts you · 3 clips required
+                  Speak when Seven prompts you · 5 clips required
                 </div>
               </div>
             </div>
