@@ -92,12 +92,14 @@ def _audio_to_embedding(audio_path: str) -> np.ndarray:
             audio_tensor = torch.from_numpy(data).unsqueeze(0).to(device)
             length       = torch.tensor([data.shape[0]]).to(device)
 
-            _, embedding = model.forward(
+            # Use get_embedding — the proper speaker embedding extraction method
+            # forward() returns classification logits, not the pure speaker embedding
+            emb = model.get_embedding(
                 input_signal        = audio_tensor,
                 input_signal_length = length
             )
 
-        emb = embedding.squeeze().cpu().numpy()  # [192]
+        emb = emb.squeeze().cpu().numpy()  # [192]
 
         # L2 normalize
         norm = np.linalg.norm(emb)
