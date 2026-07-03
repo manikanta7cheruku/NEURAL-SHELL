@@ -477,8 +477,16 @@ def seven_logic():
                                     os.environ.get('APPDATA', ''), 'SEVEN',
                                     f'enroll_clip_{_i+1}.wav'
                                 )
-                                with open(_clip_path, 'wb') as _cf:
-                                    _cf.write(_audio_enroll.get_wav_data())
+                                # Resample to 16kHz mono before saving
+                                # TitaNet get_embedding() works best with clean 16kHz
+                                try:
+                                    import soundfile as _sf_enroll
+                                    import numpy as _np_enroll
+                                    _raw = _np_enroll.frombuffer(_wav_bytes, dtype=_np_enroll.int16).astype(_np_enroll.float32) / 32768.0
+                                    _sf_enroll.write(_clip_path, _raw, 16000, subtype='PCM_16')
+                                except Exception:
+                                    with open(_clip_path, 'wb') as _cf:
+                                        _cf.write(_wav_bytes)
                                 _clip = _clip_path
                                 print(Fore.GREEN + f"[ENROLL] Clip {_i+1} captured")
                         except _sr_enroll.WaitTimeoutError:
@@ -518,7 +526,11 @@ def seven_logic():
                                     _all_frames.append(_wf.readframes(_wf.getnframes()))
                             if _wp and _all_frames:
                                 with _wave.open(_merged, 'wb') as _out:
-                                    _out.setparams(_wp)
+                                    # Force 16kHz mono for TitaNet compatibility
+                                    import wave as _wv2
+                                    _out.setnchannels(1)
+                                    _out.setsampwidth(2)
+                                    _out.setframerate(16000)
                                     for _f in _all_frames:
                                         _out.writeframes(_f)
                                 # Save first clip as playback sample

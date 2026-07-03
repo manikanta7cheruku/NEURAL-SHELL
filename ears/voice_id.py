@@ -31,7 +31,7 @@ from colorama import Fore
 
 VOICE_PRINTS_DIR     = os.path.join(".", "seven_data", "voice_prints")
 PROFILES_FILE        = os.path.join(VOICE_PRINTS_DIR, "profiles.json")
-SIMILARITY_THRESHOLD = 0.75
+SIMILARITY_THRESHOLD = 0.40
 
 _titanet_model = None
 
@@ -66,12 +66,38 @@ def _audio_to_embedding(audio_path: str) -> np.ndarray:
         if model is None:
             return None
 
-        # get_embedding handles loading, resampling, preprocessing internally
-        # Just pass the file path directly
-        with torch.no_grad():
-            emb = model.get_embedding(audio_path)
+        # Ensure 16kHz mono before passing to TitaNet
+        import soundfile as sf
+        import numpy as _np_sv
+        import tempfile
 
-        emb = emb.squeeze().cpu().numpy()  # [192]
+        data, sr = sf.read(audio_path, dtype='float32')
+        if data.ndim > 1:
+            data = data.mean(axis=1)
+
+        # Resample if not 16kHz
+        if sr != 16000:
+            import torch as _torch_sv
+            import torchaudio.transforms as _T_sv
+            _wf = _torch_sv.from_numpy(data).unsqueeze(0)
+            _wf = _T_sv.Resample(sr, 16000)(_wf)
+            data = _wf.squeeze(0).numpy()
+
+        # Write clean 16kHz WAV to temp file
+        _tmp = tempfile.NamedTemporaryFile(suffix='.wav', delete=False)
+        _tmp_path = _tmp.name
+        _tmp.close()
+        sf.write(_tmp_path, data, 16000, subtype='PCM_16')
+
+        try:
+            with torch.no_grad():
+                emb = model.get_embedding(_tmp_path)
+            emb = emb.squeeze().cpu().numpy()  # [192]
+        finally:
+            try:
+                os.remove(_tmp_path)
+            except Exception:
+                pass
 
         # L2 normalize
         norm = np.linalg.norm(emb)
