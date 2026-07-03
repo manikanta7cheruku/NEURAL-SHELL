@@ -169,9 +169,22 @@ def listen():
         recognizer.phrase_threshold         = 0.1
 
         try:
-            # force_return=True means enrollment is waiting — unblock in 1.5s
-            _listen_timeout = 1.5 if _force_return else None
-            audio = recognizer.listen(source, timeout=_listen_timeout, phrase_time_limit=7)
+            if _force_return:
+                # Enrollment waiting — must unblock immediately
+                # Lower threshold so any sound triggers recording start
+                # Then 1.5s timeout fires quickly
+                recognizer.energy_threshold = 50
+                _listen_timeout = 1.5
+                _phrase_limit   = 1
+            else:
+                _listen_timeout = None
+                _phrase_limit   = 7
+
+            audio = recognizer.listen(
+                source,
+                timeout=_listen_timeout,
+                phrase_time_limit=_phrase_limit
+            )
             wav_data = audio.get_wav_data()
 
             # ── Signal Quality Checks ──────────────────────────────────────
