@@ -445,8 +445,35 @@ def seven_logic():
                         )
                         print(Fore.CYAN + f"[ENROLL] Waiting for clip {_i+1}/3...")
 
-                        # Listen for the clip — use direct listen() call
-                        _, _clip = listen()
+                        # Use direct recognizer for enrollment — bypass all filters
+                        # Resemblyzer handles quality internally
+                        _clip = None
+                        try:
+                            import speech_recognition as _sr_enroll
+                            _rec_enroll = _sr_enroll.Recognizer()
+                            _rec_enroll.energy_threshold = 300  # low — catch quiet speech
+                            _rec_enroll.pause_threshold  = 1.0  # wait longer for pauses
+                            with _sr_enroll.Microphone() as _src_enroll:
+                                _rec_enroll.adjust_for_ambient_noise(_src_enroll, duration=0.2)
+                                print(Fore.CYAN + f"[ENROLL] Listening for clip {_i+1}...")
+                                _audio_enroll = _rec_enroll.listen(
+                                    _src_enroll,
+                                    timeout=30,        # 30s to start speaking
+                                    phrase_time_limit=10  # max 10s per clip
+                                )
+                                _clip_path = os.path.join(
+                                    os.environ.get('APPDATA', ''), 'SEVEN',
+                                    f'enroll_clip_{_i+1}.wav'
+                                )
+                                with open(_clip_path, 'wb') as _cf:
+                                    _cf.write(_audio_enroll.get_wav_data())
+                                _clip = _clip_path
+                                print(Fore.GREEN + f"[ENROLL] Clip {_i+1} captured")
+                        except _sr_enroll.WaitTimeoutError:
+                            print(Fore.YELLOW + f"[ENROLL] Clip {_i+1} timeout — user did not speak")
+                            mouth.speak("I did not hear anything. Try again.")
+                        except Exception as _ce:
+                            print(Fore.RED + f"[ENROLL] Clip {_i+1} error: {_ce}")
                         if _clip and os.path.exists(_clip):
                             _clips.append(_clip)
                             _ss("enrollment_clips_done", len(_clips))
