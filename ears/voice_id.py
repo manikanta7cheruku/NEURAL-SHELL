@@ -126,7 +126,11 @@ def _audio_to_embedding(audio_path: str) -> np.ndarray:
 
         # Extract log-mel features using Whisper's own feature extractor
         features = model.feature_extractor(data)
-        # features shape: [80, 3000] — 80 mel bins, 3000 frames (30 seconds)
+        # Whisper encoder expects exactly (1, 80, 3000) — trim if off by 1
+        if features.ndim == 2:
+            features = features[:, :3000]   # [80, 3000]
+        elif features.ndim == 3:
+            features = features[:, :, :3000] # [1, 80, 3000]
 
         # Encode with Whisper encoder
         encoded = model.encode(features)
