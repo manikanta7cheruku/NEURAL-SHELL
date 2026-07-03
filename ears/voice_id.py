@@ -129,8 +129,7 @@ def _audio_to_embedding(audio_path: str) -> np.ndarray:
         # features shape: [80, 3000] — 80 mel bins, 3000 frames (30 seconds)
 
         # Encode with Whisper encoder
-        # encode() returns [batch, time, 1024] CTranslate2 StorageView
-        encoded = model.encode(features, 0)
+        encoded = model.encode(features)
 
         # Convert to numpy
         import ctranslate2
