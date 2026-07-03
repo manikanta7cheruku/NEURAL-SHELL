@@ -35,7 +35,7 @@ from colorama import Fore
 
 VOICE_PRINTS_DIR     = os.path.join(".", "seven_data", "voice_prints")
 PROFILES_FILE        = os.path.join(VOICE_PRINTS_DIR, "profiles.json")
-SIMILARITY_THRESHOLD = 0.80
+SIMILARITY_THRESHOLD = 0.92
 
 
 def _ensure_dirs():
@@ -97,21 +97,46 @@ def _wav_to_embedding(audio_path: str):
             print(Fore.YELLOW + "[VOICE ID] Audio too short — need at least 1 second.")
             return None
 
-        # Extract MFCC features
+        # Extract MFCC features — 40 coefficients
         mfcc_transform = T.MFCC(
             sample_rate=16000,
             n_mfcc=40,
             melkwargs={
                 "n_fft":    512,
                 "hop_length": 160,
-                "n_mels":    40,
+                "n_mels":    80,
                 "center":   False,
             }
         )
-        mfcc = mfcc_transform(waveform)   # shape: [1, 40, time]
+        mfcc = mfcc_transform(waveform)  # [1, 40, time]
 
-        # Average over time axis → [40] vector
-        embedding = mfcc.mean(dim=-1).squeeze().numpy()
+        # CMVN — Cepstral Mean and Variance Normalization
+        # Removes channel/microphone effects, keeps speaker characteristics
+        mfcc_mean = mfcc.mean(dim=-1, keepdim=True)
+        mfcc_std  = mfcc.std(dim=-1, keepdim=True) + 1e-8
+        mfcc_norm = (mfcc - mfcc_mean) / mfcc_std
+
+        # Delta features — captures rate of change (more speaker-specific)
+        def _delta(x, N=2):
+            """Compute delta features over time axis."""
+            T_len = x.shape[-1]
+            denom = 2 * sum(n**2 for n in range(1, N+1))
+            delta = torch.zeros_like(x)
+            for n in range(1, N+1):
+                delta[..., n:]   += n * x[..., n:]
+                delta[..., :-n]  -= n * x[..., :-n]
+            return delta / denom
+
+        delta1 = _delta(mfcc_norm, N=2)   # first derivative
+        delta2 = _delta(delta1,    N=2)   # second derivative
+
+        # Concatenate MFCC + delta + delta-delta → 120-dim per frame
+        combined = torch.cat([mfcc_norm, delta1, delta2], dim=1)  # [1, 120, time]
+
+        # Statistics pooling — mean AND std over time (more discriminative than mean only)
+        mean_vec = combined.mean(dim=-1).squeeze()  # [120]
+        std_vec  = combined.std(dim=-1).squeeze()   # [120]
+        embedding = torch.cat([mean_vec, std_vec]).numpy()  # [240]
 
         # L2 normalize
         norm = np.linalg.norm(embedding)
