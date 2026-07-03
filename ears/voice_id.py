@@ -31,7 +31,7 @@ from colorama import Fore
 
 VOICE_PRINTS_DIR     = os.path.join(".", "seven_data", "voice_prints")
 PROFILES_FILE        = os.path.join(VOICE_PRINTS_DIR, "profiles.json")
-SIMILARITY_THRESHOLD = 0.70
+SIMILARITY_THRESHOLD = 0.45
 
 _titanet_model = None
 
