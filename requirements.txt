@@ -24,7 +24,9 @@ chromadb==1.5.8
 sentence-transformers
 
 # --- Voice Recognition ---
-resemblyzer
+torchaudio
+onnxruntime
+nemo_toolkit[asr]
 
 # --- Web Search ---
 ddgs
