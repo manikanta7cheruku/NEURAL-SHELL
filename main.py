@@ -360,6 +360,103 @@ def seven_logic():
     if sched_count > 0:
         print(Fore.CYAN + f"[SYSTEM] Scheduler: {sched_count} active schedules.")
 
+    # ── Morning Brief ─────────────────────────────────────────────────
+    def _build_morning_brief():
+        """
+        Build Seven's startup situational briefing.
+        Under 15 seconds. Skips any section with nothing to report.
+        
+        GRACEFUL DEGRADATION: Every section in try/except.
+        If tasks DB fails, brief continues without task section.
+        If battery check fails, brief continues without battery line.
+        """
+        parts = []
+
+        # ── Greeting ──────────────────────────────────────────────
+        from datetime import datetime as _dt
+        _hour = _dt.now().hour
+        _name = config.KEY.get("identity", {}).get("user_name", "").strip()
+        if not _name or _name.lower() in ("admin", "there", ""):
+            _name = brain.USER_NAME if brain.USER_NAME not in ("there", "Admin") else ""
+
+        _greeting_word = (
+            "Good morning"   if _hour < 12 else
+            "Good afternoon" if _hour < 17 else
+            "Good evening"
+        )
+        parts.append(
+            f"{_greeting_word}, {_name}." if _name else f"{_greeting_word}."
+        )
+
+        # ── Tasks ─────────────────────────────────────────────────
+        try:
+            from backend.routes.tasks import db_get_due_today, db_get_overdue
+            _today_tasks = db_get_due_today()
+            _overdue     = db_get_overdue()
+
+            if _today_tasks:
+                _top = max(
+                    _today_tasks,
+                    key=lambda t: {"high": 3, "medium": 2, "low": 1}.get(
+                        t.get("priority", "medium"), 2
+                    )
+                )
+                if len(_today_tasks) == 1:
+                    parts.append(f"One task due today: {_top['text']}.")
+                else:
+                    parts.append(
+                        f"{len(_today_tasks)} tasks due today. "
+                        f"Top priority: {_top['text'][:40]}."
+                    )
+
+            if _overdue:
+                _oc = len(_overdue)
+                parts.append(
+                    f"{_oc} overdue task{'s' if _oc != 1 else ''} need your attention."
+                )
+        except Exception as _task_brief_err:
+            print(Fore.YELLOW + f"[BRIEF] Tasks section failed: {_task_brief_err}")
+
+        # ── Schedules ─────────────────────────────────────────────
+        try:
+            _sc = scheduler_mod.get_active_count()
+            if _sc == 1:
+                parts.append("One reminder active.")
+            elif _sc > 1:
+                parts.append(f"{_sc} reminders active.")
+        except Exception as _sched_brief_err:
+            print(Fore.YELLOW + f"[BRIEF] Schedule section failed: {_sched_brief_err}")
+
+        # ── Battery ───────────────────────────────────────────────
+        try:
+            import psutil as _psu
+            _bat = _psu.sensors_battery()
+            if _bat and not _bat.power_plugged and _bat.percent < 25:
+                parts.append(f"Battery at {int(_bat.percent)} percent.")
+        except Exception:
+            pass
+
+        # ── Voice Level ───────────────────────────────────────────
+        try:
+            from ears.core import _noise_floor as _nf
+            if _nf < 300:
+                parts.append("Very quiet today.")
+            elif _nf >= 600:
+                parts.append("Noisy environment. Speak clearly.")
+        except Exception:
+            pass
+
+        return " ".join(parts)
+
+    try:
+        _brief = _build_morning_brief()
+        if _brief:
+            print(Fore.CYAN + f"[BRIEF] {_brief}")
+            mouth.speak(_brief)
+    except Exception as _brief_err:
+        print(Fore.YELLOW + f"[BRIEF] Morning brief failed: {_brief_err}")
+        # Graceful degradation — skip brief, continue to main loop        
+
     # Daemon - check if already running before starting
     # SevenScheduleDaemon in schtasks handles login startup
     # We only start one here if none is running
@@ -981,6 +1078,212 @@ def seven_logic():
                             app_ui.update_status(f"Window failed: {msg}", "#ff0000")
                     except Exception as e:
                         print(Fore.RED + f"[WINDOW ERROR] {e}")
+
+            # ── Task commands ─────────────────────────────────────────
+            task_cmds = re.findall(r"###TASK:\s*(.*?)(?=###|$)", response)
+            for _task_param_str in task_cmds:
+                _task_params = {}
+                for _pair in _task_param_str.strip().split():
+                    if "=" in _pair:
+                        _k, _v = _pair.split("=", 1)
+                        _task_params[_k.strip()] = _v.strip()
+
+                if not _task_params:
+                    continue
+
+                _task_action = _task_params.get("action", "")
+
+                try:
+                    import requests as _task_req
+
+                    # ── CREATE ──────────────────────────────────────
+                    if _task_action == "create":
+                        _text     = _task_params.get("text", "").replace("_", " ")
+                        _priority = _task_params.get("priority", "medium")
+                        _due_raw  = _task_params.get("due", "").replace("_", " ")
+
+                        # Resolve natural language due date to ISO string
+                        _due_date = None
+                        if _due_raw:
+                            try:
+                                from datetime import date, timedelta
+                                _dl = _due_raw.lower()
+                                if "today" in _dl or "tonight" in _dl:
+                                    _due_date = date.today().isoformat()
+                                elif "tomorrow" in _dl:
+                                    _due_date = (date.today() + timedelta(days=1)).isoformat()
+                                else:
+                                    # Use scheduler's time parser for other dates
+                                    from hands.scheduler import _parse_time as _pt
+                                    _parsed = _pt(_due_raw)
+                                    if _parsed:
+                                        _due_date = _parsed.date().isoformat()
+                            except Exception as _due_err:
+                                print(Fore.YELLOW + f"[TASKS] Due date parse failed: {_due_err}")
+
+                        _payload = {
+                            "text":     _text,
+                            "priority": _priority,
+                        }
+                        if _due_date:
+                            _payload["due_date"] = _due_date
+
+                        _r = _task_req.post(
+                            "http://127.0.0.1:7777/api/tasks",
+                            json=_payload,
+                            timeout=5
+                        )
+                        if _r.status_code == 200:
+                            _data = _r.json()
+                            # Get updated pending count for speech
+                            _stats = _task_req.get(
+                                "http://127.0.0.1:7777/api/tasks/stats",
+                                timeout=3
+                            ).json()
+                            _pending = _stats.get("pending", 0)
+                            _count_str = (
+                                f"You now have {_pending} pending task{'s' if _pending != 1 else ''}."
+                                if _pending > 0 else ""
+                            )
+                            # Build speech confirmation
+                            if speech_part and "adding" in speech_part.lower():
+                                # brain already said confirmation — just add count
+                                _extra = f" {_count_str}" if _count_str else ""
+                                if _extra:
+                                    mouth.speak(_extra)
+                            else:
+                                _confirm = f"Task added. {_count_str}"
+                                mouth.speak(_confirm)
+
+                            # Push to frontend state
+                            api_set_state("task_results", {
+                                "action":  "created",
+                                "task":    _data.get("task"),
+                                "pending": _pending
+                            })
+                            app_ui.update_status("Task added", "#00ff00")
+                            print(Fore.GREEN + f"[TASKS] Created: {_text}")
+                        else:
+                            print(Fore.RED + f"[TASKS] Create failed: {_r.status_code}")
+                            mouth.speak("I could not add that task. Try again.")
+
+                    # ── LIST ────────────────────────────────────────
+                    elif _task_action == "list":
+                        _filter = _task_params.get("filter", "all")
+                        _endpoint = (
+                            "http://127.0.0.1:7777/api/tasks/today"
+                            if _filter == "today"
+                            else "http://127.0.0.1:7777/api/tasks?status=pending"
+                        )
+                        _r = _task_req.get(_endpoint, timeout=5)
+                        if _r.status_code == 200:
+                            _tasks = _r.json()
+                            _count = len(_tasks)
+
+                            if _count == 0:
+                                _msg = (
+                                    "No tasks due today." if _filter == "today"
+                                    else "You have no pending tasks."
+                                )
+                                mouth.speak(_msg)
+                            elif _count == 1:
+                                _t = _tasks[0]
+                                mouth.speak(
+                                    f"One task: {_t['text']}."
+                                    + (f" Due today." if _t.get("due_date") else "")
+                                )
+                            elif _count <= 3:
+                                _names = ", ".join(t["text"][:30] for t in _tasks)
+                                mouth.speak(f"{_count} tasks: {_names}.")
+                            else:
+                                _top = _tasks[0]
+                                mouth.speak(
+                                    f"{_count} pending tasks. "
+                                    f"Top priority: {_top['text'][:40]}. "
+                                    f"Full list is in the chat."
+                                )
+
+                            # Push full list to frontend
+                            api_set_state("task_results", {
+                                "action": "list",
+                                "tasks":  _tasks,
+                                "filter": _filter
+                            })
+                            app_ui.update_status(f"Tasks: {_count} pending", "#00ccff")
+
+                    # ── COMPLETE ────────────────────────────────────
+                    elif _task_action == "complete":
+                        _search = _task_params.get("search", "").replace("_", " ")
+                        # Direct DB lookup — faster than HTTP for internal use
+                        try:
+                            from backend.routes.tasks import db_find_task_by_text
+                            _found = db_find_task_by_text(_search)
+                        except Exception:
+                            _found = None
+
+                        if _found:
+                            _r = _task_req.put(
+                                f"http://127.0.0.1:7777/api/tasks/{_found['id']}",
+                                json={"completed": True},
+                                timeout=5
+                            )
+                            if _r.status_code == 200:
+                                _stats = _task_req.get(
+                                    "http://127.0.0.1:7777/api/tasks/stats",
+                                    timeout=3
+                                ).json()
+                                _pending = _stats.get("pending", 0)
+                                mouth.speak(
+                                    f"Marked complete. "
+                                    f"{_pending} task{'s' if _pending != 1 else ''} remaining."
+                                )
+                                api_set_state("task_results", {
+                                    "action": "completed",
+                                    "task_id": _found["id"],
+                                    "pending": _pending
+                                })
+                                app_ui.update_status("Task completed", "#00ff00")
+                            else:
+                                mouth.speak("Could not mark that complete. Try again.")
+                        else:
+                            mouth.speak(
+                                f"Could not find a task matching '{_search}'. "
+                                f"Say 'show my tasks' to see the list."
+                            )
+
+                    # ── DELETE ──────────────────────────────────────
+                    elif _task_action == "delete":
+                        _search = _task_params.get("search", "").replace("_", " ")
+                        try:
+                            from backend.routes.tasks import db_find_task_by_text
+                            _found = db_find_task_by_text(_search)
+                        except Exception:
+                            _found = None
+
+                        if _found:
+                            _r = _task_req.delete(
+                                f"http://127.0.0.1:7777/api/tasks/{_found['id']}",
+                                timeout=5
+                            )
+                            if _r.status_code == 200:
+                                mouth.speak(f"Removed: {_found['text'][:40]}.")
+                                api_set_state("task_results", {
+                                    "action":  "deleted",
+                                    "task_id": _found["id"]
+                                })
+                                app_ui.update_status("Task removed", "#ff6600")
+                            else:
+                                mouth.speak("Could not remove that task.")
+                        else:
+                            mouth.speak(
+                                f"Could not find a task matching '{_search}'."
+                            )
+
+                except Exception as _task_err:
+                    # Graceful degradation — task handler failed
+                    print(Fore.RED + f"[TASKS] Handler error: {_task_err}")
+                    import traceback; traceback.print_exc()
+                    mouth.speak("Something went wrong with the task system.")
 
             # Scheduler commands
             sched_cmds = re.findall(r"###SCHED:\s*(.*?)(?=###|$)", response)
