@@ -1130,6 +1130,22 @@ def seven_logic():
                 except Exception:
                     pass
 
+        except OSError as e:
+            if "Stream closed" in str(e) or "9988" in str(e) or "9999" in str(e):
+                # Microphone disconnected (Bluetooth/USB unplugged)
+                # Recover silently — recalibrate on next iteration
+                print(Fore.YELLOW + f"[EARS] Mic device change detected — recovering")
+                import time as _rec_t
+                _rec_t.sleep(1.5)
+                try:
+                    from ears.core import _do_initial_calibration
+                    _do_initial_calibration()
+                except Exception:
+                    pass
+            else:
+                print(Fore.RED + f"[CRITICAL ERROR] Main loop: {e}")
+                import traceback; traceback.print_exc()
+            app_ui.update_status("LISTENING...", "#00ff00")
         except Exception as e:
             print(Fore.RED + f"[CRITICAL ERROR] Main loop: {e}")
             import traceback; traceback.print_exc()
