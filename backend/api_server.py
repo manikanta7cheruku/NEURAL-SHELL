@@ -42,6 +42,7 @@ _state = {
     "status_text":         "SYSTEM ONLINE",
     "status_color":        "#00ff00",
     "file_search_results": None,
+    "task_results":        None,   # Task list pushed by voice pipeline
     "pending_enrollment":        None,
     "enrollment_done":           None,
     "enrollment_clips_done":     0,
