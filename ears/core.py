@@ -410,7 +410,12 @@ def listen():
             return full_text.capitalize(), AUDIO_TEMP_PATH
 
         except sr.WaitTimeoutError:
-            # Triggered by force_return=True — enrollment waiting for loop
+            return None, None
+        except OSError as _ose:
+            # Microphone disconnected (USB unplugged, Bluetooth dropped)
+            print(Fore.YELLOW + f"[EARS] Microphone disconnected: {_ose}")
+            import time as _t
+            _t.sleep(1)  # Wait for system to settle
             return None, None
         except Exception:
             return None, None
