@@ -31,6 +31,7 @@ from colorama import Fore
 
 VOICE_PRINTS_DIR     = os.path.join(".", "seven_data", "voice_prints")
 PROFILES_FILE        = os.path.join(VOICE_PRINTS_DIR, "profiles.json")
+# Base threshold — overridden by per-speaker calibration if available
 SIMILARITY_THRESHOLD = 0.20
 
 _titanet_model = None
@@ -149,17 +150,38 @@ def enroll_speaker(name: str, audio_path: str) -> bool:
     _ensure_dirs()
     np.save(os.path.join(VOICE_PRINTS_DIR, f"{name_lower}.npy"), avg_embedding)
 
+    # Compute self-similarity score from enrollment clips
+    # This becomes the per-speaker threshold baseline
+    self_scores = []
+    for i in range(len(embeddings)):
+        for j in range(i+1, len(embeddings)):
+            score = float(np.dot(embeddings[i], embeddings[j]))
+            self_scores.append(score)
+
+    if self_scores:
+        min_self_score = float(np.min(self_scores))
+        avg_self_score = float(np.mean(self_scores))
+        # Threshold = min self-score minus 10% buffer
+        per_speaker_threshold = max(0.10, min_self_score - 0.10)
+        print(Fore.GREEN + f"[VOICE ID] Self-similarity: avg={avg_self_score:.3f} min={min_self_score:.3f}")
+        print(Fore.GREEN + f"[VOICE ID] Per-speaker threshold: {per_speaker_threshold:.3f}")
+    else:
+        per_speaker_threshold = SIMILARITY_THRESHOLD
+        avg_self_score = 0.0
+
     profiles = _load_profiles()
     profiles[name_lower] = {
-        "print_file":    f"{name_lower}.npy",
-        "enrolled":      True,
-        "version":       "6.1",
-        "clips_used":    len(embeddings),
-        "embedding_dim": int(avg_embedding.shape[0])
+        "print_file":        f"{name_lower}.npy",
+        "enrolled":          True,
+        "version":           "6.2",
+        "clips_used":        len(embeddings),
+        "embedding_dim":     int(avg_embedding.shape[0]),
+        "threshold":         per_speaker_threshold,
+        "avg_self_score":    round(avg_self_score, 3)
     }
     _save_profiles(profiles)
 
-    print(Fore.GREEN + f"[VOICE ID] {name_lower} enrolled from {len(embeddings)} clips. Dim: {avg_embedding.shape[0]}")
+    print(Fore.GREEN + f"[VOICE ID] {name_lower} enrolled. Threshold: {per_speaker_threshold:.3f}")
     return True
 
 
@@ -175,6 +197,7 @@ def identify_speaker(audio_path: str) -> str:
     best_name  = "unknown"
     best_score = 0.0
 
+    thresholds = {}
     for name, info in profiles.items():
         path = os.path.join(VOICE_PRINTS_DIR, info["print_file"])
         if not os.path.exists(path):
@@ -187,13 +210,17 @@ def identify_speaker(audio_path: str) -> str:
             continue
 
         score = float(np.dot(embedding, stored))
-        print(Fore.CYAN + f"[VOICE ID] {name}: {score:.3f}")
+        # Use per-speaker threshold if available, else global
+        speaker_threshold = info.get("threshold", SIMILARITY_THRESHOLD)
+        thresholds[name]  = speaker_threshold
+        print(Fore.CYAN + f"[VOICE ID] {name}: {score:.3f} (need >{speaker_threshold:.2f})")
 
         if score > best_score:
             best_score = score
             best_name  = name
 
-    if best_score >= SIMILARITY_THRESHOLD:
+    speaker_threshold = thresholds.get(best_name, SIMILARITY_THRESHOLD)
+    if best_score >= speaker_threshold:
         print(Fore.GREEN + f"[VOICE ID] Identified: {best_name} ({best_score:.3f})")
         return best_name
 
