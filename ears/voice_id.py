@@ -31,7 +31,7 @@ from colorama import Fore
 
 VOICE_PRINTS_DIR     = os.path.join(".", "seven_data", "voice_prints")
 PROFILES_FILE        = os.path.join(VOICE_PRINTS_DIR, "profiles.json")
-SIMILARITY_THRESHOLD = 0.45
+SIMILARITY_THRESHOLD = 0.20
 
 _titanet_model = None
 
@@ -136,36 +136,15 @@ def enroll_speaker(name: str, audio_path: str) -> bool:
             return False
         embeddings.append(embedding)
 
-    # Quality control — remove outlier clips that differ too much from the group
-    # This removes bad recordings that would corrupt the average
-    if len(embeddings) >= 3:
-        # Compute pairwise similarities
-        good_embeddings = []
-        for i, emb in enumerate(embeddings):
-            similarities = []
-            for j, other in enumerate(embeddings):
-                if i != j:
-                    sim = float(np.dot(emb, other))
-                    similarities.append(sim)
-            avg_sim = np.mean(similarities)
-            if avg_sim > 0.30:  # clip must agree with at least 30% of other clips
-                good_embeddings.append(emb)
-                print(Fore.GREEN + f"[VOICE ID] Clip {i+1} accepted (avg similarity: {avg_sim:.3f})")
-            else:
-                print(Fore.YELLOW + f"[VOICE ID] Clip {i+1} rejected as outlier (avg similarity: {avg_sim:.3f})")
-
-        if good_embeddings:
-            embeddings = good_embeddings
-
-    # Average remaining embeddings
+    # Simple average — no outlier rejection
+    # Outlier rejection was removing too many clips and degrading quality
     avg_embedding = np.mean(embeddings, axis=0)
 
-    # Re-normalize
     norm = np.linalg.norm(avg_embedding)
     if norm > 0:
         avg_embedding = avg_embedding / norm
 
-    print(Fore.GREEN + f"[VOICE ID] Final voiceprint from {len(embeddings)} clips")
+    print(Fore.GREEN + f"[VOICE ID] Voiceprint from {len(embeddings)} clips averaged")
 
     _ensure_dirs()
     np.save(os.path.join(VOICE_PRINTS_DIR, f"{name_lower}.npy"), avg_embedding)
