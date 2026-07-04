@@ -9,6 +9,7 @@ import Console        from './pages/Console';
 import Commands       from './pages/Commands';
 import Memory         from './pages/Memory';
 import Schedules      from './pages/Schedules';
+import Tasks          from './pages/Tasks';
 import Knowledge      from './pages/Knowledge';
 import Settings       from './pages/settings/index'
 import Plans          from './pages/Plans';
@@ -51,6 +52,7 @@ function MainApp() {
             <Route path="/commands"  element={<Commands />} />
             <Route path="/memory"    element={<Memory />}   />
             <Route path="/schedules" element={<Schedules />}/>
+            <Route path="/tasks"     element={<Tasks />}    />
             <Route path="/knowledge" element={<Knowledge />}/>
             <Route path="/settings"  element={<Settings />} />
             <Route path="/plans"     element={<Plans />}    />
