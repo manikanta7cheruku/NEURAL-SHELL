@@ -12,7 +12,10 @@ const {
 const path = require('node:path');
 const { spawn, exec } = require('node:child_process');
 const http = require('node:http');
-const fs = require('node:fs');
+const fs   = require('node:fs');
+
+// Task panel module
+const panel = require('./panel_window');
 
 // ============================================================================
 // ENVIRONMENT DETECTION
@@ -630,12 +633,28 @@ if (!gotTheLock) {
       }
     });
 
-    // Global hotkey: Alt+S toggle
+    // Global hotkey: Alt+S toggle Seven window
     globalShortcut.register('Alt+S', () => {
       if (mainWindow) {
         mainWindow.isVisible() ? mainWindow.hide() : (mainWindow.show(), mainWindow.focus());
       }
     });
+
+    // Task panel setup
+    const appSrc = getAppSourcePath();
+    const pyExe  = getPythonExecutable();
+
+    // Start panel server (port 7778)
+    panel.startPanelServer(appSrc, pyExe);
+
+    // Register Win+Shift+T shortcut
+    panel.registerShortcut(appSrc);
+
+    // Register IPC handlers (navigate callback opens /tasks in Seven)
+    panel.registerIPC((route) => navigateTo(route));
+
+    // Poll for daemon triggers (overdue task auto-show)
+    setTimeout(() => panel.startTriggerPolling(appSrc), 5000);
 
     console.log('[APP] SEVEN Desktop ready!');
   });
@@ -647,6 +666,9 @@ if (!gotTheLock) {
   app.on('before-quit', () => {
     app.isQuitting = true;
     globalShortcut.unregisterAll();
+    panel.stopTriggerPolling();
+    panel.stopPanelServer();
+    panel.closePanelWindow();
     if (statusWindow) {
       statusWindow.destroy();
       statusWindow = null;
