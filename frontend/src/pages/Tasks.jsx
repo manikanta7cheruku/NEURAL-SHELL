@@ -226,9 +226,9 @@ function TaskCard({ task, onComplete, onDelete, onUpdate }) {
       className={`rounded-2xl border overflow-hidden
         transition-all duration-500 ease-out
         ${phase === 'fading'
-          ? 'opacity-0 scale-95 translate-y-4'
+          ? 'opacity-0 scale-[0.98] translate-y-2'
           : phase !== 'idle'
-            ? 'border-emerald-400/25 bg-emerald-400/[0.02] shadow-lg shadow-emerald-400/5'
+            ? 'bg-s-card border-s-border opacity-80'
             : badge?.pulse
               ? 'bg-s-card border-red-400/15 hover:border-red-400/25 shadow-sm'
               : 'bg-s-card border-s-border hover:border-s-text-4/15 shadow-sm hover:shadow-md hover:shadow-black/8'}`}
@@ -258,14 +258,8 @@ function TaskCard({ task, onComplete, onDelete, onUpdate }) {
               <h3 className={`text-[14px] font-semibold leading-snug
                 transition-all duration-700 ease-out
                 ${phase !== 'idle'
-                  ? 'text-s-text-4'
+                  ? 'text-s-text-4/50 line-through decoration-s-text-4/30 decoration-1'
                   : 'text-s-text'}`}
-                style={phase !== 'idle' ? {
-                  textDecoration: 'line-through',
-                  textDecorationColor: '#34d399',
-                  textDecorationThickness: '2px',
-                  textUnderlineOffset: '3px',
-                } : {}}
               >
                 {task.text}
               </h3>
@@ -281,17 +275,17 @@ function TaskCard({ task, onComplete, onDelete, onUpdate }) {
                                transition-all duration-300 hover:scale-110 mt-0.5" />
           )}
           {phase !== 'idle' && phase !== 'fading' && (
-            <div className="flex-shrink-0 w-6 h-6 rounded-full bg-emerald-400/15
-                            border-2 border-emerald-400/40 flex items-center justify-center
+            <div className="flex-shrink-0 w-6 h-6 rounded-full bg-s-accent/10
+                            border-2 border-s-accent/30 flex items-center justify-center
                             transition-all duration-500 mt-0.5">
-              <Check size={12} className="text-emerald-400" />
+              <Check size={12} className="text-s-accent" />
             </div>
           )}
         </div>
 
         {/* ── Countdown ──────────────────────────────────────── */}
         {phase === 'countdown' && (
-          <div className="my-3 bg-emerald-400/[0.06] border border-emerald-400/15 rounded-xl
+          <div className="my-3 bg-s-bg/80 border border-s-border rounded-xl
                           px-4 py-3 flex items-center justify-between
                           transition-all duration-500 ease-out">
             <div className="flex items-center gap-3">
@@ -299,31 +293,31 @@ function TaskCard({ task, onComplete, onDelete, onUpdate }) {
                 <svg className="w-9 h-9 -rotate-90" viewBox="0 0 36 36">
                   <circle cx="18" cy="18" r="15" fill="none"
                           stroke="currentColor" strokeWidth="2"
-                          className="text-emerald-400/15" />
+                          className="text-s-border" />
                   <circle cx="18" cy="18" r="15" fill="none"
-                          stroke="currentColor" strokeWidth="2.5"
-                          className="text-emerald-400"
+                          stroke="currentColor" strokeWidth="2"
+                          className="text-s-accent"
                           strokeDasharray={`${2 * Math.PI * 15}`}
                           strokeDashoffset={`${2 * Math.PI * 15 * (1 - countdown / 7)}`}
                           strokeLinecap="round"
                           style={{ transition: 'stroke-dashoffset 1s linear' }} />
                 </svg>
                 <span className="absolute inset-0 flex items-center justify-center
-                                 text-[12px] font-bold text-emerald-400 font-mono">
+                                 text-[12px] font-bold text-s-accent font-mono">
                   {countdown}
                 </span>
               </div>
               <div>
-                <p className="text-[11px] text-emerald-400 font-semibold">Task completed</p>
-                <p className="text-[9px] text-emerald-400/50">
+                <p className="text-[11px] text-s-text-2 font-semibold">Task completed</p>
+                <p className="text-[9px] text-s-text-4">
                   Moves to completed in {countdown}s
                 </p>
               </div>
             </div>
             <button onClick={cancelComplete}
-                    className="px-3.5 py-1.5 rounded-lg border border-emerald-400/25
-                               text-[9px] text-emerald-400 font-semibold
-                               hover:bg-emerald-400/10 transition-all duration-200">
+                    className="px-3.5 py-1.5 rounded-lg border border-s-border
+                               text-[9px] text-s-text-3 font-semibold
+                               hover:bg-s-card hover:text-s-text transition-all duration-200">
               Undo
             </button>
           </div>
