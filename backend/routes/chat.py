@@ -69,8 +69,12 @@ def chat(req: ChatRequest):
 
         # Clean response (remove tags for display)
         clean_response = re.sub(r"###\w+:\s*[^\n]*", "", full_response).strip()
+
+        # Execute commands first so task_results state is populated
+        _execute_actions(action_list, full_response, req.speaker_id)
+
+        # Build human-readable response if empty after tag removal
         if not clean_response or clean_response == "":
-            # Check if a task action was performed
             try:
                 from backend.api_server import get_state as _gs
                 _tr = _gs().get("task_results")
@@ -82,8 +86,14 @@ def chat(req: ChatRequest):
                     elif _ta == "list":
                         _tl = _tr.get("tasks", [])
                         if _tl:
-                            _names = ", ".join(t.get("text", "")[:30] for t in _tl[:5])
-                            clean_response = f"{len(_tl)} tasks: {_names}."
+                            _names = ", ".join(
+                                t.get("text", "")[:30] for t in _tl[:5]
+                            )
+                            clean_response = (
+                                f"{len(_tl)} pending task{'s' if len(_tl) != 1 else ''}: "
+                                f"{_names}."
+                                + (f" And {len(_tl) - 5} more." if len(_tl) > 5 else "")
+                            )
                         else:
                             clean_response = "No pending tasks."
                     elif _ta == "completed":
@@ -96,9 +106,6 @@ def chat(req: ChatRequest):
                     clean_response = "."
             except Exception:
                 clean_response = "."
-
-        # Execute commands if present
-        _execute_actions(action_list, full_response, req.speaker_id)
 
         # Store conversation in memory (enforce plan limit)
         try:
@@ -247,26 +254,33 @@ def _execute_actions(action_list, full_response, speaker_id):
                     except Exception:
                         pass
 
-                from backend.routes.tasks import _get_conn, _row_to_dict
-                from datetime import datetime as _dt
-                import sqlite3
+                try:
+                    from backend.routes.tasks import _get_conn, _row_to_dict
+                    from datetime import datetime as _dt
 
-                with _get_conn() as conn:
-                    cursor = conn.execute(
-                        "INSERT INTO tasks (text, due_date, due_time, priority, completed,"
-                        " created_at, completed_at, tags, description, subtasks)"
-                        " VALUES (?, ?, NULL, ?, 0, ?, NULL, NULL, NULL, '[]')",
-                        (text, due_date, priority, _dt.now().isoformat())
-                    )
-                    conn.commit()
-                    new_id = cursor.lastrowid
-                    row = conn.execute("SELECT * FROM tasks WHERE id = ?", (new_id,)).fetchone()
+                    with _get_conn() as conn:
+                        cursor = conn.execute(
+                            "INSERT INTO tasks (text, due_date, due_time, priority,"
+                            " completed, created_at, completed_at, tags,"
+                            " description, subtasks)"
+                            " VALUES (?, ?, NULL, ?, 0, ?, NULL, NULL, NULL, '[]')",
+                            (text, due_date, priority, _dt.now().isoformat())
+                        )
+                        conn.commit()
+                        new_id = cursor.lastrowid
+                        row = conn.execute(
+                            "SELECT * FROM tasks WHERE id = ?", (new_id,)
+                        ).fetchone()
 
-                _task_set("task_results", {
-                    "action": "created",
-                    "task": _row_to_dict(row),
-                })
-                print(f"[CHAT] Task created: {text}")
+                    _task_set("task_results", {
+                        "action": "created",
+                        "task":   _row_to_dict(row),
+                    })
+                    print(f"[CHAT] Task created: {text}")
+
+                except Exception as _task_create_err:
+                    print(f"[CHAT] Task create DB error: {_task_create_err}")
+                    import traceback; traceback.print_exc()
 
             elif action == "list":
                 from backend.routes.tasks import db_get_pending_list
