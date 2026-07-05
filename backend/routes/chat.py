@@ -233,7 +233,7 @@ def _execute_actions(action_list, full_response, speaker_id):
             from backend.api_server import set_state as _task_set
 
             if action == "create":
-                text     = params.get("text", "").replace("_", " ")
+                text     = params.get("text", "").replace("|||", " ").replace("_", " ")
                 priority = params.get("priority", "medium")
                 due_raw  = params.get("due", "").replace("_", " ")
 
