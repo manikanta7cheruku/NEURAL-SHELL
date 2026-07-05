@@ -353,13 +353,17 @@ def seven_logic():
     if sched_count > 0:
         print(Fore.CYAN + f"[SYSTEM] Scheduler: {sched_count} active schedules.")
 
+    # Morning brief runs below after second definition
+    # ── Morning Brief ─────────────────────────────────────────────────
     def _build_morning_brief():
         import random as _rb
         parts = []
 
+        # Greeting
         from datetime import datetime as _dt
         _hour = _dt.now().hour
 
+        # Name resolution with proper fallback
         _name = ""
         try:
             _name = config.KEY.get("identity", {}).get("user_name", "").strip()
@@ -367,11 +371,10 @@ def seven_logic():
             pass
         if not _name or _name.lower() in ("admin", "there", "user", ""):
             try:
-                _name = brain.USER_NAME
-                if _name.lower() in ("admin", "there", ""):
-                    _name = ""
+                if hasattr(brain, 'USER_NAME') and brain.USER_NAME.lower() not in ("admin", "there", ""):
+                    _name = brain.USER_NAME
             except Exception:
-                _name = ""
+                pass
 
         _greeting_word = (
             "Good morning"   if _hour < 12 else
@@ -379,33 +382,43 @@ def seven_logic():
             "Good evening"
         )
 
-        _name_variants = [_name, "boss", _name, "boss", _name] if _name else ["boss", ""]
-        _chosen = _rb.choice(_name_variants)
-        parts.append(f"{_greeting_word}, {_chosen}." if _chosen else f"{_greeting_word}.")
+        # Personality name rotation — boss sometimes, name sometimes
+        if _name:
+            _name_variants = [_name, "boss", _name, _name, "boss"]
+            _chosen = _rb.choice(_name_variants)
+        else:
+            _chosen = "boss"
+
+        parts.append(f"{_greeting_word}, {_chosen}.")
         print(Fore.CYAN + f"[BRIEF] {_greeting_word}, {_chosen} | hour={_hour}")
 
+        # Tasks
         try:
-            import sys as _sb, os as _ob
-            if _ob.getcwd() not in _sb.path:
-                _sb.path.insert(0, _ob.getcwd())
             from backend.routes.tasks import db_get_due_today, db_get_overdue
             _td = db_get_due_today()
             _od = db_get_overdue()
             print(Fore.CYAN + f"[BRIEF] tasks today={len(_td)} overdue={len(_od)}")
+
             if _td:
-                _pm = {"high": 3, "medium": 2, "low": 1}
+                _pm  = {"high": 3, "medium": 2, "low": 1}
                 _top = max(_td, key=lambda t: _pm.get(t.get("priority", "medium"), 2))
                 if len(_td) == 1:
                     parts.append(f"One task due today: {_top['text']}.")
                 else:
-                    parts.append(f"{len(_td)} tasks due today. Top priority: {_top['text'][:40]}.")
+                    parts.append(
+                        f"{len(_td)} tasks due today. "
+                        f"Top priority: {_top['text'][:40]}."
+                    )
             if _od:
                 _oc = len(_od)
-                parts.append(f"{_oc} overdue task{'s' if _oc != 1 else ''} need your attention.")
+                parts.append(
+                    f"{_oc} overdue task{'s' if _oc != 1 else ''} need your attention."
+                )
         except Exception as _te:
             print(Fore.YELLOW + f"[BRIEF] tasks failed: {_te}")
             import traceback; traceback.print_exc()
 
+        # Schedules
         try:
             _sc = scheduler_mod.get_active_count()
             if _sc == 1:
@@ -415,136 +428,44 @@ def seven_logic():
         except Exception as _se:
             print(Fore.YELLOW + f"[BRIEF] schedules failed: {_se}")
 
+        # Battery — always report if unplugged
         try:
             import psutil as _pb
             _bat = _pb.sensors_battery()
+            print(Fore.CYAN + f"[BRIEF] battery={_bat}")
             if _bat is not None:
                 if not _bat.power_plugged:
-                    parts.append(f"Battery at {int(_bat.percent)} percent.")
-        except Exception:
-            pass
+                    _pct = int(_bat.percent)
+                    parts.append(f"Battery at {_pct} percent.")
+        except Exception as _be:
+            print(Fore.YELLOW + f"[BRIEF] battery failed: {_be}")
 
+        # Voice level
         try:
             from ears.core import _noise_floor as _nf
+            print(Fore.CYAN + f"[BRIEF] noise_floor={_nf}")
             if _nf < 300:
                 parts.append("Very quiet today.")
             elif _nf >= 600:
                 parts.append("Noisy environment. Speak clearly.")
-        except Exception:
-            pass
+        except Exception as _ne:
+            print(Fore.YELLOW + f"[BRIEF] noise failed: {_ne}")
 
         result = " ".join(parts)
-        print(Fore.GREEN + f"[BRIEF] {result}")
+        print(Fore.GREEN + f"[BRIEF] Full: {result}")
         return result
 
     try:
         _brief = _build_morning_brief()
         if _brief:
             mouth.speak(_brief)
-    except Exception as _be:
-        print(Fore.YELLOW + f"[BRIEF] failed: {_be}")
+    except Exception as _brief_err:
+        print(Fore.YELLOW + f"[BRIEF] failed: {_brief_err}")
         import traceback; traceback.print_exc()
         try:
             mouth.speak("Seven online.")
         except Exception:
             pass
-
-    # ── Morning Brief ─────────────────────────────────────────────────
-    def _build_morning_brief():
-        """
-        Build Seven's startup situational briefing.
-        Under 15 seconds. Skips any section with nothing to report.
-        
-        GRACEFUL DEGRADATION: Every section in try/except.
-        If tasks DB fails, brief continues without task section.
-        If battery check fails, brief continues without battery line.
-        """
-        parts = []
-
-        # ── Greeting ──────────────────────────────────────────────
-        from datetime import datetime as _dt
-        _hour = _dt.now().hour
-        _name = config.KEY.get("identity", {}).get("user_name", "").strip()
-        if not _name or _name.lower() in ("admin", "there", ""):
-            _name = brain.USER_NAME if brain.USER_NAME not in ("there", "Admin") else ""
-
-        _greeting_word = (
-            "Good morning"   if _hour < 12 else
-            "Good afternoon" if _hour < 17 else
-            "Good evening"
-        )
-        parts.append(
-            f"{_greeting_word}, {_name}." if _name else f"{_greeting_word}."
-        )
-
-        # ── Tasks ─────────────────────────────────────────────────
-        try:
-            from backend.routes.tasks import db_get_due_today, db_get_overdue
-            _today_tasks = db_get_due_today()
-            _overdue     = db_get_overdue()
-
-            if _today_tasks:
-                _top = max(
-                    _today_tasks,
-                    key=lambda t: {"high": 3, "medium": 2, "low": 1}.get(
-                        t.get("priority", "medium"), 2
-                    )
-                )
-                if len(_today_tasks) == 1:
-                    parts.append(f"One task due today: {_top['text']}.")
-                else:
-                    parts.append(
-                        f"{len(_today_tasks)} tasks due today. "
-                        f"Top priority: {_top['text'][:40]}."
-                    )
-
-            if _overdue:
-                _oc = len(_overdue)
-                parts.append(
-                    f"{_oc} overdue task{'s' if _oc != 1 else ''} need your attention."
-                )
-        except Exception as _task_brief_err:
-            print(Fore.YELLOW + f"[BRIEF] Tasks section failed: {_task_brief_err}")
-
-        # ── Schedules ─────────────────────────────────────────────
-        try:
-            _sc = scheduler_mod.get_active_count()
-            if _sc == 1:
-                parts.append("One reminder active.")
-            elif _sc > 1:
-                parts.append(f"{_sc} reminders active.")
-        except Exception as _sched_brief_err:
-            print(Fore.YELLOW + f"[BRIEF] Schedule section failed: {_sched_brief_err}")
-
-        # ── Battery ───────────────────────────────────────────────
-        try:
-            import psutil as _psu
-            _bat = _psu.sensors_battery()
-            if _bat and not _bat.power_plugged and _bat.percent < 25:
-                parts.append(f"Battery at {int(_bat.percent)} percent.")
-        except Exception:
-            pass
-
-        # ── Voice Level ───────────────────────────────────────────
-        try:
-            from ears.core import _noise_floor as _nf
-            if _nf < 300:
-                parts.append("Very quiet today.")
-            elif _nf >= 600:
-                parts.append("Noisy environment. Speak clearly.")
-        except Exception:
-            pass
-
-        return " ".join(parts)
-
-    try:
-        _brief = _build_morning_brief()
-        if _brief:
-            print(Fore.CYAN + f"[BRIEF] {_brief}")
-            mouth.speak(_brief)
-    except Exception as _brief_err:
-        print(Fore.YELLOW + f"[BRIEF] Morning brief failed: {_brief_err}")
-        # Graceful degradation — skip brief, continue to main loop        
 
     # Daemon - check if already running before starting
     # SevenScheduleDaemon in schtasks handles login startup
@@ -1299,6 +1220,23 @@ def seven_logic():
                                 "filter": _filter
                             })
                             app_ui.update_status(f"Tasks: {_count} pending", "#00ccff")
+
+                            # Trigger task panel to open via trigger file
+                            try:
+                                import json as _panel_json
+                                _panel_trigger = os.path.join(
+                                    os.environ.get('APPDATA', ''),
+                                    'SEVEN', 'panel_trigger.json'
+                                )
+                                os.makedirs(os.path.dirname(_panel_trigger), exist_ok=True)
+                                with open(_panel_trigger, 'w') as _pf:
+                                    _panel_json.dump({
+                                        "reason": "voice",
+                                        "tasks":  _tasks,
+                                    }, _pf)
+                                print(Fore.CYAN + "[TASKS] Panel trigger written")
+                            except Exception as _pt_err:
+                                print(Fore.YELLOW + f"[TASKS] Panel trigger failed: {_pt_err}")
 
                     # ── COMPLETE ────────────────────────────────────
                     elif _task_action == "complete":
