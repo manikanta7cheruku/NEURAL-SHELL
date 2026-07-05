@@ -14,8 +14,8 @@ const { spawn, exec } = require('node:child_process');
 const http = require('node:http');
 const fs   = require('node:fs');
 
-// Task panel module
-const panel = require('./panel_window');
+// Task panel host — launched as separate detached process
+let panelHostProcess = null;
 
 // ============================================================================
 // ENVIRONMENT DETECTION
@@ -426,6 +426,7 @@ function createTray() {
     { type: 'separator' },
     { label: 'Quit SEVEN', click: () => {
         app.isQuitting = true;
+        // Panel host stays alive independently
         if (statusWindow) {
           statusWindow.destroy();
           statusWindow = null;
@@ -567,6 +568,50 @@ if (!gotTheLock) {
     }
   });
 
+// ============================================================================
+// PANEL HOST — Independent background process for task panel
+// ============================================================================
+function launchPanelHost() {
+  const panelHostScript = path.join(__dirname, 'panel_host.js');
+
+  if (!fs.existsSync(panelHostScript)) {
+    console.warn('[PANEL] panel_host.js not found:', panelHostScript);
+    return;
+  }
+
+  // Check if host is already running by checking single instance lock
+  // The host itself handles duplicate prevention via requestSingleInstanceLock
+  // So we can safely try to spawn — if already running, it will exit immediately
+
+  const electronExe = process.execPath; // Path to electron executable
+
+  try {
+    const CREATE_NO_WINDOW = 0x08000000;
+    const DETACHED_PROCESS = 0x00000008;
+
+    panelHostProcess = spawn(electronExe, [panelHostScript], {
+      cwd:         getAppSourcePath(),
+      detached:    true,
+      windowsHide: true,
+      stdio:       'ignore',
+      env: {
+        ...process.env,
+        SEVEN_APP_PATH:      getAppSourcePath(),
+        ELECTRON_RUN_AS_NODE: undefined,
+      },
+    });
+
+    panelHostProcess.unref(); // Let it run independently
+    panelHostProcess.on('error', (err) => {
+      console.error('[PANEL] Host spawn error:', err.message);
+    });
+
+    console.log('[PANEL] Host launched as detached process, PID:', panelHostProcess.pid);
+  } catch (e) {
+    console.error('[PANEL] Failed to launch host:', e.message);
+  }
+}
+
   app.whenReady().then(async () => {
     if (isAppReady) return;
     isAppReady = true;
@@ -640,21 +685,9 @@ if (!gotTheLock) {
       }
     });
 
-    // Task panel setup
-    const appSrc = getAppSourcePath();
-    const pyExe  = getPythonExecutable();
-
-    // Start panel server (port 7778)
-    panel.startPanelServer(appSrc, pyExe);
-
-    // Register Win+Shift+T shortcut
-    panel.registerShortcut(appSrc);
-
-    // Register IPC handlers (navigate callback opens /tasks in Seven)
-    panel.registerIPC((route) => navigateTo(route));
-
-    // Poll for daemon triggers (overdue task auto-show)
-    setTimeout(() => panel.startTriggerPolling(appSrc), 5000);
+    // Launch panel host as independent detached process
+    // Stays alive even after Seven quits
+    launchPanelHost();
 
     console.log('[APP] SEVEN Desktop ready!');
   });
@@ -666,9 +699,8 @@ if (!gotTheLock) {
   app.on('before-quit', () => {
     app.isQuitting = true;
     globalShortcut.unregisterAll();
-    panel.stopTriggerPolling();
-    panel.stopPanelServer();
-    panel.closePanelWindow();
+    // Do NOT stop panel host — it must stay alive after Seven quits
+    // Panel host manages its own lifecycle
     if (statusWindow) {
       statusWindow.destroy();
       statusWindow = null;
