@@ -638,57 +638,67 @@ def think(prompt_text, speaker_id="default"):
             import re as _re_task
 
             if _has_task_create:
-                # Extract task text: strip trigger phrase, keep remainder
                 _task_text = clean_in
                 for _trigger in sorted(_TASK_CREATE_TRIGGERS, key=len, reverse=True):
                     if _trigger in _task_text:
                         _task_text = _task_text.replace(_trigger, "").strip()
                         break
 
-                # Strip leading filler
-                for _art in ["to ", "a ", "an ", "the "]:
-                    if _task_text.startswith(_art):
-                        _task_text = _task_text[len(_art):].strip()
-                        break
+                # Strip leading filler words
+                _strip_again = True
+                while _strip_again:
+                    _strip_again = False
+                    for _art in ["to ", "a ", "an ", "the ", "- ", ": "]:
+                        if _task_text.startswith(_art):
+                            _task_text = _task_text[len(_art):].strip()
+                            _strip_again = True
+                            break
 
-                # Extract due date from text
+                # Extract due date BEFORE mangling text
                 _due_raw = ""
                 _due_patterns = [
-                    r'\bby\s+(tomorrow|today|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b',
-                    r'\bby\s+(\d{1,2}(?:st|nd|rd|th)?\s+\w+)\b',
-                    r'\b(tomorrow|today|tonight)\b',
-                    r'\bdue\s+(\w+)\b',
-                    r'\bby\s+(\d+(?:am|pm))\b',
+                    (r'\bby\s+(tomorrow|today|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b', True),
+                    (r'\bby\s+(\d{1,2}(?:st|nd|rd|th)?\s+\w+)\b', True),
+                    (r'\b(tomorrow|today|tonight)\b', True),
+                    (r'\bdue\s+(tomorrow|today|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b', True),
+                    (r'\btill\s+(tomorrow|today|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b', True),
+                    (r'\bby\s+(\d+(?:am|pm))\b', True),
                 ]
-                for _dp in _due_patterns:
+                for _dp, _has_group in _due_patterns:
                     _dm = _re_task.search(_task_text, _re_task.IGNORECASE)
                     if _dm:
-                        _due_raw = _dm.group(1) if _dm.lastindex else _dm.group(0)
+                        _due_raw = _dm.group(1) if _dm.lastindex and _has_group else _dm.group(0)
                         _task_text = _re_task.sub(_dp, "", _task_text, flags=_re_task.IGNORECASE).strip()
                         break
 
                 # Extract priority
                 _priority = "medium"
-                if any(p in clean_in for p in ["high priority", "urgent", "important", "critical"]):
-                    _priority = "high"
-                    _task_text = _re_task.sub(
-                        r'\b(high priority|urgent|important|critical)\b', "",
-                        _task_text, flags=_re_task.IGNORECASE
-                    ).strip()
-                elif any(p in clean_in for p in ["low priority", "whenever", "not urgent"]):
-                    _priority = "low"
-                    _task_text = _re_task.sub(
-                        r'\b(low priority|whenever|not urgent)\b', "",
-                        _task_text, flags=_re_task.IGNORECASE
-                    ).strip()
+                _pri_patterns = [
+                    (["high priority", "urgent", "important", "critical"], "high"),
+                    (["low priority", "whenever", "not urgent"], "low"),
+                ]
+                for _phrases, _pri_val in _pri_patterns:
+                    if any(p in clean_in for p in _phrases):
+                        _priority = _pri_val
+                        for _pp in _phrases:
+                            _task_text = _task_text.replace(_pp, "").strip()
+                        break
 
-                # Normalize text for tag (replace spaces with underscores)
-                _task_text_tag = "_".join(_task_text.split()) if _task_text else "task"
-                _due_tag       = "_".join(_due_raw.split())   if _due_raw   else ""
+                # Clean up residual whitespace and punctuation
+                _task_text = _re_task.sub(r'\s+', ' ', _task_text).strip()
+                _task_text = _task_text.strip('.,!-:;')
 
-                _tag = f"action=create text={_task_text_tag} priority={_priority}"
-                if _due_tag:
-                    _tag += f" due={_due_tag}"
+                if not _task_text:
+                    _task_text = "task"
+
+                # Use pipe delimiter instead of underscore for multi-word text
+                # This prevents the space-based tag parser from splitting the text
+                _task_text_safe = _task_text.replace(" ", "|||")
+                _due_safe       = _due_raw.replace(" ", "|||") if _due_raw else ""
+
+                _tag = f"action=create text={_task_text_safe} priority={_priority}"
+                if _due_safe:
+                    _tag += f" due={_due_safe}"
 
                 is_command = True
                 return f"Got it. Adding that to your tasks. ###TASK: {_tag}"
@@ -709,7 +719,7 @@ def think(prompt_text, speaker_id="default"):
                 for _art in ["the ", "my ", "a "]:
                     if _search.startswith(_art):
                         _search = _search[len(_art):].strip()
-                _search_tag = "_".join(_search.split()) if _search else "task"
+                _search_tag = _search.replace(" ", "|||") if _search else "task"
                 is_command = True
                 return f"Got it. ###TASK: action=complete search={_search_tag}"
 
@@ -722,13 +732,43 @@ def think(prompt_text, speaker_id="default"):
                 for _art in ["the ", "my ", "a "]:
                     if _search.startswith(_art):
                         _search = _search[len(_art):].strip()
-                _search_tag = "_".join(_search.split()) if _search else "task"
+                _search_tag = _search.replace(" ", "|||") if _search else "task"
                 is_command = True
                 return f"Removing it. ###TASK: action=delete search={_search_tag}"
 
         except Exception as _task_detect_err:
             # Graceful degradation — task detection failed, fall through to LLM
             print(Fore.YELLOW + f"[BRAIN] Task detection error: {_task_detect_err}")
+
+    # Task suggestion for conversational "I need to" / "I have to" statements
+    _TASK_SUGGEST_TRIGGERS = [
+        "i need to finish", "i need to complete", "i need to do",
+        "i have to finish", "i have to complete", "i have to do",
+        "i have to submit", "i need to submit",
+        "i must finish", "i must complete", "i must do",
+        "i should finish", "i should complete",
+        "dont forget to", "don't forget to",
+    ]
+    _has_task_suggest = any(t in clean_in for t in _TASK_SUGGEST_TRIGGERS)
+
+    if _has_task_suggest and not _has_task_intent:
+        # Extract what they need to do
+        _suggest_text = clean_in
+        for _st in sorted(_TASK_SUGGEST_TRIGGERS, key=len, reverse=True):
+            if _st in _suggest_text:
+                _suggest_text = _suggest_text.replace(_st, "").strip()
+                break
+        for _art in ["the ", "a ", "my "]:
+            if _suggest_text.startswith(_art):
+                _suggest_text = _suggest_text[len(_art):].strip()
+                break
+        _suggest_text = _suggest_text.strip('.,!-:;')
+        if _suggest_text and len(_suggest_text) > 2:
+            return (
+                f"Want me to add \"{_suggest_text}\" as a task? "
+                f"Say \"add task {_suggest_text}\" to save it."
+            )
+        
     # --- SCHEDULER COMMANDS ---
     import re as _re_sched
     _has_after_dur = bool(_re_sched.search(
