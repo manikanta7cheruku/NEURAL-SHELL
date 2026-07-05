@@ -70,9 +70,32 @@ def chat(req: ChatRequest):
         # Clean response (remove tags for display)
         clean_response = re.sub(r"###\w+:\s*[^\n]*", "", full_response).strip()
         if not clean_response or clean_response == "":
-            # Empty = acknowledgement word, Seven stays silent in voice
-            # In chat UI, show a minimal response instead of error
-            clean_response = "."
+            # Check if a task action was performed
+            try:
+                from backend.api_server import get_state as _gs
+                _tr = _gs().get("task_results")
+                if _tr:
+                    _ta = _tr.get("action", "")
+                    if _ta == "created":
+                        _t = _tr.get("task", {})
+                        clean_response = f"Task added: {_t.get('text', 'task')}."
+                    elif _ta == "list":
+                        _tl = _tr.get("tasks", [])
+                        if _tl:
+                            _names = ", ".join(t.get("text", "")[:30] for t in _tl[:5])
+                            clean_response = f"{len(_tl)} tasks: {_names}."
+                        else:
+                            clean_response = "No pending tasks."
+                    elif _ta == "completed":
+                        clean_response = "Task marked complete."
+                    elif _ta == "deleted":
+                        clean_response = "Task removed."
+                    else:
+                        clean_response = "Done."
+                else:
+                    clean_response = "."
+            except Exception:
+                clean_response = "."
 
         # Execute commands if present
         _execute_actions(action_list, full_response, req.speaker_id)
