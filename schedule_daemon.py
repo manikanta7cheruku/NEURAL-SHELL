@@ -28,6 +28,7 @@ SCHEDULE_FILE = os.path.join(APPDATA, 'SEVEN', 'schedules.json')
 ALERT_FILE    = os.path.join(APPDATA, 'SEVEN', 'schedule_alert.json')
 FIRED_FILE    = os.path.join(APPDATA, 'SEVEN', 'daemon_fired.json')
 LOCK_FILE     = os.path.join(APPDATA, 'SEVEN', 'schedule_daemon.lock')
+PANEL_TRIGGER = os.path.join(APPDATA, 'SEVEN', 'panel_trigger.json')
 
 _battery_level = 100
 
@@ -333,12 +334,92 @@ def main():
                         except Exception as _me:
                             print(f"[DAEMON] Could not mark fired in schedules.json: {_me}")
 
+
+            # Check overdue tasks for notification
+            try:
+                import sqlite3
+                _seven_data = os.path.join(APPDATA, 'SEVEN', 'seven_data')
+                _tasks_db   = os.path.join(_seven_data, 'tasks.db')
+
+                if os.path.exists(_tasks_db):
+                    _tconn = sqlite3.connect(_tasks_db, timeout=5)
+                    _tconn.row_factory = sqlite3.Row
+                    _tconn.execute("PRAGMA journal_mode=WAL")
+
+                    from datetime import date as _date_cls
+                    _today = _date_cls.today().isoformat()
+
+                    # Overdue tasks
+                    _overdue = _tconn.execute(
+                        "SELECT COUNT(*) FROM tasks WHERE due_date < ? AND completed = 0",
+                        (_today,)
+                    ).fetchone()[0]
+
+                    # Due today tasks
+                    _due_today = _tconn.execute(
+                        "SELECT COUNT(*) FROM tasks WHERE due_date = ? AND completed = 0",
+                        (_today,)
+                    ).fetchone()[0]
+
+                    _tconn.close()
+
+                    # Notify if overdue (max once per 30 min cycle)
+                    if _overdue > 0 and not is_seven_running():
+                        _task_msg = (
+                            f"You have {_overdue} overdue task{'s' if _overdue != 1 else ''}."
+                            + (f" Plus {_due_today} due today." if _due_today > 0 else "")
+                        )
+                        fire_notification(_task_msg, "reminder")
+
+            except Exception as _te:
+                print(f"[DAEMON] Task check error: {_te}")
+
         except KeyboardInterrupt:
             print("[DAEMON] Stopped")
             release_lock()
             break
         except Exception as e:
             print(f"[DAEMON] Error: {e}")
+
+            # Task panel trigger — auto-show panel on overdue tasks
+            try:
+                import sqlite3 as _sq
+                _seven_data = os.path.join(APPDATA, 'SEVEN', 'seven_data')
+                _tdb        = os.path.join(_seven_data, 'tasks.db')
+
+                if os.path.exists(_tdb):
+                    _tc = _sq.connect(_tdb, timeout=5)
+                    _tc.execute("PRAGMA journal_mode=WAL")
+
+                    from datetime import date as _dc
+                    _today = _dc.today().isoformat()
+
+                    _overdue = _tc.execute(
+                        "SELECT COUNT(*) FROM tasks WHERE due_date < ? AND completed = 0",
+                        (_today,)
+                    ).fetchone()[0]
+
+                    _due_today = _tc.execute(
+                        "SELECT COUNT(*) FROM tasks WHERE due_date = ? AND completed = 0",
+                        (_today,)
+                    ).fetchone()[0]
+
+                    _tc.close()
+
+                    if _overdue > 0 and not is_seven_running():
+                        # Write trigger file — panel_window.js polls this
+                        os.makedirs(os.path.dirname(PANEL_TRIGGER), exist_ok=True)
+                        with open(PANEL_TRIGGER, 'w') as _pf:
+                            import json as _pj
+                            _pj.dump({
+                                "reason":    "overdue",
+                                "overdue":   _overdue,
+                                "due_today": _due_today,
+                            }, _pf)
+                        print(f"[DAEMON] Panel trigger written: {_overdue} overdue tasks")
+
+            except Exception as _te:
+                print(f"[DAEMON] Task trigger error: {_te}")
 
         time.sleep(15)
 
