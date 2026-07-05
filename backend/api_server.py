@@ -192,6 +192,7 @@ from backend.routes import usage as usage_routes
 from backend.routes import hardware as hardware_routes
 from backend.routes import updates as updates_routes
 from backend.routes import voice_gates as voice_gates_routes
+from backend.routes import tasks as tasks_routes  
 
 app.include_router(status_routes.router)
 app.include_router(chat_routes.router)
@@ -205,6 +206,7 @@ app.include_router(usage_routes.router)
 app.include_router(hardware_routes.router)
 app.include_router(updates_routes.router)
 app.include_router(voice_gates_routes.router)
+app.include_router(tasks_routes.router)  
 
 # Register knowledge upload (needs special handling for optional multipart)
 from backend.routes.knowledge import _register_upload_endpoint
