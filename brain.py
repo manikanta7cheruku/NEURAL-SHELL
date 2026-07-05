@@ -339,7 +339,7 @@ def think(prompt_text, speaker_id="default"):
     # Defined here once — used by is_command check AND Layer 4.3
     _FILE_WORDS = {
         "resume", "cv", "pdf", "document", "photo",
-        "image", "screenshot", "video", "report", "invoice",
+        "image", "screenshot", "video", "invoice",
         "contract", "presentation", "spreadsheet", "edit", "travel",
     }
     # Note: "file", "folder", "gokarna" removed
