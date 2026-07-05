@@ -338,14 +338,7 @@ def seven_logic():
     except Exception:
         pass
 
-    # Greeting
-    try:
-        print(Fore.GREEN + "[SYSTEM] Speaking startup greeting...")
-        mouth.speak(f"{config.KEY['identity']['name']} online.")
-        print(Fore.GREEN + "[SYSTEM] Greeting spoken")
-    except Exception as _greet_err:
-        print(Fore.RED + f"[SYSTEM] Greeting failed: {_greet_err}")
-        import traceback; traceback.print_exc()
+    # Greeting handled by morning brief below
 
     # Scheduler
     try:
@@ -359,6 +352,102 @@ def seven_logic():
     sched_count = scheduler_mod.get_active_count()
     if sched_count > 0:
         print(Fore.CYAN + f"[SYSTEM] Scheduler: {sched_count} active schedules.")
+
+    def _build_morning_brief():
+        import random as _rb
+        parts = []
+
+        from datetime import datetime as _dt
+        _hour = _dt.now().hour
+
+        _name = ""
+        try:
+            _name = config.KEY.get("identity", {}).get("user_name", "").strip()
+        except Exception:
+            pass
+        if not _name or _name.lower() in ("admin", "there", "user", ""):
+            try:
+                _name = brain.USER_NAME
+                if _name.lower() in ("admin", "there", ""):
+                    _name = ""
+            except Exception:
+                _name = ""
+
+        _greeting_word = (
+            "Good morning"   if _hour < 12 else
+            "Good afternoon" if _hour < 17 else
+            "Good evening"
+        )
+
+        _name_variants = [_name, "boss", _name, "boss", _name] if _name else ["boss", ""]
+        _chosen = _rb.choice(_name_variants)
+        parts.append(f"{_greeting_word}, {_chosen}." if _chosen else f"{_greeting_word}.")
+        print(Fore.CYAN + f"[BRIEF] {_greeting_word}, {_chosen} | hour={_hour}")
+
+        try:
+            import sys as _sb, os as _ob
+            if _ob.getcwd() not in _sb.path:
+                _sb.path.insert(0, _ob.getcwd())
+            from backend.routes.tasks import db_get_due_today, db_get_overdue
+            _td = db_get_due_today()
+            _od = db_get_overdue()
+            print(Fore.CYAN + f"[BRIEF] tasks today={len(_td)} overdue={len(_od)}")
+            if _td:
+                _pm = {"high": 3, "medium": 2, "low": 1}
+                _top = max(_td, key=lambda t: _pm.get(t.get("priority", "medium"), 2))
+                if len(_td) == 1:
+                    parts.append(f"One task due today: {_top['text']}.")
+                else:
+                    parts.append(f"{len(_td)} tasks due today. Top priority: {_top['text'][:40]}.")
+            if _od:
+                _oc = len(_od)
+                parts.append(f"{_oc} overdue task{'s' if _oc != 1 else ''} need your attention.")
+        except Exception as _te:
+            print(Fore.YELLOW + f"[BRIEF] tasks failed: {_te}")
+            import traceback; traceback.print_exc()
+
+        try:
+            _sc = scheduler_mod.get_active_count()
+            if _sc == 1:
+                parts.append("One reminder active.")
+            elif _sc > 1:
+                parts.append(f"{_sc} reminders active.")
+        except Exception as _se:
+            print(Fore.YELLOW + f"[BRIEF] schedules failed: {_se}")
+
+        try:
+            import psutil as _pb
+            _bat = _pb.sensors_battery()
+            if _bat is not None:
+                if not _bat.power_plugged:
+                    parts.append(f"Battery at {int(_bat.percent)} percent.")
+        except Exception:
+            pass
+
+        try:
+            from ears.core import _noise_floor as _nf
+            if _nf < 300:
+                parts.append("Very quiet today.")
+            elif _nf >= 600:
+                parts.append("Noisy environment. Speak clearly.")
+        except Exception:
+            pass
+
+        result = " ".join(parts)
+        print(Fore.GREEN + f"[BRIEF] {result}")
+        return result
+
+    try:
+        _brief = _build_morning_brief()
+        if _brief:
+            mouth.speak(_brief)
+    except Exception as _be:
+        print(Fore.YELLOW + f"[BRIEF] failed: {_be}")
+        import traceback; traceback.print_exc()
+        try:
+            mouth.speak("Seven online.")
+        except Exception:
+            pass
 
     # ── Morning Brief ─────────────────────────────────────────────────
     def _build_morning_brief():
