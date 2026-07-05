@@ -730,6 +730,8 @@ def think(prompt_text, speaker_id="default"):
         except Exception as _task_detect_err:
             # Graceful degradation — task detection failed, fall through to LLM
             print(Fore.YELLOW + f"[BRAIN] Task detection error: {_task_detect_err}")
+    # --- SCHEDULER COMMANDS ---
+    import re as _re_sched
     _has_after_dur = bool(_re_sched.search(
         r'\bafter\s+\d+\s*(second|seconds|minute|minutes|hour|hours)\b', clean_in
     ))
