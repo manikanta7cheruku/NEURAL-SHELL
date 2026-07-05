@@ -1,10 +1,11 @@
 """
 PROJECT SEVEN - backend/routes/tasks.py
-Full CRUD API for Task System. SQLite WAL mode.
+Task System with subtasks and detailed descriptions.
 """
 
 import sqlite3
 import os
+import json
 from datetime import datetime, date
 from typing import Optional, List
 from fastapi import APIRouter, HTTPException, Query
@@ -26,21 +27,31 @@ print(Fore.GREEN + f"[TASKS] DB: {TASKS_DB}")
 router = APIRouter()
 
 
-class TaskCreate(BaseModel):
+class SubTask(BaseModel):
+    id:        str
     text:      str
-    due_date:  Optional[str]  = None
-    due_time:  Optional[str]  = None
-    priority:  Optional[str]  = "medium"
-    tags:      Optional[str]  = None
+    completed: bool = False
+
+
+class TaskCreate(BaseModel):
+    text:        str
+    due_date:    Optional[str]       = None
+    due_time:    Optional[str]       = None
+    priority:    Optional[str]       = "medium"
+    tags:        Optional[str]       = None
+    description: Optional[str]       = None
+    subtasks:    Optional[List[dict]] = None
 
 
 class TaskUpdate(BaseModel):
-    text:         Optional[str]  = None
-    due_date:     Optional[str]  = None
-    due_time:     Optional[str]  = None
-    priority:     Optional[str]  = None
-    completed:    Optional[bool] = None
-    tags:         Optional[str]  = None
+    text:        Optional[str]       = None
+    due_date:    Optional[str]       = None
+    due_time:    Optional[str]       = None
+    priority:    Optional[str]       = None
+    completed:   Optional[bool]      = None
+    tags:        Optional[str]       = None
+    description: Optional[str]       = None
+    subtasks:    Optional[List[dict]] = None
 
 
 def _get_conn():
@@ -66,9 +77,23 @@ def init_db():
                                  CHECK(completed IN (0, 1)),
                     created_at   TEXT NOT NULL,
                     completed_at TEXT,
-                    tags         TEXT
+                    tags         TEXT,
+                    description  TEXT,
+                    subtasks     TEXT DEFAULT '[]'
                 )
             """)
+            # Migration: add description and subtasks columns if they dont exist
+            # Safe to run every startup — ALTER TABLE ignores existing columns
+            for col, definition in [
+                ("description", "TEXT"),
+                ("subtasks",    "TEXT DEFAULT '[]'"),
+            ]:
+                try:
+                    conn.execute(f"ALTER TABLE tasks ADD COLUMN {col} {definition}")
+                    print(Fore.CYAN + f"[TASKS] Migrated: added column {col}")
+                except Exception:
+                    pass  # Column already exists
+
             conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_tasks_due
                 ON tasks(due_date)
@@ -89,13 +114,27 @@ init_db()
 def _row_to_dict(row):
     d = dict(row)
     d["completed"] = bool(d.get("completed", 0))
-    raw = d.get("tags", "") or ""
-    d["tags"] = [t.strip() for t in raw.split(",") if t.strip()]
+    raw_tags = d.get("tags", "") or ""
+    d["tags"] = [t.strip() for t in raw_tags.split(",") if t.strip()]
+    # Deserialize subtasks JSON string to list
+    raw_sub = d.get("subtasks", "[]") or "[]"
+    try:
+        d["subtasks"] = json.loads(raw_sub)
+    except Exception:
+        d["subtasks"] = []
     return d
 
 
+def _serialize_subtasks(subtasks):
+    if not subtasks:
+        return "[]"
+    if isinstance(subtasks, str):
+        return subtasks
+    return json.dumps(subtasks)
+
+
 # =========================================================================
-# ROUTES - SPECIFIC FIRST, PARAMETERIZED LAST
+# ROUTES - SPECIFIC BEFORE PARAMETERIZED
 # =========================================================================
 
 @router.get("/api/tasks/stats")
@@ -104,13 +143,17 @@ def get_task_stats():
         today_str = date.today().isoformat()
         with _get_conn() as conn:
             total     = conn.execute("SELECT COUNT(*) FROM tasks").fetchone()[0]
-            pending   = conn.execute("SELECT COUNT(*) FROM tasks WHERE completed = 0").fetchone()[0]
-            completed = conn.execute("SELECT COUNT(*) FROM tasks WHERE completed = 1").fetchone()[0]
+            pending   = conn.execute(
+                "SELECT COUNT(*) FROM tasks WHERE completed = 0"
+            ).fetchone()[0]
+            completed = conn.execute(
+                "SELECT COUNT(*) FROM tasks WHERE completed = 1"
+            ).fetchone()[0]
             due_today = conn.execute(
                 "SELECT COUNT(*) FROM tasks WHERE due_date = ? AND completed = 0",
                 (today_str,)
             ).fetchone()[0]
-            overdue = conn.execute(
+            overdue   = conn.execute(
                 "SELECT COUNT(*) FROM tasks WHERE due_date < ? AND completed = 0",
                 (today_str,)
             ).fetchone()[0]
@@ -157,8 +200,8 @@ def get_tasks_overdue():
 
 @router.get("/api/tasks")
 def list_tasks(
-    status:   Optional[str] = Query(None),
-    priority: Optional[str] = Query(None),
+    status:      Optional[str] = Query(None),
+    priority:    Optional[str] = Query(None),
     date_filter: Optional[str] = Query(None, alias="date"),
 ):
     try:
@@ -179,10 +222,11 @@ def list_tasks(
                 query += " AND due_date = ?"
                 params.append(date_filter)
 
-            query += (" ORDER BY completed ASC, due_date ASC NULLS LAST,"
-                      " CASE priority WHEN 'high' THEN 1 WHEN 'medium' THEN 2"
-                      " WHEN 'low' THEN 3 END ASC")
-
+            query += (
+                " ORDER BY completed ASC, due_date ASC NULLS LAST,"
+                " CASE priority WHEN 'high' THEN 1 WHEN 'medium' THEN 2"
+                " WHEN 'low' THEN 3 END ASC"
+            )
             rows = conn.execute(query, params).fetchall()
             return [_row_to_dict(r) for r in rows]
     except Exception as e:
@@ -203,20 +247,28 @@ def create_task(body: TaskCreate):
     if body.tags:
         tags_str = body.tags.strip() if isinstance(body.tags, str) else ",".join(body.tags)
 
+    subtasks_str = _serialize_subtasks(body.subtasks)
     now_iso = datetime.now().isoformat()
 
     try:
         with _get_conn() as conn:
             cursor = conn.execute(
                 "INSERT INTO tasks (text, due_date, due_time, priority, completed,"
-                " created_at, completed_at, tags) VALUES (?, ?, ?, ?, 0, ?, NULL, ?)",
-                (body.text.strip(), body.due_date, body.due_time, priority, now_iso, tags_str)
+                " created_at, completed_at, tags, description, subtasks)"
+                " VALUES (?, ?, ?, ?, 0, ?, NULL, ?, ?, ?)",
+                (
+                    body.text.strip(), body.due_date, body.due_time,
+                    priority, now_iso, tags_str,
+                    body.description, subtasks_str
+                )
             )
             conn.commit()
             new_id = cursor.lastrowid
 
         with _get_conn() as conn:
-            row = conn.execute("SELECT * FROM tasks WHERE id = ?", (new_id,)).fetchone()
+            row = conn.execute(
+                "SELECT * FROM tasks WHERE id = ?", (new_id,)
+            ).fetchone()
 
         created = _row_to_dict(row)
         print(Fore.GREEN + f"[TASKS] Created #{new_id}: {body.text[:50]}")
@@ -230,7 +282,9 @@ def create_task(body: TaskCreate):
 def update_task(task_id: int, body: TaskUpdate):
     try:
         with _get_conn() as conn:
-            existing = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
+            existing = conn.execute(
+                "SELECT * FROM tasks WHERE id = ?", (task_id,)
+            ).fetchone()
             if not existing:
                 raise HTTPException(status_code=404, detail=f"Task {task_id} not found.")
 
@@ -253,7 +307,10 @@ def update_task(task_id: int, body: TaskUpdate):
 
             if body.priority is not None:
                 if body.priority not in ("low", "medium", "high"):
-                    raise HTTPException(status_code=400, detail="Priority must be low, medium, or high.")
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Priority must be low, medium, or high."
+                    )
                 updates.append("priority = ?")
                 params.append(body.priority)
 
@@ -261,20 +318,35 @@ def update_task(task_id: int, body: TaskUpdate):
                 updates.append("tags = ?")
                 params.append(body.tags.strip() if body.tags else None)
 
+            if body.description is not None:
+                updates.append("description = ?")
+                params.append(body.description if body.description else None)
+
+            if body.subtasks is not None:
+                updates.append("subtasks = ?")
+                params.append(_serialize_subtasks(body.subtasks))
+
             if body.completed is not None:
                 updates.append("completed = ?")
                 params.append(1 if body.completed else 0)
                 updates.append("completed_at = ?")
-                params.append(datetime.now().isoformat() if body.completed else None)
+                params.append(
+                    datetime.now().isoformat() if body.completed else None
+                )
 
             if not updates:
                 return {"success": True, "task": _row_to_dict(existing)}
 
             params.append(task_id)
-            conn.execute(f"UPDATE tasks SET {', '.join(updates)} WHERE id = ?", params)
+            conn.execute(
+                f"UPDATE tasks SET {', '.join(updates)} WHERE id = ?",
+                params
+            )
             conn.commit()
 
-            updated = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
+            updated = conn.execute(
+                "SELECT * FROM tasks WHERE id = ?", (task_id,)
+            ).fetchone()
 
         print(Fore.GREEN + f"[TASKS] Updated #{task_id}")
         return {"success": True, "task": _row_to_dict(updated)}
@@ -289,7 +361,9 @@ def update_task(task_id: int, body: TaskUpdate):
 def delete_task(task_id: int):
     try:
         with _get_conn() as conn:
-            existing = conn.execute("SELECT id FROM tasks WHERE id = ?", (task_id,)).fetchone()
+            existing = conn.execute(
+                "SELECT id FROM tasks WHERE id = ?", (task_id,)
+            ).fetchone()
             if not existing:
                 raise HTTPException(status_code=404, detail=f"Task {task_id} not found.")
             conn.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
@@ -305,7 +379,7 @@ def delete_task(task_id: int):
 
 
 # =========================================================================
-# DIRECT DB ACCESS (for main.py morning brief and daemon)
+# DIRECT DB ACCESS for main.py and daemon
 # =========================================================================
 
 def db_get_due_today():
@@ -340,7 +414,9 @@ def db_get_stats():
     try:
         today_str = date.today().isoformat()
         with _get_conn() as conn:
-            pending   = conn.execute("SELECT COUNT(*) FROM tasks WHERE completed = 0").fetchone()[0]
+            pending   = conn.execute(
+                "SELECT COUNT(*) FROM tasks WHERE completed = 0"
+            ).fetchone()[0]
             due_today = conn.execute(
                 "SELECT COUNT(*) FROM tasks WHERE due_date = ? AND completed = 0",
                 (today_str,)
@@ -365,15 +441,13 @@ def db_find_task_by_text(search):
             ).fetchall()
             if rows:
                 return _row_to_dict(rows[0])
-
             words = search_lower.split()
             if len(words) > 1:
                 all_tasks = conn.execute(
                     "SELECT * FROM tasks WHERE completed = 0"
                 ).fetchall()
                 for row in all_tasks:
-                    task_text = row["text"].lower()
-                    if all(w in task_text for w in words):
+                    if all(w in row["text"].lower() for w in words):
                         return _row_to_dict(row)
         return None
     except Exception as e:
