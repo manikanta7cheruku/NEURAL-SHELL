@@ -604,7 +604,6 @@ def think(prompt_text, speaker_id="default"):
     _TASK_CREATE_TRIGGERS = [
         "add to my tasks", "add task", "add to tasks", "create task",
         "make a task", "note this as task", "task:", "todo:",
-        "i need to finish", "i need to complete", "i need to do",
         "remind me to finish", "add to my todo", "add to todo",
         "new task", "create a task", "make task", "log task",
         "put on my tasks", "put on my list", "add it to my tasks",
