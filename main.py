@@ -1108,9 +1108,9 @@ def seven_logic():
 
                     # ── CREATE ──────────────────────────────────────
                     if _task_action == "create":
-                        _text     = _task_params.get("text", "").replace("_", " ")
+                        _text     = _task_params.get("text", "").replace("|||", " ").replace("_", " ")
                         _priority = _task_params.get("priority", "medium")
-                        _due_raw  = _task_params.get("due", "").replace("_", " ")
+                        _due_raw  = _task_params.get("due", "").replace("|||", " ").replace("_", " ")
 
                         # Resolve natural language due date to ISO string
                         _due_date = None
@@ -1240,7 +1240,7 @@ def seven_logic():
 
                     # ── COMPLETE ────────────────────────────────────
                     elif _task_action == "complete":
-                        _search = _task_params.get("search", "").replace("_", " ")
+                        _search = _task_params.get("search", "").replace("|||", " ").replace("_", " ")
                         # Direct DB lookup — faster than HTTP for internal use
                         try:
                             from backend.routes.tasks import db_find_task_by_text
@@ -1280,7 +1280,7 @@ def seven_logic():
 
                     # ── DELETE ──────────────────────────────────────
                     elif _task_action == "delete":
-                        _search = _task_params.get("search", "").replace("_", " ")
+                        _search = _task_params.get("search", "").replace("|||", " ").replace("_", " ")
                         try:
                             from backend.routes.tasks import db_find_task_by_text
                             _found = db_find_task_by_text(_search)
