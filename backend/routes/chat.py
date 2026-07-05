@@ -21,6 +21,7 @@ class ChatResponse(BaseModel):
     actions: List[str] = []
     streaming: bool = False
     file_results: Optional[dict] = None
+    task_results: Optional[dict] = None
 
 
 @router.post("/api/chat", response_model=ChatResponse)
@@ -99,15 +100,18 @@ def chat(req: ChatRequest):
         except Exception:
             pass
 
-        # Pull file search results from shared state if brain.py set them
+        # Pull file search results from shared state
         file_results = None
+        task_results = None
         try:
             from backend.api_server import get_state as _get_state
             _current_state = _get_state()
             file_results = _current_state.get("file_search_results")
-            # Clear after reading so next request starts fresh
+            task_results = _current_state.get("task_results")
             if file_results:
                 set_state("file_search_results", None)
+            if task_results:
+                set_state("task_results", None)
         except Exception:
             pass
 
@@ -115,7 +119,8 @@ def chat(req: ChatRequest):
             response=clean_response,
             actions=action_list,
             streaming=is_streaming,
-            file_results=file_results
+            file_results=file_results,
+            task_results=task_results
         )
 
     except Exception as e:
@@ -180,6 +185,107 @@ def _execute_actions(action_list, full_response, speaker_id):
                     _telemetry.log_activity()
             except Exception as e:
                 print(f"[API] Scheduler error: {e}")
+    
+    # Task commands
+    task_cmds = re.findall(r"###TASK:\s*(.*?)(?=###|$)", full_response)
+    for param_str in task_cmds:
+        params = {}
+        for pair in param_str.strip().split():
+            if "=" in pair:
+                key, val = pair.split("=", 1)
+                params[key.strip()] = val.strip()
+        if not params:
+            continue
+
+        action = params.get("action", "")
+
+        try:
+            from backend.api_server import set_state as _task_set
+
+            if action == "create":
+                text     = params.get("text", "").replace("_", " ")
+                priority = params.get("priority", "medium")
+                due_raw  = params.get("due", "").replace("_", " ")
+
+                due_date = None
+                if due_raw:
+                    try:
+                        from datetime import date, timedelta
+                        dl = due_raw.lower()
+                        if "today" in dl or "tonight" in dl:
+                            due_date = date.today().isoformat()
+                        elif "tomorrow" in dl:
+                            due_date = (date.today() + timedelta(days=1)).isoformat()
+                        else:
+                            from hands.scheduler import _parse_time
+                            parsed = _parse_time(due_raw)
+                            if parsed:
+                                due_date = parsed.date().isoformat()
+                    except Exception:
+                        pass
+
+                from backend.routes.tasks import _get_conn, _row_to_dict
+                from datetime import datetime as _dt
+                import sqlite3
+
+                with _get_conn() as conn:
+                    cursor = conn.execute(
+                        "INSERT INTO tasks (text, due_date, due_time, priority, completed,"
+                        " created_at, completed_at, tags, description, subtasks)"
+                        " VALUES (?, ?, NULL, ?, 0, ?, NULL, NULL, NULL, '[]')",
+                        (text, due_date, priority, _dt.now().isoformat())
+                    )
+                    conn.commit()
+                    new_id = cursor.lastrowid
+                    row = conn.execute("SELECT * FROM tasks WHERE id = ?", (new_id,)).fetchone()
+
+                _task_set("task_results", {
+                    "action": "created",
+                    "task": _row_to_dict(row),
+                })
+                print(f"[CHAT] Task created: {text}")
+
+            elif action == "list":
+                from backend.routes.tasks import db_get_pending_list
+                pending = db_get_pending_list()
+                _task_set("task_results", {
+                    "action": "list",
+                    "tasks": pending,
+                })
+
+            elif action == "complete":
+                search = params.get("search", "").replace("_", " ")
+                from backend.routes.tasks import db_find_task_by_text, _get_conn
+                from datetime import datetime as _dt
+                found = db_find_task_by_text(search)
+                if found:
+                    with _get_conn() as conn:
+                        conn.execute(
+                            "UPDATE tasks SET completed = 1, completed_at = ? WHERE id = ?",
+                            (_dt.now().isoformat(), found["id"])
+                        )
+                        conn.commit()
+                    _task_set("task_results", {
+                        "action": "completed",
+                        "task_id": found["id"],
+                    })
+
+            elif action == "delete":
+                search = params.get("search", "").replace("_", " ")
+                from backend.routes.tasks import db_find_task_by_text, _get_conn
+                found = db_find_task_by_text(search)
+                if found:
+                    with _get_conn() as conn:
+                        conn.execute("DELETE FROM tasks WHERE id = ?", (found["id"],))
+                        conn.commit()
+                    _task_set("task_results", {
+                        "action": "deleted",
+                        "task_id": found["id"],
+                    })
+
+        except Exception as e:
+            print(f"[CHAT] Task action error: {e}")
+            import traceback; traceback.print_exc()
 
     # App commands
     app_cmds = re.findall(r"###(OPEN|CLOSE):\s*(.*?)(?=###|$)", full_response)
