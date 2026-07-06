@@ -346,7 +346,7 @@ function startTriggerPolling() {
         try { fs.unlinkSync(TRIGGER_FILE); } catch (_) {}
       }
     }
-  }, 3000);
+  }, 1000);
 }
 
 function stopTriggerPolling() {
