@@ -145,32 +145,87 @@ function TaskCard({ task, onComplete, onDelete, onUpdate }) {
   // Completed card
   if (task.completed && phase === 'idle') {
     return (
-      <div className="rounded-xl border border-white/8 bg-white/[0.02] p-4
-                      flex flex-col h-full">
-        <div className="flex items-start justify-between gap-3 flex-1 min-h-0">
-          <div className="flex-1 min-w-0">
-            <h3 className="text-[13px] font-medium text-white/35
-                           line-through decoration-white/15 leading-snug">
+      <div className="rounded-xl border border-white/8 bg-white/[0.02]
+                      flex flex-col h-full overflow-hidden opacity-70">
+        <div className="p-4 flex-1 min-h-0 flex flex-col overflow-y-auto
+                        scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
+
+          {/* Title */}
+          <div className="flex items-start justify-between gap-3 mb-3">
+            <h3 className="text-[15px] font-semibold text-white/45
+                           line-through decoration-white/20 leading-tight flex-1">
               {task.text}
             </h3>
-            {hasDesc && (
-              <p className="text-[10px] text-white/25 mt-2 leading-relaxed line-clamp-3">
-                {task.description}
-              </p>
-            )}
+            <div className="flex-shrink-0 w-5 h-5 rounded-full border border-white/30
+                            flex items-center justify-center mt-0.5 bg-white/5">
+              <Check size={11} className="text-white/60" />
+            </div>
+          </div>
+
+          {/* Description */}
+          {hasDesc && (
+            <div className="mb-3 flex-shrink-0">
+              <div className="text-[9px] text-white/30 uppercase tracking-wider font-semibold mb-1.5">
+                Description
+              </div>
+              <div className="bg-white/[0.02] rounded-lg px-3 py-2 border border-white/5
+                              max-h-[140px] overflow-y-auto overflow-x-hidden
+                              scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
+                <p className="text-[11px] text-white/50 leading-[1.6] whitespace-pre-wrap
+                              line-through decoration-white/15"
+                   style={{ wordBreak: 'break-word' }}>
+                  {task.description}
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Subtasks */}
+          {subTotal > 0 && (
+            <div className="flex-shrink-0 mb-2">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-[9px] text-white/30 uppercase tracking-wider font-semibold">
+                  Subtasks
+                </span>
+                <span className="text-[9px] text-white/30 font-mono">
+                  {subDone}/{subTotal}
+                </span>
+              </div>
+              <div className="space-y-0.5 max-h-[120px] overflow-y-auto pr-1
+                              scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent
+                              bg-white/[0.01] rounded-lg p-1.5">
+                {subs.map(sub => (
+                  <div key={sub.id} className="flex items-center gap-2 py-1 px-1.5">
+                    {sub.completed
+                      ? <CheckCircle2 size={12} className="text-white/40 flex-shrink-0" />
+                      : <Circle size={12} className="text-white/15 flex-shrink-0" />}
+                    <span className={`flex-1 text-[10.5px] leading-tight
+                      ${sub.completed ? 'line-through text-white/25' : 'text-white/50'}`}>
+                      {sub.text}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="px-4 py-2.5 border-t border-white/5
+                        flex items-center justify-between flex-shrink-0 bg-white/[0.01]">
+          <div className="flex items-center gap-1.5">
+            <CheckCircle2 size={10} className="text-white/40" />
+            <span className="text-[9px] text-white/40 font-medium">
+              Completed
+              {task.completed_at && ' · ' + new Date(task.completed_at).toLocaleDateString(undefined, { month:'short', day:'numeric' })}
+            </span>
           </div>
           <button onClick={() => onDelete(task.id)}
-                  className="p-1.5 rounded-lg text-white/20 hover:text-white/60
-                             hover:bg-white/5 transition-all duration-200 flex-shrink-0">
-            <Trash2 size={12} />
+                  className="p-1.5 rounded-md text-white/30 hover:text-white/80
+                             hover:bg-white/5 transition-all duration-150"
+                  title="Delete">
+            <Trash2 size={11} />
           </button>
-        </div>
-        <div className="flex items-center gap-2 mt-3 pt-2.5 border-t border-white/5">
-          <CheckCircle2 size={9} className="text-white/40" />
-          <span className="text-[8.5px] text-white/40">
-            Completed
-            {task.completed_at && ' · ' + new Date(task.completed_at).toLocaleDateString(undefined, { month:'short', day:'numeric' })}
-          </span>
         </div>
       </div>
     );
@@ -186,7 +241,8 @@ function TaskCard({ task, onComplete, onDelete, onUpdate }) {
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
-      <div className="p-4 flex-1 min-h-0 flex flex-col">
+      <div className="p-4 flex-1 min-h-0 flex flex-col overflow-y-auto
+                      scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
 
         {/* Title */}
         <div className="flex items-start justify-between gap-3 mb-2">
@@ -298,7 +354,7 @@ function TaskCard({ task, onComplete, onDelete, onUpdate }) {
                           onChange={e => setDescVal(e.target.value)}
                           onBlur={saveDesc}
                           onKeyDown={e => { if (e.key==='Escape') { setEditDesc(false); setDescVal(task.description||''); } }}
-                          rows={subTotal > 0 ? 3 : 6}
+                          rows={subTotal > 0 ? 5 : 9}
                           className="w-full bg-white/[0.02] border border-white/10 rounded-lg
                                      text-[11px] text-white/85 outline-none px-3 py-2
                                      resize-none focus:border-white/25 transition-colors
@@ -312,7 +368,7 @@ function TaskCard({ task, onComplete, onDelete, onUpdate }) {
                                 overflow-y-auto overflow-x-hidden
                                 scrollbar-thin scrollbar-thumb-white/10
                                 scrollbar-track-transparent
-                                ${subTotal > 0 ? 'h-[70px]' : 'h-[180px]'}`}>
+                                ${subTotal > 0 ? 'h-[130px]' : 'h-[240px]'}`}>
                   <p className="text-[11px] text-white/75 leading-[1.6] whitespace-pre-wrap"
                      style={{ wordBreak: 'break-word' }}>
                     {task.description}
@@ -324,7 +380,7 @@ function TaskCard({ task, onComplete, onDelete, onUpdate }) {
                                     hover:bg-white/[0.03] transition-all duration-200
                                     border border-dashed border-white/8 hover:border-white/15
                                     flex items-center
-                                    ${subTotal > 0 ? 'h-[70px]' : 'h-[180px]'}`}>
+                                    ${subTotal > 0 ? 'h-[130px]' : 'h-[240px]'}`}>
                   <span className="text-[10px] text-white/25 italic">
                     Click to add description
                   </span>
@@ -344,7 +400,7 @@ function TaskCard({ task, onComplete, onDelete, onUpdate }) {
                   </span>
                 </div>
 
-                <div className="space-y-0.5 h-[100px] overflow-y-auto pr-1
+                <div className="space-y-0.5 h-[130px] overflow-y-auto pr-1
                                 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent
                                 bg-white/[0.01] rounded-lg p-1.5">
                   {subs.map(sub => (
@@ -633,6 +689,11 @@ export default function Tasks() {
     if (filter === 'pending') return !t.completed;
     if (filter === 'completed') return t.completed;
     return true;
+  }).sort((a, b) => {
+    // Active first, completed at bottom
+    if (a.completed !== b.completed) return a.completed ? 1 : -1;
+    // Within same group: newest first
+    return (b.id || 0) - (a.id || 0);
   });
 
   const handleComplete = async id => { await update(id, { completed: true }); fetchStats(); };
@@ -730,12 +791,14 @@ export default function Tasks() {
           </div>
         ) : (
           <div className="grid grid-cols-3 gap-4"
-               style={{ gridAutoRows: '460px' }}>
+               style={{ gridAutoRows: 'calc((100vh - 230px) * 0.85)' }}>
             {filtered.map(t => (
-              <TaskCard key={t.id} task={t}
-                        onComplete={handleComplete}
-                        onDelete={handleDelete}
-                        onUpdate={handleUpdate} />
+              <div key={t.id} className="animate-in fade-in slide-in-from-top-1 duration-300">
+                <TaskCard task={t}
+                          onComplete={handleComplete}
+                          onDelete={handleDelete}
+                          onUpdate={handleUpdate} />
+              </div>
             ))}
           </div>
         )}
