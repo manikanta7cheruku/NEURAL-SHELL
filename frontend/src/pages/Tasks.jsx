@@ -198,8 +198,9 @@ function TaskCard({ task, onComplete, onDelete, onUpdate }) {
               </p>
             )}
             <div className="flex items-center gap-2 mt-3">
-              <span className="text-[8px] text-emerald-400 bg-emerald-400/10
-                               px-2 py-0.5 rounded-lg font-medium flex items-center gap-1">
+              <span className="text-[8px] text-s-text-4/60 bg-s-bg/40
+                               px-2 py-0.5 rounded-md font-medium flex items-center gap-1
+                               border border-s-border/20">
                 <CheckCircle2 size={8} /> Completed
               </span>
               {task.completed_at && (
@@ -223,19 +224,17 @@ function TaskCard({ task, onComplete, onDelete, onUpdate }) {
 
   return (
     <div
-      className={`rounded-2xl border overflow-hidden
-        transition-all duration-500 ease-out
+      className={`rounded-2xl border overflow-hidden flex flex-col
+        transition-all duration-300
         ${phase === 'fading'
           ? 'opacity-0 scale-[0.98] translate-y-2'
           : phase !== 'idle'
-            ? 'bg-s-card border-s-border opacity-80'
-            : badge?.pulse
-              ? 'bg-s-card border-red-400/15 hover:border-red-400/25 shadow-sm'
-              : 'bg-s-card border-s-border hover:border-s-text-4/15 shadow-sm hover:shadow-md hover:shadow-black/8'}`}
+            ? 'bg-s-card border-s-border/40 opacity-70'
+            : 'bg-s-card border-s-border hover:border-s-text-4/12'}`}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
-      <div className="p-5">
+      <div className="p-4 flex flex-col h-full">
 
         {/* ── Title row ──────────────────────────────────────── */}
         <div className="flex items-start justify-between gap-4 mb-2">
@@ -307,7 +306,7 @@ function TaskCard({ task, onComplete, onDelete, onUpdate }) {
 
         {/* ── Date / Deadline ────────────────────────────────── */}
         {phase === 'idle' && (
-          <div className="flex items-center gap-2 mt-3 flex-wrap">
+          <div className="flex items-center gap-1.5 mt-2 flex-wrap">
             {editDate ? (
               <div className="flex items-center gap-2 w-full
                               transition-all duration-300">
@@ -375,7 +374,7 @@ function TaskCard({ task, onComplete, onDelete, onUpdate }) {
 
         {/* ── Description ──────────────────────────────────────── */}
         {phase === 'idle' && (
-          <div className="mt-4">
+          <div className="mt-2.5">
             {editDesc ? (
               <textarea
                 ref={descRef}
@@ -394,20 +393,21 @@ function TaskCard({ task, onComplete, onDelete, onUpdate }) {
               />
             ) : hasDesc ? (
               <div onClick={() => setEditDesc(true)}
-                   className="bg-s-bg/30 rounded-xl px-3.5 py-2.5 cursor-pointer
-                              hover:bg-s-bg/60 transition-all duration-300
-                              border border-transparent hover:border-s-border/20">
-                <p className="text-[11px] text-s-text-4 leading-relaxed whitespace-pre-wrap">
+                   className="bg-s-bg/30 rounded-lg px-3 py-2 cursor-pointer
+                              hover:bg-s-bg/50 transition-all duration-200
+                              border border-transparent hover:border-s-border/15
+                              max-h-[60px] overflow-hidden">
+                <p className="text-[10px] text-s-text-4 leading-relaxed line-clamp-3">
                   {task.description}
                 </p>
               </div>
             ) : (
               <div onClick={() => setEditDesc(true)}
-                   className="rounded-xl px-3.5 py-2 cursor-pointer
-                              border border-dashed border-s-border/20
-                              hover:border-s-text-4/15 hover:bg-s-bg/20
-                              transition-all duration-300">
-                <p className="text-[10px] text-s-text-4/30 italic">No description</p>
+                   className="rounded-lg px-3 py-1.5 cursor-pointer
+                              border border-dashed border-s-border/15
+                              hover:border-s-text-4/12 hover:bg-s-bg/10
+                              transition-all duration-200">
+                <p className="text-[9px] text-s-text-4/25 italic">No description</p>
               </div>
             )}
           </div>
@@ -415,29 +415,29 @@ function TaskCard({ task, onComplete, onDelete, onUpdate }) {
 
         {/* ── Subtasks ─────────────────────────────────────────── */}
         {phase === 'idle' && (
-          <div className="mt-4">
+          <div className="mt-2.5">
             {subTotal > 0 ? (
-              <div className="bg-s-bg/40 border border-s-border/30 rounded-xl
-                              overflow-hidden transition-all duration-300 max-h-[240px]">
-                <div className="px-3.5 py-2 border-b border-s-border/20
+              <div className="bg-s-bg/30 border border-s-border/25 rounded-lg
+                              overflow-hidden transition-all duration-200">
+                <div className="px-3 py-1.5 border-b border-s-border/15
                                 flex items-center justify-between">
-                  <span className="text-[8px] text-s-text-4/60 uppercase tracking-widest
+                  <span className="text-[7.5px] text-s-text-4/50 uppercase tracking-widest
                                    font-semibold">
                     Subtasks
                   </span>
-                  <span className="text-[8px] text-s-text-4/50 font-mono">
+                  <span className="text-[7.5px] text-s-text-4/40 font-mono">
                     {subDone}/{subTotal}
                   </span>
                 </div>
 
-                <div className="p-2 space-y-0.5 max-h-[140px] overflow-y-auto
-                                scrollbar-thin scrollbar-thumb-s-border/30
+                <div className="px-2 py-1 space-y-0 max-h-[90px] overflow-y-auto
+                                scrollbar-thin scrollbar-thumb-s-border/20
                                 scrollbar-track-transparent">
                   {subs.map(sub => (
                     <div key={sub.id}
-                         className="flex items-center gap-2.5 py-2 px-2 rounded-lg
-                                    group/sub hover:bg-s-card/50
-                                    transition-all duration-200">
+                         className="flex items-center gap-2 py-1 px-1.5 rounded-md
+                                    group/sub hover:bg-s-card/40
+                                    transition-all duration-150">
                       <button onClick={() => toggleSub(sub.id)}
                               className={`flex-shrink-0 transition-all duration-200
                                 ${sub.completed
@@ -447,7 +447,7 @@ function TaskCard({ task, onComplete, onDelete, onUpdate }) {
                           ? <CheckCircle2 size={14} />
                           : <Circle size={14} />}
                       </button>
-                      <span className={`flex-1 text-[11px] transition-all duration-200
+                      <span className={`flex-1 text-[10px] transition-all duration-150
                         ${sub.completed
                           ? 'line-through text-s-text-4/30 decoration-s-text-4/20'
                           : 'text-s-text-3'}`}>
@@ -455,8 +455,7 @@ function TaskCard({ task, onComplete, onDelete, onUpdate }) {
                       </span>
                       <button onClick={() => deleteSub(sub.id)}
                               className="opacity-0 group-hover/sub:opacity-100
-                                         blur-[2px] group-hover/sub:blur-0
-                                         transition-all duration-300
+                                         transition-all duration-200
                                          text-s-text-4/25 hover:text-red-400
                                          flex-shrink-0">
                         <X size={11} />
@@ -486,39 +485,39 @@ function TaskCard({ task, onComplete, onDelete, onUpdate }) {
                   </div>
                 ) : (
                   <button onClick={() => setAddingSub(true)}
-                          className="w-full px-3.5 py-2 border-t border-s-border/20
-                                     flex items-center gap-2 text-[10px] text-s-text-4/30
-                                     hover:text-s-accent hover:bg-s-card/30
-                                     transition-all duration-300">
-                    <Plus size={11} /> Add subtask
+                          className="w-full px-3 py-1.5 border-t border-s-border/15
+                                     flex items-center gap-1.5 text-[9px] text-s-text-4/25
+                                     hover:text-s-text-4/60 hover:bg-s-card/20
+                                     transition-all duration-200">
+                    <Plus size={9} /> Add subtask
                   </button>
                 )}
 
                 {subTotal > 0 && (
                   <div className="px-3.5 py-2 border-t border-s-border/20
                                   flex items-center gap-3">
-                    <div className="flex-1 h-[2px] bg-s-border/30 rounded-full overflow-hidden">
+                    <div className="flex-1 h-[2px] bg-s-border/20 rounded-full overflow-hidden">
                       <div className="h-full rounded-full transition-all duration-700 ease-out"
                            style={{
                              width: `${pct}%`,
-                             backgroundColor: 'var(--s-text-4, #52525b)'
+                             background: pct === 100
+                               ? 'rgba(255,255,255,0.3)'
+                               : `linear-gradient(90deg, rgba(255,255,255,0.1), rgba(255,255,255,${0.1 + (pct / 100) * 0.25}))`
                            }} />
                     </div>
-                    <span className="text-[8px] font-mono text-s-text-4/40 w-8 text-right">
+                    <span className="text-[7px] font-mono text-s-text-4/30 w-6 text-right">
                       {pct}%
                     </span>
                   </div>
                 )}
               </div>
             ) : (
-              <div className={`rounded-xl transition-all duration-500 overflow-hidden
-                ${hovered || addingSub
-                  ? 'max-h-[80px] opacity-100'
-                  : 'max-h-[36px] opacity-60'}`}>
+              <div className={`rounded-lg transition-all duration-300 overflow-hidden
+                ${addingSub ? 'max-h-[56px] opacity-100' : 'max-h-[28px] opacity-40'}`}>
                 {addingSub ? (
-                  <div className="bg-s-bg/40 border border-s-border/30 rounded-xl
-                                  px-3.5 py-2.5 flex items-center gap-2
-                                  transition-all duration-300">
+                  <div className="bg-s-bg/30 border border-s-border/20 rounded-lg
+                                  px-3 py-2 flex items-center gap-2
+                                  transition-all duration-200">
                     <Circle size={15} className="text-s-text-4/10 flex-shrink-0" />
                     <input ref={subRef} value={newSub}
                            onChange={e => setNewSub(e.target.value)}
@@ -536,13 +535,12 @@ function TaskCard({ task, onComplete, onDelete, onUpdate }) {
                   </div>
                 ) : (
                   <button onClick={() => setAddingSub(true)}
-                          className="w-full px-3.5 py-2 rounded-xl
-                                     border border-dashed border-s-border/20
-                                     hover:border-s-text-4/15
-                                     flex items-center gap-2 text-[10px]
-                                     text-s-text-4/30 hover:text-s-accent
-                                     transition-all duration-300">
-                    <Plus size={11} /> No subtasks
+                          className="w-full px-3 py-1.5 rounded-lg
+                                     border border-dashed border-s-border/15
+                                     flex items-center gap-1.5 text-[9px]
+                                     text-s-text-4/20 hover:text-s-text-4/40
+                                     transition-all duration-200">
+                    <Plus size={9} /> No subtasks
                   </button>
                 )}
               </div>
@@ -552,8 +550,8 @@ function TaskCard({ task, onComplete, onDelete, onUpdate }) {
 
         {/* ── Footer ───────────────────────────────────────────── */}
         {phase === 'idle' && (
-          <div className="flex items-center justify-between mt-4 pt-3.5
-                          border-t border-s-border/15">
+          <div className="flex items-center justify-between mt-auto pt-2.5
+                          border-t border-s-border/10">
             {/* Priority */}
             <div className="flex items-center gap-2">
               <div className={`w-1.5 h-1.5 rounded-full ${pri.dot}`} />
@@ -567,8 +565,9 @@ function TaskCard({ task, onComplete, onDelete, onUpdate }) {
               ))}
             </div>
 
-            {/* Actions - always visible with proper contrast */}
-            <div className="flex items-center gap-0.5">
+            {/* Actions - fade in on hover */}
+            <div className={`flex items-center gap-0.5 transition-opacity duration-200
+                             ${hovered ? 'opacity-100' : 'opacity-0'}`}>
               <button onClick={() => setEditDate(true)}
                       className="p-2 rounded-xl text-s-text-4/50 hover:text-s-accent
                                  hover:bg-s-accent/8 transition-all duration-200"
@@ -962,7 +961,7 @@ export default function Tasks() {
             </div>
           </div>
         ) : (
-          <div className="grid grid-cols-3 gap-5">
+          <div className="grid grid-cols-3 gap-4" style={{ gridAutoRows: '280px' }}>
             {filtered.map(t => (
               <TaskCard key={t.id} task={t}
                         onComplete={handleComplete}
