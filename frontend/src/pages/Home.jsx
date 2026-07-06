@@ -232,10 +232,8 @@ function DashTaskCard({ task, onComplete }) {
       ${phase === 'fading'
         ? 'opacity-0 scale-[0.98] translate-y-2'
         : phase !== 'idle'
-          ? 'bg-s-card border-s-border opacity-80'
-          : badge?.pulse
-            ? 'bg-s-card border-red-400/15 hover:border-red-400/25 shadow-sm'
-            : 'bg-s-card border-s-border hover:border-s-text-4/15 shadow-sm hover:shadow-md hover:shadow-black/8'}`}>
+          ? 'bg-s-card border-s-border/60 opacity-70'
+          : 'bg-s-card border-s-border hover:border-s-text-4/12 transition-all duration-300'}`}>
 
       <div className="p-4">
 
@@ -251,53 +249,37 @@ function DashTaskCard({ task, onComplete }) {
 
           {phase === 'idle' && (
             <button onClick={handleComplete}
-                    className="flex-shrink-0 w-5 h-5 rounded-full border-2
-                               border-s-text-4/15 hover:border-s-accent
-                               hover:bg-s-accent/5 flex items-center justify-center
-                               transition-all duration-300 hover:scale-110 mt-0.5" />
+                    className="flex-shrink-0 w-5 h-5 rounded-full border
+                               border-s-text-4/20 hover:border-s-text-3/40
+                               flex items-center justify-center
+                               transition-all duration-200 mt-0.5" />
           )}
           {phase !== 'idle' && phase !== 'fading' && (
-            <div className="flex-shrink-0 w-5 h-5 rounded-full bg-s-accent/10
-                            border-2 border-s-accent/30 flex items-center justify-center
-                            transition-all duration-500 mt-0.5">
-              <Check size={10} className="text-s-accent" />
+            <div className="flex-shrink-0 w-5 h-5 rounded-full border
+                            border-s-text-3/30 flex items-center justify-center
+                            transition-all duration-300 mt-0.5">
+              <Check size={9} className="text-s-text-3" />
             </div>
           )}
         </div>
 
         {/* Countdown */}
         {phase === 'countdown' && (
-          <div className="my-2 bg-s-bg/80 border border-s-border rounded-xl
-                          px-3 py-2.5 flex items-center justify-between
-                          transition-all duration-500 ease-out">
-            <div className="flex items-center gap-2.5">
-              <div className="relative w-7 h-7">
-                <svg className="w-7 h-7 -rotate-90" viewBox="0 0 28 28">
-                  <circle cx="14" cy="14" r="11" fill="none"
-                          stroke="currentColor" strokeWidth="2"
-                          className="text-s-border" />
-                  <circle cx="14" cy="14" r="11" fill="none"
-                          stroke="currentColor" strokeWidth="2"
-                          className="text-s-accent"
-                          strokeDasharray={`${2 * Math.PI * 11}`}
-                          strokeDashoffset={`${2 * Math.PI * 11 * (1 - countdown / 7)}`}
-                          strokeLinecap="round"
-                          style={{ transition: 'stroke-dashoffset 1s linear' }} />
-                </svg>
-                <span className="absolute inset-0 flex items-center justify-center
-                                 text-[10px] font-bold text-s-accent font-mono">
-                  {countdown}
-                </span>
-              </div>
-              <div>
-                <p className="text-[9px] text-s-text-2 font-semibold">Completed</p>
-                <p className="text-[7.5px] text-s-text-4">Moving in {countdown}s</p>
-              </div>
+          <div className="my-2 bg-s-bg/50 border border-s-border/50 rounded-lg
+                          px-3 py-2 flex items-center justify-between
+                          transition-all duration-300">
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-mono text-s-text-4 font-medium">
+                {countdown}s
+              </span>
+              <span className="text-[9px] text-s-text-4">
+                Moving to completed
+              </span>
             </div>
             <button onClick={cancelComplete}
-                    className="px-2.5 py-1 rounded-md border border-s-border
-                               text-[8px] text-s-text-3 font-semibold
-                               hover:bg-s-card transition-all duration-200">
+                    className="px-2 py-0.5 rounded text-[8px] text-s-text-4
+                               border border-s-border/50 hover:text-s-text-3
+                               hover:bg-s-card/50 transition-all duration-200">
               Undo
             </button>
           </div>
@@ -307,10 +289,10 @@ function DashTaskCard({ task, onComplete }) {
         {phase === 'idle' && (task.due_date || deadline) && (
           <div className="flex items-center gap-1.5 mt-2 flex-wrap">
             {badge && (
-              <span className={`inline-flex items-center gap-0.5 text-[7.5px] font-semibold
-                                px-2 py-0.5 rounded-md border ${badge.c}
-                                ${badge.pulse ? 'animate-pulse' : ''}`}>
-                {badge.pulse ? <AlertCircle size={7} /> : <Calendar size={7} />}
+              <span className="inline-flex items-center gap-0.5 text-[7.5px] font-medium
+                               px-2 py-0.5 rounded-md text-s-text-3 bg-s-bg/60
+                               border border-s-border/40">
+                <Calendar size={7} />
                 {badge.l}
               </span>
             )}
@@ -321,11 +303,9 @@ function DashTaskCard({ task, onComplete }) {
               </span>
             )}
             {deadline && (
-              <span className={`inline-flex items-center gap-0.5 text-[7px] font-semibold
-                                px-1.5 py-0.5 rounded-md
-                ${deadline.urgent
-                  ? 'text-red-400 bg-red-400/8'
-                  : 'text-s-text-4 bg-s-border/20'}`}>
+              <span className="inline-flex items-center gap-0.5 text-[7px] font-medium
+                               px-1.5 py-0.5 rounded-md text-s-text-4 bg-s-bg/40
+                               border border-s-border/30">
                 <Clock size={7} />
                 {deadline.text}
               </span>
@@ -377,8 +357,8 @@ function DashTaskCard({ task, onComplete }) {
           <div className="flex items-center justify-between mt-3 pt-2.5
                           border-t border-s-border/15">
             <div className="flex items-center gap-1.5">
-              <div className={`w-1.5 h-1.5 rounded-full ${pri.dot}`} />
-              <span className={`text-[8px] font-semibold uppercase tracking-wider ${pri.text}`}>
+              <div className="w-1.5 h-1.5 rounded-full bg-s-text-4/30" />
+              <span className="text-[8px] font-medium uppercase tracking-wider text-s-text-4">
                 {pri.label}
               </span>
             </div>
@@ -408,32 +388,32 @@ function DashSchedCard({ schedule }) {
   return (
     <div className={`rounded-2xl border overflow-hidden transition-all duration-300
       ${active
-        ? 'bg-s-card border-s-border hover:border-s-text-4/15 shadow-sm hover:shadow-md hover:shadow-black/8'
-        : 'bg-s-card/20 border-s-border/30'}`}>
+        ? 'bg-s-card border-s-border hover:border-s-text-4/12'
+        : 'bg-s-card/15 border-s-border/25'}`}>
 
       <div className="p-4">
 
         {/* Type + Recurring */}
         <div className="flex items-center justify-between mb-3">
-          <span className={`inline-flex items-center gap-1 text-[7.5px] font-bold
-                            px-2 py-0.5 rounded-md uppercase tracking-wider
-                            ${color.txt} ${color.bg}`}>
+          <span className="inline-flex items-center gap-1 text-[7.5px] font-semibold
+                           px-2 py-0.5 rounded-md uppercase tracking-wider
+                           text-s-text-3 bg-s-bg/60 border border-s-border/40">
             <Icon size={8} />
             {type}
           </span>
           <div className="flex items-center gap-1.5">
             {recur && (
               <span className="inline-flex items-center gap-0.5 text-[7px]
-                               text-purple-400 bg-purple-400/8 px-1.5 py-0.5
-                               rounded-md font-medium">
+                               text-s-text-4 bg-s-bg/40 px-1.5 py-0.5
+                               rounded-md font-medium border border-s-border/30">
                 <Repeat size={7} />
                 {schedule.recur.replace('weekly_', 'wk ')}
               </span>
             )}
             {!active && (
               <span className="inline-flex items-center gap-0.5 text-[7px]
-                               text-s-text-4 bg-s-border/30 px-1.5 py-0.5
-                               rounded-md font-medium">
+                               text-s-text-4/60 bg-s-bg/30 px-1.5 py-0.5
+                               rounded-md font-medium border border-s-border/20">
                 <CheckCircle2 size={7} />
                 fired
               </span>
@@ -442,8 +422,8 @@ function DashSchedCard({ schedule }) {
         </div>
 
         {/* Message */}
-        <p className={`text-[12px] font-semibold leading-snug mb-3
-          ${active ? 'text-s-text' : 'text-s-text-4/50'}`}>
+        <p className={`text-[12px] font-medium leading-snug mb-3
+          ${active ? 'text-s-text-2' : 'text-s-text-4/40'}`}>
           {schedule.message || '—'}
         </p>
 
@@ -457,8 +437,9 @@ function DashSchedCard({ schedule }) {
               </span>
             </div>
             {remain && (
-              <span className={`text-[8px] font-semibold font-mono px-2 py-0.5
-                                rounded-md ${color.txt} ${color.bg}`}>
+              <span className="text-[8px] font-medium font-mono px-2 py-0.5
+                               rounded-md text-s-text-3 bg-s-bg/40
+                               border border-s-border/30">
                 in {remain}
               </span>
             )}
@@ -741,10 +722,10 @@ export default function Home() {
                 </div>
               </div>
             ) : (
-              <div className="flex-1 overflow-y-auto max-h-[450px] pr-1
-                              scrollbar-thin scrollbar-thumb-s-border/50
+              <div className="flex-1 overflow-y-auto max-h-[320px] pr-1
+                              scrollbar-thin scrollbar-thumb-s-border/30
                               scrollbar-track-transparent">
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-2 gap-2.5">
                   {filteredTasks.map(t => (
                     <DashTaskCard key={t.id} task={t}
                                   onComplete={async id => {
@@ -802,10 +783,10 @@ export default function Home() {
                 </div>
               </div>
             ) : (
-              <div className="flex-1 overflow-y-auto max-h-[450px] pr-1
-                              scrollbar-thin scrollbar-thumb-s-border/50
+              <div className="flex-1 overflow-y-auto max-h-[320px] pr-1
+                              scrollbar-thin scrollbar-thumb-s-border/30
                               scrollbar-track-transparent">
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-2 gap-2.5">
                   {filteredScheds.map(s => (
                     <DashSchedCard key={s.id} schedule={s} />
                   ))}
