@@ -9,9 +9,9 @@ import useTasks from '../stores/useTasks';
 /* ── Helpers ──────────────────────────────────────────────────────────────── */
 
 const PRI = {
-  high:   { dot: 'bg-red-400',   text: 'text-red-400',   bg: 'bg-red-400/8',   label: 'High'   },
-  medium: { dot: 'bg-amber-400', text: 'text-amber-400', bg: 'bg-amber-400/8', label: 'Medium' },
-  low:    { dot: 'bg-s-text-4',  text: 'text-s-text-4',  bg: 'bg-s-border/40', label: 'Low'    },
+  high:   { dot: 'bg-s-text-3',  text: 'text-s-text-3',  bg: 'bg-s-bg/60',    label: 'High'   },
+  medium: { dot: 'bg-s-text-4',  text: 'text-s-text-4',  bg: 'bg-s-border/30', label: 'Medium' },
+  low:    { dot: 'bg-s-text-4/50', text: 'text-s-text-4/60', bg: 'bg-s-border/20', label: 'Low' },
 };
 
 function dueBadge(task) {
@@ -20,9 +20,9 @@ function dueBadge(task) {
   const due = new Date(task.due_date + 'T00:00:00');
   const d   = Math.round((due - now) / 86400000);
   if (task.completed) return { l: 'Done', c: 'text-emerald-400 bg-emerald-400/10 border-emerald-400/20' };
-  if (d < 0)  return { l: 'Overdue',  c: 'text-red-400 bg-red-400/10 border-red-400/20', pulse: true };
-  if (d === 0) return { l: 'Today',    c: 'text-amber-400 bg-amber-400/10 border-amber-400/25' };
-  if (d === 1) return { l: 'Tomorrow', c: 'text-sky-400 bg-sky-400/8 border-sky-400/20' };
+  if (d < 0)  return { l: 'Overdue',  c: 'text-s-text-3 bg-s-bg/60 border-s-border/50', pulse: false };
+  if (d === 0) return { l: 'Today',    c: 'text-s-text-3 bg-s-bg/60 border-s-border/50' };
+  if (d === 1) return { l: 'Tomorrow', c: 'text-s-text-3 bg-s-bg/60 border-s-border/50' };
   if (d <= 7) return {
     l: due.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }),
     c: 'text-s-text-3 bg-s-card border-s-border'
@@ -269,55 +269,37 @@ function TaskCard({ task, onComplete, onDelete, onUpdate }) {
           {/* Checkbox */}
           {phase === 'idle' && (
             <button onClick={handleComplete}
-                    className="flex-shrink-0 w-6 h-6 rounded-full border-2
-                               border-s-text-4/15 hover:border-emerald-400
-                               hover:bg-emerald-400/5 flex items-center justify-center
-                               transition-all duration-300 hover:scale-110 mt-0.5" />
+                    className="flex-shrink-0 w-6 h-6 rounded-full border
+                               border-s-text-4/20 hover:border-s-text-3/40
+                               flex items-center justify-center
+                               transition-all duration-200 mt-0.5" />
           )}
           {phase !== 'idle' && phase !== 'fading' && (
-            <div className="flex-shrink-0 w-6 h-6 rounded-full bg-s-accent/10
-                            border-2 border-s-accent/30 flex items-center justify-center
-                            transition-all duration-500 mt-0.5">
-              <Check size={12} className="text-s-accent" />
+            <div className="flex-shrink-0 w-6 h-6 rounded-full border
+                            border-s-text-3/30 flex items-center justify-center
+                            transition-all duration-300 mt-0.5">
+              <Check size={12} className="text-s-text-3" />
             </div>
           )}
         </div>
 
         {/* ── Countdown ──────────────────────────────────────── */}
         {phase === 'countdown' && (
-          <div className="my-3 bg-s-bg/80 border border-s-border rounded-xl
-                          px-4 py-3 flex items-center justify-between
-                          transition-all duration-500 ease-out">
-            <div className="flex items-center gap-3">
-              <div className="relative w-9 h-9">
-                <svg className="w-9 h-9 -rotate-90" viewBox="0 0 36 36">
-                  <circle cx="18" cy="18" r="15" fill="none"
-                          stroke="currentColor" strokeWidth="2"
-                          className="text-s-border" />
-                  <circle cx="18" cy="18" r="15" fill="none"
-                          stroke="currentColor" strokeWidth="2"
-                          className="text-s-accent"
-                          strokeDasharray={`${2 * Math.PI * 15}`}
-                          strokeDashoffset={`${2 * Math.PI * 15 * (1 - countdown / 7)}`}
-                          strokeLinecap="round"
-                          style={{ transition: 'stroke-dashoffset 1s linear' }} />
-                </svg>
-                <span className="absolute inset-0 flex items-center justify-center
-                                 text-[12px] font-bold text-s-accent font-mono">
-                  {countdown}
-                </span>
-              </div>
-              <div>
-                <p className="text-[11px] text-s-text-2 font-semibold">Task completed</p>
-                <p className="text-[9px] text-s-text-4">
-                  Moves to completed in {countdown}s
-                </p>
-              </div>
+          <div className="my-2 bg-s-bg/40 border border-s-border/40 rounded-lg
+                          px-3 py-2 flex items-center justify-between
+                          transition-all duration-300">
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-mono text-s-text-4 font-medium">
+                {countdown}s
+              </span>
+              <span className="text-[9px] text-s-text-4">
+                Moving to completed
+              </span>
             </div>
             <button onClick={cancelComplete}
-                    className="px-3.5 py-1.5 rounded-lg border border-s-border
-                               text-[9px] text-s-text-3 font-semibold
-                               hover:bg-s-card hover:text-s-text transition-all duration-200">
+                    className="px-2.5 py-1 rounded-md text-[8px] text-s-text-4
+                               border border-s-border/40 hover:text-s-text-3
+                               hover:bg-s-card/40 transition-all duration-200">
               Undo
             </button>
           </div>
@@ -354,20 +336,19 @@ function TaskCard({ task, onComplete, onDelete, onUpdate }) {
             ) : (
               <>
                 {badge && (
-                  <span className={`inline-flex items-center gap-1 text-[9px] font-semibold
-                                    px-2.5 py-1 rounded-lg border ${badge.c}
-                                    ${badge.pulse ? 'animate-pulse' : ''}`}>
-                    {badge.pulse ? <AlertCircle size={9} /> : <Calendar size={9} />}
-                    {badge.l}
-                  </span>
+              <span className={`inline-flex items-center gap-0.5 text-[8px] font-medium
+                                px-2 py-0.5 rounded-md border ${badge.c}`}>
+                <Calendar size={8} />
+                {badge.l}
+              </span>
                 )}
                 {task.due_date && (
                   <button onClick={() => setEditDate(true)}
-                          className="text-[9px] text-s-text-3 font-mono bg-s-bg/60
-                                     px-2.5 py-1 rounded-lg border border-s-border/40
-                                     hover:border-s-accent/30 hover:text-s-accent
-                                     transition-all duration-200 flex items-center gap-1.5">
-                    <Calendar size={9} />
+                          className="text-[8.5px] text-s-text-3 font-mono bg-s-bg/40
+                                     px-2 py-0.5 rounded-md border border-s-border/30
+                                     hover:border-s-text-4/30 hover:text-s-text-2
+                                     transition-all duration-200 flex items-center gap-1">
+                    <Calendar size={8} />
                     {fmtDateTime(task.due_date, task.due_time)}
                   </button>
                 )}
@@ -380,12 +361,10 @@ function TaskCard({ task, onComplete, onDelete, onUpdate }) {
                   </button>
                 )}
                 {deadline && (
-                  <span className={`inline-flex items-center gap-1 text-[8px] font-semibold
-                                    px-2 py-0.5 rounded-lg
-                    ${deadline.urgent
-                      ? 'text-red-400 bg-red-400/8'
-                      : 'text-s-text-4 bg-s-border/20'}`}>
-                    <Clock size={8} />
+                  <span className="inline-flex items-center gap-1 text-[7.5px] font-medium
+                                   px-1.5 py-0.5 rounded-md text-s-text-4 bg-s-bg/30
+                                   border border-s-border/20">
+                    <Clock size={7} />
                     {deadline.text}
                   </span>
                 )}
@@ -439,7 +418,7 @@ function TaskCard({ task, onComplete, onDelete, onUpdate }) {
           <div className="mt-4">
             {subTotal > 0 ? (
               <div className="bg-s-bg/40 border border-s-border/30 rounded-xl
-                              overflow-hidden transition-all duration-500">
+                              overflow-hidden transition-all duration-300 max-h-[240px]">
                 <div className="px-3.5 py-2 border-b border-s-border/20
                                 flex items-center justify-between">
                   <span className="text-[8px] text-s-text-4/60 uppercase tracking-widest
@@ -451,8 +430,8 @@ function TaskCard({ task, onComplete, onDelete, onUpdate }) {
                   </span>
                 </div>
 
-                <div className="p-2 space-y-0.5 max-h-[200px] overflow-y-auto
-                                scrollbar-thin scrollbar-thumb-s-border/50
+                <div className="p-2 space-y-0.5 max-h-[140px] overflow-y-auto
+                                scrollbar-thin scrollbar-thumb-s-border/30
                                 scrollbar-track-transparent">
                   {subs.map(sub => (
                     <div key={sub.id}
@@ -460,17 +439,17 @@ function TaskCard({ task, onComplete, onDelete, onUpdate }) {
                                     group/sub hover:bg-s-card/50
                                     transition-all duration-200">
                       <button onClick={() => toggleSub(sub.id)}
-                              className={`flex-shrink-0 transition-all duration-300
+                              className={`flex-shrink-0 transition-all duration-200
                                 ${sub.completed
-                                  ? 'text-emerald-400'
-                                  : 'text-s-text-4/25 hover:text-s-accent'}`}>
+                                  ? 'text-s-text-3'
+                                  : 'text-s-text-4/20 hover:text-s-text-4/50'}`}>
                         {sub.completed
-                          ? <CheckCircle2 size={15} />
-                          : <Circle size={15} />}
+                          ? <CheckCircle2 size={14} />
+                          : <Circle size={14} />}
                       </button>
-                      <span className={`flex-1 text-[11px] transition-all duration-300
+                      <span className={`flex-1 text-[11px] transition-all duration-200
                         ${sub.completed
-                          ? 'line-through text-s-text-4/30 decoration-emerald-400/30'
+                          ? 'line-through text-s-text-4/30 decoration-s-text-4/20'
                           : 'text-s-text-3'}`}>
                         {sub.text}
                       </span>
@@ -522,8 +501,7 @@ function TaskCard({ task, onComplete, onDelete, onUpdate }) {
                       <div className="h-full rounded-full transition-all duration-700 ease-out"
                            style={{
                              width: `${pct}%`,
-                             backgroundColor: pct === 100 ? '#34d399' :
-                                              pct >= 50  ? 'var(--s-accent,#60a5fa)' : '#fbbf24'
+                             backgroundColor: 'var(--s-text-4, #52525b)'
                            }} />
                     </div>
                     <span className="text-[8px] font-mono text-s-text-4/40 w-8 text-right">
@@ -578,8 +556,8 @@ function TaskCard({ task, onComplete, onDelete, onUpdate }) {
                           border-t border-s-border/15">
             {/* Priority */}
             <div className="flex items-center gap-2">
-              <div className={`w-2 h-2 rounded-full ${pri.dot}`} />
-              <span className={`text-[9px] font-semibold uppercase tracking-wider
+              <div className={`w-1.5 h-1.5 rounded-full ${pri.dot}`} />
+              <span className={`text-[8px] font-medium uppercase tracking-wider
                                 ${pri.text}`}>
                 {pri.label}
               </span>
@@ -733,11 +711,12 @@ function QuickAdd({ onAdd }) {
                   const c = PRI[p];
                   return (
                     <button key={p} onClick={() => setPriority(p)}
-                            className={`px-3 py-1.5 rounded-lg text-[8px] font-bold
-                                        uppercase tracking-wider transition-all duration-200
+                    className={`px-3 py-1.5 rounded-lg text-[8px] font-semibold
+                                        uppercase tracking-wider
+                                        transition-all duration-200
                               ${priority === p
-                                ? `${c.text} ${c.bg} border border-current/15`
-                                : 'text-s-text-4/25 hover:text-s-text-3 border border-transparent'}`}>
+                                ? 'text-s-text-2 bg-s-bg/60 border border-s-border/50'
+                                : 'text-s-text-4/30 hover:text-s-text-3 border border-transparent'}`}>
                       {p}
                     </button>
                   );
@@ -891,13 +870,13 @@ export default function Tasks() {
               {stats.pending} pending
             </span>
             {stats.overdue > 0 && (
-              <span className="text-[10px] text-red-400 font-semibold flex items-center gap-1">
-                <AlertCircle size={10} /> {stats.overdue} overdue
+              <span className="text-[10px] text-s-text-3 font-medium flex items-center gap-1">
+                <AlertCircle size={9} /> {stats.overdue} overdue
               </span>
             )}
             {stats.due_today > 0 && (
-              <span className="text-[10px] text-amber-400 font-semibold flex items-center gap-1">
-                <Clock size={10} /> {stats.due_today} due today
+              <span className="text-[10px] text-s-text-3 font-medium flex items-center gap-1">
+                <Clock size={9} /> {stats.due_today} due today
               </span>
             )}
           </div>
@@ -954,12 +933,11 @@ export default function Tasks() {
         <QuickAdd onAdd={add} />
 
         {stats.overdue > 0 && filter === 'pending' && (
-          <div className="flex items-center gap-3 px-5 py-3 rounded-2xl
-                          bg-red-400/5 border border-red-400/15 mb-5
-                          animate-in fade-in duration-500">
-            <AlertCircle size={15} className="text-red-400 animate-pulse flex-shrink-0" />
-            <span className="text-[11px] text-red-400 font-semibold">
-              {stats.overdue} overdue task{stats.overdue !== 1 ? 's' : ''} need attention
+          <div className="flex items-center gap-3 px-4 py-2.5 rounded-xl
+                          bg-s-bg/60 border border-s-border/40 mb-4">
+            <AlertCircle size={13} className="text-s-text-4 flex-shrink-0" />
+            <span className="text-[10px] text-s-text-3 font-medium">
+              {stats.overdue} overdue task{stats.overdue !== 1 ? 's' : ''}
             </span>
           </div>
         )}
