@@ -287,13 +287,18 @@ function TaskCard({ task, onComplete, onDelete, onUpdate }) {
             </div>
 
             {/* Description */}
-            <div className="mb-3">
+            <div className="mb-3 flex-shrink-0">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-[9px] text-white/40 uppercase tracking-wider font-semibold">
+                  Description
+                </span>
+              </div>
               {editDesc ? (
                 <textarea ref={descRef} value={descVal}
                           onChange={e => setDescVal(e.target.value)}
                           onBlur={saveDesc}
                           onKeyDown={e => { if (e.key==='Escape') { setEditDesc(false); setDescVal(task.description||''); } }}
-                          rows={4}
+                          rows={subTotal > 0 ? 3 : 6}
                           className="w-full bg-white/[0.02] border border-white/10 rounded-lg
                                      text-[11px] text-white/85 outline-none px-3 py-2
                                      resize-none focus:border-white/25 transition-colors
@@ -301,9 +306,13 @@ function TaskCard({ task, onComplete, onDelete, onUpdate }) {
                           placeholder="Details, notes..." />
               ) : hasDesc ? (
                 <div onClick={() => setEditDesc(true)}
-                     className="bg-white/[0.02] rounded-lg px-3 py-2 cursor-pointer
-                                hover:bg-white/[0.04] transition-colors duration-200
-                                border border-white/5 hover:border-white/10">
+                     className={`bg-white/[0.02] rounded-lg px-3 py-2 cursor-pointer
+                                hover:bg-white/[0.04] transition-all duration-200
+                                border border-white/5 hover:border-white/10
+                                overflow-y-auto overflow-x-hidden
+                                scrollbar-thin scrollbar-thumb-white/10
+                                scrollbar-track-transparent
+                                ${subTotal > 0 ? 'h-[70px]' : 'h-[180px]'}`}>
                   <p className="text-[11px] text-white/75 leading-[1.6] whitespace-pre-wrap"
                      style={{ wordBreak: 'break-word' }}>
                     {task.description}
@@ -311,16 +320,21 @@ function TaskCard({ task, onComplete, onDelete, onUpdate }) {
                 </div>
               ) : (
                 <button onClick={() => setEditDesc(true)}
-                        className="text-[10px] text-white/25 hover:text-white/50
-                                   transition-colors italic">
-                  Add description
+                        className={`w-full text-left rounded-lg px-3 py-2 cursor-pointer
+                                    hover:bg-white/[0.03] transition-all duration-200
+                                    border border-dashed border-white/8 hover:border-white/15
+                                    flex items-center
+                                    ${subTotal > 0 ? 'h-[70px]' : 'h-[180px]'}`}>
+                  <span className="text-[10px] text-white/25 italic">
+                    Click to add description
+                  </span>
                 </button>
               )}
             </div>
 
             {/* Subtasks */}
             {subTotal > 0 && (
-              <div className="mb-3">
+              <div className="flex-shrink-0 mb-2">
                 <div className="flex items-center justify-between mb-1.5">
                   <span className="text-[9px] text-white/40 uppercase tracking-wider font-semibold">
                     Subtasks
@@ -330,12 +344,13 @@ function TaskCard({ task, onComplete, onDelete, onUpdate }) {
                   </span>
                 </div>
 
-                <div className="space-y-0.5 max-h-[110px] overflow-y-auto pr-1
-                                scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
+                <div className="space-y-0.5 h-[100px] overflow-y-auto pr-1
+                                scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent
+                                bg-white/[0.01] rounded-lg p-1.5">
                   {subs.map(sub => (
                     <div key={sub.id}
                          className="flex items-center gap-2 py-1 px-1.5 rounded-md
-                                    group/sub hover:bg-white/[0.03] transition-colors">
+                                    group/sub hover:bg-white/[0.04] transition-colors">
                       <button onClick={() => toggleSub(sub.id)}
                               className={`flex-shrink-0 transition-colors
                                 ${sub.completed ? 'text-white/50' : 'text-white/20 hover:text-white/45'}`}>
@@ -370,42 +385,34 @@ function TaskCard({ task, onComplete, onDelete, onUpdate }) {
               </div>
             )}
 
-            {/* Add subtask */}
-            {addingSub ? (
-              <div className="flex items-center gap-2 mb-2">
-                <Circle size={12} className="text-white/15 flex-shrink-0" />
-                <input ref={subRef} value={newSub}
-                       onChange={e => setNewSub(e.target.value)}
-                       onKeyDown={e => { if (e.key==='Enter') addSubtask(); if (e.key==='Escape') { setAddingSub(false); setNewSub(''); } }}
-                       placeholder="Subtask..."
-                       className="flex-1 bg-transparent text-[10.5px] text-white/85
-                                  placeholder-white/25 outline-none" />
-                <button onClick={addSubtask}
-                        className="text-[9px] text-white/60 hover:text-white/90
-                                   transition-colors font-medium">Add</button>
-              </div>
-            ) : (
-              subTotal === 0 && (
+            {/* Add subtask button */}
+            <div className="flex-shrink-0">
+              {addingSub ? (
+                <div className="flex items-center gap-2 mb-2">
+                  <Circle size={12} className="text-white/15 flex-shrink-0" />
+                  <input ref={subRef} value={newSub}
+                         onChange={e => setNewSub(e.target.value)}
+                         onKeyDown={e => { if (e.key==='Enter') addSubtask(); if (e.key==='Escape') { setAddingSub(false); setNewSub(''); } }}
+                         placeholder="Subtask..."
+                         className="flex-1 bg-transparent text-[10.5px] text-white/85
+                                    placeholder-white/25 outline-none" />
+                  <button onClick={addSubtask}
+                          className="text-[9px] text-white/60 hover:text-white/90
+                                     transition-colors font-medium">Add</button>
+                </div>
+              ) : (
                 <button onClick={() => setAddingSub(true)}
-                        className="text-[10px] text-white/25 hover:text-white/50
-                                   transition-colors italic mb-2">
-                  Add subtasks
+                        className="text-[9.5px] text-white/30 hover:text-white/60
+                                   transition-colors flex items-center gap-1">
+                  <Plus size={10} /> {subTotal === 0 ? 'Add subtasks' : 'Add subtask'}
                 </button>
-              )
-            )}
-
-            {subTotal > 0 && !addingSub && (
-              <button onClick={() => setAddingSub(true)}
-                      className="text-[9.5px] text-white/30 hover:text-white/60
-                                 transition-colors flex items-center gap-1 mb-1">
-                <Plus size={10} /> Add subtask
-              </button>
-            )}
+              )}
+            </div>
           </>
         )}
 
         {/* Spacer pushes footer down */}
-        <div className="flex-1 min-h-[8px]" />
+        <div className="flex-1 min-h-[4px]" />
       </div>
 
       {/* Footer */}
@@ -723,7 +730,7 @@ export default function Tasks() {
           </div>
         ) : (
           <div className="grid grid-cols-3 gap-4"
-               style={{ gridAutoRows: '380px' }}>
+               style={{ gridAutoRows: '460px' }}>
             {filtered.map(t => (
               <TaskCard key={t.id} task={t}
                         onComplete={handleComplete}
