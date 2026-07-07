@@ -331,33 +331,16 @@ ipcMain.on('panel-open-seven-tasks', () => {
 // ── Trigger file polling ─────────────────────────────────────────────────────
 
 function startTriggerPolling() {
-  if (triggerPoller) return;
+  // DISABLED - panel only opens via Alt+Shift+T or tray click
+  // Automatic triggers were causing panel to appear unexpectedly
+  console.log('[PANEL HOST] Trigger polling disabled by design');
+}
 
-  // Start polling after 5 second delay so any stale triggers are ignored during startup
-  setTimeout(() => {
-    triggerPoller = setInterval(() => {
-      if (fs.existsSync(TRIGGER_FILE)) {
-        try {
-          const stat = fs.statSync(TRIGGER_FILE);
-          const ageSeconds = (Date.now() - stat.mtimeMs) / 1000;
-
-          // Only trigger if file was written in last 10 seconds (fresh)
-          if (ageSeconds < 10) {
-            const data = JSON.parse(fs.readFileSync(TRIGGER_FILE, 'utf8'));
-            fs.unlinkSync(TRIGGER_FILE);
-            console.log('[PANEL HOST] Trigger detected:', data.reason);
-            createPanelWindow();
-          } else {
-            // Stale file, just remove it
-            fs.unlinkSync(TRIGGER_FILE);
-            console.log('[PANEL HOST] Removed stale trigger file');
-          }
-        } catch (e) {
-          try { fs.unlinkSync(TRIGGER_FILE); } catch (_) {}
-        }
-      }
-    }, 1000);
-  }, 5000);
+function stopTriggerPolling() {
+  if (triggerPoller) {
+    clearInterval(triggerPoller);
+    triggerPoller = null;
+  }
 }
 
 function stopTriggerPolling() {
@@ -417,7 +400,8 @@ function createTray() {
     tray.setContextMenu(menu);
     tray.setToolTip('Seven Tasks — Alt+Shift+T');
 
-    tray.on('click', () => togglePanel());
+    // Tray click does nothing - only right-click menu opens panel
+    // Prevents accidental panel opens
 
     console.log('[PANEL HOST] Tray created');
   } catch (e) {
@@ -429,17 +413,19 @@ function createTray() {
 
 app.whenReady().then(async () => {
   console.log('[PANEL HOST] Starting...');
+  console.log('[PANEL HOST] PID:', process.pid);
   console.log('[PANEL HOST] Project root:', PROJECT_ROOT);
-  console.log('[PANEL HOST] Panel HTML:', PANEL_HTML, 'exists:', fs.existsSync(PANEL_HTML));
-  console.log('[PANEL HOST] Panel server:', PANEL_SERVER, 'exists:', fs.existsSync(PANEL_SERVER));
 
-  // Clear any stale trigger file from previous session
-  try {
-    if (fs.existsSync(TRIGGER_FILE)) {
-      fs.unlinkSync(TRIGGER_FILE);
-      console.log('[PANEL HOST] Cleared stale trigger file');
-    }
-  } catch (e) {}
+  // Aggressive cleanup — remove trigger file multiple times to prevent race
+  for (let i = 0; i < 3; i++) {
+    try {
+      if (fs.existsSync(TRIGGER_FILE)) {
+        fs.unlinkSync(TRIGGER_FILE);
+        console.log('[PANEL HOST] Removed trigger file (attempt ' + (i+1) + ')');
+      }
+    } catch (e) {}
+    await new Promise(r => setTimeout(r, 100));
+  }
 
   // Start panel server
   startPanelServer();
@@ -452,20 +438,16 @@ app.whenReady().then(async () => {
     togglePanel();
   });
 
-  if (ok) {
-    console.log('[PANEL HOST] Shortcut registered:', shortcut);
-  } else {
-    const fallback = 'Ctrl+Alt+T';
-    const fb = globalShortcut.register(fallback, () => togglePanel());
-    console.log('[PANEL HOST] Fallback shortcut:', fallback, fb ? 'OK' : 'FAILED');
+  if (ok) console.log('[PANEL HOST] Shortcut registered:', shortcut);
+  else {
+    const fb = globalShortcut.register('Ctrl+Alt+T', () => togglePanel());
+    console.log('[PANEL HOST] Fallback shortcut:', fb ? 'OK' : 'FAILED');
   }
 
-  // Tray
   createTray();
 
-  // Start polling triggers
-  startTriggerPolling();
-
+  // Trigger polling DISABLED - panel only opens on user shortcut or tray click
+  // This prevents any automatic opening from stale files or other processes
   console.log('[PANEL HOST] Ready. Press Alt+Shift+T to open tasks.');
 });
 

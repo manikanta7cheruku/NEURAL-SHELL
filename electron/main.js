@@ -574,21 +574,45 @@ if (!gotTheLock) {
 function launchPanelHost() {
   const panelHostScript = path.join(__dirname, 'panel_host.js');
 
+  // Kill any existing panel_host processes from previous session
+  if (process.platform === 'win32') {
+    try {
+      exec('wmic process where "commandline like \'%panel_host.js%\'" get processid /format:value', (err, stdout) => {
+        if (err) return;
+        const pids = stdout.match(/ProcessId=(\d+)/g);
+        if (pids) {
+          pids.forEach(match => {
+            const pid = match.replace('ProcessId=', '');
+            if (pid && parseInt(pid) !== process.pid) {
+              try {
+                exec(`taskkill /pid ${pid} /f /t`);
+                console.log('[PANEL] Killed old panel_host PID:', pid);
+              } catch (e) {}
+            }
+          });
+        }
+      });
+    } catch (e) {}
+  }
+
   if (!fs.existsSync(panelHostScript)) {
     console.warn('[PANEL] panel_host.js not found:', panelHostScript);
     return;
   }
 
-  // Check if host is already running by checking single instance lock
-  // The host itself handles duplicate prevention via requestSingleInstanceLock
-  // So we can safely try to spawn — if already running, it will exit immediately
+  // Clear any stale trigger file BEFORE spawning host
+  try {
+    const APPDATA = process.env.APPDATA || require('os').homedir();
+    const triggerFile = path.join(APPDATA, 'SEVEN', 'panel_trigger.json');
+    if (fs.existsSync(triggerFile)) {
+      fs.unlinkSync(triggerFile);
+      console.log('[PANEL] Cleared stale trigger file before host launch');
+    }
+  } catch (e) {}
 
-  const electronExe = process.execPath; // Path to electron executable
+  const electronExe = process.execPath;
 
   try {
-    const CREATE_NO_WINDOW = 0x08000000;
-    const DETACHED_PROCESS = 0x00000008;
-
     panelHostProcess = spawn(electronExe, [panelHostScript], {
       cwd:         getAppSourcePath(),
       detached:    true,
@@ -601,7 +625,7 @@ function launchPanelHost() {
       },
     });
 
-    panelHostProcess.unref(); // Let it run independently
+    panelHostProcess.unref();
     panelHostProcess.on('error', (err) => {
       console.error('[PANEL] Host spawn error:', err.message);
     });
@@ -699,16 +723,27 @@ function launchPanelHost() {
   app.on('before-quit', () => {
     app.isQuitting = true;
     globalShortcut.unregisterAll();
-    // Do NOT stop panel host — it must stay alive after Seven quits
-    // Panel host manages its own lifecycle
-    if (statusWindow) {
-      statusWindow.destroy();
-      statusWindow = null;
+
+    // Kill panel host process on Seven quit
+    if (process.platform === 'win32') {
+      try {
+        exec('wmic process where "commandline like \'%panel_host.js%\'" get processid /format:value', (err, stdout) => {
+          if (err) return;
+          const pids = stdout.match(/ProcessId=(\d+)/g);
+          if (pids) {
+            pids.forEach(match => {
+              const pid = match.replace('ProcessId=', '');
+              if (pid && parseInt(pid) !== process.pid) {
+                try { exec(`taskkill /pid ${pid} /f /t`); } catch (e) {}
+              }
+            });
+          }
+        });
+      } catch (e) {}
     }
-    if (mainWindow) {
-      mainWindow.destroy();
-      mainWindow = null;
-    }
+
+    if (statusWindow) { statusWindow.destroy(); statusWindow = null; }
+    if (mainWindow)   { mainWindow.destroy();   mainWindow = null; }
     stopPython();
   });
 
