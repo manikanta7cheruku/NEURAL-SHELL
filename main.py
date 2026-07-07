@@ -394,28 +394,49 @@ def seven_logic():
 
         # Tasks
         try:
-            from backend.routes.tasks import db_get_due_today, db_get_overdue
+            from backend.routes.tasks import db_get_due_today, db_get_overdue, db_get_stats
             _td = db_get_due_today()
             _od = db_get_overdue()
-            print(Fore.CYAN + f"[BRIEF] tasks today={len(_td)} overdue={len(_od)}")
+            _stats = db_get_stats()
+            _total_pending = _stats.get("pending", 0)
+            print(Fore.CYAN + f"[BRIEF] tasks today={len(_td)} overdue={len(_od)} total_pending={_total_pending}")
 
-            if _td:
+            if _od:
+                # Overdue is highest priority
+                _oc = len(_od)
+                parts.append(
+                    f"You have {_oc} overdue task{'s' if _oc != 1 else ''}."
+                )
+                if _td:
+                    parts.append(f"Plus {len(_td)} due today.")
+            elif _td:
                 _pm  = {"high": 3, "medium": 2, "low": 1}
                 _top = max(_td, key=lambda t: _pm.get(t.get("priority", "medium"), 2))
                 if len(_td) == 1:
-                    parts.append(f"One task due today: {_top['text']}.")
+                    parts.append(f"One task on your plate today: {_top['text']}.")
                 else:
                     parts.append(
-                        f"{len(_td)} tasks due today. "
-                        f"Top priority: {_top['text'][:40]}."
+                        f"{len(_td)} tasks today. "
+                        f"Priority is {_top['text'][:40]}."
                     )
-            if _od:
-                _oc = len(_od)
+            elif _total_pending > 0:
+                # No urgent tasks but there are pending ones
                 parts.append(
-                    f"{_oc} overdue task{'s' if _oc != 1 else ''} need your attention."
+                    f"You have {_total_pending} pending task{'s' if _total_pending != 1 else ''}, "
+                    f"nothing due today."
                 )
+            else:
+                # Completely clear
+                import random as _rc
+                parts.append(_rc.choice([
+                    "Your plate is clear.",
+                    "No tasks on the list.",
+                    "Nothing pending. Clear day ahead.",
+                    "All caught up.",
+                ]))
         except Exception as _te:
             print(Fore.YELLOW + f"[BRIEF] tasks failed: {_te}")
+            import traceback; traceback.print_exc()
             import traceback; traceback.print_exc()
 
         # Schedules
