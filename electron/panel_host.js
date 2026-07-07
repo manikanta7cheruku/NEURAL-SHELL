@@ -333,20 +333,31 @@ ipcMain.on('panel-open-seven-tasks', () => {
 function startTriggerPolling() {
   if (triggerPoller) return;
 
-  triggerPoller = setInterval(() => {
-    // Method 1: Check trigger file directly (works without panel server)
-    if (fs.existsSync(TRIGGER_FILE)) {
-      try {
-        const data = JSON.parse(fs.readFileSync(TRIGGER_FILE, 'utf8'));
-        fs.unlinkSync(TRIGGER_FILE);
-        console.log('[PANEL HOST] Trigger detected:', data.reason);
-        createPanelWindow();
-      } catch (e) {
-        // Corrupted file, remove it
-        try { fs.unlinkSync(TRIGGER_FILE); } catch (_) {}
+  // Start polling after 5 second delay so any stale triggers are ignored during startup
+  setTimeout(() => {
+    triggerPoller = setInterval(() => {
+      if (fs.existsSync(TRIGGER_FILE)) {
+        try {
+          const stat = fs.statSync(TRIGGER_FILE);
+          const ageSeconds = (Date.now() - stat.mtimeMs) / 1000;
+
+          // Only trigger if file was written in last 10 seconds (fresh)
+          if (ageSeconds < 10) {
+            const data = JSON.parse(fs.readFileSync(TRIGGER_FILE, 'utf8'));
+            fs.unlinkSync(TRIGGER_FILE);
+            console.log('[PANEL HOST] Trigger detected:', data.reason);
+            createPanelWindow();
+          } else {
+            // Stale file, just remove it
+            fs.unlinkSync(TRIGGER_FILE);
+            console.log('[PANEL HOST] Removed stale trigger file');
+          }
+        } catch (e) {
+          try { fs.unlinkSync(TRIGGER_FILE); } catch (_) {}
+        }
       }
-    }
-  }, 1000);
+    }, 1000);
+  }, 5000);
 }
 
 function stopTriggerPolling() {
@@ -421,6 +432,14 @@ app.whenReady().then(async () => {
   console.log('[PANEL HOST] Project root:', PROJECT_ROOT);
   console.log('[PANEL HOST] Panel HTML:', PANEL_HTML, 'exists:', fs.existsSync(PANEL_HTML));
   console.log('[PANEL HOST] Panel server:', PANEL_SERVER, 'exists:', fs.existsSync(PANEL_SERVER));
+
+  // Clear any stale trigger file from previous session
+  try {
+    if (fs.existsSync(TRIGGER_FILE)) {
+      fs.unlinkSync(TRIGGER_FILE);
+      console.log('[PANEL HOST] Cleared stale trigger file');
+    }
+  } catch (e) {}
 
   // Start panel server
   startPanelServer();
