@@ -152,6 +152,37 @@ def complete_task(task_id: int):
         return {"success": True, "source": "direct"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    
+@app.put("/panel/tasks/{task_id}/subtasks")
+def update_subtasks(task_id: int, body: dict):
+    """Update subtasks list for a task."""
+    subtasks = body.get("subtasks", [])
+    subtasks_json = json.dumps(subtasks) if subtasks else "[]"
+
+    # Try Seven API first
+    try:
+        import requests as _r
+        resp = _r.put(
+            f"http://127.0.0.1:7777/api/tasks/{task_id}",
+            json={"subtasks": subtasks},
+            timeout=2
+        )
+        if resp.status_code == 200:
+            return {"success": True, "source": "seven"}
+    except Exception:
+        pass
+
+    # Direct DB fallback
+    try:
+        with _conn() as conn:
+            conn.execute(
+                "UPDATE tasks SET subtasks=? WHERE id=?",
+                (subtasks_json, task_id)
+            )
+            conn.commit()
+        return {"success": True, "source": "direct"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/panel/trigger")

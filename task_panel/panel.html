@@ -172,6 +172,58 @@
   }
 
   /* List */
+
+    /* Filter tabs */
+  #filters {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    flex-shrink: 0;
+  }
+
+  .filter-chip {
+    padding: 5px 10px;
+    border-radius: 7px;
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--text-4);
+    font-size: 9.5px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 200ms ease;
+    letter-spacing: 0.02em;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+
+  .filter-chip:hover {
+    color: var(--text-2);
+    background: rgba(255,255,255,0.03);
+  }
+
+  .filter-chip.active {
+    background: rgba(124,140,255,0.1);
+    color: var(--accent);
+    border-color: rgba(124,140,255,0.2);
+  }
+
+  .filter-count {
+    font-size: 8px;
+    background: rgba(255,255,255,0.06);
+    padding: 1px 5px;
+    border-radius: 8px;
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 700;
+  }
+
+  .filter-chip.active .filter-count {
+    background: rgba(124,140,255,0.2);
+  }
+
   #task-list {
     flex: 1;
     overflow-y: auto;
@@ -522,6 +574,19 @@
   <!-- Timer -->
   <div id="timer-bar"><div id="timer-fill"></div></div>
 
+  <!-- Filters -->
+  <div id="filters">
+    <button class="filter-chip active" data-filter="all" onclick="setFilter('all')">
+      All <span class="filter-count" id="cnt-all">0</span>
+    </button>
+    <button class="filter-chip" data-filter="today" onclick="setFilter('today')">
+      Today <span class="filter-count" id="cnt-today">0</span>
+    </button>
+    <button class="filter-chip" data-filter="overdue" onclick="setFilter('overdue')">
+      Overdue <span class="filter-count" id="cnt-overdue">0</span>
+    </button>
+  </div>
+
   <!-- Loading -->
   <div id="loading"><div class="spinner"></div></div>
 
@@ -560,7 +625,55 @@
 const PANEL_PORT = 7778;
 const AUTO_CLOSE = 15;
 
-let tasks = [], timerLeft = AUTO_CLOSE, timerInterval = null, countdowns = {};
+let tasks = [], allTasks = [], timerLeft = AUTO_CLOSE, timerInterval = null, countdowns = {};
+let currentFilter = 'all';
+
+function setFilter(f) {
+  currentFilter = f;
+  document.querySelectorAll('.filter-chip').forEach(c => {
+    c.classList.toggle('active', c.dataset.filter === f);
+  });
+  applyFilter();
+  resetTimer();
+}
+
+function applyFilter() {
+  const today = new Date(); today.setHours(0,0,0,0);
+  const now = new Date();
+
+  if (currentFilter === 'today') {
+    tasks = allTasks.filter(t => {
+      if (!t.due_date) return false;
+      const due = new Date(t.due_date + 'T00:00:00');
+      return due <= today;
+    });
+  } else if (currentFilter === 'overdue') {
+    tasks = allTasks.filter(t => {
+      if (!t.due_date) return false;
+      const due = new Date(t.due_date + 'T00:00:00');
+      return due < today;
+    });
+  } else {
+    tasks = allTasks;
+  }
+  renderTasks();
+}
+
+function updateFilterCounts() {
+  const today = new Date(); today.setHours(0,0,0,0);
+  const todayCount = allTasks.filter(t => {
+    if (!t.due_date) return false;
+    return new Date(t.due_date + 'T00:00:00') <= today;
+  }).length;
+  const overdueCount = allTasks.filter(t => {
+    if (!t.due_date) return false;
+    return new Date(t.due_date + 'T00:00:00') < today;
+  }).length;
+
+  document.getElementById('cnt-all').textContent = allTasks.length;
+  document.getElementById('cnt-today').textContent = todayCount;
+  document.getElementById('cnt-overdue').textContent = overdueCount;
+}
 
 window.addEventListener('DOMContentLoaded', () => {
   requestAnimationFrame(() => {
@@ -590,8 +703,9 @@ async function api(path, method = 'GET', body = null) {
 
 async function loadTasks() {
   try {
-    tasks = await api('/panel/tasks');
-    renderTasks();
+    allTasks = await api('/panel/tasks');
+    updateFilterCounts();
+    applyFilter();
   } catch (e) {
     console.error('Failed:', e);
     showEmpty();
@@ -680,13 +794,16 @@ function makeCard(task, index) {
           </div>
           <div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.05);border-radius:8px;padding:6px;max-height:100px;overflow-y:auto">
             ${subs.map(sub => `
-              <div style="display:flex;align-items:center;gap:8px;padding:4px 6px;border-radius:5px">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="${sub.completed ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,0.2)'}" stroke-width="2" style="flex-shrink:0">
+              <div onclick="toggleSubtask(${task.id}, '${sub.id}')"
+                   style="display:flex;align-items:center;gap:8px;padding:5px 6px;border-radius:5px;cursor:pointer;transition:background 150ms ease"
+                   onmouseover="this.style.background='rgba(255,255,255,0.04)'"
+                   onmouseout="this.style.background='transparent'">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="${sub.completed ? 'rgba(124,140,255,0.7)' : 'rgba(255,255,255,0.2)'}" stroke-width="2" style="flex-shrink:0;transition:stroke 200ms">
                   ${sub.completed 
                     ? '<circle cx="12" cy="12" r="10"/><path d="M9 12l2 2 4-4"/>'
                     : '<circle cx="12" cy="12" r="10"/>'}
                 </svg>
-                <span style="font-size:10px;color:${sub.completed ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.7)'};text-decoration:${sub.completed ? 'line-through' : 'none'};line-height:1.3">
+                <span style="font-size:10px;color:${sub.completed ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.75)'};text-decoration:${sub.completed ? 'line-through' : 'none'};text-decoration-color:rgba(255,255,255,0.2);line-height:1.3;flex:1;user-select:none">
                   ${escHtml(sub.text)}
                 </span>
               </div>
@@ -799,6 +916,41 @@ function undoComplete(taskId) {
   cdEl.innerHTML = '';
 }
 
+async function toggleSubtask(taskId, subId) {
+  const task = allTasks.find(t => t.id === taskId);
+  if (!task || !task.subtasks) return;
+
+  const updated = task.subtasks.map(s =>
+    s.id === subId ? { ...s, completed: !s.completed } : s
+  );
+
+  // Optimistic update
+  task.subtasks = updated;
+  const taskInFiltered = tasks.find(t => t.id === taskId);
+  if (taskInFiltered) taskInFiltered.subtasks = updated;
+
+  // Re-render just this card
+  const oldCard = document.getElementById(`card-${taskId}`);
+  if (oldCard) {
+    const idx = tasks.findIndex(t => t.id === taskId);
+    const newCard = makeCard(task, idx);
+    oldCard.replaceWith(newCard);
+  }
+
+  resetTimer();
+
+  // Update on server
+  try {
+    await fetch(`http://127.0.0.1:${PANEL_PORT}/panel/tasks/${taskId}/subtasks`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ subtasks: updated })
+    });
+  } catch (e) {
+    console.error('Subtask update failed:', e);
+  }
+}
+
 async function doComplete(taskId) {
   try { await api(`/panel/tasks/${taskId}/complete`, 'PUT'); }
   catch (e) { console.error(e); }
@@ -808,7 +960,9 @@ async function doComplete(taskId) {
     card.classList.add('done');
     setTimeout(() => {
       card.remove();
+      allTasks = allTasks.filter(t => t.id !== taskId);
       tasks = tasks.filter(t => t.id !== taskId);
+      updateFilterCounts();
       if (tasks.length === 0) showEmpty();
       loadStats();
     }, 500);
