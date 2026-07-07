@@ -1,7 +1,7 @@
 """
 =============================================================================
 PROJECT SEVEN - brain.py (The Orchestrator)
-Version: 1.3 (Modular Monolith Refactor)
+Version: 2.0 (Full pipeline refactor)
 
 WHAT THIS FILE IS:
     The single public interface for Seven's intelligence.
@@ -10,118 +10,65 @@ WHAT THIS FILE IS:
 
 WHAT THIS FILE IS NOT:
     It does not own any logic itself.
-    It delegates to brain_modules/ for everything.
+    It delegates to brain_modules/pipeline.py which runs 21 layers.
     It is the conductor, not the musician.
 
 DESIGN PATTERN: Facade Pattern
-    brain.think() is a Facade -- a simple interface hiding complex internals.
+    brain.think() is a Facade — a simple interface hiding complex internals.
     main.py never imports brain_modules directly.
     All complexity is behind this one function.
 
     WHY FACADE:
-        If we change how memory injection works, we change one brain_modules
-        file. main.py never needs to know. The interface stays stable.
+        If we change how memory injection works, we change one layer file.
+        main.py never needs to know. The interface stays stable.
         This is the Open/Closed Principle: open for extension (add new layers),
         closed for modification (main.py never changes).
 
-LAYER ORDER (Critical -- do not reorder):
-    Layer 1: Name setting         -- "my name is X" -> saves, returns immediately
-    Layer 2: Repetition detection -- repeated question -> short ack, returns
-    Layer 3: Identity overrides   -- "who are you", greetings -> returns immediately
-    Layer 4: TARS controls        -- "set humor to 80" -> saves, returns immediately
-    Layer 4.5: Command routing    -- open/close/volume/window/schedule -> tag + speech
-    Layer 5: Memory search        -- ChromaDB similarity search
-    Layer 5.3: Knowledge search   -- local knowledge base
-    Layer 5.5: Web search         -- DuckDuckGo live data
-    Layer 6: Personal Q filter    -- "what sport do I play?" with no memory -> returns
-    Layer 7: Fact extraction      -- learn from user statements
-    Layer 8: LLM inference        -- Ollama generates final response
+LAYER ORDER (Critical — do not reorder):
+    See brain_modules/pipeline.py for full LAYER_ORDER list.
 
 INTERVIEW TALKING POINT:
-    "brain.py is ~120 lines and contains no logic itself.
-     It is the entry point that orchestrates 8 processing layers.
-     Each layer either returns a response or passes the input to the next.
-     This is the Chain of Responsibility pattern. The first 4 layers handle
+    "brain.py is under 200 lines and contains no layer logic itself.
+     It is the entry point that orchestrates 21 processing layers.
+     Each layer either returns a response or passes to the next.
+     This is Chain of Responsibility pattern. The first 4 layers handle
      60-70% of inputs without any LLM call. Average latency for those is
      under 5ms. Only open-ended questions reach the LLM."
 
 MODULAR MONOLITH ARCHITECTURE:
     All brain_modules run in the SAME Python process as main.py.
-    Direct function calls -- zero network overhead.
-    This is why latency is sub-5ms for command layers.
+    Direct function calls — zero network overhead.
+    Sub-5ms latency for command layers.
     Alternative (microservices) would add 50-200ms per layer for HTTP calls.
     For a voice assistant, that is unacceptable.
 =============================================================================
 """
 
 import os
-import re
-import random
-import requests
-import time as _time
-
-import config
-import colorama
 from colorama import Fore
+import colorama
 colorama.init(autoreset=True)
 
+import config
 
-def _clean_response(text: str) -> str:
-    """
-    Strip robotic trailing phrases that LLMs append regardless of system prompt.
-    These come from RLHF training — the model learned to end responses with
-    assistant-style prompts. We remove them post-generation.
-    """
-    if not text:
-        return text
-
-    # Trailing phrases to strip — order matters, check longest first
-    _trailers = [
-        "go ahead.", "go ahead",
-        "what do you need?", "what do you need",
-        "what's your next request?", "whats your next request",
-        "how can i help?", "how can i help you?",
-        "is there anything else?", "is there anything else i can help",
-        "let me know if you need anything", "let me know if",
-        "feel free to ask", "feel free to",
-        "anything else?", "anything else i can",
-        "what would you like", "what else can i",
-        "i'm here if you need", "im here if",
-        "just let me know", "just ask if",
-        "what's next?", "whats next",
-        "what can i do for you", "how may i help",
-        "ready when you are", "standing by",
-        "awaiting your", "next command",
-    ]
-
-    text_lower = text.lower().rstrip()
-
-    for trailer in _trailers:
-        if text_lower.endswith(trailer):
-            # Remove the trailer and clean up punctuation
-            cut = len(text) - len(trailer)
-            text = text[:cut].rstrip(" .,!-—")
-            text_lower = text.lower().rstrip()
-            break  # Only strip one trailer per response
-
-    # Strip slash artifacts like "/ /" or "// " at end
-    import re
-    text = re.sub(r'\s*[/\\]+\s*$', '', text).strip()
-
-    return text.strip()
-
-# ---------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────────────────
 # MEMORY IMPORTS
 # Imported at module level so they are ready when think() is first called.
-# ---------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────────────────
 from memory import seven_memory
 from memory.mood import mood_engine
 
-# ---------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────────────────
+# PIPELINE + CONTEXT
+# ─────────────────────────────────────────────────────────────────────────
+from brain_modules.pipeline import run as run_pipeline
+from brain_modules.context  import BrainContext
+
+# ─────────────────────────────────────────────────────────────────────────
 # MODEL SELECTION (runs once at startup)
-# select_model() checks GPU VRAM -> picks best installed Ollama model.
+# select_model() checks GPU VRAM → picks best installed Ollama model.
 # Falls back gracefully if Ollama is not running.
-# ---------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────────────────
 try:
     from brain_modules.model_selector import select_model
     MODEL_NAME = select_model()
@@ -134,18 +81,10 @@ except Exception as _model_err:
 
 print(f"[BRAIN] Active model: {MODEL_NAME}")
 
-# ---------------------------------------------------------------------------
-# OLLAMA ENDPOINT
-# Defined here for the non-streaming path.
-# ollama_client.py owns the streaming path.
-# ---------------------------------------------------------------------------
-OLLAMA_URL = "http://127.0.0.1:11434/api/generate"
-
-# ---------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────────────────
 # SESSION STATE
 # USER_NAME: resolved name of the default speaker this session.
-# LAST_SYSTEM_DOMAIN: tracks last volume/brightness for pronoun resolution.
-# ---------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────────────────
 USER_NAME = "Admin"
 
 
@@ -157,9 +96,9 @@ def load_name_from_memory():
     3. Default: "there"
 
     WHY THIS ORDER:
-        Settings UI is the most intentional -- user typed their name.
-        ChromaDB voice is second -- user said it out loud.
-        "there" is neutral fallback -- "Yeah, there?" is not weird.
+        Settings UI is the most intentional — user typed their name.
+        ChromaDB voice is second — user said it out loud.
+        "there" is neutral fallback — "Yeah, there?" is not weird.
 
     CALLED ONCE: at module load time below.
     """
@@ -212,11 +151,9 @@ def reset_session():
     global USER_NAME
     USER_NAME = "Admin"
 
-    # Clear conversation history
     from brain_modules.context_manager import clear_history
     clear_history()
 
-    # Clear repetition tracker
     from brain_modules.identity_layer import reset_session as identity_reset
     identity_reset()
 
@@ -245,8 +182,8 @@ def think(prompt_text, speaker_id="default"):
                             "mani", "priya" etc = identified speakers.
 
     RETURNS:
-        str                    -- regular text response
-        ("__STREAM__", gen)    -- streaming response (generator of sentences)
+        str                    → regular text response
+        ("__STREAM__", gen)    → streaming response (generator of sentences)
 
     RESPONSE FORMAT:
         Plain text for conversation: "That is a solid plan."
@@ -254,1223 +191,41 @@ def think(prompt_text, speaker_id="default"):
         Stream tuple for streaming:  ("__STREAM__", <generator>)
 
     ERROR HANDLING:
-        Never raises exceptions. Always returns a string.
-        If Ollama crashes: "My brain hiccupped. Try again."
-        If memory fails: silently continues without memory context.
-        This guarantees Seven always has something to say.
+        Never raises exceptions. Always returns a string or stream tuple.
+        Pipeline catches per-layer errors and continues.
+        Layer 8 (LLM) always returns something.
 
     INTERVIEW TALKING POINT:
         "think() is the Facade. It is the only public interface.
-         Internally it runs 8 layers, but the caller -- main.py --
+         Internally it runs 21 pipeline layers, but the caller — main.py —
          only sees one function that takes text and returns text.
          All complexity is hidden. This is the Facade pattern."
     """
     global USER_NAME
 
-    # ------------------------------------------------------------------
-    # RESOLVE SPEAKER NAME
-    # If Voice ID identified a speaker, look up their real name from memory.
-    # Otherwise use the session USER_NAME (loaded from config/memory at startup).
-    # ------------------------------------------------------------------
-    if speaker_id not in ("default", "unknown"):
-        speaker_name = speaker_id.title()  # Default: capitalize profile ID
-        try:
-            all_facts = seven_memory.user_facts.get(where={"user_id": speaker_id})
-            if all_facts and all_facts['documents']:
-                for doc in all_facts['documents']:
-                    doc_lower = doc.lower()
-                    if "name is" in doc_lower:
-                        found_name = doc.split("is")[-1].strip().rstrip(".")
-                        if found_name:
-                            speaker_name = found_name
-                            break
-                    elif "called" in doc_lower:
-                        found_name = doc.split("called")[-1].strip().rstrip(".")
-                        if found_name:
-                            speaker_name = found_name
-                            break
-        except Exception:
-            pass
-    else:
-        speaker_name = USER_NAME if USER_NAME else 'there'
-
-    # ------------------------------------------------------------------
-    # CLEAN INPUT
-    # Lowercase, strip punctuation, strip leading filler words.
-    # "And open chrome please" -> "open chrome"
-    # ------------------------------------------------------------------
-    clean_in = prompt_text.lower().strip()
-    clean_in = clean_in.replace("?", "").replace(".", "").replace("!", "")
-    clean_in = clean_in.replace("'", "").replace(",", "")
-
-    # Strip leading filler so "and open chrome" becomes "open chrome"
-    _filler_starts = ["and ", "also ", "now ", "then ", "please ",
-                      "can you ", "could you ", "hey "]
-    for _filler in _filler_starts:
-        if clean_in.startswith(_filler):
-            clean_in = clean_in[len(_filler):].strip()
-            break
-
-    words      = clean_in.split()
-    first_word = words[0] if words else ""
-
-    # ── SHORT INPUT FILTER ──────────────────────────────────────────
-    # Single words or very short phrases with no actionable content
-    # should not reach the LLM. LLM has no context for "good", "okay",
-    # "yeah", "alright" and will hallucinate a response.
-    _acknowledgements = {
-        "good", "okay", "ok", "alright", "yeah", "yep", "yup",
-        "sure", "fine", "nice", "cool", "great", "perfect",
-        "right", "correct", "exactly", "indeed", "absolutely",
-        "understood", "noted", "got it", "i see", "i know",
-        "no", "nope", "never mind", "nevermind", "forget it",
-        "nothing", "nah", "not really", "not now", "maybe later",
-        "that's fine", "thats fine", "that's it", "thats it",
-        "that's all", "thats all", "that's good", "thats good",
-        "well", "anyway", "moving on", "never mind",
-    }
-    if clean_in in _acknowledgements or (len(words) == 1 and words[0] in _acknowledgements):
-        print(Fore.YELLOW + f"[BRAIN] Acknowledgement filtered: '{clean_in}'")
-        # Voice: empty string = intentional silence (main.py continues loop)
-        # Chat API: return minimal response to avoid 500 error
-        return ""
-
-    # Words that are NEVER app names — always file/folder references
-    # Defined here once — used by is_command check AND Layer 4.3
-    _FILE_WORDS = {
-        "resume", "cv", "pdf", "document", "photo",
-        "image", "screenshot", "video", "invoice",
-        "contract", "presentation", "spreadsheet", "edit", "travel",
-    }
-    # Note: "file", "folder", "gokarna" removed
-    # "file" caused "close file explorer" to trigger file search
-    # "folder" caused window commands to trigger file search
-    # Specific place names like "gokarna" should not be hardcoded   
-    _has_file_word = any(w in _FILE_WORDS for w in words)
-
-    # Pre-classify to skip unnecessary layers for commands/greetings
-    # REMOVED from is_command: volume, mute, unmute, brightness, play, pause,
-    # skip, next, previous, stop — these are SYSTEM commands handled by
-    # _build_system_tag(). Having them here set is_command=True which
-    # blocked the SYS layer entirely. That was why "volume 10" did nothing.
-    # File type words — "open resume" should go to file search, not app launcher
-    _always_file_words = {
-        "resume", "cv", "folder", "pdf", "document", "photo",
-        "image", "screenshot", "video", "report", "invoice",
-        "contract", "presentation", "spreadsheet", "edit",
-    }
-    # If any word in the command is a file word, it is a file request not an app command
-    _cmd_words      = clean_in.split()
-    _has_file_word  = any(w in _always_file_words for w in _cmd_words)
-
-    # If command contains a file word, it is a file request not an app launch
-    # "open resume" → file search. "open chrome" → app launch.
-    is_command = (
-        first_word in ["open", "close", "start", "kill", "launch",
-                       "minimize", "maximize", "maximise", "restore", "snap"]
-        and not _has_file_word
-    )
-    is_greeting = first_word in ["hi", "hey", "hello", "bye", "goodbye", "good"]
-
-    # ------------------------------------------------------------------
-    # LAYER 1: NAME SETTING
-    # ------------------------------------------------------------------
-    from brain_modules.identity_layer import handle_name_setting
-    name_result = handle_name_setting(
-        prompt_text, clean_in, speaker_id, speaker_name, seven_memory, USER_NAME
-    )
-    if name_result is not None:
-        if isinstance(name_result, tuple):
-            new_name, response = name_result
-            USER_NAME    = new_name
-            speaker_name = new_name
-        else:
-            response = name_result
-        return response
-
-    # ------------------------------------------------------------------
-    # LAYER 2: REPETITION DETECTION
-    # ------------------------------------------------------------------
-    from brain_modules.identity_layer import handle_repetition
-    repeat_result = handle_repetition(
-        clean_in, speaker_id, speaker_name,
-        is_command, is_greeting, seven_memory, config
-    )
-    if repeat_result == "__SIMILAR_DETECTED__":
-        # Inject note into prompt for LLM to handle differently
-        prompt_text = (
-            f"[The user asked a similar question before. "
-            f"Acknowledge briefly then answer differently.] {prompt_text}"
-        )
-    elif repeat_result is not None:
-        return repeat_result
-
-    # ------------------------------------------------------------------
-    # LAYER 3: IDENTITY OVERRIDES
-    # ------------------------------------------------------------------
-    from brain_modules.identity_layer import handle_identity
-    identity_result = handle_identity(clean_in, words, speaker_id, speaker_name, config)
-    if identity_result is not None:
-        return identity_result
-    
-
-    # ------------------------------------------------------------------
-    # LAYER 3.8: FILE SEARCH ROOT REGISTRATION
-    # "add M:\adobe2 to search folders", "remember to look in M:\edit"
-    # ------------------------------------------------------------------
-    _add_root_triggers = [
-        "add to search", "add to your search", "remember to search",
-        "search in", "also search", "look in", "search folder",
-        "add search folder", "include folder", "include in search",
-    ]
-    _has_add_root = any(t in clean_in for t in _add_root_triggers)
-
-    # Also catch drive paths directly: "add M:\adobe2"
-    import re as _re_path
-    _path_match = _re_path.search(r'[a-zA-Z]:\\[^\s]+', prompt_text)
-
-    if _has_add_root and _path_match:
-        _new_root = _path_match.group(0).rstrip('.,!?')
-        if os.path.exists(_new_root):
-            try:
-                _current_roots = config.KEY.get("file_search_roots", [])
-                if _new_root not in _current_roots:
-                    _current_roots.append(_new_root)
-                    config.update_config({"file_search_roots": _current_roots})
-                    # Rebuild search roots immediately
-                    from hands.files import _build_search_roots
-                    _build_search_roots()
-                    return (f"Got it. I will search {_new_root} from now on. "
-                            f"That folder is now in my search list.")
-                else:
-                    return f"Already searching {_new_root}."
-            except Exception as _root_err:
-                print(Fore.YELLOW + f"[BRAIN] Root registration failed: {_root_err}")
-                return "Could not save that folder. Try again."
-        else:
-            return f"That path does not exist: {_new_root}. Check the spelling."
-
-    # ------------------------------------------------------------------
-    # LAYER 4: TARS PERSONALITY CONTROLS
-    # ------------------------------------------------------------------
-    from brain_modules.identity_layer import handle_tars_controls
-    tars_result = handle_tars_controls(clean_in, words, config)
-    if tars_result is not None:
-        return tars_result
-
-
-    # ------------------------------------------------------------------
-    # FILE TYPE WORDS — defined here so both Layer 4.3 and Layer 6 can use it
-    # Layer 4.3 uses it to detect file intent
-    # Layer 6 uses it to avoid blocking file questions as personal questions
-    # ------------------------------------------------------------------
-    # Use _FILE_WORDS defined at top of think() — same set, defined once
-    _file_type_words = _FILE_WORDS
-
-    # ------------------------------------------------------------------
-    # LAYER 4.3: FILE SEARCH INTENT
-    # Catches "open my resume", "show resume to friends", "find my cv"
-    # before the LLM sees it. Uses hands/files.py filesystem crawler.
-    # ------------------------------------------------------------------
-    _file_intent_triggers = [
-        "my resume", "my cv", "my document", "my file", "my photo",
-        "my image", "my video", "my pdf", "my report", "my project",
-        "show resume", "find resume", "open resume", "open cv",
-        "show my", "find my", "where is my",
-    ]
-    _open_intents = [
-        "open", "show", "find", "display", "launch", "pull up",
-        "bring up", "view", "look at", "see my", "access"
-    ]
-    _has_file_intent = any(t in clean_in for t in _file_intent_triggers)
-    _has_open_intent = any(t in clean_in for t in _open_intents)
-
-    _has_file_query = (
-        any(fw in clean_in for fw in _file_type_words)
-        and any(q in clean_in for q in [
-            "how many", "do i have", "any", "list", "show all",
-            "find all", "what files", "search for"
-        ])
+    # Build context for this call
+    ctx = BrainContext(
+        prompt_text=prompt_text,
+        speaker_id=speaker_id,
+        user_name=USER_NAME
     )
 
-    _cmd_paths_check   = config.KEY.get("commands", {}).get("app_paths", {})
-    _cmd_aliases_check = config.KEY.get("commands", {}).get("app_aliases", {})
-    _is_configured     = any(k in clean_in for k in _cmd_paths_check) or \
-                         any(k in clean_in for k in _cmd_aliases_check)
-
-    _has_file_type = any(fw in clean_in for fw in _file_type_words)
-
-    # File intent overrides is_command when the phrase clearly refers to a file
-    # "open my resume" — "my resume" is a file phrase, not an app name
-    # "open cv folder" — "folder" signals filesystem, not app launcher
-    # Words that are NEVER app names — always file/folder references
-    _always_file_words = {
-        "resume", "cv", "folder", "pdf", "document", "photo",
-        "image", "screenshot", "video", "report", "invoice",
-        "contract", "presentation", "spreadsheet",
-    }
-    _clear_file_phrase = _has_file_intent or _has_file_query or (
-        _has_file_type and (
-            any(w in clean_in for w in ["my ", "folder", "file"]) or
-            any(w in clean_in for w in _always_file_words)
-        )
-    )
-    if _has_file_type and _clear_file_phrase and not _is_configured:
-        try:
-            from hands.files import search_files, open_file, format_results_for_speech, format_results_for_chat
-
-            _search_terms = [fw for fw in _file_type_words if fw in clean_in]
-            _orig_words = prompt_text.split()
-            _proper = [w.lower() for w in _orig_words
-                       if w[0].isupper() and w.lower() not in
-                       {"open", "show", "find", "my", "the", "a", "can", "you"}]
-            _search_query = " ".join(_search_terms + _proper) or clean_in
-
-            _uname = config.KEY.get("identity", {}).get("user_name", "")
-            results = search_files(_search_query, user_name=_uname)
-
-            try:
-                from backend.api_server import set_state as _api_set_file
-                chat_data = format_results_for_chat(results, _search_query)
-                _api_set_file("file_search_results", chat_data)
-            except Exception:
-                pass
-
-            if not results:
-                return (
-                    f"I searched Desktop, Documents, Downloads, and OneDrive "
-                    f"but found nothing matching '{_search_query}'. "
-                    f"Add the exact path in Commands if you know where it is."
-                )
-
-            # Build voice response listing actual file names found
-            _names = [r["name"] for r in results]
-            _count = len(results)
-
-            if _count == 1:
-                _list_str = f"one file: {_names[0]}"
-            elif _count == 2:
-                _list_str = f"two files: {_names[0]} and {_names[1]}"
-            else:
-                _list_str = f"{_count} files: {', '.join(_names[:3])}"
-                if _count > 3:
-                    _list_str += f" and {_count - 3} more"
-
-            # Open if user asked to open
-            if _has_open_intent or _has_file_intent:
-                open_file(results[0]["path"])
-                if _count == 1:
-                    return f"Found and opened {_names[0]}. Path is in the chat."
-                else:
-                    return (
-                        f"Found {_list_str}. "
-                        f"Opened the top match: {_names[0]}. "
-                        f"All paths are in the chat."
-                    )
-
-            # Count/list query — just report
-            return (
-                f"Found {_list_str}. "
-                f"Full paths and details are in the chat below."
-            )
-
-        except Exception as _file_err:
-            import traceback
-            print(Fore.YELLOW + f"[BRAIN] File search failed: {_file_err}")
-            traceback.print_exc()
-            # Fall through to LLM only on actual error
-
-    # ------------------------------------------------------------------
-    # LAYER 4.5: COMMAND ROUTING (Python-first, bypasses LLM)
-    # ------------------------------------------------------------------
-    from brain_modules.command_router import (
-        _build_window_tag, _build_sched_tag, _build_system_tag,
-        get_last_system_domain, set_last_system_domain
-    )
-
-    # Mood analysis (affects LLM response tone, not commands)
-    mood_engine.analyze_input(prompt_text)
-
-    # ------------------------------------------------------------------
-    # LAYER 4.5a: TASK DETECTION (before scheduler — tasks are faster)
-    # ------------------------------------------------------------------
-    # Graceful degradation: if task detection fails, falls through to LLM
-    # Tag format: ###TASK: action=create text=... due=... priority=...
-    #             ###TASK: action=list filter=today
-    #             ###TASK: action=complete search=...
-    #             ###TASK: action=delete search=...
-    # ------------------------------------------------------------------
-
-    _TASK_CREATE_TRIGGERS = [
-        "add to my tasks", "add task", "add to tasks", "create task",
-        "make a task", "note this as task", "task:", "todo:",
-        "remind me to finish", "add to my todo", "add to todo",
-        "new task", "create a task", "make task", "log task",
-        "put on my tasks", "put on my list", "add it to my tasks",
-    ]
-    _TASK_LIST_TRIGGERS = [
-        "what are my tasks", "show my tasks", "list tasks", "list my tasks",
-        "what do i have to do", "show todo", "show my todo",
-        "my tasks today", "tasks today", "what tasks", "my pending tasks",
-        "show all tasks", "what's on my list", "whats on my list",
-        "show task list", "my task list",
-    ]
-    _TASK_DONE_TRIGGERS = [
-        "mark as done", "mark done", "complete task", "finished with",
-        "done with", "mark complete", "check off", "completed",
-        "i finished", "i completed", "i'm done with", "im done with",
-        "task done", "mark task done", "mark it done",
-    ]
-    _TASK_DELETE_TRIGGERS = [
-        "remove task", "delete task", "cancel task", "remove from tasks",
-        "delete from tasks", "remove from my tasks", "drop task",
-        "clear task", "remove it from tasks",
-    ]
-
-    _has_task_create = any(t in clean_in for t in _TASK_CREATE_TRIGGERS)
-    _has_task_list   = any(t in clean_in for t in _TASK_LIST_TRIGGERS)
-    _has_task_done   = any(t in clean_in for t in _TASK_DONE_TRIGGERS)
-    _has_task_delete = any(t in clean_in for t in _TASK_DELETE_TRIGGERS)
-    _has_task_intent = _has_task_create or _has_task_list or _has_task_done or _has_task_delete
-
-    if _has_task_intent:
-        try:
-            import re as _re_task
-
-            if _has_task_create:
-                _task_text = clean_in
-                for _trigger in sorted(_TASK_CREATE_TRIGGERS, key=len, reverse=True):
-                    if _trigger in _task_text:
-                        _task_text = _task_text.replace(_trigger, "").strip()
-                        break
-
-                # Strip leading filler words
-                _strip_again = True
-                while _strip_again:
-                    _strip_again = False
-                    for _art in ["to ", "a ", "an ", "the ", "- ", ": "]:
-                        if _task_text.startswith(_art):
-                            _task_text = _task_text[len(_art):].strip()
-                            _strip_again = True
-                            break
-
-                # Extract due date BEFORE mangling text
-                _due_raw = ""
-                _due_patterns = [
-                    (r'\bby\s+(tomorrow|today|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b', True),
-                    (r'\bby\s+(\d{1,2}(?:st|nd|rd|th)?\s+\w+)\b', True),
-                    (r'\b(tomorrow|today|tonight)\b', True),
-                    (r'\bdue\s+(tomorrow|today|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b', True),
-                    (r'\btill\s+(tomorrow|today|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b', True),
-                    (r'\bby\s+(\d+(?:am|pm))\b', True),
-                ]
-                for _dp, _has_group in _due_patterns:
-                    _dm = _re_task.search(_task_text, _re_task.IGNORECASE)
-                    if _dm:
-                        _due_raw = _dm.group(1) if _dm.lastindex and _has_group else _dm.group(0)
-                        _task_text = _re_task.sub(_dp, "", _task_text, flags=_re_task.IGNORECASE).strip()
-                        break
-
-                # Extract priority
-                _priority = "medium"
-                _pri_patterns = [
-                    (["high priority", "urgent", "important", "critical"], "high"),
-                    (["low priority", "whenever", "not urgent"], "low"),
-                ]
-                for _phrases, _pri_val in _pri_patterns:
-                    if any(p in clean_in for p in _phrases):
-                        _priority = _pri_val
-                        for _pp in _phrases:
-                            _task_text = _task_text.replace(_pp, "").strip()
-                        break
-
-                # Clean up residual whitespace and punctuation
-                _task_text = _re_task.sub(r'\s+', ' ', _task_text).strip()
-                _task_text = _task_text.strip('.,!-:;')
-
-                if not _task_text:
-                    _task_text = "task"
-
-                # Use pipe delimiter instead of underscore for multi-word text
-                # This prevents the space-based tag parser from splitting the text
-                _task_text_safe = _task_text.replace(" ", "|||")
-                _due_safe       = _due_raw.replace(" ", "|||") if _due_raw else ""
-
-                _tag = f"action=create text={_task_text_safe} priority={_priority}"
-                if _due_safe:
-                    _tag += f" due={_due_safe}"
-
-                is_command = True
-                return f"Got it. Adding that to your tasks. ###TASK: {_tag}"
-
-            elif _has_task_list:
-                _filter = "today" if "today" in clean_in else "all"
-                is_command = True
-                return f"###TASK: action=list filter={_filter}"
-
-            elif _has_task_done:
-                # Extract what task to mark done
-                _search = clean_in
-                for _trigger in sorted(_TASK_DONE_TRIGGERS, key=len, reverse=True):
-                    if _trigger in _search:
-                        _search = _search.replace(_trigger, "").strip()
-                        break
-                # Strip "the", "my" etc
-                for _art in ["the ", "my ", "a "]:
-                    if _search.startswith(_art):
-                        _search = _search[len(_art):].strip()
-                _search_tag = _search.replace(" ", "|||") if _search else "task"
-                is_command = True
-                return f"Got it. ###TASK: action=complete search={_search_tag}"
-
-            elif _has_task_delete:
-                _search = clean_in
-                for _trigger in sorted(_TASK_DELETE_TRIGGERS, key=len, reverse=True):
-                    if _trigger in _search:
-                        _search = _search.replace(_trigger, "").strip()
-                        break
-                for _art in ["the ", "my ", "a "]:
-                    if _search.startswith(_art):
-                        _search = _search[len(_art):].strip()
-                _search_tag = _search.replace(" ", "|||") if _search else "task"
-                is_command = True
-                return f"Removing it. ###TASK: action=delete search={_search_tag}"
-
-        except Exception as _task_detect_err:
-            # Graceful degradation — task detection failed, fall through to LLM
-            print(Fore.YELLOW + f"[BRAIN] Task detection error: {_task_detect_err}")
-
-    # Task suggestion for conversational "I need to" / "I have to" statements
-    _TASK_SUGGEST_TRIGGERS = [
-        "i need to finish", "i need to complete", "i need to do",
-        "i have to finish", "i have to complete", "i have to do",
-        "i have to submit", "i need to submit",
-        "i must finish", "i must complete", "i must do",
-        "i should finish", "i should complete",
-        "dont forget to", "don't forget to",
-    ]
-    _has_task_suggest = any(t in clean_in for t in _TASK_SUGGEST_TRIGGERS)
-
-    if _has_task_suggest and not _has_task_intent:
-        # Extract what they need to do
-        _suggest_text = clean_in
-        for _st in sorted(_TASK_SUGGEST_TRIGGERS, key=len, reverse=True):
-            if _st in _suggest_text:
-                _suggest_text = _suggest_text.replace(_st, "").strip()
-                break
-        for _art in ["the ", "a ", "my "]:
-            if _suggest_text.startswith(_art):
-                _suggest_text = _suggest_text[len(_art):].strip()
-                break
-        _suggest_text = _suggest_text.strip('.,!-:;')
-        if _suggest_text and len(_suggest_text) > 2:
-            return (
-                f"Want me to add \"{_suggest_text}\" as a task? "
-                f"Say \"add task {_suggest_text}\" to save it."
-            )
-        
-    # --- SCHEDULER COMMANDS ---
-    import re as _re_sched
-    _has_after_dur = bool(_re_sched.search(
-        r'\bafter\s+\d+\s*(second|seconds|minute|minutes|hour|hours)\b', clean_in
-    ))
-    _has_in_dur = bool(_re_sched.search(
-        r'\bin\s+\d+\s*(second|seconds|minute|minutes|hour|hours)\b', clean_in
-    ))
-
-    SCHED_TRIGGER_PHRASES = [
-        "remind me", "remember me to", "reminder to", "reminder for",
-        "dont let me forget", "don't let me forget", "remind me to",
-        "remind me about", "tell me to", "let me know when", "let me know to",
-        "alert me", "notify me", "ping me", "wake me up", "wake me at",
-        "set a timer", "set an alarm", "set timer", "set alarm", "start a timer",
-        "schedule a meeting", "add meeting", "add event", "cancel my",
-        "cancel the", "cancel all", "delete the alarm", "delete the timer",
-        "delete the reminder", "remove the alarm", "remove the timer",
-        "remove the reminder", "clear all timers", "clear all reminders",
-        "clear all alarms", "what reminders", "what alarms", "what timers",
-        "show my schedule", "show schedule", "any alarms", "any reminders",
-        "any timers", "whats scheduled", "how much time left", "time remaining",
-        "timer status", "list reminders", "list alarms", "list timers",
-        "my schedule", "my reminders", "my alarms", "cancel everything",
-        "clear all schedules", "how long left", "time left on timer",
-    ]
-
-    _has_sched = (
-        any(t in clean_in for t in SCHED_TRIGGER_PHRASES)
-        or any(t in words for t in ["remind", "reminder", "alarm", "timer", "countdown"])
-        or _has_after_dur
-        or _has_in_dur
-    )
-    _sched_guard = is_command or "what time is it" in clean_in
-
-    if _has_sched and not _sched_guard:
-        sched_tag = _build_sched_tag(clean_in, words)
-        if sched_tag:
-            is_command = True
-
-            if sched_tag == "action=timer_ask":
-                return "How long should I set the timer for?"
-            if sched_tag == "action=alarm_ask":
-                return "What time should I set the alarm for?"
-            if sched_tag == "action=reminder_ask":
-                return "What should I remind you about, and when?"
-
-            _sched_acks = {
-                "reminder":      ["On it.", "Locked in.", "I have it.",
-                                  "Leave it with me.", "Got it. I will remind you."],
-                "timer":         ["Clock is running.", "Counting down.",
-                                  "Timer set.", "On the clock."],
-                "alarm":         ["Alarm set.", "I will wake you.", "Set."],
-                "event":         ["On the calendar.", "Locked in.", "Noted."],
-                "cancel":        ["Cancelled.", "Done. Removed.", "Cleared."],
-                "list":          [],
-                "timer_remaining": [],
-            }
-            _action  = (sched_tag.split("action=")[1].split(" ")[0]
-                        if "action=" in sched_tag else "")
-            _ack_list = _sched_acks.get(_action, ["On it."])
-            _ack      = random.choice(_ack_list) if _ack_list else ""
-
-            return f"{_ack} ###SCHED: {sched_tag}" if _ack else f"###SCHED: {sched_tag}"
-
-    # --- BATTERY FAST PATH ---
-    _battery_q = (
-        any(p in clean_in for p in ["battery", "how much charge", "battery level",
-                                     "battery percentage", "is it charging", "plugged in"])
-        and not is_command
-    )
-    if _battery_q:
-        return random.choice(["Checking.", "On it.", "One moment."]) + " ###SYS: action=battery"
-
-    # --- SYSTEM COMMANDS ---
-    SYSTEM_TRIGGER_WORDS = [
-        "volume", "mute", "unmute", "louder", "quieter", "softer",
-        "brightness", "brighter", "dimmer", "dim", "battery", "charging",
-        "plugged", "wifi", "bluetooth", "play", "pause", "skip",
-        "next track", "next song", "previous track", "previous song",
-        "stop music", "stop playing", "resume music", "dark mode",
-        "light mode", "dark theme", "light theme", "night light",
-        "blue light", "night mode", "do not disturb", "dnd",
-        "focus assist", "airplane mode", "flight mode",
-    ]
-    _has_sys = any(t in clean_in for t in SYSTEM_TRIGGER_WORDS)
-
-    import re as _re_mod
-    _has_context_ref = (
-        get_last_system_domain() is not None
-        and (
-            (any(w in clean_in for w in ["it", "that", "this"])
-             and bool(_re_mod.search(r'\d+', clean_in)))
-            or clean_in in ["more", "less", "higher", "lower",
-                             "increase", "decrease"]
-        )
-    )
-
-    # Use _is_app_cmd_only instead of is_command so system words like
-    # "volume", "mute" are not blocked by the app-command classifier.
-    _is_app_cmd_only = first_word in ["open", "close", "start", "kill", "launch"]
-    # Strip polite prefixes before system command check
-    # "can you take the volume" → "volume" → system command
-    _politeness_prefixes = [
-        "can you ", "could you ", "please ", "would you ",
-        "will you ", "can you please ", "could you please ",
-    ]
-    _clean_for_sys = clean_in
-    for _pfx in _politeness_prefixes:
-        if _clean_for_sys.startswith(_pfx):
-            _clean_for_sys = _clean_for_sys[len(_pfx):]
-            break
-    _has_sys_clean = any(t in _clean_for_sys for t in SYSTEM_TRIGGER_WORDS)
-
-    if (_has_sys and not _is_app_cmd_only) or _has_context_ref or (_has_sys_clean and not _is_app_cmd_only):
-        sys_tag = _build_system_tag(clean_in)
-        if sys_tag:
-            is_command = True
-
-            # Track domain for pronoun resolution
-            if "volume" in sys_tag:
-                set_last_system_domain("volume")
-            elif "brightness" in sys_tag:
-                set_last_system_domain("brightness")
-
-            # Parse tag for context-aware speech
-            _parts  = {}
-            for _p in sys_tag.split():
-                if "=" in _p:
-                    _k, _v = _p.split("=", 1)
-                    _parts[_k] = _v
-            _action = _parts.get("action", "")
-            _value  = _parts.get("value", "")
-
-            # Map actions to TARS-style speech responses
-            _sys_speech_map = {
-                "volume_up":       lambda: random.choice(["Turning it up.", "Louder.", "Volume up."]),
-                "volume_down":     lambda: random.choice(["Turning it down.", "Quieter.", "Volume down."]),
-                "volume_set":      lambda: f"{_value}%.",
-                "volume_mute":     lambda: random.choice(["Muted.", "Going silent.", "Sound off."]),
-                "volume_unmute":   lambda: random.choice(["Unmuted.", "Sound on.", "You are live."]),
-                "volume_get":      lambda: "",
-                "brightness_up":   lambda: random.choice(["Brightening up.", "More brightness.", "Screen brighter."]),
-                "brightness_down": lambda: random.choice(["Dimming.", "Less brightness.", "Screen dimmer."]),
-                "brightness_set":  lambda: f"Brightness to {_value}%.",
-                "brightness_get":  lambda: "",
-                "battery":         lambda: "",
-                "wifi_on":         lambda: "Enabling WiFi.",
-                "wifi_off":        lambda: "Disabling WiFi.",
-                "wifi_status":     lambda: "",
-                "bluetooth_on":    lambda: "Enabling Bluetooth.",
-                "bluetooth_off":   lambda: "Disabling Bluetooth.",
-                "bluetooth_status": lambda: "",
-                "media_play_pause": lambda: random.choice(["Toggled.", "Done.", ""]),
-                "media_next":      lambda: random.choice(["Next track.", "Skipping.", "Next."]),
-                "media_prev":      lambda: random.choice(["Previous track.", "Going back.", "Previous."]),
-                "media_stop":      lambda: "Stopping playback.",
-                "dark_mode_on":    lambda: random.choice(["Going dark.", "Dark mode.", "Switching to dark."]),
-                "dark_mode_off":   lambda: random.choice(["Going light.", "Light mode.", "Switching to light."]),
-                "night_light_on":  lambda: random.choice(["Night light on.", "Easy on the eyes.", "Warming the screen."]),
-                "night_light_off": lambda: "Night light off.",
-                "dnd_on":          lambda: random.choice(["Do not disturb.", "Going quiet.", "Notifications silenced."]),
-                "dnd_off":         lambda: "Notifications back on.",
-                "airplane_on":     lambda: random.choice(["Airplane mode on.", "Going offline.", "All radios off."]),
-                "airplane_off":    lambda: random.choice(["Airplane mode off.", "Back online.", "Radios on."]),
-            }
-
-            speech_fn = _sys_speech_map.get(_action)
-            speech    = speech_fn() if speech_fn else "On it."
-
-            return f"{speech} ###SYS: {sys_tag}" if speech else f"###SYS: {sys_tag}"
-
-    # --- WINDOW COMMANDS ---
-    window_verbs   = ["minimize", "maximise", "maximize", "restore", "snap",
-                      "switch to", "focus", "bring up", "center", "centre",
-                      "pin", "unpin", "fullscreen", "full screen", "swap"]
-    put_pattern    = "put " in clean_in and any(
-        p in clean_in for p in ["on the left", "on the right", "on left", "on right",
-                                 "top left", "top right", "bottom left", "bottom right"]
-    )
-    layout_triggers = ["side by side", "split screen", "split view",
-                        "stack", "quad", "tile", "arrange"]
-    is_layout      = any(t in clean_in for t in layout_triggers)
-
-    desktop_phrases = [
-        "show desktop", "hide all windows", "minimize everything",
-        "minimize all", "minimize all windows", "clear desktop",
-        "hide everything", "show all windows", "restore all",
-        "restore all windows", "view desktop", "show my desktop",
-        "clear screen", "clear all windows", "go to desktop",
-        "desktop", "hide windows"
-    ]
-    notarget_phrases = [
-        "undo that", "undo last", "undo window", "put it back",
-        "revert that", "undo", "whats open", "what is open",
-        "what windows are open", "list windows", "show windows",
-        "what's running", "whats running"
-    ]
-    is_desktop_cmd  = clean_in in desktop_phrases
-    is_notarget_cmd = (clean_in in notarget_phrases
-                       or any(p in clean_in for p in notarget_phrases))
-
-    switch_verbs   = ["switch to", "bring up", "go to", "focus on", "focus",
-                      "show me", "pull up", "jump to", "open up"]
-    is_switch      = any(sv in clean_in for sv in switch_verbs)
-    is_move_monitor = "move" in clean_in and "monitor" in clean_in
-    is_swap        = "swap" in clean_in and ("and" in clean_in or "," in clean_in)
-    is_window_close = ("close this" in clean_in or "close the window" in clean_in
-                       or "close active" in clean_in)
-    is_transparent = ("transparent" in clean_in or "see through" in clean_in
-                      or "translucent" in clean_in)
-    is_solid       = ("solid" in clean_in or "opaque" in clean_in
-                      or "not transparent" in clean_in)
-    is_pin         = ("pin " in clean_in
-                      or ("keep" in clean_in and "on top" in clean_in)
-                      or "always on top" in clean_in)
-    is_unpin       = ("unpin" in clean_in or "remove from top" in clean_in
-                      or "not on top" in clean_in)
-    is_window_verb = any(wv in clean_in for wv in window_verbs)
-
-    is_any_window  = (is_desktop_cmd or is_notarget_cmd or is_layout or put_pattern
-                      or is_window_verb or is_switch or is_move_monitor or is_swap
-                      or is_window_close or is_transparent or is_solid
-                      or is_pin or is_unpin)
-
-    if is_any_window:
-        is_command = True
-        tag_params = _build_window_tag(
-            clean_in, is_desktop_cmd, is_notarget_cmd, is_layout, put_pattern,
-            is_switch, is_move_monitor, is_swap, is_window_close,
-            is_transparent, is_solid, is_pin, is_unpin
-        )
-        if tag_params:
-            _parts   = {}
-            for _p in tag_params.split():
-                if "=" in _p:
-                    _k, _v = _p.split("=", 1)
-                    _parts[_k] = _v
-
-            _action   = _parts.get("action", "")
-            _target   = _parts.get("target", "").replace(",", " and ")
-            _position = _parts.get("position", "")
-            _mode     = _parts.get("mode", "")
-
-            # Map window actions to TARS-style speech
-            _win_speech_map = {
-                "focus":       lambda: random.choice([f"Switching to {_target}.", f"Bringing up {_target}.", f"{_target}, coming up."]),
-                "minimize":    lambda: random.choice([f"Minimizing {_target}.", f"Putting {_target} away.", f"{_target}, out of sight."]),
-                "maximize":    lambda: random.choice([f"Maximizing {_target}.", f"Full size on {_target}.", f"{_target}, going big."]),
-                "restore":     lambda: random.choice([f"Restoring {_target}.", f"Bringing {_target} back."]),
-                "snap":        lambda: random.choice([f"Snapping {_target} to the {_position}.", f"{_target}, {_position} side."]),
-                "center":      lambda: f"Centering {_target}.",
-                "layout":      lambda: (f"Putting {_target} side by side." if _mode == "split"
-                                        else f"Stacking {_target}." if _mode == "stack"
-                                        else f"Four corners, {_target}." if _mode == "quad"
-                                        else f"Arranging {_target}."),
-                "minimize_all": lambda: random.choice(["Clearing the deck.", "Everything down.", "Desktop, clear."]),
-                "show_desktop": lambda: random.choice(["Showing desktop.", "All clear.", "Desktop."]),
-                "swap":        lambda: random.choice([f"Swapping {_target}.", f"{_target}, switching places."]),
-                "pin":         lambda: random.choice([f"Pinning {_target} on top.", f"{_target} stays on top now."]),
-                "unpin":       lambda: random.choice([f"Unpinning {_target}.", f"{_target}, back to normal."]),
-                "fullscreen":  lambda: random.choice([f"Fullscreen on {_target}.", f"{_target}, going fullscreen."]),
-                "solid":       lambda: random.choice([f"Making {_target} solid again.", f"{_target}, back to full opacity."]),
-                "close_window": lambda: "Closing this window.",
-                "undo":        lambda: random.choice(["Undoing that.", "Putting it back.", "Reverting."]),
-                "list":        lambda: "",
-            }
-
-            if _action == "transparent":
-                _opacity = _parts.get("opacity", "0.8")
-                if _opacity == "more":
-                    speech = random.choice([f"Making {_target} more transparent.", f"{_target}, a bit more see-through."])
-                elif _opacity == "less":
-                    speech = random.choice([f"Making {_target} less transparent.", f"Brightening {_target} up."])
-                else:
-                    try:
-                        pct = int(float(_opacity) * 100)
-                        speech = (f"Making {_target} slightly transparent." if pct >= 90
-                                  else f"Making {_target} very transparent." if pct <= 40
-                                  else f"Setting {_target} to {pct}% opacity.")
-                    except Exception:
-                        speech = f"Making {_target} transparent."
-            else:
-                speech_fn = _win_speech_map.get(_action)
-                speech    = speech_fn() if speech_fn else "On it."
-
-            return f"{speech} ###WINDOW: {tag_params}" if speech else f"###WINDOW: {tag_params}"
-
-    # --- APP OPEN/CLOSE/SEARCH ---
-    if first_word in ["open", "close", "start", "kill", "launch"]:
-        command_verb = first_word
-        remaining    = clean_in
-
-        for verb in ["open", "close", "start", "kill", "launch"]:
-            if remaining.startswith(verb):
-                remaining = remaining[len(verb):].strip()
-                break
-
-        tag       = "OPEN" if command_verb in ["open", "start", "launch"] else "CLOSE"
-        close_all = False
-
-        if tag == "CLOSE" and remaining.startswith("all "):
-            close_all = True
-            remaining = remaining[4:].strip()
-
-        for _art in ["the ", "a ", "an "]:
-            if remaining.startswith(_art):
-                remaining = remaining[len(_art):].strip()
-                break
-
-        # Self-referential open commands
-        _self_words = {"seven", "yourself", "self", "you", "assistant", "ai"}
-        if remaining.lower().strip() in _self_words and tag == "OPEN":
-            return "I am already running. You are talking to me right now."
-
-        if remaining:
-            _normalized = remaining.replace(" and ", ",").replace(" & ", ",")
-            apps        = [a.strip() for a in _normalized.split(",") if a.strip()]
-            if not apps:
-                apps = [remaining.strip()]
-
-            # Known system apps always closeable without a configured path
-            # Common apps that can be opened/closed without a configured path
-            # AppOpener handles these via system search
-            _ALWAYS_CLOSEABLE = {
-                "chrome", "firefox", "edge", "notepad", "explorer", "calculator",
-                "camera", "photos", "settings", "paint", "word", "excel",
-                "powerpoint", "outlook", "teams", "discord", "spotify",
-                "whatsapp", "telegram", "zoom", "obs", "vlc", "code",
-                "vscode", "terminal", "cmd", "powershell", "task manager",
-                "snipping tool", "copilot", "clock", "calendar", "mail",
-                "maps", "store", "xbox", "winamp", "notepad++", "brave",
-                "opera", "skype", "slack", "premiere", "premiere pro",
-                "adobe premiere", "adobe premiere pro", "after effects",
-                "photoshop", "illustrator", "lightroom", "audacity",
-                "davinci", "davinci resolve", "figma", "blender",
-                "autocad", "solidworks", "matlab", "android studio",
-                "intellij", "pycharm", "webstorm", "rider", "clion",
-                "unity", "unreal", "godot", "steam", "epic games",
-                "origin", "battle.net", "valorant", "minecraft",
-            }
-
-            _cmd_paths   = config.KEY.get("commands", {}).get("app_paths", {})
-            _cmd_aliases = config.KEY.get("commands", {}).get("app_aliases", {})
-
-            # Pronouns and garbage words that are never app names
-            _INVALID_TARGETS = {
-                "me", "it", "this", "that", "the", "a", "an",
-                "and", "or", "all", "everything", "them", "those",
-                "these", "here", "there", "now", "app", "window",
-            }
-
-            if tag == "OPEN":
-                for _app in apps:
-                    _app_clean = _app.lower().strip()
-                    # Known configured app — allow through
-                    if _app_clean in _cmd_paths or _app_clean in _cmd_aliases:
-                        continue
-                    # Common system app — allow through
-                    if _app_clean in _ALWAYS_CLOSEABLE:
-                        continue
-                    # Allow if it looks like real software name
-                    # Real software: multiple words, or known suffixes, or long enough
-                    _words = _app_clean.split()
-                    _looks_real = (
-                        len(_words) >= 2 or          # "premiere pro", "after effects"
-                        len(_app_clean) >= 6 or      # "spotify", "discord"
-                        _app_clean.endswith('.exe')   # explicit exe
-                    )
-                    if _looks_real:
-                        continue  # Let AppOpener try it
-                    # Short single unknown word — block
-                    return (
-                        f"I don't see '{_app}' installed. "
-                        f"If it is a custom file or folder, add it in Commands."
-                    )
-
-            if tag == "CLOSE":
-                for _app in apps:
-                    _app_clean = _app.lower().strip()
-
-                    # "close it", "close this", "close that" = close active window
-                    _active_window_words = {"it", "this", "that", "the window",
-                                           "current", "active", "foreground"}
-                    if _app_clean in _active_window_words:
-                        import pyautogui as _pag
-                        _pag.hotkey('alt', 'f4')
-                        return "Closed."
-
-                    # Reject other pronouns
-                    if _app_clean in _INVALID_TARGETS:
-                        return "Close which app? Be specific."
-
-                    # Reject gibberish — no vowels and longer than 3 chars
-                    _has_vowel = any(v in _app_clean for v in "aeiou")
-                    if not _has_vowel and len(_app_clean) > 3:
-                        return (f"That does not look like an app name. What did you want to close?")
-
-                    # Reject very short unknown words
-                    if len(_app_clean) < 3 and _app_clean not in _cmd_paths:
-                        return (f"Close what? Be more specific.")
-
-            tags     = " ".join([f"###{tag}: ALL_{a}" if close_all else f"###{tag}: {a}"
-                                 for a in apps])
-            app_list = ", ".join(apps)
-
-            if tag == "OPEN":
-                speech = random.choice([
-                    f"Opening {app_list}.",
-                    f"On it. {app_list} coming up.",
-                    f"{app_list}, coming right up.",
-                    f"Launching {app_list}.",
-                ])
-            else:
-                speech = (
-                    random.choice([f"Closing all {app_list}.",
-                                   f"Shutting down every {app_list}.",
-                                   f"Killing all {app_list} instances."])
-                    if close_all else
-                    random.choice([f"Closing {app_list}.",
-                                   f"Shutting down {app_list}.",
-                                   f"Done with {app_list}."])
-                )
-            return f"{speech} {tags}"
-
-    # ------------------------------------------------------------------
-    # LAYER 5: MEMORY SEARCH
-    # ------------------------------------------------------------------
-    memory_context = ""
-    _is_action_cmd = first_word in [
-        "open", "close", "start", "kill", "launch", "minimize", "maximize",
-        "maximise", "restore", "snap", "mute", "unmute", "set", "volume",
-        "brightness", "play", "pause", "skip", "next", "previous", "stop"
-    ]
-
-    if ("VISUAL_REPORT:" not in prompt_text
-            and not is_command and not is_greeting and not _is_action_cmd):
-        search_uid = (speaker_id if speaker_id not in ("default", "unknown")
-                      else config.KEY.get("identity", {}).get(
-                          "user_name", "default").lower() or "default")
-        try:
-            memory_context = seven_memory.search(prompt_text, user_id=search_uid)
-        except Exception as _mem_err:
-            print(Fore.YELLOW + f"[BRAIN] Memory search skipped: {_mem_err}")
-
-        if memory_context:
-            print(Fore.MAGENTA + "[MEMORY] Found relevant memories!")
-
-    # ------------------------------------------------------------------
-    # LAYER 5.3: KNOWLEDGE BASE SEARCH
-    # ------------------------------------------------------------------
-    knowledge_context = ""
-    knowledge_triggers = ["what is", "what are", "who is", "who was", "who were",
-                          "explain", "define", "how does", "how do", "how is",
-                          "tell me about", "what does", "meaning of", "describe",
-                          "history of", "why is", "why do", "why does", "when was",
-                          "when did", "where is", "where was", "difference between"]
-    personal_words     = ["my", "i ", "me ", "about me", "do i", "am i"]
-
-    if (not is_command and not is_greeting and not _is_action_cmd
-            and "VISUAL_REPORT:" not in prompt_text):
-        is_knowledge_q = any(t in clean_in for t in knowledge_triggers)
-        is_personal    = any(w in clean_in for w in personal_words)
-
-        if is_knowledge_q and not is_personal and not memory_context:
-            try:
-                from knowledge import search_knowledge
-                knowledge_context = search_knowledge(prompt_text)
-                if knowledge_context:
-                    print(Fore.CYAN + "[BRAIN] Knowledge base results found!")
-            except ImportError:
-                pass
-            except Exception as e:
-                print(Fore.YELLOW + f"[BRAIN] Knowledge search error: {e}")
-
-    # ------------------------------------------------------------------
-    # LAYER 5.5: WEB SEARCH
-    # ------------------------------------------------------------------
-    web_context  = ""
-    web_searched = False
-
-    if (not is_command and not is_greeting and not _is_action_cmd
-            and "VISUAL_REPORT:" not in prompt_text):
-        from web.classifier import needs_web_search
-        from web.core       import web_search, web_news
-
-        should_search, search_query = needs_web_search(prompt_text)
-
-        if should_search and search_query:
-            # Add location to weather queries
-            _weather_words = ["weather", "temperature", "forecast", "rain",
-                              "sunny", "cloudy", "humidity", "wind"]
-            _is_weather = any(w in search_query.lower() for w in _weather_words)
-            if _is_weather and "in " not in search_query.lower():
-                try:
-                    _city = config.KEY.get("identity", {}).get("city", "")
-                    if not _city:
-                        # Try to get from previous IP-based detection
-                        _city = config.KEY.get("identity", {}).get("location", "")
-                    if _city:
-                        search_query = f"weather in {_city} today"
-                    else:
-                        search_query = "current weather today"
-                except Exception:
-                    pass
-
-            print(Fore.CYAN + f"[BRAIN] Web search: '{search_query}'")
-            news_words = ["news", "latest", "happened", "breaking", "update"]
-            is_news    = any(w in clean_in for w in news_words)
-            web_context = web_news(search_query) if is_news else web_search(search_query)
-
-            if web_context:
-                web_searched = True
-                print(Fore.GREEN + "[BRAIN] Web results injected.")
-
-    # LAYER 5.7: CAPABILITY — handled by system prompt knowledge block
-    # No injection needed. LLM answers from system prompt context.
-    # Removed hardcoded trigger list and facts block.
-
-    # ------------------------------------------------------------------
-    # LAYER 5.9: APP HISTORY QUERY
-    # ------------------------------------------------------------------
-    if (("what" in clean_in or "which" in clean_in)
-            and ("app" in clean_in or "open" in clean_in)
-            and ("today" in clean_in or "did i" in clean_in or "did you" in clean_in)):
-        from memory.command_log import command_log
-        stats  = command_log.get_stats()
-        recent = stats.get('recent', [])
-        if recent:
-            app_list = ", ".join([f"{r['action']} {r['target']}" for r in recent[:5]])
-            return f"Recent commands: {app_list}."
-        return "No apps opened in this session yet."
-
-    # ------------------------------------------------------------------
-    # LAYER 6: PERSONAL QUESTION FILTER (no memory = no answer)
-    # ------------------------------------------------------------------
-    personal_question_words = ["my", "about me", "do i", "did i", "am i",
-                               "i like", "i love", "i play", "i work", "i study"]
-    is_personal_question    = any(w in clean_in for w in personal_question_words)
-    question_starts         = ["what", "which", "who", "when", "where", "how",
-                               "do you know"]
-    is_question             = any(clean_in.startswith(w) for w in question_starts)
-
-    # Guard: do not block file queries — "how many resumes do i have" is a
-    # file system question, not a personal memory question
-    _is_file_question = any(fw in clean_in for fw in _file_type_words)
-
-    _is_file_question = any(fw in clean_in for fw in _file_type_words)
-    if is_question and is_personal_question and not memory_context and not is_command and not _is_file_question:
-        return "You haven't told me that yet."
-
-    # ------------------------------------------------------------------
-    # LAYER 7: FACT EXTRACTION
-    # ------------------------------------------------------------------
-    if ("VISUAL_REPORT:" not in prompt_text
-            and not is_command and not is_greeting and not _is_action_cmd):
-        search_uid = (speaker_id if speaker_id not in ("default", "unknown")
-                      else config.KEY.get("identity", {}).get(
-                          "user_name", "default").lower() or "default")
-        try:
-            seven_memory.extract_and_store_facts(prompt_text, user_id=search_uid)
-        except Exception as _fact_err:
-            print(Fore.YELLOW + f"[BRAIN] Fact extraction skipped: {_fact_err}")
-
-    # ------------------------------------------------------------------
-    # LAYER 8: LLM INFERENCE
-    # ------------------------------------------------------------------
-    # Store original user input in history (not modified prompt)
-    _original_input = prompt_text
-    if "===" in _original_input and "User asked:" in _original_input:
-        _original_input = _original_input.split("User asked:")[-1].strip()
-
-    if "VISUAL_REPORT:" not in _original_input and not _is_action_cmd:
-        from brain_modules.context_manager import add_user_turn
-        add_user_turn(speaker_id, _original_input)
-
-    # Build system prompt with TARS personality
-    _brain_cfg = config.KEY.get('brain', {})
-    _humor     = int(_brain_cfg.get('tars_humor',   75))
-    _honesty   = int(_brain_cfg.get('tars_honesty', 85))
-
-    from brain_modules.prompt_builder  import build_system_prompt
-    from brain_modules.context_manager import assemble_prompt
-
-    _tier = config.KEY.get("license", {}).get("tier", "free")
-    system_prompt = build_system_prompt(
-        speaker_name = speaker_name,
-        humor        = _humor,
-        honesty      = _honesty,
-        tier         = _tier,
-    )
-
-    full_prompt = assemble_prompt(
-        system_prompt     = system_prompt,
-        speaker_id        = speaker_id,
-        web_context       = web_context,
-        knowledge_context = knowledge_context,
-        memory_context    = memory_context,
-    )
-
-    # Response length based on question type
-    long_triggers = ["tell me", "explain", "describe", "what can you",
-                     "list", "how does", "how do", "why", "story",
-                     "detail", "everything", "all about", "continue",
-                     "go on", "more about", "your capabilities",
-                     "what are you capable", "what do you do",
-                     "what you can do", "capable of"]
-    count_triggers = ["count", "1 to", "one to", "from 1", "from one",
-                      "list them", "name them", "enumerate"]
-
-    needs_long  = any(t in clean_in for t in long_triggers)
-    needs_count = any(t in clean_in for t in count_triggers)
-
-    if needs_count:
-        response_length = 200
-    elif needs_long:
-        response_length = 120
-    elif web_searched:
-        response_length = 80
-    else:
-        response_length = 50
-
-    payload = {
-        "model":   MODEL_NAME,
-        "prompt":  full_prompt,
-        "stream":  False,
-        "options": {
-            # 0.15 was too low — caused robotic fragmented output
-            # "Hyderabad's Telanganas' pride" was repeat_penalty 1.6 destroying tokens
-            "temperature":    0.3,
-            "num_predict":    min(response_length, 150),
-            "repeat_penalty": 1.2,
-            "stop":           ["User:", "System:", "Seven:", "(Note", "(note",
-                               "Note to self", "\n\n"],
-            "num_ctx":        4096
-        }
+    # Dependencies passed to every layer that needs them
+    deps = {
+        "seven_memory": seven_memory,
+        "mood_engine":  mood_engine,
+        "config":       config,
+        "model_name":   MODEL_NAME,
     }
 
-    # --- STREAMING PATH ---
-    use_streaming = config.KEY.get('brain', {}).get('streaming', False)
+    # Run pipeline
+    result = run_pipeline(ctx, deps)
 
-    if use_streaming:
-        from brain_modules.ollama_client import stream_sentences
-        start_time = _time.time()
+    # If a layer updated the user name (name-setting layer), apply it globally
+    if ctx.new_user_name:
+        USER_NAME = ctx.new_user_name
 
-        def _sentence_gen():
-            full_reply = []
-            for sentence in stream_sentences(full_prompt, payload):
-                full_reply.append(sentence)
-                yield sentence
-
-            # After streaming: store complete response in history
-            complete_reply = " ".join(full_reply)
-            elapsed        = int((_time.time() - start_time) * 1000)
-
-            try:
-                from brain_manager import record_latency
-                record_latency(elapsed)
-            except Exception:
-                pass
-
-            if "VISUAL_REPORT:" not in prompt_text:
-                from brain_modules.context_manager import add_seven_turn
-                add_seven_turn(speaker_id, complete_reply)
-
-        return ("__STREAM__", _sentence_gen())
-
-    # --- NON-STREAMING PATH ---
-    start_time = _time.time()
-
-    try:
-        r = requests.post(OLLAMA_URL, json=payload, timeout=120)
-
-        elapsed = int((_time.time() - start_time) * 1000)
-        try:
-            from brain_manager import record_latency
-            record_latency(elapsed)
-        except Exception:
-            pass
-
-        if r.status_code == 200:
-            reply = r.json().get("response", "").strip() or "Listening."
-            reply = _clean_response(reply)
-
-            if "VISUAL_REPORT:" not in prompt_text:
-                from brain_modules.context_manager import add_seven_turn
-                add_seven_turn(speaker_id, reply)
-
-            return reply
-
-        print(Fore.RED + f"[BRAIN] Ollama status {r.status_code}")
-        return "My brain hiccupped. Try again."
-
-    except requests.exceptions.ConnectionError:
-        print(Fore.RED + "[BRAIN] Cannot connect to Ollama.")
-        return "I can't reach my brain. Run 'ollama serve' in a terminal first."
-    except requests.exceptions.Timeout:
-        print(Fore.RED + "[BRAIN] Ollama timeout.")
-        return "My brain took too long. Try again."
-    except Exception as e:
-        print(Fore.RED + f"[BRAIN] Unexpected error: {e}")
-        return "Something went wrong with my thinking."
+    return result
 
 
 def inject_observation(text):
