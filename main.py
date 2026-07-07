@@ -1,6 +1,9 @@
 """
 PROJECT SEVEN - main.py (The Controller)
-Version: 1.2.8
+Version: 1.4.0 - Full modular monolith
+
+Voice loop orchestrator.
+All heavy lifting delegated to main_modules/.
 """
 
 import sys
@@ -55,6 +58,7 @@ if _app_path:
 _cwd = os.getcwd()
 if _cwd not in sys.path:
     sys.path.insert(0, _cwd)
+
 
 # ============================================================================
 # PACKAGE CHECK
@@ -117,6 +121,7 @@ if not _packages_ready():
         os._exit(0)
     os._exit(0)
 
+
 # ============================================================================
 # FULL STARTUP
 # ============================================================================
@@ -125,7 +130,6 @@ print("[SYSTEM] Packages ready - starting full Seven...")
 
 import threading
 import re
-import random
 
 import colorama
 from colorama import Fore
@@ -136,7 +140,20 @@ from backend.api_server import start_api_server, set_state as api_set_state
 from backend.admin_server import start_admin_server
 import telemetry
 
+from main_modules.startup.context             import SevenContext
+from main_modules.startup.module_loader       import load_all_modules
+from main_modules.startup.morning_brief       import speak_morning_brief
+from main_modules.startup.daemon_launcher     import launch_schedule_daemon
+from main_modules.startup.battery_monitor     import start_battery_monitor
+from main_modules.startup.enrollment_handler  import (
+    handle_pending_enrollment,
+    handle_voice_enrollment_command,
+)
+from main_modules.handlers                    import register_all, execute_all
+from main_modules.handlers.pre_executor       import pre_execute
+
 app_ui = None
+
 
 # ============================================================================
 # SEVEN LOGIC THREAD
@@ -145,104 +162,17 @@ app_ui = None
 def seven_logic():
     global app_ui
 
-    print("[SYSTEM] Loading AI modules...")
+    # Build shared context
+    ctx = SevenContext()
+    ctx.app_ui        = app_ui
+    ctx.api_set_state = api_set_state
+    ctx.config        = config
 
-    try:
-        from ears import listen
-        from ears.voice_id import (identify_speaker, enroll_speaker,
-                                    is_voice_id_enabled, get_enrolled_speakers)
-        from ears.core import listen_for_interrupt
-        print("[SYSTEM] Ears loaded")
-    except Exception as e:
-        print(f"[SYSTEM] Ears failed: {e}")
-        import traceback; traceback.print_exc()
-        app_ui.update_status("EARS ERROR", "#ff0000")
-        return
+    # Load all AI modules onto ctx
+    if not load_all_modules(ctx):
+        return  # critical load failure
 
-    try:
-        import brain
-        import brain_manager
-        print("[SYSTEM] Brain loaded")
-    except Exception as e:
-        print(f"[SYSTEM] Brain failed: {e}")
-        import traceback; traceback.print_exc()
-        app_ui.update_status("BRAIN ERROR", "#ff0000")
-        return
-
-    # Preload TitaNet speaker model at startup in background thread
-    # Avoids 3-5 second delay on first identification
-    try:
-        from ears.voice_id import _get_model as _preload_titanet
-        import threading as _thr
-        def _load_titanet_bg():
-            _preload_titanet()
-            print(Fore.GREEN + "[SYSTEM] TitaNet speaker model ready")
-        _thr.Thread(target=_load_titanet_bg, daemon=True).start()
-    except Exception as _tne:
-        print(Fore.YELLOW + f"[SYSTEM] TitaNet preload skipped: {_tne}")
-
-    try:
-        import hands.core as core
-        import hands.system as system_mod
-        import hands.scheduler as scheduler_mod
-        import hands.windows as hands_windows
-        print("[SYSTEM] Hands loaded")
-    except Exception as e:
-        print(f"[SYSTEM] Hands failed: {e}")
-        import traceback; traceback.print_exc()
-
-    print(Fore.CYAN + "[SYSTEM] Loading mouth...")
-
-    try:
-        import pythoncom
-        pythoncom.CoInitialize()
-        print(Fore.CYAN + "[SYSTEM] COM initialized")
-    except Exception as _com_err:
-        print(Fore.YELLOW + f"[SYSTEM] COM init skipped: {_com_err}")
-
-    mouth = None
-    mouth_interrupt = None
-    is_speaking = None
-    try:
-        import sys as _sys
-        for _k in list(_sys.modules.keys()):
-            if 'mouth' in _k.lower() or 'pyttsx' in _k.lower():
-                del _sys.modules[_k]
-        import mouth as _mouth_mod
-        mouth = _mouth_mod
-        from mouth import interrupt as mouth_interrupt, is_speaking
-        print(Fore.GREEN + "[SYSTEM] Mouth loaded")
-    except Exception as e:
-        print(Fore.RED + f"[SYSTEM] Mouth failed: {e}")
-        import traceback; traceback.print_exc()
-        class _FallbackMouth:
-            def speak(self, text): print(f"[MOUTH FALLBACK] {text}")
-            def interrupt(self): pass
-            def is_speaking(self): return False
-        mouth = _FallbackMouth()
-        mouth_interrupt = mouth.interrupt
-        is_speaking = mouth.is_speaking
-        print(Fore.YELLOW + "[SYSTEM] Using fallback mouth")
-
-    seven_memory = None
-    mood_engine  = None
-    command_log  = None
-    try:
-        print(Fore.CYAN + "[SYSTEM] Loading memory...")
-        from memory import seven_memory as _sm
-        from memory.mood import mood_engine as _me
-        from memory.command_log import command_log as _cl
-        seven_memory = _sm
-        mood_engine  = _me
-        command_log  = _cl
-        _ = seven_memory.get_stats()
-        print(Fore.GREEN + "[SYSTEM] Memory loaded")
-    except Exception as e:
-        print(Fore.RED + f"[SYSTEM] Memory failed: {e}")
-        import traceback; traceback.print_exc()
-
-    print(Fore.GREEN + "[SYSTEM] AI modules loaded.")
-
+    # Voice loop configuration
     is_active = True
     interrupt_config   = config.KEY.get('interrupt', {})
     INTERRUPT_ENABLED  = interrupt_config.get('enabled', True)
@@ -250,11 +180,7 @@ def seven_logic():
     INTERRUPT_COOLDOWN = interrupt_config.get('interrupt_cooldown', 1.5)
     last_interrupt_time = [0]
 
-    interrupt_context = {
-        "last_response":   None,
-        "last_input":      None,
-        "was_interrupted": False
-    }
+    interrupt_context = ctx.interrupt_context
 
     WAKE_WORDS  = ["wake up", "seven", "hey seven", "listen", "online", "resume"]
     PAUSE_WORDS = ["not you", "hold it", "hold on", "just a moment", "wait",
@@ -262,34 +188,35 @@ def seven_logic():
                    "enough", "quiet", "shut up", "be quiet"]
     KILL_WORDS  = ["shut down", "shutdown", "kill system", "go to sleep", "terminate"]
 
-    # Start PTT keyboard listener once — runs for entire session
+    # PTT listener
     _is_ptt_active_fn = lambda: True
     try:
-        from ears.push_to_talk import start as _ptt_start, set_enabled as _ptt_set, is_ptt_active
+        from ears.push_to_talk import start as _ptt_start, is_ptt_active
         _ptt_start()
         _is_ptt_active_fn = is_ptt_active
         print(Fore.CYAN + "[GATES] PTT keyboard listener started")
     except Exception as _ptt_err:
         print(Fore.YELLOW + f"[GATES] PTT init failed: {_ptt_err}")
 
+    # Speak with interrupt helper
     def speak_with_interrupt(text):
         import time as _time
         if not INTERRUPT_ENABLED or (_time.time() - last_interrupt_time[0] < INTERRUPT_COOLDOWN):
-            mouth.speak(text)
+            ctx.mouth.speak(text)
             return True
         stop_listening  = threading.Event()
         was_interrupted = threading.Event()
         def on_interrupt():
             was_interrupted.set()
-            mouth_interrupt()
+            ctx.mouth_interrupt()
             last_interrupt_time[0] = _time.time()
         interrupt_thread = threading.Thread(
-            target=listen_for_interrupt,
+            target=ctx.listen_for_interrupt,
             args=(INTERRUPT_WORDS, on_interrupt, stop_listening),
             daemon=True
         )
         interrupt_thread.start()
-        completed = mouth.speak(text)
+        completed = ctx.mouth.speak(text)
         stop_listening.set()
         interrupt_thread.join(timeout=2)
         if was_interrupted.is_set():
@@ -297,9 +224,11 @@ def seven_logic():
             app_ui.update_status("INTERRUPTED", "#ffaa00")
             interrupt_context["was_interrupted"] = True
             interrupt_context["last_response"]   = text
-            mouth.speak("Yeah?")
+            ctx.mouth.speak("Yeah?")
             return False
         return True
+
+    ctx.speak_with_interrupt = speak_with_interrupt
 
     # Silence watcher
     _silence_watcher = None
@@ -311,226 +240,36 @@ def seven_logic():
             get_last_topic_fn=lambda: _last_topic_ref[0],
         )
         threading.Thread(target=_silence_watcher.start, daemon=True).start()
+        ctx.silence_watcher = _silence_watcher
         print(Fore.CYAN + "[SYSTEM] Silence watcher started")
     except Exception as _sw_err:
         print(Fore.YELLOW + f"[SYSTEM] Silence watcher skipped: {_sw_err}")
 
-    # Startup stats
-    try:
-        if seven_memory:
-            stats = seven_memory.get_stats()
-            print(Fore.GREEN + f"[SYSTEM] Memory: {stats['total_conversations']} conversations, {stats['total_facts']} facts")
-        if mood_engine:
-            mood_status = mood_engine.get_status()
-            print(Fore.MAGENTA + f"[SYSTEM] Mood: {mood_status['mood_value']:.2f} ({mood_status['label']})")
-        if command_log:
-            cmd_stats = command_log.get_stats()
-            print(Fore.CYAN + f"[SYSTEM] Commands: {cmd_stats['total']} (success: {cmd_stats['success_rate']})")
-    except Exception as _stats_err:
-        print(Fore.YELLOW + f"[SYSTEM] Stats skipped: {_stats_err}")
-
-    try:
-        if is_voice_id_enabled():
-            speakers = get_enrolled_speakers()
-            print(Fore.CYAN + f"[SYSTEM] Voice ID active. Speakers: {', '.join(speakers)}")
-        else:
-            print(Fore.YELLOW + "[SYSTEM] Voice ID inactive.")
-    except Exception:
-        pass
-
-    # Greeting handled by morning brief below
-
     # Scheduler
     try:
         from backend.api_server import set_schedule_alert as _alert_fn
-        scheduler_mod.start_background(speak_fn=mouth.speak, alert_fn=_alert_fn)
+        ctx.scheduler_mod.start_background(speak_fn=ctx.mouth.speak, alert_fn=_alert_fn)
         print(Fore.GREEN + "[SYSTEM] Scheduler started with banner support")
     except Exception:
-        scheduler_mod.start_background(speak_fn=mouth.speak)
+        ctx.scheduler_mod.start_background(speak_fn=ctx.mouth.speak)
         print(Fore.YELLOW + "[SYSTEM] Scheduler started without banner support")
 
-    sched_count = scheduler_mod.get_active_count()
+    sched_count = ctx.scheduler_mod.get_active_count()
     if sched_count > 0:
         print(Fore.CYAN + f"[SYSTEM] Scheduler: {sched_count} active schedules.")
 
-    # Morning brief runs below after second definition
-    # ── Morning Brief ─────────────────────────────────────────────────
-    def _build_morning_brief():
-        import random as _rb
-        parts = []
+    # Morning brief
+    speak_morning_brief(ctx, config)
 
-        # Greeting
-        from datetime import datetime as _dt
-        _hour = _dt.now().hour
+    # Daemon launcher
+    launch_schedule_daemon()
 
-        # Name resolution with proper fallback
-        _name = ""
-        try:
-            _name = config.KEY.get("identity", {}).get("user_name", "").strip()
-        except Exception:
-            pass
-        if not _name or _name.lower() in ("admin", "there", "user", ""):
-            try:
-                if hasattr(brain, 'USER_NAME') and brain.USER_NAME.lower() not in ("admin", "there", ""):
-                    _name = brain.USER_NAME
-            except Exception:
-                pass
-
-        _greeting_word = (
-            "Good morning"   if _hour < 12 else
-            "Good afternoon" if _hour < 17 else
-            "Good evening"
-        )
-
-        # Personality name rotation — boss sometimes, name sometimes
-        if _name:
-            _name_variants = [_name, "boss", _name, _name, "boss"]
-            _chosen = _rb.choice(_name_variants)
-        else:
-            _chosen = "boss"
-
-        parts.append(f"{_greeting_word}, {_chosen}.")
-        print(Fore.CYAN + f"[BRIEF] {_greeting_word}, {_chosen} | hour={_hour}")
-
-        # Tasks
-        try:
-            from backend.routes.tasks import db_get_due_today, db_get_overdue, db_get_stats
-            _td = db_get_due_today()
-            _od = db_get_overdue()
-            _stats = db_get_stats()
-            _total_pending = _stats.get("pending", 0)
-            print(Fore.CYAN + f"[BRIEF] tasks today={len(_td)} overdue={len(_od)} total_pending={_total_pending}")
-
-            if _od:
-                # Overdue is highest priority
-                _oc = len(_od)
-                parts.append(
-                    f"You have {_oc} overdue task{'s' if _oc != 1 else ''}."
-                )
-                if _td:
-                    parts.append(f"Plus {len(_td)} due today.")
-            elif _td:
-                _pm  = {"high": 3, "medium": 2, "low": 1}
-                _top = max(_td, key=lambda t: _pm.get(t.get("priority", "medium"), 2))
-                if len(_td) == 1:
-                    parts.append(f"One task on your plate today: {_top['text']}.")
-                else:
-                    parts.append(
-                        f"{len(_td)} tasks today. "
-                        f"Priority is {_top['text'][:40]}."
-                    )
-            elif _total_pending > 0:
-                # No urgent tasks but there are pending ones
-                parts.append(
-                    f"You have {_total_pending} pending task{'s' if _total_pending != 1 else ''}, "
-                    f"nothing due today."
-                )
-            else:
-                # Completely clear
-                import random as _rc
-                parts.append(_rc.choice([
-                    "Your plate is clear.",
-                    "No tasks on the list.",
-                    "Nothing pending. Clear day ahead.",
-                    "All caught up.",
-                ]))
-        except Exception as _te:
-            print(Fore.YELLOW + f"[BRIEF] tasks failed: {_te}")
-            import traceback; traceback.print_exc()
-            import traceback; traceback.print_exc()
-
-        # Schedules
-        try:
-            _sc = scheduler_mod.get_active_count()
-            if _sc == 1:
-                parts.append("One reminder active.")
-            elif _sc > 1:
-                parts.append(f"{_sc} reminders active.")
-        except Exception as _se:
-            print(Fore.YELLOW + f"[BRIEF] schedules failed: {_se}")
-
-        # Battery — always report if unplugged
-        try:
-            import psutil as _pb
-            _bat = _pb.sensors_battery()
-            print(Fore.CYAN + f"[BRIEF] battery={_bat}")
-            if _bat is not None:
-                if not _bat.power_plugged:
-                    _pct = int(_bat.percent)
-                    parts.append(f"Battery at {_pct} percent.")
-        except Exception as _be:
-            print(Fore.YELLOW + f"[BRIEF] battery failed: {_be}")
-
-        # Voice level
-        try:
-            from ears.core import _noise_floor as _nf
-            print(Fore.CYAN + f"[BRIEF] noise_floor={_nf}")
-            if _nf < 300:
-                parts.append("Very quiet today.")
-            elif _nf >= 600:
-                parts.append("Noisy environment. Speak clearly.")
-        except Exception as _ne:
-            print(Fore.YELLOW + f"[BRIEF] noise failed: {_ne}")
-
-        result = " ".join(parts)
-        print(Fore.GREEN + f"[BRIEF] Full: {result}")
-        return result
-
+    # Register handlers
     try:
-        _brief = _build_morning_brief()
-        if _brief:
-            mouth.speak(_brief)
-    except Exception as _brief_err:
-        print(Fore.YELLOW + f"[BRIEF] failed: {_brief_err}")
+        register_all(ctx)
+    except Exception as _hr_err:
+        print(Fore.RED + f"[HANDLERS] Registration failed: {_hr_err}")
         import traceback; traceback.print_exc()
-        try:
-            mouth.speak("Seven online.")
-        except Exception:
-            pass
-
-    # Daemon - check if already running before starting
-    # SevenScheduleDaemon in schtasks handles login startup
-    # We only start one here if none is running
-    try:
-        import subprocess as _sp
-        import os as _os
-
-        _daemon  = _os.path.join(_os.getcwd(), "schedule_daemon.py")
-        _python  = sys.executable
-        _pythonw = _python.replace("python.exe", "pythonw.exe")
-        if not _os.path.exists(_pythonw):
-            _pythonw = _python
-
-        # Count running daemon instances
-        _daemon_count = 0
-        try:
-            import psutil as _psu
-            for _proc in _psu.process_iter(['pid', 'cmdline']):
-                try:
-                    _cmd = " ".join(_proc.info['cmdline'] or [])
-                    if "schedule_daemon" in _cmd:
-                        _daemon_count += 1
-                except Exception:
-                    pass
-        except Exception:
-            pass
-
-        if _daemon_count == 0 and _os.path.exists(_daemon):
-            _CREATE_NO_WINDOW = 0x08000000
-            _DETACHED_PROCESS = 0x00000008
-            _sp.Popen(
-                [_pythonw, _daemon],
-                stdout=_sp.DEVNULL,
-                stderr=_sp.DEVNULL,
-                stdin=_sp.DEVNULL,
-                creationflags=_CREATE_NO_WINDOW | _DETACHED_PROCESS
-            )
-            print(Fore.CYAN + "[SYSTEM] Schedule daemon started (hidden)")
-        elif _daemon_count > 0:
-            print(Fore.CYAN + f"[SYSTEM] Daemon already running ({_daemon_count} instance). Skipping.")
-
-    except Exception as _de:
-        print(Fore.YELLOW + f"[SYSTEM] Daemon skipped: {_de}")
 
     app_ui.update_status("SYSTEM ONLINE", "#00ff00")
 
@@ -539,161 +278,9 @@ def seven_logic():
     # =========================================================================
     while True:
         try:
-
-            # ── Check pending voice enrollment BEFORE listen() ────────
-            # Must be here — enrollment needs to intercept the listen() cycle
-            try:
-                from backend.api_server import get_state as _gs, set_state as _ss
-                _pending_name = _gs().get("pending_enrollment")
-                if _pending_name:
-                    _ss("pending_enrollment", None)
-                    _ss("enrollment_clips_done", 0)
-                    _ss("enrollment_done", None)
-                    api_set_state("listening", False)
-                    api_set_state("thinking",  True)
-
-                    # Clear force_return — normal listen() timeout from here
-                    try:
-                        from ears.core import set_force_return as _clr_fr
-                        _clr_fr(False)
-                    except Exception:
-                        pass
-
-                    import wave as _wave, shutil as _shutil, random as _rand
-
-                    # Professional enrollment prompts — multiple variants
-                    mouth.speak(f"Ready, {_pending_name}. Five clips.")
-                    app_ui.update_status(f"ENROLLING {_pending_name}...", "#ff00ff")
-
-                    import time as _enroll_time
-                    _enroll_time.sleep(0.5)
-
-                    # Single word prompts — fast, clear, not annoying
-                    _clip_prompts = [
-                        ["Clip one. Speak."],
-                        ["Clip two. Speak."],
-                        ["Clip three. Speak."],
-                        ["Clip four. Speak."],
-                        ["Last clip. Speak."],
-                    ]
-
-                    _clips = []
-                    for _i in range(5):
-                        mouth.speak(_rand.choice(_clip_prompts[_i]))
-                        app_ui.update_status(
-                            f"ENROLLING — Recording {_i+1}/5... speak now", "#ff00ff"
-                        )
-                        print(Fore.CYAN + f"[ENROLL] Waiting for clip {_i+1}/5...")
-
-                        # Use direct recognizer for enrollment — bypass all filters
-                        # Resemblyzer handles quality internally
-                        _clip = None
-                        try:
-                            import speech_recognition as _sr_enroll
-                            _rec_enroll = _sr_enroll.Recognizer()
-                            _rec_enroll.energy_threshold = 300  # low — catch quiet speech
-                            _rec_enroll.pause_threshold  = 1.0  # wait longer for pauses
-                            with _sr_enroll.Microphone() as _src_enroll:
-                                _rec_enroll.adjust_for_ambient_noise(_src_enroll, duration=0.2)
-                                print(Fore.CYAN + f"[ENROLL] Listening for clip {_i+1}...")
-                                _audio_enroll = _rec_enroll.listen(
-                                    _src_enroll,
-                                    timeout=30,        # 30s to start speaking
-                                    phrase_time_limit=10  # max 10s per clip
-                                )
-                                _clip_path = os.path.join(
-                                    os.environ.get('APPDATA', ''), 'SEVEN',
-                                    f'enroll_clip_{_i+1}.wav'
-                                )
-                                _wav_bytes = _audio_enroll.get_wav_data()   
-                                with open(_clip_path, 'wb') as _cf:
-                                    _cf.write(_wav_bytes)
-                                _clip = _clip_path
-                                print(Fore.GREEN + f"[ENROLL] Clip {_i+1} captured: {len(_wav_bytes)} bytes")
-                        except _sr_enroll.WaitTimeoutError:
-                            print(Fore.YELLOW + f"[ENROLL] Clip {_i+1} timeout — user did not speak")
-                            mouth.speak("I did not hear anything. Try again.")
-                        except Exception as _ce:
-                            print(Fore.RED + f"[ENROLL] Clip {_i+1} error: {_ce}")
-                        if _clip and os.path.exists(_clip):
-                            _clips.append(_clip)
-                            _ss("enrollment_clips_done", len(_clips))
-                            print(Fore.GREEN + f"[ENROLL] Clip {_i+1} captured")
-
-                            # Confirm between clips (not after last)
-                            if _i < 4:
-                                mouth.speak("Got it.")
-                        else:
-                            print(Fore.YELLOW + f"[ENROLL] Clip {_i+1} empty")
-                            mouth.speak("I did not catch that. Try again — speak clearly.")
-                            # Retry once
-                            _, _clip = listen()
-                            if _clip and os.path.exists(_clip):
-                                _clips.append(_clip)
-                                _ss("enrollment_clips_done", len(_clips))
-                                print(Fore.GREEN + f"[ENROLL] Clip {_i+1} captured on retry")
-
-                    _ok = False
-                    if _clips:
-                        _merged = os.path.join(
-                            os.environ.get('APPDATA', ''), 'SEVEN', 'enroll_merge.wav'
-                        )
-                        try:
-                            _all_frames, _wp = [], None
-                            for _cp in _clips:
-                                with _wave.open(_cp, 'rb') as _wf:
-                                    if _wp is None:
-                                        _wp = _wf.getparams()
-                                    _all_frames.append(_wf.readframes(_wf.getnframes()))
-                            if _wp and _all_frames:
-                                # Simple merge — write all frames with original params
-                                with _wave.open(_merged, 'wb') as _out:
-                                    _out.setparams(_wp)
-                                    for _f in _all_frames:
-                                        _out.writeframes(_f)
-                                print(Fore.CYAN + f"[ENROLL] Merged {len(_clips)} clips")
-                                # Save first clip as playback sample
-                                _sample_dir = os.path.join(os.getcwd(), 'seven_data', 'voice_prints')
-                                os.makedirs(_sample_dir, exist_ok=True)
-                                _shutil.copy(_clips[0], os.path.join(
-                                    _sample_dir, f"{_pending_name.lower()}_sample.wav"
-                                ))
-                                _ok = enroll_speaker(_pending_name, _merged)
-                                try:
-                                    os.remove(_merged)
-                                except Exception:
-                                    pass
-                        except Exception as _me:
-                            print(Fore.RED + f"[ENROLL] Merge error: {_me}")
-                            _ok = enroll_speaker(_pending_name, _clips[0])
-
-                    _ss("enrollment_clips_done", 0)
-                    _ss("enrollment_done", {
-                        "name":    _pending_name,
-                        "success": _ok,
-                        "message": (
-                            f"Voice enrolled for {_pending_name}. Enable Speaker Verification in Voice Security settings to activate it."
-                            if _ok else
-                            "Enrollment failed. No clear audio captured. Speak clearly for each clip."
-                        )
-                    })
-                    if _ok:
-                        mouth.speak(
-                            f"Voice enrollment complete for {_pending_name}. "
-                            f"To activate it, go to Settings, Voice Security, and turn on Speaker Verification. "
-                            f"Once enabled, only registered voices can give me commands."
-                        )
-                    else:
-                        mouth.speak(
-                            "Enrollment did not complete. The audio was unclear. "
-                            "Try again in a quiet environment and speak directly toward the microphone."
-                        )
-                    app_ui.update_status("SYSTEM ONLINE", "#00ff00")
-                    api_set_state("thinking", False)
-                    continue   # Skip normal listen() this iteration
-            except Exception as _enroll_err:
-                print(Fore.YELLOW + f"[ENROLL] Error: {_enroll_err}")
-                import traceback; traceback.print_exc()
+            # Enrollment check
+            if handle_pending_enrollment(ctx, api_set_state):
+                continue
 
             if is_active:
                 app_ui.update_status("LISTENING...", "#00ff00")
@@ -703,9 +290,9 @@ def seven_logic():
                 app_ui.update_status("PAUSED (Say 'Wake Up')", "#555555")
                 api_set_state("listening", False)
 
-            user_input, audio_path = listen()
+            user_input, audio_path = ctx.listen()
             if not user_input:
-                # Check for pending battery alert
+                # Battery alert check
                 try:
                     from backend.api_server import get_state as _gs
                     if _gs().get("battery_alert_pending"):
@@ -718,21 +305,19 @@ def seven_logic():
                     pass
                 continue
 
-            # ── Read gates fresh every loop — config can change from Settings UI
+            # Voice gates
             _vg          = config.KEY.get("voice_gates", {})
             _ptt_enabled = _vg.get("push_to_talk",   {}).get("enabled", False)
             _ww_enabled  = _vg.get("wake_word",      {}).get("enabled", False)
             _ww_words    = _vg.get("wake_word",      {}).get("words", ["hey seven", "ok seven", "seven"])
             _sv_enabled  = _vg.get("speaker_verify", {}).get("enabled", False)
 
-            # Sync PTT enabled state to keyboard listener
             try:
                 from ears.push_to_talk import set_enabled as _ptt_set
                 _ptt_set(_ptt_enabled)
             except Exception:
                 pass
 
-            # ── Gate 1: Push to Talk ──────────────────────────────────
             if _ptt_enabled and not _is_ptt_active_fn():
                 print(Fore.YELLOW + "[GATE1-PTT] Shift not held — audio discarded")
                 continue
@@ -741,13 +326,12 @@ def seven_logic():
                 _silence_watcher.on_user_spoke()
             _last_topic_ref[0] = user_input
 
-            # ── Gate 2: Wake Word ─────────────────────────────────────
             if _ww_enabled:
                 try:
                     from ears.wake_word import check_and_strip as _ww_check
                     user_input, _ww_found = _ww_check(user_input, _ww_words)
                     if not _ww_found:
-                        print(Fore.YELLOW + f"[GATE2-WW] No wake word — discarded: '{user_input[:40]}'")
+                        print(Fore.YELLOW + f"[GATE2-WW] No wake word — discarded")
                         continue
                 except Exception as _ww_err:
                     print(Fore.YELLOW + f"[GATE2-WW] Error: {_ww_err}")
@@ -764,6 +348,7 @@ def seven_logic():
                 print(Fore.YELLOW + f"[EARS] Filtered: '{user_input}'")
                 continue
 
+            # Interrupt resume
             if interrupt_context["was_interrupted"]:
                 resume_words = ["continue", "resume", "go on", "go ahead", "keep going", "carry on"]
                 if any(w in text_lower for w in resume_words):
@@ -776,114 +361,44 @@ def seven_logic():
                             f"I had said: '{old_response}'. "
                             f"Continue from where I left off naturally."
                         )
-                        response = brain.think(resume_prompt, speaker_id="default")
+                        response = ctx.brain.think(resume_prompt, speaker_id="default")
                         if response:
                             speak_with_interrupt(response)
                         else:
-                            mouth.speak("Sorry, lost my train of thought.")
+                            ctx.mouth.speak("Sorry, lost my train of thought.")
                     else:
-                        mouth.speak("Sorry, lost my train of thought. Ask me again?")
+                        ctx.mouth.speak("Sorry, lost my train of thought. Ask me again?")
                 else:
                     interrupt_context.update({"was_interrupted": False, "last_response": None, "last_input": None})
                 continue
 
+            # Speaker ID
             speaker_id = "default"
-            if audio_path and is_voice_id_enabled():
-                speaker_id = identify_speaker(audio_path)
+            if audio_path and ctx.is_voice_id_enabled():
+                speaker_id = ctx.identify_speaker(audio_path)
                 print(Fore.CYAN + f"[VOICE ID] Speaker: {speaker_id}")
                 api_set_state("current_speaker", speaker_id)
 
-            # ── Gate 3: Speaker Verification ──────────────────────────
-            if _sv_enabled and is_voice_id_enabled() and speaker_id == "unknown":
+            if _sv_enabled and ctx.is_voice_id_enabled() and speaker_id == "unknown":
                 print(Fore.YELLOW + "[GATE3-SV] Unknown speaker — audio discarded")
                 continue
 
+            # Voice enrollment trigger
             if "enroll my voice" in text_lower or "enroll voice" in text_lower:
-                mouth.speak("What name should I save this voice as?")
-                app_ui.update_status("ENROLLING — Say your name...", "#ff00ff")
-                name_input, _ = listen()
-                if not name_input:
-                    mouth.speak("I did not catch your name. Try again.")
-                    continue
-
-                enroll_name = name_input.strip().replace(".", "").replace("!", "").strip()
-                if len(enroll_name) < 2:
-                    mouth.speak("Name too short. Try again.")
-                    continue
-
-                # Collect 3 clips for better voice coverage
-                mouth.speak(f"Got it, {enroll_name}. Now speak for about 10 seconds. Say anything — a few sentences work best.")
-                app_ui.update_status(f"ENROLLING {enroll_name} — Speak now...", "#ff00ff")
-
-                import tempfile, wave as _wave, numpy as _np
-
-                collected_audio = []
-                for clip_num in range(5):
-                    if clip_num > 0:
-                        mouth.speak("Got it. Keep going.")
-                        app_ui.update_status(f"ENROLLING — Keep speaking... ({clip_num+1}/5)", "#ff00ff")
-                    _, clip_path = listen()
-                    if clip_path and os.path.exists(clip_path):
-                        collected_audio.append(clip_path)
-
-                if not collected_audio:
-                    mouth.speak("Did not capture any audio. Try again.")
-                    continue
-
-                # Merge audio clips into one file for better embedding
-                try:
-                    merged_path = os.path.join(
-                        os.environ.get('APPDATA', ''), 'SEVEN', 'enroll_temp.wav'
-                    )
-                    frames = []
-                    params = None
-                    for path in collected_audio:
-                        try:
-                            with _wave.open(path, 'rb') as wf:
-                                if params is None:
-                                    params = wf.getparams()
-                                frames.append(wf.readframes(wf.getnframes()))
-                        except Exception:
-                            pass
-
-                    if frames and params:
-                        with _wave.open(merged_path, 'wb') as out:
-                            out.setparams(params)
-                            for f in frames:
-                                out.writeframes(f)
-                        success = enroll_speaker(enroll_name, merged_path)
-                        try:
-                            os.remove(merged_path)
-                        except Exception:
-                            pass
-                    else:
-                        success = enroll_speaker(enroll_name, collected_audio[0])
-
-                except Exception as _enroll_err:
-                    print(Fore.RED + f"[ENROLL] Merge failed: {_enroll_err}")
-                    success = enroll_speaker(enroll_name, collected_audio[0])
-
-                if success:
-                    mouth.speak(f"Voice enrolled. I will recognize {enroll_name} from now on.")
-                    # Push enrolled status to frontend
-                    try:
-                        api_set_state("enrollment_updated", True)
-                    except Exception:
-                        pass
-                else:
-                    mouth.speak("Enrollment failed. Try again with clearer audio.")
+                handle_voice_enrollment_command(ctx, api_set_state)
                 continue
 
+            # Kill / wake / pause
             if any(trigger in text_lower for trigger in KILL_WORDS):
                 app_ui.update_status("SHUTTING DOWN...", "#ff0000")
-                mouth.speak("Systems offline. Goodbye.")
+                ctx.mouth.speak("Systems offline. Goodbye.")
                 app_ui.close()
                 os._exit(0)
 
             if any(trigger in text_lower for trigger in WAKE_WORDS):
                 if not is_active:
                     is_active = True
-                    mouth.speak("Listening.")
+                    ctx.mouth.speak("Listening.")
                     app_ui.update_status("RESUMED", "#00ff00")
                     if _silence_watcher:
                         _silence_watcher.set_paused(False)
@@ -891,7 +406,7 @@ def seven_logic():
 
             if is_active and any(trigger in text_lower for trigger in PAUSE_WORDS):
                 is_active = False
-                mouth.speak("Standing by.")
+                ctx.mouth.speak("Standing by.")
                 app_ui.update_status("PAUSED", "#555555")
                 if _silence_watcher:
                     _silence_watcher.set_paused(True)
@@ -909,6 +424,7 @@ def seven_logic():
             api_set_state("user_text", user_input)
             api_set_state("seven_text", "")
 
+            # Facts limit check
             if any(t in user_input.lower() for t in [
                 "remember that", "remember this", "my name is", "call me",
                 "i love", "i like", "i prefer", "i am a",
@@ -916,21 +432,19 @@ def seven_logic():
             ]):
                 try:
                     import voice_limits
-                    if seven_memory:
-                        _current_facts = seven_memory.user_facts.count()
+                    if ctx.seven_memory:
+                        _current_facts = ctx.seven_memory.user_facts.count()
                         _fact_ok, _fact_msg = voice_limits.check("facts_limit", _current_facts)
                         if not _fact_ok:
                             api_set_state("speaking", True)
-                            mouth.speak(_fact_msg)
+                            ctx.mouth.speak(_fact_msg)
                             api_set_state("speaking", False)
                             app_ui.update_status("PLAN LIMIT", "#ffaa00")
                             continue
                 except Exception:
                     pass
 
-            # For questions going to LLM — say "just a moment" naturally
-            # Only say "one moment" for web searches and long factual questions
-            # Not for conversation or capability questions
+            # Web search hint
             _web_needed = any(w in user_input.lower() for w in [
                 "weather", "news", "price", "score", "latest",
                 "what is", "who is", "when did", "how much",
@@ -942,18 +456,13 @@ def seven_logic():
             ])
             if _web_needed and not _is_convo and len(user_input.split()) > 5:
                 import random as _rand
-                _thinking_phrases = [
-                    "One moment.",
-                    "Let me check.",
-                    "Checking.",
-                ]
-                mouth.speak(_rand.choice(_thinking_phrases))
+                ctx.mouth.speak(_rand.choice(["One moment.", "Let me check.", "Checking."]))
 
-            response = brain.think(user_input, speaker_id=speaker_id)
+            # Brain response
+            response = ctx.brain.think(user_input, speaker_id=speaker_id)
             telemetry.log_activity()
 
             if response == "":
-                # Empty string = intentional silence (acknowledgement filtered)
                 continue
             if not response:
                 response = "Processing error."
@@ -980,55 +489,17 @@ def seven_logic():
             if not is_streaming and speech_part:
                 api_set_state("seven_text", speech_part)
 
-            # Pre-execute SYS commands before speaking
-            # Mark as pre-executed so main handler skips them
-                       # Pre-execute OPEN and CLOSE commands before speaking
-            _pre_executed_sys  = False
-            _pre_executed_open = False
-            if isinstance(response, str) and "###SYS:" in response:
-                import re as _re_presys
-                _pre_sys = _re_presys.findall(r"###SYS:\s*(.*?)(?=###|$)", response)
-                for _ps in _pre_sys:
-                    _ps_params = {}
-                    for _pair in _ps.strip().split():
-                        if "=" in _pair:
-                            _k, _v = _pair.split("=", 1)
-                            _ps_params[_k] = _v
-                    if _ps_params:
-                        try:
-                            system_mod.manage_system(_ps_params)
-                            _pre_executed_sys = True
-                        except Exception as _pre_err:
-                            print(f"[PRE-EXEC] SYS error: {_pre_err}")
+            # Update context for handlers
+            ctx.speaker_id  = speaker_id
+            ctx.speech_part = speech_part
+            ctx.user_input  = user_input
 
-            # Pre-execute OPEN and CLOSE commands before speaking
-            # User hears confirmation while app is already launching
-            if isinstance(response, str) and "###OPEN:" in response:
-                import re as _re_preopen
-                _pre_opens = _re_preopen.findall(r"###OPEN:\s*(.*?)(?=###|$)", response)
-                for _app in _pre_opens:
-                    _app = _app.strip().replace('"','').replace("'","")
-                    if _app:
-                        threading.Thread(
-                            target=core.open_app,
-                            args=(_app,),
-                            daemon=True
-                        ).start()
-                        _pre_executed_open = True
-
-            _pre_executed_close = False
-            if isinstance(response, str) and "###CLOSE:" in response:
-                import re as _re_preclose
-                _pre_closes = _re_preclose.findall(r"###CLOSE:\s*(.*?)(?=###|$)", response)
-                for _app in _pre_closes:
-                    _app = _app.strip().replace('"','').replace("'","")
-                    if _app:
-                        threading.Thread(
-                            target=core.close_app,
-                            args=(_app,),
-                            daemon=True
-                        ).start()
-                        _pre_executed_close = True
+            # Pre-execute
+            if isinstance(response, str):
+                try:
+                    pre_execute(response, ctx)
+                except Exception as _pe_err:
+                    print(Fore.RED + f"[PRE-EXEC] Error: {_pe_err}")
 
             api_set_state("speaking", True)
             if _silence_watcher:
@@ -1048,6 +519,7 @@ def seven_logic():
                         break
                 response    = " ".join(full_parts)
                 speech_part = response.split("###")[0].strip() if "###" in response else response
+                ctx.speech_part = speech_part
                 app_ui.update_status(
                     "INTERRUPTED" if not completed else speech_part[:80],
                     "#ffaa00" if not completed else "#00ccff"
@@ -1065,10 +537,11 @@ def seven_logic():
             if _silence_watcher:
                 _silence_watcher.on_seven_speaking(False)
 
-            if should_store and isinstance(response, str) and seven_memory:
+            # Store conversation
+            if should_store and isinstance(response, str) and ctx.seven_memory:
                 try:
                     import voice_limits
-                    current_convos = seven_memory.conversations.count()
+                    current_convos = ctx.seven_memory.conversations.count()
                     allowed, limit_msg = voice_limits.check("conversation_history", current_convos)
                     if allowed:
                         clean_response = re.sub(r'###\w+:\s*\S+', '', response).strip()
@@ -1076,7 +549,7 @@ def seven_logic():
                             clean_response = f"[INTERRUPTED] {clean_response}"
                         if clean_response:
                             _default_uid = config.KEY.get('identity', {}).get('user_name', 'default').lower() or "default"
-                            seven_memory.store_conversation(
+                            ctx.seven_memory.store_conversation(
                                 user_input, clean_response,
                                 user_id=speaker_id if speaker_id not in ("default", "unknown") else _default_uid
                             )
@@ -1088,392 +561,12 @@ def seven_logic():
             if not isinstance(response, str):
                 continue
 
-            # Window commands
-            window_cmds = re.findall(r"###WINDOW:\s*(.*?)(?=###|$)", response)
-            for param_str in window_cmds:
-                params = {}
-                for pair in param_str.strip().split():
-                    if "=" in pair:
-                        k, v = pair.split("=", 1)
-                        params[k.strip()] = v.strip()
-                if params:
-                    try:
-                        success, msg = hands_windows.manage_window(params)
-                        if success:
-                            app_ui.update_status(f"Window: {msg}", "#00ff00")
-                            if params.get("action") == "list" and msg and not speech_part:
-                                speak_with_interrupt(msg)
-                        else:
-                            if not speech_part:
-                                mouth.speak(msg)
-                            app_ui.update_status(f"Window failed: {msg}", "#ff0000")
-                    except Exception as e:
-                        print(Fore.RED + f"[WINDOW ERROR] {e}")
-
-            # ── Task commands ─────────────────────────────────────────
-            task_cmds = re.findall(r"###TASK:\s*(.*?)(?=###|$)", response)
-            for _task_param_str in task_cmds:
-                _task_params = {}
-                for _pair in _task_param_str.strip().split():
-                    if "=" in _pair:
-                        _k, _v = _pair.split("=", 1)
-                        _task_params[_k.strip()] = _v.strip()
-
-                if not _task_params:
-                    continue
-
-                _task_action = _task_params.get("action", "")
-
-                try:
-                    import requests as _task_req
-
-                    # ── CREATE ──────────────────────────────────────
-                    if _task_action == "create":
-                        _text     = _task_params.get("text", "").replace("|||", " ").replace("_", " ")
-                        _priority = _task_params.get("priority", "medium")
-                        _due_raw  = _task_params.get("due", "").replace("|||", " ").replace("_", " ")
-
-                        # Resolve natural language due date to ISO string
-                        _due_date = None
-                        if _due_raw:
-                            try:
-                                from datetime import date, timedelta
-                                _dl = _due_raw.lower()
-                                if "today" in _dl or "tonight" in _dl:
-                                    _due_date = date.today().isoformat()
-                                elif "tomorrow" in _dl:
-                                    _due_date = (date.today() + timedelta(days=1)).isoformat()
-                                else:
-                                    # Use scheduler's time parser for other dates
-                                    from hands.scheduler import _parse_time as _pt
-                                    _parsed = _pt(_due_raw)
-                                    if _parsed:
-                                        _due_date = _parsed.date().isoformat()
-                            except Exception as _due_err:
-                                print(Fore.YELLOW + f"[TASKS] Due date parse failed: {_due_err}")
-
-                        _payload = {
-                            "text":     _text,
-                            "priority": _priority,
-                        }
-                        if _due_date:
-                            _payload["due_date"] = _due_date
-
-                        _r = _task_req.post(
-                            "http://127.0.0.1:7777/api/tasks",
-                            json=_payload,
-                            timeout=5
-                        )
-                        if _r.status_code == 200:
-                            _data = _r.json()
-                            # Get updated pending count for speech
-                            _stats = _task_req.get(
-                                "http://127.0.0.1:7777/api/tasks/stats",
-                                timeout=3
-                            ).json()
-                            _pending = _stats.get("pending", 0)
-                            _count_str = (
-                                f"You now have {_pending} pending task{'s' if _pending != 1 else ''}."
-                                if _pending > 0 else ""
-                            )
-                            # Build speech confirmation
-                            if speech_part and "adding" in speech_part.lower():
-                                # brain already said confirmation — just add count
-                                _extra = f" {_count_str}" if _count_str else ""
-                                if _extra:
-                                    mouth.speak(_extra)
-                            else:
-                                _confirm = f"Task added. {_count_str}"
-                                mouth.speak(_confirm)
-
-                            # Push to frontend state
-                            api_set_state("task_results", {
-                                "action":  "created",
-                                "task":    _data.get("task"),
-                                "pending": _pending
-                            })
-                            app_ui.update_status("Task added", "#00ff00")
-                            print(Fore.GREEN + f"[TASKS] Created: {_text}")
-                        else:
-                            print(Fore.RED + f"[TASKS] Create failed: {_r.status_code}")
-                            mouth.speak("I could not add that task. Try again.")
-
-                    # ── LIST ────────────────────────────────────────
-                    elif _task_action == "list":
-                        _filter = _task_params.get("filter", "all")
-                        _endpoint = (
-                            "http://127.0.0.1:7777/api/tasks/today"
-                            if _filter == "today"
-                            else "http://127.0.0.1:7777/api/tasks?status=pending"
-                        )
-                        _r = _task_req.get(_endpoint, timeout=5)
-                        if _r.status_code == 200:
-                            _tasks = _r.json()
-                            _count = len(_tasks)
-
-                            if _count == 0:
-                                _msg = (
-                                    "No tasks due today." if _filter == "today"
-                                    else "You have no pending tasks."
-                                )
-                                mouth.speak(_msg)
-                            elif _count == 1:
-                                _t = _tasks[0]
-                                mouth.speak(
-                                    f"One task: {_t['text']}."
-                                    + (f" Due today." if _t.get("due_date") else "")
-                                )
-                            elif _count <= 3:
-                                _names = ", ".join(t["text"][:30] for t in _tasks)
-                                mouth.speak(f"{_count} tasks: {_names}.")
-                            else:
-                                _top = _tasks[0]
-                                mouth.speak(
-                                    f"{_count} pending tasks. "
-                                    f"Top priority: {_top['text'][:40]}. "
-                                    f"Full list is in the chat."
-                                )
-
-                            # Push full list to frontend
-                            api_set_state("task_results", {
-                                "action": "list",
-                                "tasks":  _tasks,
-                                "filter": _filter
-                            })
-                            app_ui.update_status(f"Tasks: {_count} pending", "#00ccff")
-
-                            # Trigger task panel to open via trigger file
-                            try:
-                                import json as _panel_json
-                                _panel_trigger = os.path.join(
-                                    os.environ.get('APPDATA', ''),
-                                    'SEVEN', 'panel_trigger.json'
-                                )
-                                os.makedirs(os.path.dirname(_panel_trigger), exist_ok=True)
-                                with open(_panel_trigger, 'w') as _pf:
-                                    _panel_json.dump({
-                                        "reason": "voice",
-                                        "tasks":  _tasks,
-                                    }, _pf)
-                                print(Fore.CYAN + "[TASKS] Panel trigger written")
-                            except Exception as _pt_err:
-                                print(Fore.YELLOW + f"[TASKS] Panel trigger failed: {_pt_err}")
-
-                    # ── COMPLETE ────────────────────────────────────
-                    elif _task_action == "complete":
-                        _search = _task_params.get("search", "").replace("|||", " ").replace("_", " ")
-                        # Direct DB lookup — faster than HTTP for internal use
-                        try:
-                            from backend.routes.tasks import db_find_task_by_text
-                            _found = db_find_task_by_text(_search)
-                        except Exception:
-                            _found = None
-
-                        if _found:
-                            _r = _task_req.put(
-                                f"http://127.0.0.1:7777/api/tasks/{_found['id']}",
-                                json={"completed": True},
-                                timeout=5
-                            )
-                            if _r.status_code == 200:
-                                _stats = _task_req.get(
-                                    "http://127.0.0.1:7777/api/tasks/stats",
-                                    timeout=3
-                                ).json()
-                                _pending = _stats.get("pending", 0)
-                                mouth.speak(
-                                    f"Marked complete. "
-                                    f"{_pending} task{'s' if _pending != 1 else ''} remaining."
-                                )
-                                api_set_state("task_results", {
-                                    "action": "completed",
-                                    "task_id": _found["id"],
-                                    "pending": _pending
-                                })
-                                app_ui.update_status("Task completed", "#00ff00")
-                            else:
-                                mouth.speak("Could not mark that complete. Try again.")
-                        else:
-                            mouth.speak(
-                                f"Could not find a task matching '{_search}'. "
-                                f"Say 'show my tasks' to see the list."
-                            )
-
-                    # ── DELETE ──────────────────────────────────────
-                    elif _task_action == "delete":
-                        _search = _task_params.get("search", "").replace("|||", " ").replace("_", " ")
-                        try:
-                            from backend.routes.tasks import db_find_task_by_text
-                            _found = db_find_task_by_text(_search)
-                        except Exception:
-                            _found = None
-
-                        if _found:
-                            _r = _task_req.delete(
-                                f"http://127.0.0.1:7777/api/tasks/{_found['id']}",
-                                timeout=5
-                            )
-                            if _r.status_code == 200:
-                                mouth.speak(f"Removed: {_found['text'][:40]}.")
-                                api_set_state("task_results", {
-                                    "action":  "deleted",
-                                    "task_id": _found["id"]
-                                })
-                                app_ui.update_status("Task removed", "#ff6600")
-                            else:
-                                mouth.speak("Could not remove that task.")
-                        else:
-                            mouth.speak(
-                                f"Could not find a task matching '{_search}'."
-                            )
-
-                except Exception as _task_err:
-                    # Graceful degradation — task handler failed
-                    print(Fore.RED + f"[TASKS] Handler error: {_task_err}")
-                    import traceback; traceback.print_exc()
-                    mouth.speak("Something went wrong with the task system.")
-
-            # Scheduler commands
-            sched_cmds = re.findall(r"###SCHED:\s*(.*?)(?=###|$)", response)
-            for param_str in sched_cmds:
-                params = {"speaker_id": speaker_id}
-                for pair in param_str.strip().split():
-                    if "=" in pair:
-                        k, v = pair.split("=", 1)
-                        params[k.strip()] = v.strip()
-                if params:
-                    action = params.get("action", "")
-                    if action in ("alarm", "reminder", "timer", "event"):
-                        try:
-                            import voice_limits
-                            recur = params.get("recur", "")
-                            if recur and recur not in ("", "none"):
-                                rec_ok, rec_msg = voice_limits.check_bool("recurring_schedules")
-                                if not rec_ok:
-                                    mouth.speak(rec_msg)
-                                    app_ui.update_status("PLAN LIMIT", "#ffaa00")
-                                    continue
-                            current_scheds = scheduler_mod.get_active_count()
-                            sched_ok, sched_msg = voice_limits.check("schedules", current_scheds)
-                            if not sched_ok:
-                                mouth.speak(sched_msg)
-                                app_ui.update_status("PLAN LIMIT", "#ffaa00")
-                                continue
-                        except Exception:
-                            pass
-                    success, msg = scheduler_mod.manage_schedule(params)
-                    telemetry.log_activity()
-                    if success:
-                        app_ui.update_status(f"Schedule: {msg}", "#00ff00")
-                        # Only speak scheduler confirmation if brain gave no speech part
-                        # brain already said "On it." or "Locked in." before the tag
-                        if msg and not speech_part and any(x in msg for x in [
-                            "AM", "PM", "today", "tomorrow", "minutes", "seconds",
-                            "hours", "Monday", "Tuesday", "Wednesday", "Thursday",
-                            "Friday", "Saturday", "Sunday"
-                        ]):
-                            speak_with_interrupt(msg)
-                    else:
-                        mouth.speak(msg)
-                        app_ui.update_status(f"Schedule failed: {msg}", "#ff0000")
-
-            # System commands — skip if already pre-executed before speaking
-            if _pre_executed_sys:
-                sys_cmds = []
-            else:
-                sys_cmds = re.findall(r"###SYS:\s*(.*?)(?=###|$)", response)
-            for param_str in sys_cmds:
-                params = {}
-                for pair in param_str.strip().split():
-                    if "=" in pair:
-                        k, v = pair.split("=", 1)
-                        params[k.strip()] = v.strip()
-                if params:
-                    success, msg = system_mod.manage_system(params)
-                    if success:
-                        app_ui.update_status(f"System: {msg}", "#00ff00")
-                        action = params.get("action", "")
-                        if action in ["battery", "volume_get", "brightness_get",
-                                      "wifi_status", "bluetooth_status"] and msg:
-                            speak_with_interrupt(msg)
-                    else:
-                        mouth.speak(msg)
-                        app_ui.update_status(f"System failed: {msg}", "#ff0000")
-
-            # App commands — skip if already pre-executed
-            if _pre_executed_open and _pre_executed_close:
-                commands = re.findall(r"###(SEARCH):\s*(.*?)(?=###|$)", response)
-            elif _pre_executed_open:
-                commands = re.findall(r"###(CLOSE|SEARCH):\s*(.*?)(?=###|$)", response)
-            elif _pre_executed_close:
-                commands = re.findall(r"###(OPEN|SEARCH):\s*(.*?)(?=###|$)", response)
-            else:
-                commands = re.findall(r"###(OPEN|CLOSE|SEARCH):\s*(.*?)(?=###|$)", response)
-            for cmd_type, arg in commands:
-                clean_arg = arg.replace('"','').replace("'","").replace(".","").strip()
-                if not clean_arg:
-                    continue
-
-                # Normalize separators
-                _normalized = clean_arg.replace(" and ", ",").replace(" & ", ",")
-                sub_apps = [a.strip() for a in _normalized.split(",") if a.strip()]
-                if not sub_apps:
-                    sub_apps = [clean_arg]
-
-                if cmd_type == "OPEN":
-                    if len(sub_apps) > 1:
-                        def _open_one(name):
-                            if not name:
-                                return
-                            core.open_app(name)
-                            telemetry.log_activity()
-                        _threads = []
-                        for _app in sub_apps:
-                            _t = threading.Thread(target=_open_one, args=(_app.strip(),), daemon=True)
-                            _t.start()
-                            _threads.append(_t)
-                        for _t in _threads:
-                            _t.join(timeout=5)
-                        app_ui.update_status(f"Opened {len(sub_apps)} apps", "#00ff00")
-                    else:
-                        app_name = sub_apps[0]
-                        app_ui.update_status(f"Opening: {app_name}", "#00ff00")
-                        telemetry.log_activity()
-
-                elif cmd_type == "CLOSE":
-                    for app_name in sub_apps:
-                        app_name = app_name.strip()
-                        if not app_name:
-                            continue
-                        # Skip if app_name looks like leftover garbage
-                        # (brain validation should have caught this already)
-                        _skip_words = {"me", "it", "this", "that", "the", "a", "an"}
-                        if app_name.lower() in _skip_words:
-                            continue
-                        app_ui.update_status(f"Closing: {app_name}", "#ff0000")
-
-                        def _close_and_report(name):
-                            success = core.close_app(name)
-                            if not success:
-                                # App was not found running — tell user
-                                try:
-                                    mouth.speak(f"{name} is not running.")
-                                except Exception:
-                                    pass
-
-                        threading.Thread(
-                            target=_close_and_report,
-                            args=(app_name,),
-                            daemon=True
-                        ).start()
-                        telemetry.log_activity()
-
-                elif cmd_type == "SEARCH":
-                    for app_name in sub_apps:
-                        app_name = app_name.strip()
-                        if app_name:
-                            app_ui.update_status(f"Searching: {app_name}", "#0000ff")
-                            core.search_web(app_name)
+            # Dispatch to handlers
+            try:
+                execute_all(response, ctx)
+            except Exception as _hd_err:
+                print(Fore.RED + f"[HANDLERS] Dispatch error: {_hd_err}")
+                import traceback; traceback.print_exc()
 
             if audio_path and os.path.exists(audio_path):
                 try:
@@ -1483,8 +576,6 @@ def seven_logic():
 
         except OSError as e:
             if "Stream closed" in str(e) or "9988" in str(e) or "9999" in str(e):
-                # Microphone disconnected (Bluetooth/USB unplugged)
-                # Recover silently — recalibrate on next iteration
                 print(Fore.YELLOW + f"[EARS] Mic device change detected — recovering")
                 import time as _rec_t
                 _rec_t.sleep(1.5)
@@ -1550,56 +641,7 @@ def start_app():
     else:
         print(Fore.GREEN + "[SYSTEM] Backend running. Open http://localhost:5173 in browser.")
 
-    # Battery monitor
-    def _battery_monitor():
-        import time as _bt
-        _alerted_30 = False
-        _alerted_20 = False
-        _alerted_10 = False
-        _alerted_5  = False
-        while True:
-            try:
-                _bt.sleep(300)
-                import psutil
-                bat = psutil.sensors_battery()
-                if bat is None:
-                    continue
-                if bat.power_plugged:
-                    _alerted_30 = _alerted_20 = _alerted_10 = _alerted_5 = False
-                    continue
-                pct = int(bat.percent)
-
-                def _alert(msg, title):
-                    try:
-                        import mouth as _m
-                        _m.speak(msg)
-                    except Exception:
-                        pass
-                    try:
-                        from winotify import Notification, audio
-                        t = Notification(app_id="Seven AI", title=title, msg=msg, duration="long")
-                        t.set_audio(audio.Default, loop=False)
-                        t.show()
-                    except Exception:
-                        pass
-
-                if pct <= 5 and not _alerted_5:
-                    _alert(f"Battery at {pct} percent. Shutting down soon. Plug in immediately.", "Seven - BATTERY CRITICAL")
-                    _alerted_5 = True
-                elif pct <= 10 and not _alerted_10:
-                    _alert(f"Battery at {pct} percent. Getting critical. Plug in now.", "Seven - Battery Critical")
-                    _alerted_10 = True
-                elif pct <= 20 and not _alerted_20:
-                    _alert(f"Battery at {pct} percent. Should plug in soon.", "Seven - Battery Low")
-                    _alerted_20 = True
-                elif pct <= 30 and not _alerted_30:
-                    _alert(f"Battery at {pct} percent. Just a heads up.", "Seven - Battery Notice")
-                    _alerted_30 = True
-            except Exception:
-                pass
-
-    threading.Thread(target=_battery_monitor, daemon=True).start()
-    print(Fore.CYAN + "[SYSTEM] Battery monitor active")
+    start_battery_monitor()
 
     try:
         import time
@@ -1615,4 +657,4 @@ def start_app():
 
 
 if __name__ == "__main__":
-    start_app() 
+    start_app()
