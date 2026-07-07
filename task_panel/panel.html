@@ -81,22 +81,6 @@
     gap: 10px;
   }
 
-  #brand-mark {
-    width: 26px;
-    height: 26px;
-    border-radius: 8px;
-    background: linear-gradient(135deg, rgba(124,140,255,0.15), rgba(124,140,255,0.05));
-    border: 1px solid rgba(124,140,255,0.2);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 9px;
-    font-weight: 800;
-    color: var(--accent);
-    letter-spacing: 0.05em;
-    font-family: 'Inter', sans-serif;
-  }
-
   #title-block h1 {
     font-size: 12px;
     font-weight: 600;
@@ -507,7 +491,6 @@
   <!-- Header -->
   <div id="header">
     <div id="brand">
-      <div id="brand-mark">SVN</div>
       <div id="title-block">
         <h1>Tasks</h1>
         <div id="title-sub">loading...</div>
@@ -674,16 +657,47 @@ function makeCard(task, index) {
         </button>
       </div>
 
-      ${task.description ? `<div class="card-desc">${escHtml(task.description)}</div>` : ''}
+      ${task.description ? `
+        <div style="margin-top:10px">
+          <div style="font-size:8px;color:rgba(255,255,255,0.35);text-transform:uppercase;letter-spacing:0.12em;font-weight:600;margin-bottom:5px">
+            Description
+          </div>
+          <div class="card-desc">${escHtml(task.description)}</div>
+        </div>
+      ` : ''}
 
       <div id="countdown-${task.id}" style="display:none"></div>
 
-      ${subPct !== null ? `
-        <div style="margin-top:10px;display:flex;align-items:center;gap:8px">
-          <div style="flex:1;height:2px;background:rgba(255,255,255,0.06);border-radius:2px;overflow:hidden">
-            <div style="height:100%;width:${subPct}%;background:${subPct === 100 ? 'rgba(255,255,255,0.5)' : 'rgba(124,140,255,0.6)'};border-radius:2px;transition:width 0.7s cubic-bezier(0.16,1,0.3,1)"></div>
+      ${subs.length > 0 ? `
+        <div style="margin-top:12px">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+            <div style="font-size:8px;color:rgba(255,255,255,0.35);text-transform:uppercase;letter-spacing:0.12em;font-weight:600">
+              Subtasks
+            </div>
+            <div style="font-size:8px;color:rgba(255,255,255,0.3);font-family:JetBrains Mono,monospace;font-weight:600">
+              ${subDone}/${subs.length}
+            </div>
           </div>
-          <span style="font-size:7.5px;color:rgba(255,255,255,0.3);font-family:JetBrains Mono,monospace;font-weight:600">${subDone}/${subs.length}</span>
+          <div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.05);border-radius:8px;padding:6px;max-height:100px;overflow-y:auto">
+            ${subs.map(sub => `
+              <div style="display:flex;align-items:center;gap:8px;padding:4px 6px;border-radius:5px">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="${sub.completed ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,0.2)'}" stroke-width="2" style="flex-shrink:0">
+                  ${sub.completed 
+                    ? '<circle cx="12" cy="12" r="10"/><path d="M9 12l2 2 4-4"/>'
+                    : '<circle cx="12" cy="12" r="10"/>'}
+                </svg>
+                <span style="font-size:10px;color:${sub.completed ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.7)'};text-decoration:${sub.completed ? 'line-through' : 'none'};line-height:1.3">
+                  ${escHtml(sub.text)}
+                </span>
+              </div>
+            `).join('')}
+          </div>
+          <div style="margin-top:8px;display:flex;align-items:center;gap:8px">
+            <div style="flex:1;height:2px;background:rgba(255,255,255,0.06);border-radius:2px;overflow:hidden">
+              <div style="height:100%;width:${subPct}%;background:${subPct === 100 ? 'rgba(255,255,255,0.5)' : 'rgba(124,140,255,0.6)'};border-radius:2px;transition:width 0.7s cubic-bezier(0.16,1,0.3,1)"></div>
+            </div>
+            <span style="font-size:7.5px;color:rgba(255,255,255,0.3);font-family:JetBrains Mono,monospace;font-weight:600">${subPct}%</span>
+          </div>
         </div>
       ` : ''}
 
