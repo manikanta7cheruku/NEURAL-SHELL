@@ -400,25 +400,30 @@ function TaskCard({ task, onComplete, onDelete, onUpdate }) {
                   </span>
                 </div>
 
-                <div className="space-y-0.5 h-[130px] overflow-y-auto pr-1
-                                scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent
-                                bg-white/[0.01] rounded-lg p-1.5">
+                <div className="space-y-0 h-[130px] overflow-y-auto pr-1
+                                scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
                   {subs.map(sub => (
                     <div key={sub.id}
-                         className="flex items-center gap-2 py-1 px-1.5 rounded-md
-                                    group/sub hover:bg-white/[0.04] transition-colors">
+                         className="flex items-center gap-2.5 py-1.5 px-0
+                                    group/sub border-b border-white/[0.03] last:border-b-0
+                                    hover:bg-white/[0.02] transition-colors rounded-sm">
                       <button onClick={() => toggleSub(sub.id)}
-                              className={`flex-shrink-0 transition-colors
-                                ${sub.completed ? 'text-white/50' : 'text-white/20 hover:text-white/45'}`}>
-                        {sub.completed ? <CheckCircle2 size={13} /> : <Circle size={13} />}
+                              className={`flex-shrink-0 transition-all duration-200
+                                ${sub.completed
+                                  ? 'text-white/55 scale-100'
+                                  : 'text-white/20 hover:text-white/50 hover:scale-110'}`}>
+                        {sub.completed ? <CheckCircle2 size={14} /> : <Circle size={14} />}
                       </button>
-                      <span className={`flex-1 text-[10.5px] transition-colors leading-tight
-                        ${sub.completed ? 'line-through text-white/30' : 'text-white/80'}`}>
+                      <span className={`flex-1 text-[10.5px] transition-all leading-tight
+                        ${sub.completed
+                          ? 'line-through text-white/30 decoration-white/15'
+                          : 'text-white/80'}`}>
                         {sub.text}
                       </span>
                       <button onClick={() => deleteSub(sub.id)}
                               className="opacity-0 group-hover/sub:opacity-100
-                                         transition-opacity text-white/25 hover:text-white/70">
+                                         transition-opacity text-white/20 hover:text-white/60
+                                         flex-shrink-0">
                         <X size={10} />
                       </button>
                     </div>
