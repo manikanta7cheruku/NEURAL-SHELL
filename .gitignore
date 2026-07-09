@@ -66,3 +66,15 @@ mouth/piper/voices/*.onnx
 mouth/piper/voices/*.onnx.json
 
 current_packages.txt
+
+# Baseline test artifacts
+baseline_before.txt
+baseline_after.txt
+
+# One-time diagnostic scripts
+test_mics.py
+test_mic_levels.py
+
+# Trigger test outputs (from upcoming stages)
+trigger_test_*.wav
+trigger_test_*.txt

@@ -788,32 +788,34 @@ function makeCard(task, index) {
             <div style="font-size:8px;color:rgba(255,255,255,0.35);text-transform:uppercase;letter-spacing:0.12em;font-weight:600">
               Subtasks
             </div>
-            <div style="font-size:8px;color:rgba(255,255,255,0.3);font-family:JetBrains Mono,monospace;font-weight:600">
+            <div id="sub-count-${task.id}" style="font-size:8px;color:rgba(255,255,255,0.3);font-family:JetBrains Mono,monospace;font-weight:600">
               ${subDone}/${subs.length}
             </div>
           </div>
           <div style="max-height:100px;overflow-y:auto">
             ${subs.map(sub => `
-              <div onclick="toggleSubtask(${task.id}, '${sub.id}')"
+              <div id="sub-${task.id}-${sub.id}"
+                   onclick="toggleSubtask(${task.id}, '${sub.id}')"
                    style="display:flex;align-items:center;gap:8px;padding:5px 6px;border-radius:5px;cursor:pointer;transition:background 150ms ease"
                    onmouseover="this.style.background='rgba(255,255,255,0.04)'"
                    onmouseout="this.style.background='transparent'">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="${sub.completed ? 'rgba(124,140,255,0.7)' : 'rgba(255,255,255,0.2)'}" stroke-width="2" style="flex-shrink:0;transition:stroke 200ms">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="${sub.completed ? 'rgba(124,140,255,0.7)' : 'rgba(255,255,255,0.2)'}" stroke-width="2" style="flex-shrink:0;transition:stroke 250ms ease">
                   ${sub.completed 
                     ? '<circle cx="12" cy="12" r="10"/><path d="M9 12l2 2 4-4"/>'
                     : '<circle cx="12" cy="12" r="10"/>'}
                 </svg>
-                <span style="font-size:10px;color:${sub.completed ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.75)'};text-decoration:${sub.completed ? 'line-through' : 'none'};text-decoration-color:rgba(255,255,255,0.2);line-height:1.3;flex:1;user-select:none">
+                <span style="font-size:10px;color:${sub.completed ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.75)'};text-decoration:${sub.completed ? 'line-through' : 'none'};text-decoration-color:rgba(255,255,255,0.2);line-height:1.3;flex:1;user-select:none;transition:color 250ms ease">
                   ${escHtml(sub.text)}
                 </span>
               </div>
             `).join('')}
           </div>
           <div style="margin-top:8px;display:flex;align-items:center;gap:8px">
-            <div style="flex:1;height:2px;background:rgba(255,255,255,0.06);border-radius:2px;overflow:hidden">
-              <div style="height:100%;width:${subPct}%;background:${subPct === 100 ? 'rgba(255,255,255,0.5)' : 'rgba(124,140,255,0.6)'};border-radius:2px;transition:width 0.7s cubic-bezier(0.16,1,0.3,1)"></div>
+            <div style="flex:1;height:3px;background:rgba(255,255,255,0.06);border-radius:3px;overflow:hidden">
+              <div id="progress-${task.id}"
+                   style="height:100%;width:${subPct}%;background:${subPct === 100 ? 'rgba(255,255,255,0.5)' : 'rgba(124,140,255,0.6)'};border-radius:3px;transition:width 600ms cubic-bezier(0.16,1,0.3,1),background 400ms ease"></div>
             </div>
-            <span style="font-size:7.5px;color:rgba(255,255,255,0.3);font-family:JetBrains Mono,monospace;font-weight:600">${subPct}%</span>
+            <span id="progress-text-${task.id}" style="font-size:8px;color:rgba(255,255,255,0.4);font-family:JetBrains Mono,monospace;font-weight:600">${subPct}%</span>
           </div>
         </div>
       ` : ''}
@@ -924,22 +926,53 @@ async function toggleSubtask(taskId, subId) {
     s.id === subId ? { ...s, completed: !s.completed } : s
   );
 
-  // Optimistic update
   task.subtasks = updated;
   const taskInFiltered = tasks.find(t => t.id === taskId);
   if (taskInFiltered) taskInFiltered.subtasks = updated;
 
-  // Re-render just this card
-  const oldCard = document.getElementById(`card-${taskId}`);
-  if (oldCard) {
-    const idx = tasks.findIndex(t => t.id === taskId);
-    const newCard = makeCard(task, idx);
-    oldCard.replaceWith(newCard);
+  const subDone = updated.filter(s => s.completed).length;
+  const subPct  = Math.round((subDone / updated.length) * 100);
+
+  // Update ONLY the specific subtask row (checkbox + text style)
+  const subRow = document.getElementById(`sub-${taskId}-${subId}`);
+  if (subRow) {
+    const sub = updated.find(s => s.id === subId);
+    const svg = subRow.querySelector('svg');
+    const span = subRow.querySelector('span');
+    if (sub.completed) {
+      svg.setAttribute('stroke', 'rgba(124,140,255,0.7)');
+      svg.innerHTML = '<circle cx="12" cy="12" r="10"/><path d="M9 12l2 2 4-4"/>';
+      span.style.color = 'rgba(255,255,255,0.3)';
+      span.style.textDecoration = 'line-through';
+    } else {
+      svg.setAttribute('stroke', 'rgba(255,255,255,0.2)');
+      svg.innerHTML = '<circle cx="12" cy="12" r="10"/>';
+      span.style.color = 'rgba(255,255,255,0.75)';
+      span.style.textDecoration = 'none';
+    }
+  }
+
+  // Update progress bar smoothly
+  const progressBar = document.getElementById(`progress-${taskId}`);
+  const progressText = document.getElementById(`progress-text-${taskId}`);
+  if (progressBar) {
+    progressBar.style.width = subPct + '%';
+    progressBar.style.background = subPct === 100
+      ? 'rgba(255,255,255,0.5)'
+      : 'rgba(124,140,255,0.6)';
+  }
+  if (progressText) {
+    progressText.textContent = subPct + '%';
+  }
+
+  // Update SUBTASKS count in header
+  const subHeader = document.getElementById(`sub-count-${taskId}`);
+  if (subHeader) {
+    subHeader.textContent = `${subDone}/${updated.length}`;
   }
 
   resetTimer();
 
-  // Update on server
   try {
     await fetch(`http://127.0.0.1:${PANEL_PORT}/panel/tasks/${taskId}/subtasks`, {
       method: 'PUT',
