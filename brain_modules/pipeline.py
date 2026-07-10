@@ -35,6 +35,7 @@ LAYER_ORDER = [
     "brain_modules.layers.layer_43_file_search",
     "brain_modules.layers.layer_45_tasks",
     "brain_modules.layers.layer_45_suggest",
+    "brain_modules.layers.layer_45_trigger",     # NEW — voice triggers + workspaces
     "brain_modules.layers.layer_45_scheduler",
     "brain_modules.layers.layer_45_battery",
     "brain_modules.layers.layer_45_system",

@@ -223,9 +223,13 @@ def execute_trigger(trigger):
             print(f"[TRIGGER DAEMON] Unknown action type: {action_type}")
             return
 
-        # Show notification (unless silent)
+        # Show notification with sound (unless silent)
         if not trigger.get("silent", False):
-            _show_notification(name, action_type)
+            try:
+                from hands.notifications import notify_trigger_fired
+                notify_trigger_fired(name, action_type, sound="default")
+            except ImportError:
+                _show_notification(name, action_type)
 
         # Update stats
         update_fire_stats(trigger.get("id"))

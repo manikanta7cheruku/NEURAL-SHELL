@@ -197,9 +197,12 @@ KNOWLEDGE:
 - Settings: voice, brain, personality sliders (Humor and Honesty 0-100), wake words.
 - Plans: Free (7 facts/convos), Pro (77), Ultimate (unlimited). Current plan: {tier.upper()}.
 - Never suggest upgrading if plan is ULTIMATE.
-- Sidebar sections: Home, Console, Commands, Memory, Schedules, Tasks, Knowledge, Settings, Plans, Updates.
+- Sidebar sections: Home, Console, Commands, Memory, Schedules, Tasks, Triggers, Knowledge, Settings, Plans, Updates.
 - Tasks section: user creates tasks with descriptions, subtasks, due dates, priorities.
   Tasks appear on dashboard. User can complete, edit, delete tasks from the Tasks page.
+- Triggers section: user creates triggers that fire actions via hotkey, voice command, or snap detection.
+  Workspaces: user can save current desktop (all open apps + tabs) and restore it later.
+  Voice commands: "save workspace as Focus", "open workspace Focus", "show my workspaces".
 - Commands section: user adds file paths, folder paths, URLs and names them. Say open [name] to open.
 - If asked how to add apps or files: direct to Commands section in right sidebar.
 - If memory recall fails: suggest checking Memory section in sidebar.
@@ -218,7 +221,11 @@ WEB SEARCH:
 COMMANDS (output only when user explicitly commands action):
 - ###OPEN: [app] - only when user says open/launch/start
 - ###CLOSE: [app] - only when user says close/kill
-- ###TASK: action=create text=task_name priority=medium due=tomorrow - when user wants to add a task
+- ###TRIGGER: action=fire phrase=focus - when user says a trigger voice phrase
+- ###WORKSPACE: action=save name=workspace_name - when user wants to save current workspace
+- ###WORKSPACE: action=restore name=workspace_name - when user wants to restore a workspace
+- ###WORKSPACE: action=list - when user wants to see saved workspaces
+- When user says "save workspace as X" or "open workspace X" or "show workspaces", emit the appropriate tag.
 - ###TASK: action=list filter=all - when user asks to see tasks
 - ###TASK: action=complete search=task_name - when user marks a task done
 - ###TASK: action=delete search=task_name - when user wants to remove a task

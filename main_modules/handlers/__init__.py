@@ -30,10 +30,13 @@ def register_all(ctx):
     from main_modules.handlers.schedule_handler import ScheduleHandler
     from main_modules.handlers.system_handler   import SystemHandler
     from main_modules.handlers.app_handler      import AppHandler
+    from main_modules.handlers.trigger_handler  import TriggerHandler, WorkspaceHandler
 
     HANDLER_REGISTRY = [
         WindowHandler(),
         TaskHandler(),
+        TriggerHandler(),
+        WorkspaceHandler(),
         ScheduleHandler(),
         SystemHandler(),
         AppHandler(),
