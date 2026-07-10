@@ -261,8 +261,14 @@ def seven_logic():
     # Morning brief
     speak_morning_brief(ctx, config)
 
-    # Daemon launcher
+    # Daemon launchers
     launch_schedule_daemon()
+
+    try:
+        from main_modules.startup.trigger_daemon_launcher import launch_trigger_daemon
+        launch_trigger_daemon()
+    except Exception as _td_err:
+        print(Fore.YELLOW + f"[SYSTEM] Trigger daemon skipped: {_td_err}")
 
     # Register handlers
     try:
