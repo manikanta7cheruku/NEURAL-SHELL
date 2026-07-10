@@ -192,6 +192,32 @@ from backend.routes import usage as usage_routes
 from backend.routes import hardware as hardware_routes
 from backend.routes import updates as updates_routes
 from backend.routes import voice_gates as voice_gates_routes
+from backend.routes import tasks as tasks_routes
+from backend.routes import triggers as triggers_routes         # NEW
+from backend.routes import workspaces as workspaces_routes     # NEW
+
+app.include_router(status_routes.router)
+app.include_router(chat_routes.router)
+app.include_router(memory_routes.router)
+app.include_router(schedules_routes.router)
+app.include_router(knowledge_routes.router)
+app.include_router(config_routes.router)
+app.include_router(license_routes.router)
+app.include_router(setup_routes.router)
+app.include_router(usage_routes.router)
+app.include_router(hardware_routes.router)
+app.include_router(updates_routes.router)
+app.include_router(voice_gates_routes.router)
+app.include_router(tasks_routes.router)
+app.include_router(triggers_routes.router)                     # NEW
+app.include_router(workspaces_routes.router)                   # NEW
+from backend.routes import config_routes
+from backend.routes import license_routes
+from backend.routes import setup as setup_routes
+from backend.routes import usage as usage_routes
+from backend.routes import hardware as hardware_routes
+from backend.routes import updates as updates_routes
+from backend.routes import voice_gates as voice_gates_routes
 from backend.routes import tasks as tasks_routes  
 
 app.include_router(status_routes.router)
