@@ -255,29 +255,23 @@ def delete_workspace(workspace_id: int):
 @router.post("/api/workspaces/scan")
 def scan_current_workspace():
     """
-    Scan currently open windows and return workspace snapshot (not saved).
+    Scan currently open windows and return workspace snapshot.
     User previews it then decides to save with a name.
-
-    STUB IN PHASE 1: Returns example structure.
-    REAL IMPLEMENTATION: Phase 4 (hands/workspace.py)
     """
     try:
-        # In Phase 4 this will call hands.workspace.scan_current()
-        # For now return stub so UI can be developed against real API shape
-        try:
-            from hands.workspace import scan_current
-            apps = scan_current()
-        except ImportError:
-            # Stub for Phase 1
-            apps = [
-                {"type": "app", "name": "Chrome", "note": "stub — Phase 4 will scan real data"},
-                {"type": "app", "name": "VS Code", "note": "stub"},
-            ]
+        from hands.workspace import scan_current
+        apps = scan_current()
+
+        # Remove internal fields before sending to frontend
+        clean_apps = []
+        for app in apps:
+            clean = {k: v for k, v in app.items() if k != "pid"}
+            clean_apps.append(clean)
 
         return {
             "success":     True,
-            "app_count":   len(apps),
-            "apps":        apps,
+            "app_count":   len(clean_apps),
+            "apps":        clean_apps,
             "scanned_at":  datetime.now().isoformat(),
         }
 
@@ -290,9 +284,6 @@ def scan_current_workspace():
 def restore_workspace(workspace_id: int):
     """
     Restore a saved workspace — launches all apps in parallel.
-
-    STUB IN PHASE 1: Just increments use count.
-    REAL IMPLEMENTATION: Phase 4 (hands/workspace.py)
     """
     try:
         with _get_conn() as conn:
@@ -305,19 +296,20 @@ def restore_workspace(workspace_id: int):
 
             workspace = _row_to_dict(row)
 
-            # Update use stats
             conn.execute(
                 "UPDATE workspaces SET use_count = use_count + 1, last_used = ? WHERE id = ?",
                 (datetime.now().isoformat(), workspace_id)
             )
             conn.commit()
 
-        # In Phase 4 this will call hands.workspace.restore(workspace["apps"])
-        try:
-            from hands.workspace import restore
-            restore(workspace["apps"])
-        except ImportError:
-            print(Fore.YELLOW + f"[WORKSPACES] restore stub — Phase 4 will implement")
+        # Launch workspace restore in background thread for speed
+        import threading
+        from hands.workspace import restore
+        threading.Thread(
+            target=restore,
+            args=(workspace["apps"],),
+            daemon=True
+        ).start()
 
         return {
             "success":    True,
