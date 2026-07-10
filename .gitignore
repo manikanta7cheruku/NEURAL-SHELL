@@ -78,3 +78,14 @@ test_mic_levels.py
 # Trigger test outputs (from upcoming stages)
 trigger_test_*.wav
 trigger_test_*.txt
+
+# ML audio trigger detection (Stage 1A)
+tensorflow==2.15.0
+tensorflow-hub==0.16.0
+librosa==0.10.1
+soundfile==0.12.1
+# Audio test outputs
+test_recording.wav
+test_soundcard.wav
+test_soundcard.py
+test_record_and_save.py

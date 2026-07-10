@@ -248,6 +248,215 @@ if __name__ == "__main__":
     import time
     import pyaudio
 
+    device_index = 2
+    for i, a in enumerate(sys.argv):
+        if a == "--device" and i + 1 < len(sys.argv):
+            try:
+                device_index = int(sys.argv[i + 1])
+            except ValueError:
+                pass
+
+    print("=" * 60)
+    print("STAGE 1D: YAMNET STANDALONE DETECTION TEST v2")
+    print("=" * 60)
+    print()
+    print(f"Recording device: {device_index}")
+    print()
+    print("FIX FROM v1: This version has countdown + peak-window analysis")
+    print("             so short sounds like snaps are properly detected.")
+    print()
+    print("=" * 60)
+    print()
+
+    classifier = YAMNetClassifier()
+
+    print()
+    print("=" * 60)
+    print("READY TO TEST")
+    print("=" * 60)
+    print()
+
+    def record_with_countdown(label, duration=3.0, countdown=True):
+        """Record audio with visible countdown before start."""
+        print(f"\n>>> {label}")
+
+        audio = pyaudio.PyAudio()
+
+        try:
+            info = audio.get_device_info_by_index(device_index)
+            rate = int(info['defaultSampleRate'])
+            channels = min(2, int(info['maxInputChannels']))
+        except Exception:
+            rate = 44100
+            channels = 2
+
+        chunk = int(rate * 0.05)  # 50ms chunks for fine granularity
+
+        # Countdown BEFORE recording
+        if countdown:
+            for c in [3, 2, 1]:
+                print(f"    Starting in {c}...", end="\r", flush=True)
+                time.sleep(1)
+            print("    RECORDING NOW - MAKE THE SOUND!   ")
+
+        stream = audio.open(
+            format=pyaudio.paInt16,
+            channels=channels,
+            rate=rate,
+            input=True,
+            frames_per_buffer=chunk,
+            input_device_index=device_index,
+        )
+
+        frames = []
+        num_chunks = int((duration * rate) / chunk)
+
+        # Show live peak during recording
+        max_peak = 0
+        for i in range(num_chunks):
+            data = stream.read(chunk, exception_on_overflow=False)
+            frames.append(data)
+
+            # Show peak
+            samples = np.frombuffer(data, dtype=np.int16).astype(np.float32) / 32768.0
+            peak = float(np.max(np.abs(samples)))
+            max_peak = max(max_peak, peak)
+
+            # Progress bar
+            elapsed = (i + 1) * (chunk / rate)
+            remaining = duration - elapsed
+            bar_len = int(peak * 30)
+            bar = "█" * bar_len + "·" * (30 - bar_len)
+            print(f"    [{bar}] {remaining:.1f}s left  peak={peak:.3f}",
+                  end="\r", flush=True)
+
+        print()
+        print(f"    Recording done. Max peak captured: {max_peak:.3f}")
+
+        stream.stop_stream()
+        stream.close()
+        audio.terminate()
+
+        if max_peak < 0.01:
+            print(f"    ⚠ WARNING: No audio captured (max peak = {max_peak:.3f})")
+            print(f"    Mic may not be receiving sound. Check device {device_index}")
+
+        raw = b"".join(frames)
+        samples = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+
+        if channels == 2:
+            samples = samples.reshape(-1, 2).mean(axis=1)
+
+        if rate != 16000:
+            import librosa
+            samples = librosa.resample(samples, orig_sr=rate, target_sr=16000)
+
+        return samples, max_peak
+
+    def classify_with_peak_window(samples):
+        """
+        Instead of averaging across whole recording, find the LOUDEST
+        1-second window and analyze THAT.
+        
+        Why: A snap is 30ms in a 3-second recording. Averaging dilutes it
+        to 1% signal. Finding peak window gives us 100% signal in 1 second.
+        """
+        SR = 16000
+        WINDOW_SEC = 1.0
+        window_size = int(SR * WINDOW_SEC)
+        hop_size = int(SR * 0.1)  # slide by 100ms
+
+        if len(samples) <= window_size:
+            # Recording shorter than window, just classify whole thing
+            return classifier.classify(samples, sample_rate=SR)
+
+        best_result = None
+        best_snap_conf = 0
+        best_clap_conf = 0
+        best_window_peak = 0
+
+        # Scan through all 1-second windows
+        for start in range(0, len(samples) - window_size + 1, hop_size):
+            window = samples[start:start + window_size]
+            window_peak = float(np.max(np.abs(window)))
+
+            # Skip near-silent windows
+            if window_peak < 0.05:
+                continue
+
+            result = classifier.classify(window, sample_rate=SR)
+
+            # Track best snap/clap detection
+            if result['snap'] > best_snap_conf or result['clap'] > best_clap_conf:
+                if result['snap'] > best_snap_conf:
+                    best_snap_conf = result['snap']
+                if result['clap'] > best_clap_conf:
+                    best_clap_conf = result['clap']
+                best_result = result
+                best_window_peak = window_peak
+
+        # If no loud window found, classify whole thing
+        if best_result is None:
+            return classifier.classify(samples, sample_rate=SR)
+
+        return best_result
+
+    def run_test(label, expected):
+        input(f">>> {label}: press ENTER to start (expected: {expected})")
+        samples, max_peak = record_with_countdown(label)
+
+        print(f"    Analyzing with peak-window scan...")
+        result = classify_with_peak_window(samples)
+
+        print()
+        print(f"    RESULTS FOR: {label}")
+        print(f"    ─────────────────────────────────────────")
+        print(f"    Max audio peak:   {max_peak:.3f}")
+        print(f"    Snap confidence:  {result['snap']*100:5.1f}%")
+        print(f"    Clap confidence:  {result['clap']*100:5.1f}%")
+        print(f"    Voice confidence: {result['voice']*100:5.1f}%")
+        print(f"    Top 5 predictions:")
+        for name, conf in result['top_5']:
+            marker = "  ⭐" if any(kw in name.lower() for kw in
+                                  ["snap", "clap", "hand", "applause"]) else "  "
+            print(f"    {marker}{conf*100:5.1f}%  {name}")
+        print()
+        return result
+
+    input("Press ENTER when ready to start (5 tests total, each has countdown)...")
+
+    r1 = run_test("TEST 1 — SILENCE",       "no sound detected")
+    r2 = run_test("TEST 2 — SPEECH",        "high voice confidence")
+    r3 = run_test("TEST 3 — SINGLE SNAP",   "high snap confidence")
+    r4 = run_test("TEST 4 — SINGLE CLAP",   "high clap confidence")
+    r5 = run_test("TEST 5 — MULTIPLE SNAPS","high snap confidence")
+
+    print()
+    print("=" * 60)
+    print("FINAL VERDICT")
+    print("=" * 60)
+    print()
+
+    snap_conf = max(r3['snap'], r5['snap'])
+    clap_conf = r4['clap']
+
+    print(f"  Best snap confidence:  {snap_conf*100:.1f}%")
+    print(f"  Best clap confidence:  {clap_conf*100:.1f}%")
+    print(f"  Voice test:            {r2['voice']*100:.1f}% (should be >30%)")
+    print(f"  Silence test:          {r1['voice']*100:.1f}% (should be ~0%)")
+    print()
+
+    if snap_conf >= 0.40 or clap_conf >= 0.40:
+        print(f"  ✓ DETECTION WORKS — build full pipeline")
+    elif snap_conf >= 0.15 or clap_conf >= 0.15:
+        print(f"  ~ WEAK BUT DETECTABLE — add preprocessing and retest")
+    else:
+        print(f"  ✗ INSUFFICIENT — YAMNet cannot detect on this mic")
+
+    print()
+    import time
+    import pyaudio
+
     # Parse device index from command line
     device_index = 2  # default to OMEN Cam & Voice from previous test
     for i, a in enumerate(sys.argv):
