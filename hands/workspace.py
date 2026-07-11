@@ -357,40 +357,76 @@ def _extract_file_from_title(title):
 # ── Browser tabs ─────────────────────────────────────────────────────────
 
 def _enrich_browser_tabs(apps):
-    """Read Chrome/Edge tabs via DevTools Protocol."""
-    browsers = [a for a in apps if a.get("type") in ("chrome", "edge")]
+    """
+    Read Chrome/Edge tabs via Seven Tab Sync extension API.
+    Falls back to DevTools if extension not installed.
+    Falls back to window title if neither available.
+    """
+    browsers = [a for a in apps if a.get("type") in ("chrome", "edge", "brave")]
     if not browsers:
         return
 
+    # Method 1: Seven Tab Sync extension (best — gets ALL tabs from ALL profiles)
+    try:
+        from backend.routes.chrome import get_tabs_by_profile
+        profile_tabs = get_tabs_by_profile()
+
+        if profile_tabs:
+            # We have tab data from extension
+            total_tabs = sum(len(tabs) for tabs in profile_tabs.values())
+            print(Fore.GREEN + f"[WORKSPACE] Chrome tabs via extension: "
+                  f"{total_tabs} tabs across {len(profile_tabs)} profiles")
+
+            # Assign tabs to browser app configs
+            for browser in browsers:
+                all_tabs = []
+                for prof_name, tabs in profile_tabs.items():
+                    for tab in tabs:
+                        all_tabs.append({
+                            "url":     tab["url"],
+                            "title":   tab["title"],
+                            "profile": prof_name,
+                            "pinned":  tab.get("pinned", False),
+                        })
+                browser["tabs"] = all_tabs
+                browser["profiles"] = list(profile_tabs.keys())
+            return
+    except Exception as e:
+        print(Fore.YELLOW + f"[WORKSPACE] Extension tab read failed: {e}")
+
+    # Method 2: DevTools Protocol (requires --remote-debugging-port)
     for browser in browsers:
-        port = 9222
         try:
             import requests
-            r = requests.get(f"http://127.0.0.1:{port}/json/list", timeout=2)
+            r = requests.get("http://127.0.0.1:9222/json/list", timeout=2)
             if r.status_code == 200:
                 pages = r.json()
                 tabs = []
                 for page in pages:
                     if page.get("type") == "page":
                         url = page.get("url", "")
-                        # Skip chrome internal pages
                         if url.startswith("chrome://") or url.startswith("edge://"):
                             continue
-                        tabs.append({
-                            "url": url,
-                            "title": page.get("title", ""),
-                        })
+                        if url.startswith("chrome-extension://"):
+                            continue
+                        tabs.append({"url": url, "title": page.get("title", "")})
                 browser["tabs"] = tabs
                 print(Fore.CYAN + f"[WORKSPACE] {browser['type']}: {len(tabs)} tabs via DevTools")
                 return
         except Exception:
             pass
 
-        # Fallback: title only
+    # Method 3: Window title only (fallback)
+    for browser in browsers:
         title = browser.get("window", {}).get("title", "")
         if title:
-            browser["tabs"] = [{"url": "", "title": title}]
-            print(Fore.YELLOW + f"[WORKSPACE] {browser['type']}: DevTools unavailable, title only")
+            # Clean up title — remove " - Google Chrome" suffix
+            clean = title
+            for suffix in [" - Google Chrome", " - Microsoft Edge", " - Brave"]:
+                if clean.endswith(suffix):
+                    clean = clean[:-len(suffix)]
+            browser["tabs"] = [{"url": "", "title": clean}]
+        print(Fore.YELLOW + f"[WORKSPACE] {browser['type']}: extension not installed, title only")
 
 
 # ── VS Code ──────────────────────────────────────────────────────────────
@@ -601,9 +637,8 @@ def _restore_one(cfg):
 
 def _restore_browser(cfg):
     """
-    Restore browser. Chrome/Edge restore their own tabs automatically
-    when reopened (if "Continue where you left off" is enabled in settings).
-    We just need to launch the browser.
+    Restore browser with all saved tabs.
+    Opens tabs in batches to avoid overwhelming the browser.
     """
     browser_type = cfg.get("type", "chrome")
     tabs = cfg.get("tabs", [])
@@ -614,16 +649,22 @@ def _restore_browser(cfg):
         "brave": "brave", "opera": "opera", "vivaldi": "vivaldi",
     }.get(browser_type, "chrome")
 
-    # If we have captured URLs (DevTools was available), open them
-    if urls:
-        # Open all URLs at once as arguments
-        url_args = " ".join(f'"{u}"' for u in urls)
-        subprocess.Popen(f'start {browser_cmd} {url_args}', shell=True)
-        print(f"[WORKSPACE] {browser_type}: opened with {len(urls)} tabs")
-    else:
-        # Just launch browser — Chrome restores its own tabs
+    if not urls:
         subprocess.Popen(f'start {browser_cmd}', shell=True)
-        print(f"[WORKSPACE] {browser_type}: launched (tabs restore via browser settings)")
+        print(f"[WORKSPACE] {browser_type}: launched (no saved tabs)")
+        return
+
+    # Open tabs in batches of 5 to avoid browser crash
+    batch_size = 5
+    for i in range(0, len(urls), batch_size):
+        batch = urls[i:i + batch_size]
+        url_args = " ".join(f'"{u}"' for u in batch)
+        subprocess.Popen(f'start {browser_cmd} {url_args}', shell=True)
+
+        if i + batch_size < len(urls):
+            time.sleep(1.5)  # wait between batches
+
+    print(f"[WORKSPACE] {browser_type}: opened {len(urls)} tabs")
 
 
 def _restore_vscode(cfg):

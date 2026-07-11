@@ -193,8 +193,9 @@ from backend.routes import hardware as hardware_routes
 from backend.routes import updates as updates_routes
 from backend.routes import voice_gates as voice_gates_routes
 from backend.routes import tasks as tasks_routes
-from backend.routes import triggers as triggers_routes         # NEW
-from backend.routes import workspaces as workspaces_routes     # NEW
+from backend.routes import triggers as triggers_routes  
+from backend.routes import workspaces as workspaces_routes 
+from backend.routes import chrome as chrome_routes
 
 app.include_router(status_routes.router)
 app.include_router(chat_routes.router)
@@ -209,8 +210,9 @@ app.include_router(hardware_routes.router)
 app.include_router(updates_routes.router)
 app.include_router(voice_gates_routes.router)
 app.include_router(tasks_routes.router)
-app.include_router(triggers_routes.router)                     # NEW
-app.include_router(workspaces_routes.router)                   # NEW
+app.include_router(triggers_routes.router)
+app.include_router(workspaces_routes.router)
+app.include_router(chrome_routes.router)
 from backend.routes import config_routes
 from backend.routes import license_routes
 from backend.routes import setup as setup_routes
