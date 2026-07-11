@@ -684,14 +684,15 @@ const FILTERS = [
 ];
 
 function ChromeTabSyncCard() {
-  const [status, setStatus]       = useState(null);
-  const [step, setStep]           = useState(0);
-  const [extPath, setExtPath]     = useState('');
-  const [loading, setLoading]     = useState(false);
+  const [status, setStatus]     = useState(null);
+  const [expanded, setExpanded] = useState(false);
+  const [step, setStep]         = useState(0);
+  const [extPath, setExtPath]   = useState('');
+  const [loading, setLoading]   = useState(false);
 
   useEffect(() => {
     checkStatus();
-    const id = setInterval(checkStatus, 3000);
+    const id = setInterval(checkStatus, 5000);
     return () => clearInterval(id);
   }, []);
 
@@ -701,92 +702,139 @@ function ChromeTabSyncCard() {
       if (r.ok) {
         const data = await r.json();
         setStatus(data);
-        if (data.connected && step > 0) setStep(0);
+        if (data.extension_path) setExtPath(data.extension_path);
       }
     } catch {}
   };
 
   const handleEnable = async () => {
     setLoading(true);
-
-    // Step 1: Prepare extension files + copy path to clipboard
     try {
       const r = await fetch('http://127.0.0.1:7777/api/chrome/setup/prepare', { method: 'POST' });
       const data = await r.json();
       if (data.success) {
         setExtPath(data.path);
         setStep(1);
-
-        // Step 2: Open Chrome extensions page
-        await fetch('http://127.0.0.1:7777/api/chrome/setup/open', { method: 'POST' });
-        setStep(2);
       }
-    } catch (e) {
-      console.error(e);
-    }
-
+    } catch {}
     setLoading(false);
   };
 
   const handleDisable = async () => {
     try {
       await fetch('http://127.0.0.1:7777/api/chrome/setup/uninstall', { method: 'POST' });
-      setTimeout(checkStatus, 1000);
+      setStatus(null);
+      setTimeout(checkStatus, 2000);
     } catch {}
   };
 
-  // Connected state
-  if (status?.connected) {
-    return (
-      <div className="mb-4 bg-white/[0.015] border border-white/8 rounded-2xl p-4">
-        <div className="flex items-start justify-between">
-          <div className="flex items-start gap-3">
-            <div className="w-8 h-8 rounded-lg bg-green-500/10 border border-green-500/20
-                            flex items-center justify-center flex-shrink-0">
-              <Globe size={14} className="text-green-400" />
-            </div>
-            <div>
-              <h4 className="text-[11px] font-semibold text-white/80">Chrome Tab Sync</h4>
-              <p className="text-[9px] text-green-400 mt-0.5">
-                Connected · {status.tab_count} tabs across {status.profile_count} profile{status.profile_count !== 1 ? 's' : ''}
-              </p>
+  const copyPath = () => {
+    if (extPath) navigator.clipboard.writeText(extPath);
+  };
 
-              {status.profile_count < 5 && (
-                <div className="mt-2 px-2.5 py-1.5 rounded-lg bg-white/[0.02] border border-white/5">
-                  <p className="text-[8.5px] text-white/40 leading-relaxed">
-                    <span className="text-white/60 font-medium">Add more profiles:</span> Open each Chrome
-                    account → go to <span className="text-white/55 font-mono">chrome://extensions</span> → 
-                    enable Developer mode → Load unpacked →
-                    paste this path:
-                  </p>
-                  <div className="flex items-center gap-2 mt-1">
-                    <code className="text-[8px] text-s-accent bg-s-accent/8 border border-s-accent/15
-                                     px-2 py-0.5 rounded font-mono select-all break-all flex-1">
-                      {status.extension_path || 'Loading...'}
-                    </code>
-                    <button onClick={() => navigator.clipboard.writeText(status.extension_path || '')}
-                            className="text-[7.5px] text-white/30 hover:text-s-accent
-                                       transition-colors flex-shrink-0 px-1.5 py-0.5
-                                       rounded bg-white/[0.03] border border-white/6
-                                       hover:bg-s-accent/8 hover:border-s-accent/15">
-                      Copy
-                    </button>
-                  </div>
-                </div>
-              )}
+  // Connected state — show profiles
+  if (status?.connected && status?.profile_count > 0) {
+    const profiles = status.profile_details || [];
+
+    return (
+      <div className="mb-4 bg-white/[0.015] border border-white/8 rounded-2xl overflow-hidden">
+        {/* Header */}
+        <div className="p-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-lg bg-green-500/10 border border-green-500/20
+                              flex items-center justify-center flex-shrink-0">
+                <Globe size={14} className="text-green-400" />
+              </div>
+              <div>
+                <h4 className="text-[11px] font-semibold text-white/80">Chrome Tab Sync</h4>
+                <p className="text-[9px] text-green-400 mt-0.5">
+                  {status.total_tabs} tabs · {status.profile_count} profile{status.profile_count !== 1 ? 's' : ''}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <button onClick={() => setExpanded(p => !p)}
+                      className="text-[8px] text-white/30 hover:text-white/60
+                                 transition-colors px-2 py-1 rounded
+                                 bg-white/[0.03] border border-white/6
+                                 hover:bg-white/[0.06]">
+                {expanded ? 'Hide' : 'Manage'}
+              </button>
             </div>
           </div>
-          <button onClick={handleDisable}
-                  className="text-[8px] text-white/20 hover:text-white/50 transition-colors
-                             flex-shrink-0 mt-1">
-            Disable
-          </button>
         </div>
+
+        {/* Expanded: profile list + add instructions */}
+        {expanded && (
+          <div className="border-t border-white/5 px-4 py-3 space-y-3">
+
+            {/* Profile cards */}
+            <div className="space-y-1.5">
+              {profiles.map((p, i) => (
+                <div key={i} className="flex items-center justify-between px-3 py-2
+                                         bg-white/[0.02] border border-white/5 rounded-lg">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-6 h-6 rounded-md bg-s-accent/8 border border-s-accent/12
+                                    flex items-center justify-center">
+                      <span className="text-[9px] text-s-accent font-bold">{i + 1}</span>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-white/70 font-medium">{p.name}</p>
+                      <p className="text-[8px] text-white/30">
+                        {p.tabs} tab{p.tabs !== 1 ? 's' : ''} · {p.windows} window{p.windows !== 1 ? 's' : ''}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <div className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+                    <span className="text-[7.5px] text-green-400/70">syncing</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Add more profiles */}
+            <div className="px-3 py-2.5 bg-white/[0.015] border border-dashed border-white/8
+                            rounded-lg">
+              <p className="text-[9px] text-white/50 font-medium mb-1.5">
+                Add another Chrome profile
+              </p>
+              <p className="text-[8px] text-white/30 leading-relaxed mb-2">
+                Open Chrome with the account you want to add →
+                go to chrome://extensions → enable Developer mode →
+                click Load unpacked → paste the path below
+              </p>
+              <div className="flex items-center gap-2">
+                <code className="text-[8px] text-s-accent bg-s-accent/6 border border-s-accent/12
+                                 px-2 py-1 rounded font-mono select-all break-all flex-1
+                                 cursor-pointer hover:bg-s-accent/10 transition-colors"
+                       onClick={copyPath}
+                       title="Click to copy">
+                  {extPath}
+                </code>
+                <button onClick={copyPath}
+                        className="text-[8px] text-white/30 hover:text-s-accent
+                                   px-2 py-1 rounded bg-white/[0.03] border border-white/6
+                                   hover:bg-s-accent/8 hover:border-s-accent/12 transition-all
+                                   flex-shrink-0">
+                  Copy
+                </button>
+              </div>
+            </div>
+
+            {/* Disable */}
+            <button onClick={handleDisable}
+                    className="text-[8px] text-white/15 hover:text-white/40 transition-colors">
+              Remove Tab Sync
+            </button>
+          </div>
+        )}
       </div>
     );
   }
 
-  // Setup guide (steps 1-2)
+  // Setup guide (after clicking Enable)
   if (step > 0) {
     return (
       <div className="mb-4 bg-white/[0.015] border border-s-accent/15 rounded-2xl p-5">
@@ -797,79 +845,65 @@ function ChromeTabSyncCard() {
           </div>
           <div>
             <h4 className="text-[12px] font-semibold text-white/90">
-              Quick Setup — 30 seconds
+              Setup Chrome Tab Sync
             </h4>
             <p className="text-[9px] text-white/40 mt-0.5">
-              Chrome's extensions page should be open now
+              One-time setup per Chrome profile · takes 30 seconds
             </p>
           </div>
         </div>
 
         <div className="space-y-3 ml-2">
-
-          {/* Step 1 */}
           <div className="flex items-start gap-3">
-            <div className="w-6 h-6 rounded-full bg-s-accent/15 border border-s-accent/25
+            <div className="w-5 h-5 rounded-full bg-s-accent/15 border border-s-accent/25
                             flex items-center justify-center flex-shrink-0 mt-0.5">
-              <span className="text-[10px] text-s-accent font-bold">1</span>
+              <span className="text-[9px] text-s-accent font-bold">1</span>
             </div>
-            <div>
-              <p className="text-[10px] text-white/80 font-medium">
-                Toggle <span className="text-s-accent">"Developer mode"</span> ON
-              </p>
-              <p className="text-[8.5px] text-white/35 mt-0.5">
-                Top right corner of the extensions page
-              </p>
-            </div>
+            <p className="text-[10px] text-white/70">
+              Open Chrome with the account you want → go to{' '}
+              <span className="text-s-accent font-mono">chrome://extensions</span>
+            </p>
           </div>
 
-          {/* Step 2 */}
           <div className="flex items-start gap-3">
-            <div className="w-6 h-6 rounded-full bg-s-accent/15 border border-s-accent/25
+            <div className="w-5 h-5 rounded-full bg-s-accent/15 border border-s-accent/25
                             flex items-center justify-center flex-shrink-0 mt-0.5">
-              <span className="text-[10px] text-s-accent font-bold">2</span>
+              <span className="text-[9px] text-s-accent font-bold">2</span>
             </div>
-            <div>
-              <p className="text-[10px] text-white/80 font-medium">
-                Click <span className="text-s-accent">"Load unpacked"</span>
-              </p>
-              <p className="text-[8.5px] text-white/35 mt-0.5">
-                Top left, next to the search bar
-              </p>
-            </div>
+            <p className="text-[10px] text-white/70">
+              Toggle <span className="text-white/90 font-medium">Developer mode</span> ON (top right corner)
+            </p>
           </div>
 
-          {/* Step 3 */}
           <div className="flex items-start gap-3">
-            <div className="w-6 h-6 rounded-full bg-s-accent/15 border border-s-accent/25
+            <div className="w-5 h-5 rounded-full bg-s-accent/15 border border-s-accent/25
                             flex items-center justify-center flex-shrink-0 mt-0.5">
-              <span className="text-[10px] text-s-accent font-bold">3</span>
+              <span className="text-[9px] text-s-accent font-bold">3</span>
             </div>
             <div>
-              <p className="text-[10px] text-white/80 font-medium">
-                Paste the folder path and click <span className="text-s-accent">"Select Folder"</span>
+              <p className="text-[10px] text-white/70">
+                Click <span className="text-white/90 font-medium">Load unpacked</span> → paste this path:
               </p>
               <div className="flex items-center gap-2 mt-1.5">
-                <code className="text-[8px] text-s-accent bg-s-accent/8 border border-s-accent/15
-                                 px-2 py-1 rounded font-mono select-all break-all">
+                <code className="text-[8px] text-s-accent bg-s-accent/6 border border-s-accent/12
+                                 px-2 py-1 rounded font-mono select-all break-all flex-1
+                                 cursor-pointer hover:bg-s-accent/10 transition-colors"
+                       onClick={copyPath}
+                       title="Click to copy">
                   {extPath}
                 </code>
-                <button onClick={() => {
-                  navigator.clipboard.writeText(extPath);
-                }}
-                  className="text-[7.5px] text-white/30 hover:text-s-accent
-                             transition-colors flex-shrink-0">
+                <button onClick={copyPath}
+                        className="text-[8px] text-white/30 hover:text-s-accent
+                                   px-2 py-1 rounded bg-white/[0.03] border border-white/6
+                                   hover:bg-s-accent/8 hover:border-s-accent/12 transition-all
+                                   flex-shrink-0">
                   Copy
                 </button>
               </div>
-              <p className="text-[8px] text-white/25 mt-1 italic">
-                Path already copied to your clipboard — just press Ctrl+V in the folder picker
-              </p>
             </div>
           </div>
         </div>
 
-        {/* Waiting for connection */}
         <div className="mt-4 pt-3 border-t border-white/5">
           <div className="flex items-center gap-2">
             <div className="w-3 h-3 border-2 border-s-accent/30 border-t-s-accent
@@ -879,20 +913,19 @@ function ChromeTabSyncCard() {
             </span>
           </div>
           <p className="text-[8px] text-white/20 mt-1.5 ml-5">
-            This will update automatically once you complete the steps above.
-            For each Chrome profile, repeat these steps in that profile's window.
+            Repeat for each Chrome profile you want to sync.
           </p>
         </div>
 
         <button onClick={() => setStep(0)}
-                className="mt-3 text-[8px] text-white/20 hover:text-white/40 transition-colors">
-          Cancel setup
+                className="mt-3 text-[8px] text-white/15 hover:text-white/40 transition-colors">
+          Cancel
         </button>
       </div>
     );
   }
 
-  // Not installed — show enable card
+  // Not set up
   return (
     <div className="mb-4 bg-white/[0.015] border border-white/8 rounded-2xl p-4">
       <div className="flex items-start justify-between gap-4">
@@ -902,26 +935,22 @@ function ChromeTabSyncCard() {
             <Globe size={14} className="text-white/50" />
           </div>
           <div>
-            <h4 className="text-[11px] font-semibold text-white/80">
-              Chrome Tab Sync
-            </h4>
+            <h4 className="text-[11px] font-semibold text-white/80">Chrome Tab Sync</h4>
             <p className="text-[9px] text-white/40 mt-1 leading-relaxed max-w-[350px]">
-              Capture all Chrome tabs across all your Google accounts.
-              When you save a workspace, every tab URL is preserved.
-              When you restore, all tabs reopen exactly where you left off.
+              Save and restore all Chrome tabs across all your accounts.
+              Every tab URL is preserved when you save a workspace.
             </p>
-            <p className="text-[8px] text-white/25 mt-1.5 italic">
-              100% local · 30-second one-time setup · works with Chrome, Edge, Brave
+            <p className="text-[8px] text-white/20 mt-1 italic">
+              100% local · 30-second one-time setup
             </p>
           </div>
         </div>
-
         <button onClick={handleEnable} disabled={loading}
                 className="flex items-center gap-1.5 px-3.5 py-2 flex-shrink-0
                            bg-s-accent/8 border border-s-accent/15
                            text-[10px] text-s-accent font-medium rounded-lg
                            hover:bg-s-accent/15 disabled:opacity-30 transition-all">
-          {loading ? 'Preparing...' : 'Enable'}
+          {loading ? 'Preparing...' : 'Setup'}
         </button>
       </div>
     </div>

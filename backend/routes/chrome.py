@@ -17,6 +17,8 @@ MULTI-PROFILE SUPPORT:
   Seven merges all profiles into one unified snapshot.
 """
 
+import os
+import sys
 import time
 from datetime import datetime
 from typing import Optional
@@ -33,6 +35,14 @@ router = APIRouter()
 _tab_snapshots = {}
 _last_update = 0
 
+def get_extension_install_dir():
+    try:
+        from hands.chrome_setup import get_extension_install_dir as _get_dir
+        return _get_dir()
+    except Exception:
+        appdata = os.environ.get("APPDATA", "")
+        return os.path.join(appdata, "SEVEN", "chrome_extension")
+
 
 class TabSyncPayload(BaseModel):
     timestamp: str
@@ -45,26 +55,27 @@ class TabSyncPayload(BaseModel):
 def receive_tabs(payload: TabSyncPayload):
     """
     Receive tab data from Chrome extension.
-    Called every 3 seconds per Chrome profile.
+    Called periodically per Chrome profile.
+    Keeps data from ALL profiles, not just the latest.
     """
     global _last_update
 
     profile = payload.profile or "default"
-    
+
+    total_tabs = sum(
+        len(w.get("tabs", [])) for w in payload.windows
+    )
+
     _tab_snapshots[profile] = {
         "timestamp": payload.timestamp,
         "browser":   payload.browser,
         "profile":   profile,
         "windows":   payload.windows,
         "received":  datetime.now().isoformat(),
+        "tab_count": total_tabs,
     }
-    
-    _last_update = time.time()
 
-    # Count total tabs across all windows
-    total_tabs = sum(
-        len(w.get("tabs", [])) for w in payload.windows
-    )
+    _last_update = time.time()
 
     return {
         "success": True,
@@ -131,12 +142,27 @@ def get_status():
     """Check if Chrome extension is connected and sending data."""
     age = time.time() - _last_update if _last_update > 0 else -1
 
+    total_tabs = 0
+    profile_details = []
+    for prof_name, snap in _tab_snapshots.items():
+        tab_count = snap.get("tab_count", 0)
+        total_tabs += tab_count
+        profile_details.append({
+            "name":      prof_name,
+            "tabs":      tab_count,
+            "last_sync": snap.get("received", ""),
+            "windows":   len(snap.get("windows", [])),
+        })
+
     return {
-        "connected":     age >= 0 and age < 10,
-        "last_update":   _last_update,
-        "age_seconds":   round(age, 1) if age >= 0 else -1,
-        "profiles":      list(_tab_snapshots.keys()),
-        "profile_count": len(_tab_snapshots),
+        "connected":       age >= 0 and age < 30,
+        "last_update":     _last_update,
+        "age_seconds":     round(age, 1) if age >= 0 else -1,
+        "profiles":        list(_tab_snapshots.keys()),
+        "profile_count":   len(_tab_snapshots),
+        "total_tabs":      total_tabs,
+        "profile_details": profile_details,
+        "extension_path":  get_extension_install_dir() if hasattr(sys.modules[__name__], 'get_extension_install_dir') else "",
     }
 
 @router.get("/api/chrome/setup/status")

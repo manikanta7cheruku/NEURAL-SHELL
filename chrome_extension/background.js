@@ -119,8 +119,42 @@ async function getProfileName() {
 // Initial sync
 syncTabs();
 
-// Periodic sync
+// ── Sync strategies ──────────────────────────────────────────────────────
+
+// Strategy 1: Periodic sync
 setInterval(syncTabs, SYNC_INTERVAL);
+
+// Strategy 2: Sync on any tab event
+chrome.tabs.onCreated.addListener(() => syncTabs());
+chrome.tabs.onRemoved.addListener(() => syncTabs());
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.url || changeInfo.title) syncTabs();
+});
+chrome.windows.onCreated.addListener(() => syncTabs());
+chrome.windows.onRemoved.addListener(() => syncTabs());
+
+// Strategy 3: Keep service worker alive
+// Manifest V3 suspends service workers after 30 seconds of inactivity
+// We use chrome.alarms to wake up periodically
+chrome.alarms.create('seven-tab-sync', { periodInMinutes: 0.5 });
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === 'seven-tab-sync') {
+    syncTabs();
+  }
+});
+
+// Strategy 4: Sync on window focus change
+chrome.windows.onFocusChanged.addListener(() => syncTabs());
+
+// Extension icon click — manual sync
+chrome.action.onClicked.addListener(async () => {
+  await syncTabs();
+});
+
+// Initial sync
+syncTabs();
+
+console.log('[Seven Tab Sync] Extension loaded. Syncing every 3 seconds + on events.');
 
 // Also sync on tab events for faster updates
 chrome.tabs.onCreated.addListener(() => syncTabs());
