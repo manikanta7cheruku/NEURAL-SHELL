@@ -13,7 +13,7 @@
  * BADGE: Tasks pending count — polls /api/tasks/stats every 30s
  */
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, Terminal, Zap,
@@ -41,7 +41,7 @@ const SECTIONS = [
     items: [
       { to: '/tasks',     label: 'Tasks',     icon: CheckSquare, badge: 'tasks'    },
       { to: '/schedules', label: 'Schedules', icon: Calendar                       },
-      { to: null,         label: 'Triggers',  icon: Radio,       soon: true        },
+      { to: '/triggers',  label: 'Triggers',  icon: Radio,       badge: 'triggers' },
     ]
   },
   {
@@ -98,7 +98,7 @@ function RailItem({ item, isActive }) {
   );
 }
 
-function SidebarItem({ item, taskBadge, showUpdateDot }) {
+function SidebarItem({ item, taskBadge, triggerBadge, showUpdateDot }) {
   const Icon = item.icon;
   const loc  = useLocation();
   const isActive = item.to && loc.pathname === item.to;
@@ -157,6 +157,15 @@ function SidebarItem({ item, taskBadge, showUpdateDot }) {
         </span>
       )}
 
+            {/* Triggers badge */}
+      {item.badge === 'triggers' && triggerBadge > 0 && (
+        <span className="text-[8px] font-mono font-medium bg-s-accent/15
+                         text-s-accent px-1.5 py-0.5 rounded-full min-w-[18px]
+                         text-center leading-none">
+          {triggerBadge > 99 ? '99+' : triggerBadge}
+        </span>
+      )}
+
       {/* Update dot */}
       {item.badge === 'update' && showUpdateDot && (
         <div className="w-1.5 h-1.5 rounded-full bg-s-yellow" />
@@ -175,6 +184,7 @@ export default function Sidebar() {
 
   const showUpdateDot = updateAvailable && !dismissed;
   const taskBadge     = stats?.pending ?? 0;
+  const [triggerBadge, setTriggerBadge] = useState(0);
 
   // Status poll — every 800ms
   useEffect(() => {
@@ -183,10 +193,19 @@ export default function Sidebar() {
     return () => clearInterval(id);
   }, []);
 
-  // Task badge poll — every 30s
+  // Trigger badge poll — every 30s
   useEffect(() => {
-    fetchStats();
-    const id = setInterval(fetchStats, 30_000);
+    const fetchTriggerStats = async () => {
+      try {
+        const r = await fetch('http://127.0.0.1:7777/api/triggers/stats');
+        if (r.ok) {
+          const data = await r.json();
+          setTriggerBadge(data.enabled || 0);
+        }
+      } catch {}
+    };
+    fetchTriggerStats();
+    const id = setInterval(fetchTriggerStats, 30_000);
     return () => clearInterval(id);
   }, []);
 
@@ -275,6 +294,7 @@ export default function Sidebar() {
                   key={item.to || i}
                   item={item}
                   taskBadge={taskBadge}
+                  triggerBadge={triggerBadge}
                   showUpdateDot={showUpdateDot}
                 />
               ))}

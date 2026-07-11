@@ -10,7 +10,8 @@ import Commands       from './pages/Commands';
 import Memory         from './pages/Memory';
 import Schedules      from './pages/Schedules';
 import Tasks          from './pages/Tasks';
-import Knowledge      from './pages/Knowledge';
+import Triggers       from './pages/Triggers';
+import Knowledge      from './pages/Knowledge'; 
 import Settings       from './pages/settings/index'
 import Plans          from './pages/Plans';
 import Purchase       from './pages/Purchase';
@@ -53,6 +54,7 @@ function MainApp() {
             <Route path="/memory"    element={<Memory />}   />
             <Route path="/schedules" element={<Schedules />}/>
             <Route path="/tasks"     element={<Tasks />}    />
+            <Route path="/triggers"  element={<Triggers />} />
             <Route path="/knowledge" element={<Knowledge />}/>
             <Route path="/settings"  element={<Settings />} />
             <Route path="/plans"     element={<Plans />}    />
