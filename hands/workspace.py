@@ -1,16 +1,25 @@
 """
 hands/workspace.py
-Workspace scanner and restorer — ENHANCED version.
+Workspace scanner and restorer — FINAL version.
 
-Improvements over v1:
-  - Captures file paths from window titles (Notepad, Excel, PDF viewers)
-  - Scans Explorer folder paths via Shell COM
-  - VS Code workspace detection via state.vscdb
-  - Chrome tab URLs via DevTools Protocol
-  - UWP app detection (Settings, Photos, Calculator)
-  - Window positions and sizes for restore
-  - PowerShell/Terminal working directory detection
-  - Parallel restore with progress logging
+KEY FIX: Tracks windows by HWND (window handle), not PID.
+This captures multiple Chrome profile windows that share one PID.
+
+Captures:
+  - ALL visible user app windows (any app with a window)
+  - Chrome tabs via Seven Tab Sync extension (all profiles)
+  - VS Code workspace path via state.vscdb
+  - File Explorer folder paths via Shell COM
+  - File paths from window titles (Notepad, Excel, PDF)
+  - PowerShell/Terminal working directory
+  - UWP apps (WhatsApp, Settings, Calculator, Photos)
+  - Window positions and sizes
+
+Skips:
+  - Seven itself (Electron)
+  - System UI (ClickToDo, TextInputHost, NVIDIA Overlay)
+  - Desktop shell (Program Manager)
+  - Background services
 """
 
 import os
@@ -31,93 +40,105 @@ except ImportError:
     print(Fore.YELLOW + "[WORKSPACE] pywin32 or psutil not available")
 
 
-# ── Known app classifications ────────────────────────────────────────────
+# ── Skip lists ───────────────────────────────────────────────────────────
 
-_BROWSER_PROCESSES = {
+_SKIP_EXE_NAMES = {
+    # System processes
+    "searchhost.exe", "shellexperiencehost.exe",
+    "startmenuexperiencehost.exe", "textinputhost.exe",
+    "widgetservice.exe", "applicationframehost.exe",
+    "runtimebroker.exe", "lockapp.exe",
+    "dllhost.exe", "ctfmon.exe", "sihost.exe",
+    "taskhostw.exe", "backgroundtaskhost.exe",
+    "shellhost.exe", "smartscreen.exe",
+    # HP/OEM
+    "clicktodo.exe",
+    # GPU overlays
+    "nvidia overlay.exe",
+    # WebView (captured via parent app)
+    "msedgewebview2.exe",
+}
+
+_SKIP_TITLE_EXACT = {
+    "", "program manager", "windows input experience",
+    "microsoft text input application",
+    "nvidia geforce overlay", "nvidia geforce overlay dt",
+    "click to do",
+}
+
+# ── App classification ───────────────────────────────────────────────────
+
+_BROWSERS = {
     "chrome.exe": "chrome", "msedge.exe": "edge",
     "firefox.exe": "firefox", "brave.exe": "brave",
-    "opera.exe": "opera", "vivaldi.exe": "vivaldi",
 }
 
-_EDITOR_PROCESSES = {
-    "code.exe": "vscode", "code - insiders.exe": "vscode",
-    "notepad.exe": "notepad", "notepad++.exe": "notepad++",
-    "sublime_text.exe": "sublime", "devenv.exe": "visual_studio",
+_EDITORS = {
+    "code.exe": "vscode", "notepad.exe": "notepad",
+    "notepad++.exe": "notepad++", "sublime_text.exe": "sublime",
 }
 
-_TERMINAL_PROCESSES = {
+_OFFICE = {
+    "excel.exe": "excel", "winword.exe": "word",
+    "powerpnt.exe": "powerpoint",
+}
+
+_TERMINALS = {
     "powershell.exe": "powershell", "pwsh.exe": "powershell",
     "cmd.exe": "cmd", "windowsterminal.exe": "terminal",
     "wt.exe": "terminal",
 }
 
-_OFFICE_PROCESSES = {
-    "excel.exe": "excel", "winword.exe": "word",
-    "powerpnt.exe": "powerpoint", "onenote.exe": "onenote",
+_UWP_APPS = {
+    "whatsapp.root.exe": {"type": "uwp", "launch": "whatsapp:"},
+    "systemsettings.exe": {"type": "uwp", "launch": "ms-settings:"},
+    "calculatorapp.exe": {"type": "uwp", "launch": "calculator:"},
+    "calculator.exe": {"type": "uwp", "launch": "calculator:"},
+    "photos.exe": {"type": "uwp", "launch": "ms-photos:"},
+    "mspaint.exe": {"type": "uwp", "launch": "mspaint:"},
 }
 
-_UWP_PROTOCOLS = {
-    "systemsettings.exe":    "ms-settings:",
-    "photos.exe":            "ms-photos:",
-    "calculatorapp.exe":     "calculator:",
-    "calculator.exe":        "calculator:",
-    "mspaint.exe":           "mspaint:",
-    "windowsstore.exe":      "ms-windows-store:",
-    "whatsapp.exe":          "whatsapp:",
+# System apps that should be capturable
+_SYSTEM_TOOLS = {
+    "taskmgr.exe": {"type": "system_tool", "launch": "taskmgr"},
+    "rundll32.exe": {"type": "system_tool"},
 }
-
-# Additional apps launched by protocol or start menu name
-_APP_LAUNCH_NAMES = {
-    "whatsapp.root": "whatsapp",
-    "calculatorapp": "calculator",
-    "photos":        "ms-photos:",
-}
-
-_SKIP_PROCESSES = {
-    "searchhost.exe", "shellexperiencehost.exe",
-    "startmenuexperiencehost.exe", "textinputhost.exe",
-    "widgetservice.exe", "applicationframehost.exe",
-    "runtimebroker.exe", "searchui.exe", "lockapp.exe",
-    "taskmgr.exe", "rundll32.exe", "dllhost.exe",
-    "sihost.exe", "ctfmon.exe", "securityhealthsystray.exe",
-    "clicktodo.exe", "phoneexperiencehost.exe",
-    "nvidia overlay.exe", "gamebar.exe", "gamebarftserver.exe",
-    "gamingservices.exe", "gamingservicesnet.exe",
-}
-
-# Skip Seven's own window (Electron)
-_SKIP_TITLES_CONTAINS = [
-    "nvidia geforce overlay",
-    "click to do",
-]
-
-_SKIP_TITLES = {"", "program manager", "windows input experience",
-                "microsoft text input application", "search",
-                "nvidia geforce overlay", "click to do"}
 
 
 # ── SCAN ─────────────────────────────────────────────────────────────────
 
 def scan_current():
-    """Scan all visible windows and return workspace config list."""
+    """
+    Scan ALL visible windows. Uses window handles (hwnd) not PIDs
+    to capture multiple windows from the same process (Chrome profiles).
+    """
     print(Fore.CYAN + "[WORKSPACE] Scanning desktop...")
     start = time.time()
 
     apps = []
-    seen_pids = set()
+    seen_titles = set()  # prevent exact duplicate titles
 
     def enum_cb(hwnd, _):
         try:
             if not win32gui.IsWindowVisible(hwnd):
                 return
+
             title = win32gui.GetWindowText(hwnd)
-            if not title or title.lower() in _SKIP_TITLES:
+            if not title:
                 return
 
+            title_lower = title.lower().strip()
+
+            # Skip exact title matches
+            if title_lower in _SKIP_TITLE_EXACT:
+                return
+
+            # Skip duplicate titles (same window listed twice)
+            if title in seen_titles:
+                return
+
+            # Get process info
             _, pid = win32process.GetWindowThreadProcessId(hwnd)
-            if pid in seen_pids:
-                return
-
             try:
                 proc = psutil.Process(pid)
                 exe_name = proc.name().lower()
@@ -125,27 +146,17 @@ def scan_current():
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 return
 
-            if exe_name in _SKIP_PROCESSES:
+            # Skip by exe name
+            if exe_name in _SKIP_EXE_NAMES:
                 return
 
-            # Skip system titles
-            if title.lower() in _SKIP_TITLES:
+            # Skip Seven itself
+            if exe_name == "electron.exe" and "seven" in (exe_path or "").lower():
                 return
 
-            # Skip Seven's own Electron window
-            if "electron" in exe_name.lower() and "seven" in (exe_path or "").lower():
-                return
+            seen_titles.add(title)
 
-            # Explorer special handling: skip "Program Manager" (desktop shell)
-            # but KEEP actual File Explorer windows
-            if exe_name == "explorer.exe":
-                if title.lower() == "program manager":
-                    return
-                # Don't add to seen_pids — multiple explorer windows share same process
-            else:
-                seen_pids.add(pid)
-
-            # Window rect
+            # Get window rect
             try:
                 rect = win32gui.GetWindowRect(hwnd)
                 win_info = {
@@ -157,9 +168,11 @@ def scan_current():
             except Exception:
                 win_info = {"title": title}
 
+            # Classify
             app_cfg = _classify(exe_name, exe_path, title, win_info, pid, proc)
             if app_cfg:
                 apps.append(app_cfg)
+
         except Exception:
             pass
 
@@ -176,81 +189,99 @@ def scan_current():
 
 
 def _classify(exe_name, exe_path, title, win_info, pid, proc):
-    """Classify a window into an app config."""
+    """Classify a window into an app config dict."""
 
-    # Browser
-    if exe_name in _BROWSER_PROCESSES:
+    # Browser (each window = potentially different profile)
+    if exe_name in _BROWSERS:
         return {
-            "type": _BROWSER_PROCESSES[exe_name],
-            "name": title.split(" - ")[-1].strip() if " - " in title else exe_name.replace(".exe", "").title(),
+            "type": _BROWSERS[exe_name],
+            "name": _clean_app_name(title, exe_name),
             "exe_path": exe_path,
             "tabs": [],
             "window": win_info,
         }
 
     # Editor
-    if exe_name in _EDITOR_PROCESSES:
-        file_path = _extract_file_from_title(title)
+    if exe_name in _EDITORS:
         return {
-            "type": _EDITOR_PROCESSES[exe_name],
+            "type": _EDITORS[exe_name],
             "name": title,
             "exe_path": exe_path,
-            "file_path": file_path,
+            "file_path": _extract_file_path(title),
             "workspace_path": "",
             "window": win_info,
         }
 
+    # Office
+    if exe_name in _OFFICE:
+        return {
+            "type": _OFFICE[exe_name],
+            "name": title,
+            "exe_path": exe_path,
+            "file_path": _extract_file_path(title),
+            "window": win_info,
+        }
+
     # Terminal
-    if exe_name in _TERMINAL_PROCESSES:
+    if exe_name in _TERMINALS:
         cwd = ""
         try:
             cwd = proc.cwd()
         except Exception:
             pass
         return {
-            "type": _TERMINAL_PROCESSES[exe_name],
+            "type": _TERMINALS[exe_name],
             "name": title,
             "exe_path": exe_path,
             "working_dir": cwd,
             "window": win_info,
         }
 
-    # Office
-    if exe_name in _OFFICE_PROCESSES:
-        file_path = _extract_file_from_title(title)
-        return {
-            "type": _OFFICE_PROCESSES[exe_name],
-            "name": title,
-            "exe_path": exe_path,
-            "file_path": file_path,
-            "window": win_info,
-        }
-
-    # UWP apps (Store apps, modern Windows apps)
-    if exe_name in _UWP_PROTOCOLS:
+    # UWP apps
+    if exe_name in _UWP_APPS:
+        info = _UWP_APPS[exe_name]
         return {
             "type": "uwp",
             "name": title or exe_name.replace(".exe", "").title(),
-            "protocol": _UWP_PROTOCOLS[exe_name],
+            "protocol": info.get("launch", ""),
             "window": win_info,
         }
 
-    # UWP apps detected by path (SystemApps or WindowsApps)
-    if exe_path and ("SystemApps" in exe_path or "WindowsApps" in exe_path):
-        # Try to find a protocol or launch name
-        app_lower = exe_name.replace(".exe", "").lower()
-        protocol = _APP_LAUNCH_NAMES.get(app_lower, "")
-        if protocol:
-            return {
-                "type": "uwp",
-                "name": title or app_lower.title(),
-                "protocol": protocol,
-                "window": win_info,
-            }
-        # Skip unknown system apps
-        return None
+    # UWP by path (WindowsApps or SystemApps)
+    if exe_path and ("WindowsApps" in exe_path or "SystemApps" in exe_path):
+        # Try known UWP names
+        for known_exe, info in _UWP_APPS.items():
+            if known_exe in exe_name:
+                return {
+                    "type": "uwp",
+                    "name": title,
+                    "protocol": info.get("launch", ""),
+                    "window": win_info,
+                }
+        # Unknown UWP — skip if it looks like system junk
+        if any(skip in exe_name for skip in ["background", "host", "broker", "service"]):
+            return None
+        # Keep other UWP apps
+        return {
+            "type": "uwp",
+            "name": title,
+            "exe_path": exe_path,
+            "protocol": "",
+            "window": win_info,
+        }
 
-    # Explorer windows
+    # System tools
+    if exe_name in _SYSTEM_TOOLS:
+        info = _SYSTEM_TOOLS[exe_name]
+        return {
+            "type": info.get("type", "app"),
+            "name": title,
+            "exe_path": exe_path,
+            "launch_cmd": info.get("launch", ""),
+            "window": win_info,
+        }
+
+    # Explorer windows (not desktop shell)
     if exe_name == "explorer.exe":
         return {
             "type": "explorer",
@@ -259,97 +290,64 @@ def _classify(exe_name, exe_path, title, win_info, pid, proc):
             "window": win_info,
         }
 
-    # PDF / document viewers
-    file_path = _extract_file_from_title(title)
-    if file_path:
-        return {
-            "type": "document",
-            "name": title,
-            "exe_path": exe_path,
-            "file_path": file_path,
-            "window": win_info,
-        }
-
-    # Skip NVIDIA overlay and other system overlays
-    if "overlay" in exe_name.lower() or "overlay" in title.lower():
+    # Skip overlays
+    if "overlay" in exe_name or "overlay" in title.lower():
         return None
 
-    # Generic app
-    clean_name = title.split(" - ")[-1].strip() if " - " in title else exe_name.replace(".exe", "").title()
+    # Generic app (Premiere Pro, Photoshop, Spotify, anything)
     return {
         "type": "app",
-        "name": clean_name,
+        "name": _clean_app_name(title, exe_name),
         "exe_path": exe_path,
+        "file_path": _extract_file_path(title),
         "window": win_info,
     }
 
 
-def _extract_file_from_title(title):
-    """Extract file path from window title."""
+def _clean_app_name(title, exe_name):
+    """Extract clean app name from window title."""
+    # "filename.py - AppName" → "AppName"
+    if " - " in title:
+        parts = title.split(" - ")
+        return parts[-1].strip()
+    return exe_name.replace(".exe", "").title()
+
+
+def _extract_file_path(title):
+    """Try to extract file path from window title."""
     if not title:
         return ""
 
-    # Remove leading asterisk (unsaved file indicator)
-    clean_title = title.lstrip("*").strip()
+    # Remove leading asterisk (unsaved indicator)
+    clean = title.lstrip("*").strip()
 
-    # Pattern: "filename.ext - AppName" or "C:\path\file.ext - AppName"
-    parts = clean_title.split(" - ")
+    parts = clean.split(" - ")
     if len(parts) >= 2:
-        candidate = parts[0].strip()
+        candidate = parts[0].strip().lstrip("*").strip()
 
-        # Remove leading asterisk again (some apps put it before filename)
-        candidate = candidate.lstrip("*").strip()
-
-        # Direct path check
+        # Direct path
         if os.path.exists(candidate):
             return os.path.abspath(candidate)
 
-        # Check with common drives
-        for drive in ["C:\\", "D:\\", "E:\\", "M:\\", "F:\\", "G:\\"]:
+        # Check common drives
+        for drive in ["C:\\", "D:\\", "E:\\", "M:\\", "F:\\"]:
             full = os.path.join(drive, candidate)
             if os.path.exists(full):
                 return full
 
-        # Check common locations
+        # Check user folders
         home = os.path.expanduser("~")
-        for subdir in ["Desktop", "Documents", "Downloads", "OneDrive",
-                       "OneDrive - Personal"]:
-            full = os.path.join(home, subdir, candidate)
+        for sub in ["Desktop", "Documents", "Downloads"]:
+            full = os.path.join(home, sub, candidate)
             if os.path.exists(full):
                 return full
 
-        # Check APPDATA locations
-        appdata = os.environ.get("APPDATA", "")
-        if appdata:
-            full = os.path.join(appdata, "SEVEN", candidate)
-            if os.path.exists(full):
-                return full
-
-    # Look for file extensions anywhere in the title
-    ext_pattern = r'[A-Za-z]:\\[^\*\?"<>|]+\.(?:pdf|docx?|xlsx?|pptx?|txt|md|csv|py|js|html|json|log)'
-    match = re.search(ext_pattern, clean_title, re.IGNORECASE)
+    # Look for full paths in title
+    match = re.search(r'[A-Za-z]:\\[^\*\?"<>|]+\.\w+', clean)
     if match:
-        candidate = match.group(0).strip()
-        if os.path.exists(candidate):
-            return candidate
-
-    # Try just the filename part with common extensions
-    for ext in ['.txt', '.pdf', '.docx', '.xlsx', '.pptx', '.md', '.py', '.json', '.csv']:
-        if ext in clean_title.lower():
-            # Extract everything before " - " as potential filename
-            fname = parts[0].strip().lstrip("*").strip() if parts else clean_title
-            # Search in recent/common dirs
-            for search_dir in [
-                os.path.expanduser("~\\Desktop"),
-                os.path.expanduser("~\\Documents"),
-                os.path.expanduser("~\\Downloads"),
-                os.getcwd(),
-            ]:
-                if os.path.exists(search_dir):
-                    for f in os.listdir(search_dir):
-                        if f.lower() == fname.lower():
-                            return os.path.join(search_dir, f)
-            break
+        path = match.group(0).strip()
+        if os.path.exists(path):
+            return path
 
     return ""
 
@@ -357,124 +355,86 @@ def _extract_file_from_title(title):
 # ── Browser tabs ─────────────────────────────────────────────────────────
 
 def _enrich_browser_tabs(apps):
-    """
-    Read Chrome/Edge tabs via Seven Tab Sync extension API.
-    Falls back to DevTools if extension not installed.
-    Falls back to window title if neither available.
-    """
+    """Read Chrome tabs via Seven Tab Sync extension."""
     browsers = [a for a in apps if a.get("type") in ("chrome", "edge", "brave")]
     if not browsers:
         return
 
-    # Method 1: Seven Tab Sync extension (best — gets ALL tabs from ALL profiles)
     try:
         from backend.routes.chrome import get_tabs_by_profile
         profile_tabs = get_tabs_by_profile()
 
         if profile_tabs:
-            # We have tab data from extension
-            total_tabs = sum(len(tabs) for tabs in profile_tabs.values())
-            print(Fore.GREEN + f"[WORKSPACE] Chrome tabs via extension: "
-                  f"{total_tabs} tabs across {len(profile_tabs)} profiles")
+            total = sum(len(t) for t in profile_tabs.values())
+            print(Fore.GREEN + f"[WORKSPACE] Chrome tabs: {total} across {len(profile_tabs)} profiles")
 
-            # Assign tabs to browser app configs
             for browser in browsers:
                 all_tabs = []
-                for prof_name, tabs in profile_tabs.items():
+                for prof, tabs in profile_tabs.items():
                     for tab in tabs:
                         all_tabs.append({
-                            "url":     tab["url"],
-                            "title":   tab["title"],
-                            "profile": prof_name,
-                            "pinned":  tab.get("pinned", False),
+                            "url": tab["url"],
+                            "title": tab["title"],
+                            "profile": prof,
+                            "pinned": tab.get("pinned", False),
                         })
                 browser["tabs"] = all_tabs
                 browser["profiles"] = list(profile_tabs.keys())
             return
     except Exception as e:
-        print(Fore.YELLOW + f"[WORKSPACE] Extension tab read failed: {e}")
+        print(Fore.YELLOW + f"[WORKSPACE] Extension tab read: {e}")
 
-    # Method 2: DevTools Protocol (requires --remote-debugging-port)
-    for browser in browsers:
-        try:
-            import requests
-            r = requests.get("http://127.0.0.1:9222/json/list", timeout=2)
-            if r.status_code == 200:
-                pages = r.json()
-                tabs = []
-                for page in pages:
-                    if page.get("type") == "page":
-                        url = page.get("url", "")
-                        if url.startswith("chrome://") or url.startswith("edge://"):
-                            continue
-                        if url.startswith("chrome-extension://"):
-                            continue
-                        tabs.append({"url": url, "title": page.get("title", "")})
-                browser["tabs"] = tabs
-                print(Fore.CYAN + f"[WORKSPACE] {browser['type']}: {len(tabs)} tabs via DevTools")
-                return
-        except Exception:
-            pass
-
-    # Method 3: Window title only (fallback)
-    for browser in browsers:
-        title = browser.get("window", {}).get("title", "")
-        if title:
-            # Clean up title — remove " - Google Chrome" suffix
-            clean = title
-            for suffix in [" - Google Chrome", " - Microsoft Edge", " - Brave"]:
-                if clean.endswith(suffix):
-                    clean = clean[:-len(suffix)]
-            browser["tabs"] = [{"url": "", "title": clean}]
-        print(Fore.YELLOW + f"[WORKSPACE] {browser['type']}: extension not installed, title only")
+    # Fallback: window title only
+    for b in browsers:
+        title = b.get("window", {}).get("title", "")
+        for suffix in [" - Google Chrome", " - Microsoft Edge", " - Brave"]:
+            if title.endswith(suffix):
+                title = title[:-len(suffix)]
+        b["tabs"] = [{"url": "", "title": title}]
+    print(Fore.YELLOW + "[WORKSPACE] Chrome tabs: title only (extension not installed)")
 
 
 # ── VS Code ──────────────────────────────────────────────────────────────
 
 def _enrich_vscode(apps):
     """Read VS Code workspace from state.vscdb."""
-    vscode_apps = [a for a in apps if a.get("type") == "vscode"]
-    if not vscode_apps:
+    vscode = [a for a in apps if a.get("type") == "vscode"]
+    if not vscode:
         return
 
     appdata = os.environ.get("APPDATA", "")
-    state_db = os.path.join(appdata, "Code", "User", "globalStorage", "state.vscdb")
-
-    if not os.path.exists(state_db):
+    db = os.path.join(appdata, "Code", "User", "globalStorage", "state.vscdb")
+    if not os.path.exists(db):
         return
 
     try:
         import sqlite3
-        conn = sqlite3.connect(state_db, timeout=2)
-        cursor = conn.execute(
+        from urllib.parse import unquote
+        conn = sqlite3.connect(db, timeout=2)
+        row = conn.execute(
             "SELECT value FROM ItemTable WHERE key = 'history.recentlyOpenedPathsList'"
-        )
-        row = cursor.fetchone()
+        ).fetchone()
         conn.close()
 
         if row:
             data = json.loads(row[0])
             entries = data.get("entries", [])
             if entries:
-                recent = entries[0]
-                ws = recent.get("folderUri", "").replace("file:///", "").replace("/", "\\")
-                # URL-decode percent-encoded characters (m%3A → M:)
-                from urllib.parse import unquote
+                ws = entries[0].get("folderUri", "").replace("file:///", "").replace("/", "\\")
                 ws = unquote(ws)
-                # Fix drive letter casing
                 if len(ws) >= 2 and ws[1] == ":":
                     ws = ws[0].upper() + ws[1:]
-                for vs in vscode_apps:
-                    vs["workspace_path"] = ws
-                    print(Fore.CYAN + f"[WORKSPACE] VS Code: {ws}")
+                for v in vscode:
+                    v["workspace_path"] = ws
+                print(Fore.CYAN + f"[WORKSPACE] VS Code: {ws}")
     except Exception as e:
-        print(Fore.YELLOW + f"[WORKSPACE] VS Code state error: {e}")
+        print(Fore.YELLOW + f"[WORKSPACE] VS Code state: {e}")
 
 
 # ── Explorer folders ─────────────────────────────────────────────────────
 
 def _scan_explorer_folders(apps):
-    """Get open Explorer window folder paths via Shell COM."""
+    """Get Explorer window folder paths via Shell COM."""
     explorers = [a for a in apps if a.get("type") == "explorer"]
     if not explorers:
         return
@@ -482,6 +442,7 @@ def _scan_explorer_folders(apps):
     try:
         import win32com.client
         from urllib.parse import unquote
+
         shell = win32com.client.Dispatch("Shell.Application")
         windows = shell.Windows()
 
@@ -489,105 +450,27 @@ def _scan_explorer_folders(apps):
         for i in range(windows.Count):
             try:
                 w = windows.Item(i)
-                if w is None:
-                    continue
-                loc = w.LocationURL
-                if loc:
-                    path = unquote(loc.replace("file:///", "").replace("/", "\\"))
-                    folders.append({"path": path, "name": w.LocationName})
+                if w and w.LocationURL:
+                    path = unquote(w.LocationURL.replace("file:///", "").replace("/", "\\"))
+                    folders.append({"path": path, "name": w.LocationName or ""})
             except Exception:
                 continue
 
         for i, exp in enumerate(explorers):
             if i < len(folders):
                 exp["folder_path"] = folders[i]["path"]
-                exp["name"] = folders[i]["name"] or exp["name"]
+                if folders[i]["name"]:
+                    exp["name"] = folders[i]["name"]
                 print(Fore.CYAN + f"[WORKSPACE] Explorer: {folders[i]['path']}")
     except Exception as e:
-        print(Fore.YELLOW + f"[WORKSPACE] Explorer scan error: {e}")
+        print(Fore.YELLOW + f"[WORKSPACE] Explorer scan: {e}")
 
-
-
-# ── Chrome DevTools setup ────────────────────────────────────────────────
-
-def setup_chrome_devtools():
-    """
-    Modify Chrome shortcut to add --remote-debugging-port=9222.
-    This allows Seven to read Chrome tab URLs.
-    Returns True if setup succeeded, False otherwise.
-    
-    Called from Triggers settings UI when user clicks "Enable tab capture".
-    """
-    import winreg
-    import shutil
-
-    # Find Chrome shortcut in common locations
-    shortcuts = [
-        os.path.join(os.environ.get("APPDATA", ""),
-                     "Microsoft", "Internet Explorer", "Quick Launch",
-                     "User Pinned", "TaskBar", "Google Chrome.lnk"),
-        os.path.join(os.environ.get("PUBLIC", "C:\\Users\\Public"),
-                     "Desktop", "Google Chrome.lnk"),
-        os.path.join(os.path.expanduser("~"), "Desktop", "Google Chrome.lnk"),
-        os.path.join(os.environ.get("PROGRAMDATA", "C:\\ProgramData"),
-                     "Microsoft", "Windows", "Start Menu", "Programs",
-                     "Google Chrome.lnk"),
-    ]
-
-    chrome_exe = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
-    if not os.path.exists(chrome_exe):
-        chrome_exe = "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe"
-
-    if not os.path.exists(chrome_exe):
-        print(Fore.YELLOW + "[WORKSPACE] Chrome not found at standard location")
-        return False
-
-    flag = "--remote-debugging-port=9222"
-
-    try:
-        # Method 1: Create/modify registry for Chrome command line
-        # This adds the flag globally when Chrome launches
-        reg_path = r"Software\Google\Chrome\Application"
-        try:
-            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, reg_path, 0, winreg.KEY_ALL_ACCESS)
-        except FileNotFoundError:
-            key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, reg_path)
-
-        # Read current command line flags
-        try:
-            current_flags, _ = winreg.QueryValueEx(key, "CommandLineFlags")
-        except FileNotFoundError:
-            current_flags = ""
-
-        if flag not in current_flags:
-            new_flags = f"{current_flags} {flag}".strip()
-            winreg.SetValueEx(key, "CommandLineFlags", 0, winreg.REG_SZ, new_flags)
-            print(Fore.GREEN + f"[WORKSPACE] Chrome DevTools flag added: {flag}")
-
-        winreg.CloseKey(key)
-        return True
-
-    except Exception as e:
-        print(Fore.YELLOW + f"[WORKSPACE] Chrome DevTools setup failed: {e}")
-        return False
-
-
-def check_chrome_devtools():
-    """Check if Chrome DevTools is accessible."""
-    try:
-        import requests
-        r = requests.get("http://127.0.0.1:9222/json/version", timeout=2)
-        return r.status_code == 200
-    except Exception:
-        return False
-    
 
 # ── RESTORE ──────────────────────────────────────────────────────────────
 
 def restore(apps_config):
-    """Restore workspace by launching all apps in parallel."""
+    """Restore workspace — all apps launch in parallel."""
     if not apps_config:
-        print(Fore.YELLOW + "[WORKSPACE] Nothing to restore")
         return
 
     print(Fore.CYAN + f"[WORKSPACE] Restoring {len(apps_config)} apps...")
@@ -603,11 +486,11 @@ def restore(apps_config):
         t.join(timeout=20)
 
     elapsed = int((time.time() - start) * 1000)
-    print(Fore.GREEN + f"[WORKSPACE] Restored {len(apps_config)} apps in {elapsed}ms")
+    print(Fore.GREEN + f"[WORKSPACE] Restored in {elapsed}ms")
 
 
 def _restore_one(cfg):
-    """Restore a single app from config."""
+    """Restore a single app."""
     app_type = cfg.get("type", "app")
     name = cfg.get("name", "unknown")
 
@@ -618,16 +501,18 @@ def _restore_one(cfg):
             _restore_vscode(cfg)
         elif app_type == "explorer":
             _restore_explorer(cfg)
-        elif app_type in ("notepad", "notepad++"):
-            _restore_with_file(cfg)
+        elif app_type in ("notepad", "notepad++", "sublime"):
+            _restore_editor(cfg)
         elif app_type in ("excel", "word", "powerpoint"):
-            _restore_with_file(cfg)
-        elif app_type == "document":
-            _restore_document(cfg)
+            _restore_office(cfg)
         elif app_type == "uwp":
             _restore_uwp(cfg)
         elif app_type in ("powershell", "cmd", "terminal"):
             _restore_terminal(cfg)
+        elif app_type == "system_tool":
+            _restore_system_tool(cfg)
+        elif app_type == "document":
+            _restore_file(cfg)
         else:
             _restore_generic(cfg)
         print(Fore.GREEN + f"  [+] {name}")
@@ -636,113 +521,29 @@ def _restore_one(cfg):
 
 
 def _restore_browser(cfg):
-    """
-    Restore browser with all saved tabs across all profiles.
-    Groups tabs by profile and opens each profile's tabs separately.
-    """
-    browser_type = cfg.get("type", "chrome")
+    """Restore browser with tabs from all profiles."""
     tabs = cfg.get("tabs", [])
-    profiles = cfg.get("profiles", [])
+    urls = [t["url"] for t in tabs if t.get("url", "").startswith("http")]
 
-    browser_exe = {
-        "chrome":  "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
-        "edge":    "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
-        "firefox": "C:\\Program Files\\Mozilla Firefox\\firefox.exe",
-        "brave":   "C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe",
-    }.get(browser_type)
+    browser_type = cfg.get("type", "chrome")
+    browser_cmd = {
+        "chrome": "chrome", "edge": "msedge",
+        "firefox": "firefox", "brave": "brave",
+    }.get(browser_type, "chrome")
 
-    # Find actual exe if default path doesn't exist
-    if not browser_exe or not os.path.exists(browser_exe):
-        browser_cmd = {
-            "chrome": "chrome", "edge": "msedge",
-            "firefox": "firefox", "brave": "brave",
-        }.get(browser_type, "chrome")
-
-        # Fallback to start command
-        urls = [t["url"] for t in tabs if t.get("url", "").startswith("http")]
-        if urls:
-            batch_size = 5
-            for i in range(0, len(urls), batch_size):
-                batch = urls[i:i + batch_size]
-                url_args = " ".join(f'"{u}"' for u in batch)
-                subprocess.Popen(f'start {browser_cmd} {url_args}', shell=True)
-                if i + batch_size < len(urls):
-                    time.sleep(1)
-        else:
-            subprocess.Popen(f'start {browser_cmd}', shell=True)
-        print(f"[WORKSPACE] {browser_type}: opened {len(urls)} tabs")
+    if not urls:
+        subprocess.Popen(f'start {browser_cmd}', shell=True)
         return
 
-    # Group tabs by profile
-    profile_tabs = {}
-    no_profile_tabs = []
-    for tab in tabs:
-        url = tab.get("url", "")
-        if not url or not url.startswith("http"):
-            continue
-        prof = tab.get("profile", "")
-        if prof:
-            if prof not in profile_tabs:
-                profile_tabs[prof] = []
-            profile_tabs[prof].append(url)
-        else:
-            no_profile_tabs.append(url)
+    # Open in batches of 5
+    for i in range(0, len(urls), 5):
+        batch = urls[i:i+5]
+        url_args = " ".join(f'"{u}"' for u in batch)
+        subprocess.Popen(f'start {browser_cmd} {url_args}', shell=True)
+        if i + 5 < len(urls):
+            time.sleep(1)
 
-    # If no profile grouping, open all tabs in default profile
-    if not profile_tabs:
-        all_urls = no_profile_tabs or [t["url"] for t in tabs
-                                       if t.get("url", "").startswith("http")]
-        if all_urls:
-            batch_size = 5
-            for i in range(0, len(all_urls), batch_size):
-                batch = all_urls[i:i + batch_size]
-                url_args = " ".join(f'"{u}"' for u in batch)
-                subprocess.Popen(f'start chrome {url_args}', shell=True)
-                if i + batch_size < len(all_urls):
-                    time.sleep(1)
-        else:
-            subprocess.Popen(f'start chrome', shell=True)
-        print(f"[WORKSPACE] {browser_type}: opened {len(all_urls)} tabs (no profile info)")
-        return
-
-    # Open each profile's tabs with --profile-directory
-    # Map profile names to Chrome profile directories
-    chrome_base = os.path.join(
-        os.environ.get("LOCALAPPDATA", ""),
-        "Google", "Chrome", "User Data"
-    )
-
-    total_opened = 0
-    for prof_name, urls in profile_tabs.items():
-        if not urls:
-            continue
-
-        # Open tabs in batches
-        batch_size = 5
-        for i in range(0, len(urls), batch_size):
-            batch = urls[i:i + batch_size]
-
-            cmd = [browser_exe] + batch
-            try:
-                subprocess.Popen(cmd)
-                total_opened += len(batch)
-            except Exception as e:
-                print(f"[WORKSPACE] Failed to open tabs for {prof_name}: {e}")
-
-            if i + batch_size < len(urls):
-                time.sleep(1)
-
-        time.sleep(0.5)
-
-    # Also open tabs without profile
-    if no_profile_tabs:
-        for i in range(0, len(no_profile_tabs), 5):
-            batch = no_profile_tabs[i:i+5]
-            subprocess.Popen([browser_exe] + batch)
-            total_opened += len(batch)
-            time.sleep(0.5)
-
-    print(f"[WORKSPACE] {browser_type}: opened {total_opened} tabs across {len(profile_tabs)} profiles")
+    print(f"[WORKSPACE] {browser_type}: {len(urls)} tabs opened")
 
 
 def _restore_vscode(cfg):
@@ -764,8 +565,7 @@ def _restore_explorer(cfg):
         subprocess.Popen(['explorer'])
 
 
-def _restore_with_file(cfg):
-    """Restore apps that had a specific file open (Notepad, Excel, etc.)."""
+def _restore_editor(cfg):
     fp = cfg.get("file_path", "")
     exe = cfg.get("exe_path", "")
     if fp and os.path.exists(fp):
@@ -773,15 +573,10 @@ def _restore_with_file(cfg):
     elif exe and os.path.exists(exe):
         subprocess.Popen([exe])
     else:
-        name = cfg.get("name", "").split(" - ")[-1].strip()
-        try:
-            from hands.core import open_app
-            open_app(name)
-        except Exception:
-            pass
+        _restore_generic(cfg)
 
 
-def _restore_document(cfg):
+def _restore_office(cfg):
     fp = cfg.get("file_path", "")
     if fp and os.path.exists(fp):
         os.startfile(fp)
@@ -790,38 +585,41 @@ def _restore_document(cfg):
 
 
 def _restore_uwp(cfg):
-    """Restore UWP apps using protocol URIs."""
     protocol = cfg.get("protocol", "")
     if protocol:
-        os.startfile(protocol)
+        try:
+            os.startfile(protocol)
+        except Exception:
+            _restore_generic(cfg)
+    else:
+        _restore_generic(cfg)
 
 
 def _restore_terminal(cfg):
-    """Restore PowerShell/CMD/Terminal with working directory."""
     cwd = cfg.get("working_dir", "")
     app_type = cfg.get("type", "powershell")
-    title = cfg.get("name", "")
-
-    if app_type in ("powershell", "terminal"):
-        exe = "powershell"
-    else:
-        exe = "cmd"
-
-    # Try to use Windows Terminal if available
-    wt_path = os.path.join(os.environ.get("LOCALAPPDATA", ""),
-                           "Microsoft", "WindowsApps", "wt.exe")
-    use_wt = os.path.exists(wt_path)
+    exe = "powershell" if app_type in ("powershell", "terminal") else "cmd"
 
     if cwd and os.path.exists(cwd):
-        if use_wt:
-            subprocess.Popen([wt_path, "-d", cwd, exe], creationflags=subprocess.CREATE_NEW_CONSOLE)
-        else:
-            subprocess.Popen([exe], cwd=cwd, creationflags=subprocess.CREATE_NEW_CONSOLE)
+        subprocess.Popen([exe], cwd=cwd, creationflags=subprocess.CREATE_NEW_CONSOLE)
     else:
-        if use_wt:
-            subprocess.Popen([wt_path, exe], creationflags=subprocess.CREATE_NEW_CONSOLE)
-        else:
-            subprocess.Popen([exe], creationflags=subprocess.CREATE_NEW_CONSOLE)
+        subprocess.Popen([exe], creationflags=subprocess.CREATE_NEW_CONSOLE)
+
+
+def _restore_system_tool(cfg):
+    launch = cfg.get("launch_cmd", "")
+    if launch:
+        subprocess.Popen(launch, shell=True, creationflags=subprocess.CREATE_NEW_CONSOLE)
+    else:
+        _restore_generic(cfg)
+
+
+def _restore_file(cfg):
+    fp = cfg.get("file_path", "")
+    if fp and os.path.exists(fp):
+        os.startfile(fp)
+    else:
+        _restore_generic(cfg)
 
 
 def _restore_generic(cfg):
@@ -829,8 +627,11 @@ def _restore_generic(cfg):
     name = cfg.get("name", "")
 
     if exe and os.path.exists(exe):
-        subprocess.Popen([exe])
-        return
+        try:
+            subprocess.Popen([exe])
+            return
+        except Exception:
+            pass
 
     clean = name.split(" - ")[-1].strip() if " - " in name else name
     try:
