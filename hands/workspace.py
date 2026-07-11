@@ -289,35 +289,67 @@ def _extract_file_from_title(title):
     if not title:
         return ""
 
+    # Remove leading asterisk (unsaved file indicator)
+    clean_title = title.lstrip("*").strip()
+
     # Pattern: "filename.ext - AppName" or "C:\path\file.ext - AppName"
-    parts = title.split(" - ")
+    parts = clean_title.split(" - ")
     if len(parts) >= 2:
         candidate = parts[0].strip()
 
+        # Remove leading asterisk again (some apps put it before filename)
+        candidate = candidate.lstrip("*").strip()
+
         # Direct path check
         if os.path.exists(candidate):
-            return candidate
+            return os.path.abspath(candidate)
 
         # Check with common drives
-        for drive in ["C:\\", "D:\\", "E:\\", "M:\\"]:
+        for drive in ["C:\\", "D:\\", "E:\\", "M:\\", "F:\\", "G:\\"]:
             full = os.path.join(drive, candidate)
             if os.path.exists(full):
                 return full
 
         # Check common locations
         home = os.path.expanduser("~")
-        for subdir in ["Desktop", "Documents", "Downloads"]:
+        for subdir in ["Desktop", "Documents", "Downloads", "OneDrive",
+                       "OneDrive - Personal"]:
             full = os.path.join(home, subdir, candidate)
             if os.path.exists(full):
                 return full
 
-    # Look for file extensions in the title
-    ext_pattern = r'[\w\\/:.\- ]+\.(?:pdf|docx?|xlsx?|pptx?|txt|md|csv|py|js|html|json)'
-    match = re.search(ext_pattern, title, re.IGNORECASE)
+        # Check APPDATA locations
+        appdata = os.environ.get("APPDATA", "")
+        if appdata:
+            full = os.path.join(appdata, "SEVEN", candidate)
+            if os.path.exists(full):
+                return full
+
+    # Look for file extensions anywhere in the title
+    ext_pattern = r'[A-Za-z]:\\[^\*\?"<>|]+\.(?:pdf|docx?|xlsx?|pptx?|txt|md|csv|py|js|html|json|log)'
+    match = re.search(ext_pattern, clean_title, re.IGNORECASE)
     if match:
         candidate = match.group(0).strip()
         if os.path.exists(candidate):
             return candidate
+
+    # Try just the filename part with common extensions
+    for ext in ['.txt', '.pdf', '.docx', '.xlsx', '.pptx', '.md', '.py', '.json', '.csv']:
+        if ext in clean_title.lower():
+            # Extract everything before " - " as potential filename
+            fname = parts[0].strip().lstrip("*").strip() if parts else clean_title
+            # Search in recent/common dirs
+            for search_dir in [
+                os.path.expanduser("~\\Desktop"),
+                os.path.expanduser("~\\Documents"),
+                os.path.expanduser("~\\Downloads"),
+                os.getcwd(),
+            ]:
+                if os.path.exists(search_dir):
+                    for f in os.listdir(search_dir):
+                        if f.lower() == fname.lower():
+                            return os.path.join(search_dir, f)
+            break
 
     return ""
 
@@ -513,7 +545,7 @@ def check_chrome_devtools():
     except Exception:
         return False
     
-    
+
 # ── RESTORE ──────────────────────────────────────────────────────────────
 
 def restore(apps_config):
@@ -568,31 +600,30 @@ def _restore_one(cfg):
 
 
 def _restore_browser(cfg):
+    """
+    Restore browser. Chrome/Edge restore their own tabs automatically
+    when reopened (if "Continue where you left off" is enabled in settings).
+    We just need to launch the browser.
+    """
+    browser_type = cfg.get("type", "chrome")
     tabs = cfg.get("tabs", [])
     urls = [t["url"] for t in tabs if t.get("url") and t["url"].startswith("http")]
-    browser_type = cfg.get("type", "chrome")
 
-    # Browser executable names for 'start' command
     browser_cmd = {
         "chrome": "chrome", "edge": "msedge", "firefox": "firefox",
         "brave": "brave", "opera": "opera", "vivaldi": "vivaldi",
     }.get(browser_type, "chrome")
 
+    # If we have captured URLs (DevTools was available), open them
     if urls:
-        # Open first URL normally, rest as new tabs
-        first_url = urls[0]
-        rest_urls = urls[1:]
-
-        subprocess.Popen(f'start {browser_cmd} "{first_url}"', shell=True)
-
-        # Small delay then open remaining tabs
-        if rest_urls:
-            time.sleep(1)
-            for url in rest_urls:
-                subprocess.Popen(f'start {browser_cmd} "{url}"', shell=True)
-                time.sleep(0.3)
+        # Open all URLs at once as arguments
+        url_args = " ".join(f'"{u}"' for u in urls)
+        subprocess.Popen(f'start {browser_cmd} {url_args}', shell=True)
+        print(f"[WORKSPACE] {browser_type}: opened with {len(urls)} tabs")
     else:
+        # Just launch browser — Chrome restores its own tabs
         subprocess.Popen(f'start {browser_cmd}', shell=True)
+        print(f"[WORKSPACE] {browser_type}: launched (tabs restore via browser settings)")
 
 
 def _restore_vscode(cfg):
