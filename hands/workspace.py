@@ -637,34 +637,112 @@ def _restore_one(cfg):
 
 def _restore_browser(cfg):
     """
-    Restore browser with all saved tabs.
-    Opens tabs in batches to avoid overwhelming the browser.
+    Restore browser with all saved tabs across all profiles.
+    Groups tabs by profile and opens each profile's tabs separately.
     """
     browser_type = cfg.get("type", "chrome")
     tabs = cfg.get("tabs", [])
-    urls = [t["url"] for t in tabs if t.get("url") and t["url"].startswith("http")]
+    profiles = cfg.get("profiles", [])
 
-    browser_cmd = {
-        "chrome": "chrome", "edge": "msedge", "firefox": "firefox",
-        "brave": "brave", "opera": "opera", "vivaldi": "vivaldi",
-    }.get(browser_type, "chrome")
+    browser_exe = {
+        "chrome":  "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+        "edge":    "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+        "firefox": "C:\\Program Files\\Mozilla Firefox\\firefox.exe",
+        "brave":   "C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe",
+    }.get(browser_type)
 
-    if not urls:
-        subprocess.Popen(f'start {browser_cmd}', shell=True)
-        print(f"[WORKSPACE] {browser_type}: launched (no saved tabs)")
+    # Find actual exe if default path doesn't exist
+    if not browser_exe or not os.path.exists(browser_exe):
+        browser_cmd = {
+            "chrome": "chrome", "edge": "msedge",
+            "firefox": "firefox", "brave": "brave",
+        }.get(browser_type, "chrome")
+
+        # Fallback to start command
+        urls = [t["url"] for t in tabs if t.get("url", "").startswith("http")]
+        if urls:
+            batch_size = 5
+            for i in range(0, len(urls), batch_size):
+                batch = urls[i:i + batch_size]
+                url_args = " ".join(f'"{u}"' for u in batch)
+                subprocess.Popen(f'start {browser_cmd} {url_args}', shell=True)
+                if i + batch_size < len(urls):
+                    time.sleep(1)
+        else:
+            subprocess.Popen(f'start {browser_cmd}', shell=True)
+        print(f"[WORKSPACE] {browser_type}: opened {len(urls)} tabs")
         return
 
-    # Open tabs in batches of 5 to avoid browser crash
-    batch_size = 5
-    for i in range(0, len(urls), batch_size):
-        batch = urls[i:i + batch_size]
-        url_args = " ".join(f'"{u}"' for u in batch)
-        subprocess.Popen(f'start {browser_cmd} {url_args}', shell=True)
+    # Group tabs by profile
+    profile_tabs = {}
+    no_profile_tabs = []
+    for tab in tabs:
+        url = tab.get("url", "")
+        if not url or not url.startswith("http"):
+            continue
+        prof = tab.get("profile", "")
+        if prof:
+            if prof not in profile_tabs:
+                profile_tabs[prof] = []
+            profile_tabs[prof].append(url)
+        else:
+            no_profile_tabs.append(url)
 
-        if i + batch_size < len(urls):
-            time.sleep(1.5)  # wait between batches
+    # If no profile grouping, open all tabs in default profile
+    if not profile_tabs:
+        all_urls = no_profile_tabs or [t["url"] for t in tabs
+                                       if t.get("url", "").startswith("http")]
+        if all_urls:
+            batch_size = 5
+            for i in range(0, len(all_urls), batch_size):
+                batch = all_urls[i:i + batch_size]
+                url_args = " ".join(f'"{u}"' for u in batch)
+                subprocess.Popen(f'start chrome {url_args}', shell=True)
+                if i + batch_size < len(all_urls):
+                    time.sleep(1)
+        else:
+            subprocess.Popen(f'start chrome', shell=True)
+        print(f"[WORKSPACE] {browser_type}: opened {len(all_urls)} tabs (no profile info)")
+        return
 
-    print(f"[WORKSPACE] {browser_type}: opened {len(urls)} tabs")
+    # Open each profile's tabs with --profile-directory
+    # Map profile names to Chrome profile directories
+    chrome_base = os.path.join(
+        os.environ.get("LOCALAPPDATA", ""),
+        "Google", "Chrome", "User Data"
+    )
+
+    total_opened = 0
+    for prof_name, urls in profile_tabs.items():
+        if not urls:
+            continue
+
+        # Open tabs in batches
+        batch_size = 5
+        for i in range(0, len(urls), batch_size):
+            batch = urls[i:i + batch_size]
+
+            cmd = [browser_exe] + batch
+            try:
+                subprocess.Popen(cmd)
+                total_opened += len(batch)
+            except Exception as e:
+                print(f"[WORKSPACE] Failed to open tabs for {prof_name}: {e}")
+
+            if i + batch_size < len(urls):
+                time.sleep(1)
+
+        time.sleep(0.5)
+
+    # Also open tabs without profile
+    if no_profile_tabs:
+        for i in range(0, len(no_profile_tabs), 5):
+            batch = no_profile_tabs[i:i+5]
+            subprocess.Popen([browser_exe] + batch)
+            total_opened += len(batch)
+            time.sleep(0.5)
+
+    print(f"[WORKSPACE] {browser_type}: opened {total_opened} tabs across {len(profile_tabs)} profiles")
 
 
 def _restore_vscode(cfg):

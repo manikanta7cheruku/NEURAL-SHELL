@@ -683,6 +683,119 @@ const FILTERS = [
   { key: 'audio',  label: 'Audio' },
 ];
 
+
+function TabPreview() {
+  const [tabs, setTabs]       = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+
+  const loadTabs = async () => {
+    if (tabs.length > 0 && expanded) {
+      setExpanded(false);
+      return;
+    }
+    setLoading(true);
+    try {
+      const r = await fetch('http://127.0.0.1:7777/api/chrome/tabs');
+      if (r.ok) {
+        const data = await r.json();
+        setTabs(data.tabs || []);
+        setExpanded(true);
+      }
+    } catch {}
+    setLoading(false);
+  };
+
+  return (
+    <div>
+      <button onClick={loadTabs} disabled={loading}
+              className="flex items-center gap-2 w-full px-3 py-2
+                         bg-white/[0.02] border border-white/6 rounded-lg
+                         text-[9px] text-white/50 font-medium
+                         hover:bg-white/[0.04] hover:text-white/70
+                         disabled:opacity-30 transition-all">
+        <Globe size={10} className="flex-shrink-0" />
+        <span className="flex-1 text-left">
+          {loading ? 'Loading tabs...' : expanded ? 'Hide all tabs' : 'View all synced tabs'}
+        </span>
+        {tabs.length > 0 && (
+          <span className="text-[7.5px] text-white/30 font-mono">{tabs.length}</span>
+        )}
+      </button>
+
+      {expanded && tabs.length > 0 && (
+        <div className="mt-1.5 max-h-[250px] overflow-y-auto
+                        scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent
+                        bg-white/[0.01] border border-white/5 rounded-lg">
+          {/* Group by profile */}
+          {(() => {
+            const grouped = {};
+            tabs.forEach(t => {
+              const prof = t.profile || 'default';
+              if (!grouped[prof]) grouped[prof] = [];
+              grouped[prof].push(t);
+            });
+            return Object.entries(grouped).map(([profile, profileTabs]) => (
+              <div key={profile}>
+                <div className="px-3 py-1.5 border-b border-white/5 sticky top-0
+                                bg-[#0a0a0c]">
+                  <span className="text-[8px] text-white/40 font-semibold uppercase tracking-wider">
+                    {profile} · {profileTabs.length} tabs
+                  </span>
+                </div>
+                {profileTabs.map((tab, i) => {
+                  const url = tab.url || '';
+                  const title = tab.title || url || 'Untitled';
+                  const domain = url ? (() => {
+                    try { return new URL(url).hostname.replace('www.', ''); }
+                    catch { return ''; }
+                  })() : '';
+
+                  // Skip internal Chrome pages
+                  if (url.startsWith('chrome://') || url.startsWith('chrome-extension://')) {
+                    return null;
+                  }
+
+                  return (
+                    <div key={i} className="flex items-center gap-2 px-3 py-1.5
+                                             border-b border-white/[0.03] last:border-0
+                                             hover:bg-white/[0.02] transition-colors">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[9px] text-white/60 truncate">{title}</p>
+                        {domain && (
+                          <p className="text-[7.5px] text-white/25 font-mono truncate">{domain}</p>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1 flex-shrink-0">
+                        {tab.pinned && (
+                          <span className="text-[6px] text-white/20 bg-white/[0.04]
+                                           px-1 py-0.5 rounded">PIN</span>
+                        )}
+                        {tab.incognito && (
+                          <span className="text-[6px] text-white/20 bg-white/[0.04]
+                                           px-1 py-0.5 rounded">PVT</span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ));
+          })()}
+        </div>
+      )}
+
+      {expanded && tabs.length === 0 && (
+        <p className="mt-1.5 text-[8px] text-white/25 px-3 py-2
+                      bg-white/[0.01] border border-white/5 rounded-lg">
+          No tabs synced yet. Switch between Chrome profiles to trigger sync.
+        </p>
+      )}
+    </div>
+  );
+}
+
+
 function ChromeTabSyncCard() {
   const [status, setStatus]     = useState(null);
   const [expanded, setExpanded] = useState(false);
@@ -698,11 +811,20 @@ function ChromeTabSyncCard() {
 
   const checkStatus = async () => {
     try {
-      const r = await fetch('http://127.0.0.1:7777/api/chrome/setup/status');
-      if (r.ok) {
-        const data = await r.json();
-        setStatus(data);
-        if (data.extension_path) setExtPath(data.extension_path);
+      // Get detailed tab status (includes per-profile tab counts)
+      const tabR = await fetch('http://127.0.0.1:7777/api/chrome/tabs/status');
+      if (tabR.ok) {
+        const tabData = await tabR.json();
+        setStatus(tabData);
+        if (tabData.extension_path) setExtPath(tabData.extension_path);
+      } else {
+        // Fallback to setup status
+        const setupR = await fetch('http://127.0.0.1:7777/api/chrome/setup/status');
+        if (setupR.ok) {
+          const setupData = await setupR.json();
+          setStatus(setupData);
+          if (setupData.extension_path) setExtPath(setupData.extension_path);
+        }
       }
     } catch {}
   };
@@ -723,7 +845,12 @@ function ChromeTabSyncCard() {
   const handleDisable = async () => {
     try {
       await fetch('http://127.0.0.1:7777/api/chrome/setup/uninstall', { method: 'POST' });
+      // Also clear in-memory tab data
+      try {
+        await fetch('http://127.0.0.1:7777/api/chrome/tabs/clear', { method: 'POST' });
+      } catch {}
       setStatus(null);
+      setStep(0);
       setTimeout(checkStatus, 2000);
     } catch {}
   };
@@ -749,12 +876,7 @@ function ChromeTabSyncCard() {
               <div>
                 <h4 className="text-[11px] font-semibold text-white/80">Chrome Tab Sync</h4>
               <p className="text-[9px] text-green-400 mt-0.5">
-                {status.total_tabs} tabs · {status.profile_count} profile{status.profile_count !== 1 ? 's' : ''}{' '}
-                {status.active_profiles < status.profile_count && (
-                  <span className="text-white/30">
-                    ({status.active_profiles} active)
-                  </span>
-                )}
+                {status.total_tabs || 0} total tabs · {status.profile_count || 0} profile{(status.profile_count || 0) !== 1 ? 's' : ''}
               </p>
               </div>
             </div>
@@ -815,7 +937,8 @@ function ChromeTabSyncCard() {
                 </div>
               ))}
             </div>
-
+            {/* View all tabs */}
+            <TabPreview />
             {/* Add more profiles */}
             <div className="px-3 py-2.5 bg-white/[0.015] border border-dashed border-white/8
                             rounded-lg">

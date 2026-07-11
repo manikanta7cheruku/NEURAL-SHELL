@@ -240,6 +240,13 @@ def uninstall_extension():
     except Exception as e:
         return {"success": False, "message": str(e)}
 
+@router.post("/api/chrome/tabs/clear")
+def clear_tabs():
+    """Clear all stored tab data. Called when user disables Tab Sync."""
+    global _tab_snapshots, _last_update
+    _tab_snapshots = {}
+    _last_update = 0
+    return {"success": True, "message": "Tab data cleared"}
 
 # ── Direct access for workspace scanner ──────────────────────────────────
 
