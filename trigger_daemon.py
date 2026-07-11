@@ -241,57 +241,96 @@ def execute_trigger(trigger):
 
 
 def _exec_open_app(data):
-    """Launch an application."""
-    app_name = data.get("app", "")
-    if not app_name:
+    """Launch application(s). Supports single or multiple apps."""
+    # Support both single app and multi-app
+    apps_list = data.get("apps", [])
+    single_app = data.get("app", "")
+    if single_app and not apps_list:
+        apps_list = [single_app]
+
+    if not apps_list:
+        print("[TRIGGER DAEMON] No app specified")
         return
 
-    try:
-        # Try Seven's own app launcher first (if running)
-        if is_seven_running():
-            import requests
-            requests.post(
-                "http://127.0.0.1:7777/api/chat",
-                json={"text": f"open {app_name}", "speaker_id": "default"},
-                timeout=5
-            )
-            return
-    except Exception:
-        pass
+    for app_name in apps_list:
+        if not app_name:
+            continue
 
-    # Direct launch fallback
-    try:
-        from hands.core import open_app
-        open_app(app_name)
-    except ImportError:
-        # Fallback: try AppOpener or subprocess
+        # ALWAYS try direct launch first (fastest, most reliable)
+        launched = False
+
+        # Method 1: hands.core.open_app (Seven's own launcher)
         try:
-            import AppOpener
-            AppOpener.open(app_name)
-        except Exception:
-            os.startfile(app_name)
+            from hands.core import open_app
+            open_app(app_name)
+            print(f"[TRIGGER DAEMON] Opened: {app_name}")
+            launched = True
+            continue
+        except Exception as e:
+            print(f"[TRIGGER DAEMON] hands.core failed for {app_name}: {e}")
+
+        # Method 2: AppOpener
+        if not launched:
+            try:
+                import AppOpener
+                AppOpener.open(app_name)
+                print(f"[TRIGGER DAEMON] Opened via AppOpener: {app_name}")
+                launched = True
+                continue
+            except Exception as e:
+                print(f"[TRIGGER DAEMON] AppOpener failed for {app_name}: {e}")
+
+        # Method 3: subprocess start command
+        if not launched:
+            try:
+                subprocess.Popen(f'start {app_name}', shell=True)
+                print(f"[TRIGGER DAEMON] Opened via start: {app_name}")
+                launched = True
+            except Exception as e:
+                print(f"[TRIGGER DAEMON] start command failed for {app_name}: {e}")
+
+        if not launched:
+            print(f"[TRIGGER DAEMON] FAILED to open: {app_name}")
 
 
 def _exec_open_url(data):
-    """Open URL in default browser."""
-    url = data.get("url", "")
-    if url:
-        import webbrowser
-        webbrowser.open(url)
+    """Open URL(s) in default browser."""
+    import webbrowser
+    urls = data.get("urls", [])
+    single = data.get("url", "")
+    if single and not urls:
+        urls = [single]
+
+    for url in urls:
+        if url:
+            webbrowser.open(url)
+            print(f"[TRIGGER DAEMON] Opened URL: {url}")
 
 
 def _exec_open_file(data):
-    """Open a file with default application."""
-    path = data.get("path", "")
-    if path and os.path.exists(path):
-        os.startfile(path)
+    """Open file(s) with default application."""
+    paths = data.get("paths", [])
+    single = data.get("path", "")
+    if single and not paths:
+        paths = [single]
+
+    for path in paths:
+        if path and os.path.exists(path):
+            os.startfile(path)
+            print(f"[TRIGGER DAEMON] Opened file: {path}")
 
 
 def _exec_open_folder(data):
-    """Open folder in Explorer."""
-    path = data.get("path", "")
-    if path and os.path.exists(path):
-        subprocess.Popen(['explorer', path])
+    """Open folder(s) in Explorer."""
+    paths = data.get("paths", [])
+    single = data.get("path", "")
+    if single and not paths:
+        paths = [single]
+
+    for path in paths:
+        if path and os.path.exists(path):
+            subprocess.Popen(['explorer', path])
+            print(f"[TRIGGER DAEMON] Opened folder: {path}")
 
 
 def _exec_open_workspace(data):
@@ -427,21 +466,51 @@ def _exec_run_command(data):
 
 
 def _exec_seven_action(data):
-    """Execute internal Seven action via API."""
+    """Execute internal Seven action via API or direct."""
     action = data.get("action", "")
     if not action:
         return
 
+    # Try API if Seven is running
     if is_seven_running():
         try:
             import requests
-            requests.post(
+            r = requests.post(
                 "http://127.0.0.1:7777/api/chat",
                 json={"text": action, "speaker_id": "default"},
-                timeout=5
+                timeout=10
             )
-        except Exception:
-            pass
+            print(f"[TRIGGER DAEMON] Seven action via API: {action}")
+            return
+        except Exception as e:
+            print(f"[TRIGGER DAEMON] API call failed: {e}")
+
+    # Direct execution fallback for system commands
+    action_lower = action.lower()
+    try:
+        if "volume" in action_lower or "brightness" in action_lower or "mute" in action_lower:
+            from hands.system import manage_system
+            # Parse simple commands
+            if "max" in action_lower and "volume" in action_lower:
+                manage_system({"action": "volume_set", "value": "100"})
+            elif "volume" in action_lower:
+                # Try to extract number
+                import re
+                nums = re.findall(r'\d+', action_lower)
+                if nums:
+                    manage_system({"action": "volume_set", "value": nums[0]})
+            if "max" in action_lower and "brightness" in action_lower:
+                manage_system({"action": "brightness_set", "value": "100"})
+            elif "brightness" in action_lower:
+                import re
+                nums = re.findall(r'\d+', action_lower)
+                if nums:
+                    manage_system({"action": "brightness_set", "value": nums[0]})
+            if "mute" in action_lower:
+                manage_system({"action": "volume_mute"})
+            print(f"[TRIGGER DAEMON] Direct system action: {action}")
+    except Exception as e:
+        print(f"[TRIGGER DAEMON] Direct action failed: {e}")
 
 
 def _show_notification(trigger_name, action_type):
