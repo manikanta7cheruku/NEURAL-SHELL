@@ -1,11 +1,14 @@
 {
   "manifest_version": 3,
   "name": "Seven Tab Sync",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Syncs Chrome tab data with Seven AI for workspace management. 100% local — no data leaves your machine.",
   "permissions": [
     "tabs",
-    "activeTab"
+    "activeTab",
+    "identity",
+    "identity.email",
+    "storage"
   ],
   "host_permissions": [
     "http://127.0.0.1:7777/*"

@@ -73,25 +73,44 @@ async function syncTabs() {
 }
 
 /**
- * Get Chrome profile name from the user data directory.
+ * Get Chrome profile name.
+ * Each profile has a unique extension ID, so we use that as identifier.
+ * Also tries to read the profile name from Chrome's identity API.
  */
 async function getProfileName() {
   try {
-    // Chrome doesn't expose profile name directly to extensions
-    // Use a workaround: check the profile path from chrome.runtime
-    const info = await chrome.runtime.getPlatformInfo();
-    
-    // Try to identify profile from extension ID path
-    // Each profile has unique extension storage
-    const profileKey = await chrome.storage.local.get('seven_profile_name');
-    if (profileKey.seven_profile_name) {
-      return profileKey.seven_profile_name;
+    // Method 1: Check if we already saved a profile name
+    const stored = await chrome.storage.local.get('seven_profile_name');
+    if (stored.seven_profile_name) {
+      return stored.seven_profile_name;
     }
+
+    // Method 2: Use extension ID as unique identifier per profile
+    // Each Chrome profile gets a DIFFERENT extension ID for unpacked extensions
+    // This naturally separates profiles
+    const extId = chrome.runtime.id;
     
-    // Auto-detect: ask user on first run or use "default"
-    return 'default';
+    // Method 3: Try to get user's email from Chrome identity
+    try {
+      const userInfo = await chrome.identity.getProfileUserInfo({ accountStatus: 'ANY' });
+      if (userInfo && userInfo.email) {
+        const profileName = userInfo.email.split('@')[0];
+        await chrome.storage.local.set({ seven_profile_name: profileName });
+        return profileName;
+      }
+    } catch {
+      // identity API not available or no user signed in
+    }
+
+    // Method 4: Use a hash of the extension ID as profile identifier
+    // Different profile = different extension ID = different hash
+    const shortId = extId.substring(0, 8);
+    const profileName = `profile_${shortId}`;
+    await chrome.storage.local.set({ seven_profile_name: profileName });
+    return profileName;
+
   } catch {
-    return 'default';
+    return 'unknown';
   }
 }
 

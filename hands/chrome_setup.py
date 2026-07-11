@@ -125,21 +125,41 @@ def copy_path_to_clipboard(path):
 
 
 def open_chrome_extensions_page():
-    """Open Chrome extensions page directly using Chrome executable."""
+    """
+    Open Chrome extensions page for each profile.
+    Chrome profile picker intercepts chrome:// URLs, so we need
+    to launch Chrome with a specific profile AND the extensions URL.
+    """
     chrome_exe = _find_chrome_exe()
     if not chrome_exe:
         return False, "Chrome not found"
 
-    try:
-        # Must use Chrome exe directly — webbrowser.open() cannot handle chrome:// URLs
-        # Use subprocess with shell=True to handle the chrome:// protocol
-        subprocess.Popen(
-            f'"{chrome_exe}" "chrome://extensions/"',
-            shell=True
-        )
-        return True, "Chrome extensions page opened"
-    except Exception as e:
-        return False, f"Failed to open Chrome: {e}"
+    profiles = _get_chrome_profiles()
+    opened = False
+
+    for profile in profiles:
+        try:
+            # Launch Chrome with specific profile + extensions page
+            # --profile-directory forces Chrome to skip the profile picker
+            subprocess.Popen(
+                [
+                    chrome_exe,
+                    f"--profile-directory={profile}",
+                    "chrome://extensions/",
+                ],
+            )
+            opened = True
+            print(Fore.CYAN + f"[CHROME SETUP] Opened extensions page for {profile}")
+
+            # Small delay between profiles so Chrome doesn't merge them
+            time.sleep(1)
+
+        except Exception as e:
+            print(Fore.YELLOW + f"[CHROME SETUP] Failed for {profile}: {e}")
+
+    if opened:
+        return True, f"Extensions page opened for {len(profiles)} profile(s)"
+    return False, "Could not open Chrome"
 
 
 def check_extension_status():

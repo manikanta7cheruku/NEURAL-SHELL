@@ -739,10 +739,10 @@ function ChromeTabSyncCard() {
   if (status?.connected) {
     return (
       <div className="mb-4 bg-white/[0.015] border border-white/8 rounded-2xl p-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
+        <div className="flex items-start justify-between">
+          <div className="flex items-start gap-3">
             <div className="w-8 h-8 rounded-lg bg-green-500/10 border border-green-500/20
-                            flex items-center justify-center">
+                            flex items-center justify-center flex-shrink-0">
               <Globe size={14} className="text-green-400" />
             </div>
             <div>
@@ -750,10 +750,35 @@ function ChromeTabSyncCard() {
               <p className="text-[9px] text-green-400 mt-0.5">
                 Connected · {status.tab_count} tabs across {status.profile_count} profile{status.profile_count !== 1 ? 's' : ''}
               </p>
+
+              {status.profile_count < 5 && (
+                <div className="mt-2 px-2.5 py-1.5 rounded-lg bg-white/[0.02] border border-white/5">
+                  <p className="text-[8.5px] text-white/40 leading-relaxed">
+                    <span className="text-white/60 font-medium">Add more profiles:</span> Open each Chrome
+                    account → go to <span className="text-white/55 font-mono">chrome://extensions</span> → 
+                    enable Developer mode → Load unpacked →
+                    paste this path:
+                  </p>
+                  <div className="flex items-center gap-2 mt-1">
+                    <code className="text-[8px] text-s-accent bg-s-accent/8 border border-s-accent/15
+                                     px-2 py-0.5 rounded font-mono select-all break-all flex-1">
+                      {status.extension_path || 'Loading...'}
+                    </code>
+                    <button onClick={() => navigator.clipboard.writeText(status.extension_path || '')}
+                            className="text-[7.5px] text-white/30 hover:text-s-accent
+                                       transition-colors flex-shrink-0 px-1.5 py-0.5
+                                       rounded bg-white/[0.03] border border-white/6
+                                       hover:bg-s-accent/8 hover:border-s-accent/15">
+                      Copy
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
           <button onClick={handleDisable}
-                  className="text-[8px] text-white/20 hover:text-white/50 transition-colors">
+                  className="text-[8px] text-white/20 hover:text-white/50 transition-colors
+                             flex-shrink-0 mt-1">
             Disable
           </button>
         </div>
