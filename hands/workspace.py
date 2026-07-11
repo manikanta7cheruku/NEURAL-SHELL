@@ -1,40 +1,23 @@
 """
-=============================================================================
 hands/workspace.py
+Workspace scanner and restorer — ENHANCED version.
 
-Workspace scanner and restorer.
-Scans all open windows on the system and captures their state.
-Restores everything in parallel for speed.
-
-SCAN CAPTURES:
-  - All visible windows (title, process name, exe path)
-  - Chrome/Edge tabs (URLs + titles via DevTools Protocol)
-  - VS Code workspaces (via SQLite state.vscdb)
-  - File Explorer open folders (via Shell COM interface)
-  - PDF/document file paths
-  - Window positions and sizes
-
-RESTORE:
-  - Launches all apps in parallel threads
-  - Chrome opens with all saved tab URLs
-  - VS Code opens saved workspace
-  - Explorer opens saved folders
-  - Other apps launch by exe path or name
-
-PERFORMANCE:
-  Scan:    200-500ms for typical desktop (10-20 windows)
-  Restore: 2-5 seconds parallel launch (depends on app count)
-
-DEPENDENCIES:
-  pywin32 (already installed — win32gui, win32process, win32com)
-  psutil  (already installed)
-=============================================================================
+Improvements over v1:
+  - Captures file paths from window titles (Notepad, Excel, PDF viewers)
+  - Scans Explorer folder paths via Shell COM
+  - VS Code workspace detection via state.vscdb
+  - Chrome tab URLs via DevTools Protocol
+  - UWP app detection (Settings, Photos, Calculator)
+  - Window positions and sizes for restore
+  - PowerShell/Terminal working directory detection
+  - Parallel restore with progress logging
 """
 
 import os
 import sys
 import json
 import time
+import re
 import subprocess
 import threading
 from colorama import Fore
@@ -48,103 +31,70 @@ except ImportError:
     print(Fore.YELLOW + "[WORKSPACE] pywin32 or psutil not available")
 
 
-# ─────────────────────────────────────────────────────────────────────────
-# KNOWN APP CLASSIFICATIONS
-# Maps process names to friendly app types for UI
-# ─────────────────────────────────────────────────────────────────────────
+# ── Known app classifications ────────────────────────────────────────────
 
 _BROWSER_PROCESSES = {
-    "chrome.exe":    "chrome",
-    "msedge.exe":    "edge",
-    "firefox.exe":   "firefox",
-    "brave.exe":     "brave",
-    "opera.exe":     "opera",
-    "vivaldi.exe":   "vivaldi",
+    "chrome.exe": "chrome", "msedge.exe": "edge",
+    "firefox.exe": "firefox", "brave.exe": "brave",
+    "opera.exe": "opera", "vivaldi.exe": "vivaldi",
 }
 
 _EDITOR_PROCESSES = {
-    "code.exe":           "vscode",
-    "code - insiders.exe": "vscode",
-    "notepad.exe":        "notepad",
-    "notepad++.exe":      "notepad++",
-    "sublime_text.exe":   "sublime",
-    "devenv.exe":         "visual_studio",
-    "idea64.exe":         "intellij",
-    "pycharm64.exe":      "pycharm",
-    "webstorm64.exe":     "webstorm",
+    "code.exe": "vscode", "code - insiders.exe": "vscode",
+    "notepad.exe": "notepad", "notepad++.exe": "notepad++",
+    "sublime_text.exe": "sublime", "devenv.exe": "visual_studio",
 }
 
-_MEDIA_PROCESSES = {
-    "spotify.exe":      "spotify",
-    "vlc.exe":          "vlc",
-    "wmplayer.exe":     "media_player",
+_TERMINAL_PROCESSES = {
+    "powershell.exe": "powershell", "pwsh.exe": "powershell",
+    "cmd.exe": "cmd", "windowsterminal.exe": "terminal",
+    "wt.exe": "terminal",
+}
+
+_OFFICE_PROCESSES = {
+    "excel.exe": "excel", "winword.exe": "word",
+    "powerpnt.exe": "powerpoint", "onenote.exe": "onenote",
+}
+
+_UWP_PROTOCOLS = {
+    "systemsettings.exe":    "ms-settings:",
+    "photos.exe":            "ms-photos:",
+    "calculator.exe":        "calculator:",
+    "mspaint.exe":           "mspaint:",
+    "windowsstore.exe":      "ms-windows-store:",
 }
 
 _SKIP_PROCESSES = {
-    "explorer.exe",        # Desktop shell (not file explorer windows)
-    "searchhost.exe",
-    "shellexperiencehost.exe",
-    "startmenuexperiencehost.exe",
-    "systemsettings.exe",
-    "textinputhost.exe",
-    "widgetservice.exe",
-    "applicationframehost.exe",
-    "taskmgr.exe",
-    "runtimebroker.exe",
-    "searchui.exe",
-    "lockapp.exe",
+    "explorer.exe", "searchhost.exe", "shellexperiencehost.exe",
+    "startmenuexperiencehost.exe", "textinputhost.exe",
+    "widgetservice.exe", "applicationframehost.exe",
+    "runtimebroker.exe", "searchui.exe", "lockapp.exe",
+    "taskmgr.exe", "rundll32.exe", "dllhost.exe",
+    "sihost.exe", "ctfmon.exe", "securityhealthsystray.exe",
 }
 
-_SKIP_TITLES = {
-    "", "program manager", "windows input experience",
-    "microsoft text input application",
-    "settings", "search",
-}
+_SKIP_TITLES = {"", "program manager", "windows input experience",
+                "microsoft text input application", "search"}
 
 
-# ─────────────────────────────────────────────────────────────────────────
-# SCAN CURRENT WORKSPACE
-# ─────────────────────────────────────────────────────────────────────────
+# ── SCAN ─────────────────────────────────────────────────────────────────
 
 def scan_current():
-    """
-    Scan all visible windows and return workspace config list.
-
-    Returns:
-        list of app configs, each is a dict like:
-        {
-            "type": "chrome",
-            "name": "Google Chrome",
-            "exe_path": "C:\\...\\chrome.exe",
-            "tabs": [...],            # for browsers
-            "workspace_path": "...",  # for VS Code
-            "folder_path": "...",     # for Explorer
-            "file_path": "...",       # for documents
-            "window": {
-                "title": "...",
-                "x": 0, "y": 0,
-                "width": 1920, "height": 1080
-            }
-        }
-    """
-    print(Fore.CYAN + "[WORKSPACE] Scanning current desktop...")
-    start_time = time.time()
+    """Scan all visible windows and return workspace config list."""
+    print(Fore.CYAN + "[WORKSPACE] Scanning desktop...")
+    start = time.time()
 
     apps = []
     seen_pids = set()
-    seen_exe_paths = set()
 
-    def enum_callback(hwnd, _):
-        """Callback for EnumWindows — processes each visible window."""
+    def enum_cb(hwnd, _):
         try:
             if not win32gui.IsWindowVisible(hwnd):
                 return
-
             title = win32gui.GetWindowText(hwnd)
             if not title or title.lower() in _SKIP_TITLES:
                 return
 
-            # Get process info
             _, pid = win32process.GetWindowThreadProcessId(hwnd)
             if pid in seen_pids:
                 return
@@ -159,158 +109,176 @@ def scan_current():
             if exe_name in _SKIP_PROCESSES:
                 return
 
-            # Skip if we already captured this exe (avoid duplicates)
-            exe_key = exe_path.lower() if exe_path else exe_name
-            if exe_key in seen_exe_paths:
-                return
-
             seen_pids.add(pid)
-            seen_exe_paths.add(exe_key)
 
-            # Get window position
+            # Window rect
             try:
                 rect = win32gui.GetWindowRect(hwnd)
-                window_info = {
+                win_info = {
                     "title": title,
-                    "x": rect[0],
-                    "y": rect[1],
+                    "x": rect[0], "y": rect[1],
                     "width": rect[2] - rect[0],
                     "height": rect[3] - rect[1],
                 }
             except Exception:
-                window_info = {"title": title}
+                win_info = {"title": title}
 
-            # Classify the window
-            app_config = _classify_window(exe_name, exe_path, title, window_info, pid)
-            if app_config:
-                apps.append(app_config)
-
+            app_cfg = _classify(exe_name, exe_path, title, win_info, pid, proc)
+            if app_cfg:
+                apps.append(app_cfg)
         except Exception:
             pass
 
-    win32gui.EnumWindows(enum_callback, None)
+    win32gui.EnumWindows(enum_cb, None)
 
-    # Scan Chrome tabs separately (requires DevTools)
+    # Enrich with extra data
     _enrich_browser_tabs(apps)
-
-    # Scan VS Code state separately
-    _enrich_vscode_state(apps)
-
-    # Scan Explorer folders separately
+    _enrich_vscode(apps)
     _scan_explorer_folders(apps)
 
-    elapsed = int((time.time() - start_time) * 1000)
+    elapsed = int((time.time() - start) * 1000)
     print(Fore.GREEN + f"[WORKSPACE] Scanned {len(apps)} apps in {elapsed}ms")
-
     return apps
 
 
-def _classify_window(exe_name, exe_path, title, window_info, pid):
-    """Classify a window into an app config dict."""
+def _classify(exe_name, exe_path, title, win_info, pid, proc):
+    """Classify a window into an app config."""
 
     # Browser
     if exe_name in _BROWSER_PROCESSES:
-        browser_type = _BROWSER_PROCESSES[exe_name]
         return {
-            "type": browser_type,
-            "name": title.split(" - ")[-1] if " - " in title else browser_type.title(),
+            "type": _BROWSER_PROCESSES[exe_name],
+            "name": title.split(" - ")[-1].strip() if " - " in title else exe_name.replace(".exe", "").title(),
             "exe_path": exe_path,
-            "tabs": [],  # filled by _enrich_browser_tabs
-            "window": window_info,
-            "pid": pid,
+            "tabs": [],
+            "window": win_info,
         }
 
     # Editor
     if exe_name in _EDITOR_PROCESSES:
-        editor_type = _EDITOR_PROCESSES[exe_name]
+        file_path = _extract_file_from_title(title)
         return {
-            "type": editor_type,
+            "type": _EDITOR_PROCESSES[exe_name],
             "name": title,
             "exe_path": exe_path,
-            "workspace_path": "",  # filled by _enrich_vscode_state
-            "files": [],
-            "window": window_info,
-            "pid": pid,
+            "file_path": file_path,
+            "workspace_path": "",
+            "window": win_info,
         }
 
-    # Media
-    if exe_name in _MEDIA_PROCESSES:
-        media_type = _MEDIA_PROCESSES[exe_name]
+    # Terminal
+    if exe_name in _TERMINAL_PROCESSES:
+        cwd = ""
+        try:
+            cwd = proc.cwd()
+        except Exception:
+            pass
         return {
-            "type": media_type,
+            "type": _TERMINAL_PROCESSES[exe_name],
             "name": title,
             "exe_path": exe_path,
-            "window": window_info,
-            "pid": pid,
+            "working_dir": cwd,
+            "window": win_info,
         }
 
-    # File Explorer (special — handled by _scan_explorer_folders)
-    if exe_name == "explorer.exe" and title and title.lower() != "program manager":
+    # Office
+    if exe_name in _OFFICE_PROCESSES:
+        file_path = _extract_file_from_title(title)
+        return {
+            "type": _OFFICE_PROCESSES[exe_name],
+            "name": title,
+            "exe_path": exe_path,
+            "file_path": file_path,
+            "window": win_info,
+        }
+
+    # UWP apps
+    if exe_name in _UWP_PROTOCOLS:
+        return {
+            "type": "uwp",
+            "name": title or exe_name.replace(".exe", "").title(),
+            "protocol": _UWP_PROTOCOLS[exe_name],
+            "window": win_info,
+        }
+
+    # Explorer windows (not desktop shell)
+    if exe_name == "explorer.exe" and title.lower() != "program manager":
         return {
             "type": "explorer",
             "name": title,
-            "folder_path": "",  # filled by _scan_explorer_folders
-            "window": window_info,
-            "pid": pid,
+            "folder_path": "",
+            "window": win_info,
         }
 
-    # PDF / Document viewers
-    _doc_exts = [".pdf", ".docx", ".xlsx", ".pptx", ".txt", ".md"]
-    for ext in _doc_exts:
-        if ext in title.lower():
-            return {
-                "type": "document",
-                "name": title,
-                "exe_path": exe_path,
-                "file_path": _extract_file_path_from_title(title),
-                "window": window_info,
-                "pid": pid,
-            }
+    # PDF / document viewers
+    file_path = _extract_file_from_title(title)
+    if file_path:
+        return {
+            "type": "document",
+            "name": title,
+            "exe_path": exe_path,
+            "file_path": file_path,
+            "window": win_info,
+        }
 
     # Generic app
+    clean_name = title.split(" - ")[-1].strip() if " - " in title else exe_name.replace(".exe", "").title()
     return {
         "type": "app",
-        "name": title.split(" - ")[-1] if " - " in title else exe_name.replace(".exe", "").title(),
+        "name": clean_name,
         "exe_path": exe_path,
-        "window": window_info,
-        "pid": pid,
+        "window": win_info,
     }
 
 
-def _extract_file_path_from_title(title):
-    """Try to extract file path from window title (many apps show it)."""
-    # Many apps show "filename.ext - AppName" or "path\\file - AppName"
+def _extract_file_from_title(title):
+    """Extract file path from window title."""
+    if not title:
+        return ""
+
+    # Pattern: "filename.ext - AppName" or "C:\path\file.ext - AppName"
     parts = title.split(" - ")
     if len(parts) >= 2:
-        potential_path = parts[0].strip()
-        if os.path.exists(potential_path):
-            return potential_path
-        # Try common locations
-        for base in [os.path.expanduser("~"), "C:\\", "D:\\"]:
-            full = os.path.join(base, potential_path)
+        candidate = parts[0].strip()
+
+        # Direct path check
+        if os.path.exists(candidate):
+            return candidate
+
+        # Check with common drives
+        for drive in ["C:\\", "D:\\", "E:\\", "M:\\"]:
+            full = os.path.join(drive, candidate)
             if os.path.exists(full):
                 return full
+
+        # Check common locations
+        home = os.path.expanduser("~")
+        for subdir in ["Desktop", "Documents", "Downloads"]:
+            full = os.path.join(home, subdir, candidate)
+            if os.path.exists(full):
+                return full
+
+    # Look for file extensions in the title
+    ext_pattern = r'[\w\\/:.\- ]+\.(?:pdf|docx?|xlsx?|pptx?|txt|md|csv|py|js|html|json)'
+    match = re.search(ext_pattern, title, re.IGNORECASE)
+    if match:
+        candidate = match.group(0).strip()
+        if os.path.exists(candidate):
+            return candidate
+
     return ""
 
 
-# ─────────────────────────────────────────────────────────────────────────
-# CHROME TAB SCANNING
-# ─────────────────────────────────────────────────────────────────────────
+# ── Browser tabs ─────────────────────────────────────────────────────────
 
 def _enrich_browser_tabs(apps):
-    """
-    Read Chrome/Edge tab URLs via DevTools Protocol.
-    Requires Chrome to be running with --remote-debugging-port=9222.
-    Falls back to title-only if DevTools not available.
-    """
-    browser_apps = [a for a in apps if a.get("type") in ("chrome", "edge", "brave")]
-    if not browser_apps:
+    """Read Chrome/Edge tabs via DevTools Protocol."""
+    browsers = [a for a in apps if a.get("type") in ("chrome", "edge")]
+    if not browsers:
         return
 
-    for browser_app in browser_apps:
-        browser_type = browser_app["type"]
-        port = 9222  # default DevTools port
-
+    for browser in browsers:
+        port = 9222
         try:
             import requests
             r = requests.get(f"http://127.0.0.1:{port}/json/list", timeout=2)
@@ -319,32 +287,31 @@ def _enrich_browser_tabs(apps):
                 tabs = []
                 for page in pages:
                     if page.get("type") == "page":
+                        url = page.get("url", "")
+                        # Skip chrome internal pages
+                        if url.startswith("chrome://") or url.startswith("edge://"):
+                            continue
                         tabs.append({
-                            "url": page.get("url", ""),
+                            "url": url,
                             "title": page.get("title", ""),
                         })
-                browser_app["tabs"] = tabs
-                print(Fore.CYAN + f"[WORKSPACE] {browser_type}: {len(tabs)} tabs captured via DevTools")
+                browser["tabs"] = tabs
+                print(Fore.CYAN + f"[WORKSPACE] {browser['type']}: {len(tabs)} tabs via DevTools")
                 return
         except Exception:
             pass
 
-        # Fallback: just capture the window title (no URLs)
-        title = browser_app.get("window", {}).get("title", "")
+        # Fallback: title only
+        title = browser.get("window", {}).get("title", "")
         if title:
-            browser_app["tabs"] = [{"url": "", "title": title}]
-            print(Fore.YELLOW + f"[WORKSPACE] {browser_type}: DevTools not available, title only")
+            browser["tabs"] = [{"url": "", "title": title}]
+            print(Fore.YELLOW + f"[WORKSPACE] {browser['type']}: DevTools unavailable, title only")
 
 
-# ─────────────────────────────────────────────────────────────────────────
-# VS CODE STATE SCANNING
-# ─────────────────────────────────────────────────────────────────────────
+# ── VS Code ──────────────────────────────────────────────────────────────
 
-def _enrich_vscode_state(apps):
-    """
-    Read VS Code recently opened workspace from its SQLite state database.
-    Location: %APPDATA%/Code/User/globalStorage/state.vscdb
-    """
+def _enrich_vscode(apps):
+    """Read VS Code workspace from state.vscdb."""
     vscode_apps = [a for a in apps if a.get("type") == "vscode"]
     if not vscode_apps:
         return
@@ -353,7 +320,6 @@ def _enrich_vscode_state(apps):
     state_db = os.path.join(appdata, "Code", "User", "globalStorage", "state.vscdb")
 
     if not os.path.exists(state_db):
-        print(Fore.YELLOW + "[WORKSPACE] VS Code state.vscdb not found")
         return
 
     try:
@@ -369,175 +335,127 @@ def _enrich_vscode_state(apps):
             data = json.loads(row[0])
             entries = data.get("entries", [])
             if entries:
-                # Most recent workspace
                 recent = entries[0]
-                workspace_path = recent.get("folderUri", "").replace("file:///", "").replace("/", "\\")
-
-                for vs_app in vscode_apps:
-                    vs_app["workspace_path"] = workspace_path
-                    print(Fore.CYAN + f"[WORKSPACE] VS Code workspace: {workspace_path}")
-
+                ws = recent.get("folderUri", "").replace("file:///", "").replace("/", "\\")
+                for vs in vscode_apps:
+                    vs["workspace_path"] = ws
+                    print(Fore.CYAN + f"[WORKSPACE] VS Code: {ws}")
     except Exception as e:
-        print(Fore.YELLOW + f"[WORKSPACE] VS Code state read error: {e}")
+        print(Fore.YELLOW + f"[WORKSPACE] VS Code state error: {e}")
 
 
-# ─────────────────────────────────────────────────────────────────────────
-# FILE EXPLORER FOLDER SCANNING
-# ─────────────────────────────────────────────────────────────────────────
+# ── Explorer folders ─────────────────────────────────────────────────────
 
 def _scan_explorer_folders(apps):
-    """
-    Read open File Explorer windows and get their current folder paths.
-    Uses Windows Shell COM interface (IShellWindows).
-    """
-    explorer_apps = [a for a in apps if a.get("type") == "explorer"]
-    if not explorer_apps:
+    """Get open Explorer window folder paths via Shell COM."""
+    explorers = [a for a in apps if a.get("type") == "explorer"]
+    if not explorers:
         return
 
     try:
         import win32com.client
+        from urllib.parse import unquote
         shell = win32com.client.Dispatch("Shell.Application")
         windows = shell.Windows()
 
-        explorer_folders = []
+        folders = []
         for i in range(windows.Count):
             try:
-                window = windows.Item(i)
-                if window is None:
+                w = windows.Item(i)
+                if w is None:
                     continue
-
-                location_url = window.LocationURL
-                location_name = window.LocationName
-
-                if location_url:
-                    # Convert file:///C:/Users/... to C:\Users\...
-                    folder_path = location_url.replace("file:///", "").replace("/", "\\")
-                    # URL decode
-                    from urllib.parse import unquote
-                    folder_path = unquote(folder_path)
-
-                    explorer_folders.append({
-                        "path": folder_path,
-                        "name": location_name,
-                    })
+                loc = w.LocationURL
+                if loc:
+                    path = unquote(loc.replace("file:///", "").replace("/", "\\"))
+                    folders.append({"path": path, "name": w.LocationName})
             except Exception:
                 continue
 
-        # Match folders to our explorer app entries
-        for i, exp_app in enumerate(explorer_apps):
-            if i < len(explorer_folders):
-                exp_app["folder_path"] = explorer_folders[i]["path"]
-                exp_app["name"] = explorer_folders[i]["name"]
-                print(Fore.CYAN + f"[WORKSPACE] Explorer folder: {explorer_folders[i]['path']}")
-
+        for i, exp in enumerate(explorers):
+            if i < len(folders):
+                exp["folder_path"] = folders[i]["path"]
+                exp["name"] = folders[i]["name"] or exp["name"]
+                print(Fore.CYAN + f"[WORKSPACE] Explorer: {folders[i]['path']}")
     except Exception as e:
         print(Fore.YELLOW + f"[WORKSPACE] Explorer scan error: {e}")
 
 
-# ─────────────────────────────────────────────────────────────────────────
-# WORKSPACE RESTORE
-# ─────────────────────────────────────────────────────────────────────────
+# ── RESTORE ──────────────────────────────────────────────────────────────
 
 def restore(apps_config):
-    """
-    Restore a workspace by launching all apps in parallel.
-
-    Args:
-        apps_config: list of app config dicts from workspace JSON
-
-    Each app launches in its own thread for speed.
-    Total restore time: 2-5 seconds for typical workspace.
-    """
+    """Restore workspace by launching all apps in parallel."""
     if not apps_config:
         print(Fore.YELLOW + "[WORKSPACE] Nothing to restore")
         return
 
     print(Fore.CYAN + f"[WORKSPACE] Restoring {len(apps_config)} apps...")
-    start_time = time.time()
+    start = time.time()
 
     threads = []
-    for app_cfg in apps_config:
-        t = threading.Thread(
-            target=_restore_single_app,
-            args=(app_cfg,),
-            daemon=True
-        )
+    for cfg in apps_config:
+        t = threading.Thread(target=_restore_one, args=(cfg,), daemon=True)
         t.start()
         threads.append(t)
 
-    # Wait for all (max 20 seconds)
     for t in threads:
         t.join(timeout=20)
 
-    elapsed = int((time.time() - start_time) * 1000)
+    elapsed = int((time.time() - start) * 1000)
     print(Fore.GREEN + f"[WORKSPACE] Restored {len(apps_config)} apps in {elapsed}ms")
 
 
-def _restore_single_app(app_cfg):
-    """Restore a single app from its config."""
-    app_type = app_cfg.get("type", "app")
-    name     = app_cfg.get("name", "unknown")
+def _restore_one(cfg):
+    """Restore a single app from config."""
+    app_type = cfg.get("type", "app")
+    name = cfg.get("name", "unknown")
 
     try:
         if app_type in ("chrome", "edge", "brave", "firefox"):
-            _restore_browser(app_cfg)
-
+            _restore_browser(cfg)
         elif app_type == "vscode":
-            _restore_vscode(app_cfg)
-
+            _restore_vscode(cfg)
         elif app_type == "explorer":
-            _restore_explorer(app_cfg)
-
+            _restore_explorer(cfg)
+        elif app_type in ("notepad", "notepad++"):
+            _restore_with_file(cfg)
+        elif app_type in ("excel", "word", "powerpoint"):
+            _restore_with_file(cfg)
         elif app_type == "document":
-            _restore_document(app_cfg)
-
-        elif app_type == "app":
-            _restore_generic_app(app_cfg)
-
-        elif app_type in ("spotify", "vlc", "media_player"):
-            _restore_generic_app(app_cfg)
-
+            _restore_document(cfg)
+        elif app_type == "uwp":
+            _restore_uwp(cfg)
+        elif app_type in ("powershell", "cmd", "terminal"):
+            _restore_terminal(cfg)
         else:
-            _restore_generic_app(app_cfg)
-
+            _restore_generic(cfg)
         print(Fore.GREEN + f"  [+] {name}")
-
     except Exception as e:
         print(Fore.RED + f"  [-] {name}: {e}")
 
 
 def _restore_browser(cfg):
-    """Restore browser with all saved tabs."""
     tabs = cfg.get("tabs", [])
-    urls = [t.get("url", "") for t in tabs if t.get("url") and t["url"].startswith("http")]
-
-    browser_type = cfg.get("type", "chrome")
-    browser_cmd = {
-        "chrome":  "chrome",
-        "edge":    "msedge",
-        "brave":   "brave",
-        "firefox": "firefox",
-    }.get(browser_type, "chrome")
-
+    urls = [t["url"] for t in tabs if t.get("url") and t["url"].startswith("http")]
+    browser = {"chrome": "chrome", "edge": "msedge", "firefox": "firefox",
+               "brave": "brave"}.get(cfg["type"], "chrome")
     if urls:
-        # Open browser with all tab URLs at once
-        cmd = f'start {browser_cmd} {" ".join(urls)}'
-        subprocess.Popen(cmd, shell=True)
+        subprocess.Popen(f'start {browser} {" ".join(urls)}', shell=True)
     else:
-        subprocess.Popen(f'start {browser_cmd}', shell=True)
+        subprocess.Popen(f'start {browser}', shell=True)
 
 
 def _restore_vscode(cfg):
-    """Restore VS Code with workspace path."""
-    workspace = cfg.get("workspace_path", "")
-    if workspace and os.path.exists(workspace):
-        subprocess.Popen(['code', workspace])
+    ws = cfg.get("workspace_path", "")
+    fp = cfg.get("file_path", "")
+    if ws and os.path.exists(ws):
+        subprocess.Popen(['code', ws])
+    elif fp and os.path.exists(fp):
+        subprocess.Popen(['code', fp])
     else:
         subprocess.Popen(['code'])
 
 
 def _restore_explorer(cfg):
-    """Restore Explorer with folder path."""
     folder = cfg.get("folder_path", "")
     if folder and os.path.exists(folder):
         subprocess.Popen(['explorer', folder])
@@ -545,34 +463,69 @@ def _restore_explorer(cfg):
         subprocess.Popen(['explorer'])
 
 
+def _restore_with_file(cfg):
+    """Restore apps that had a specific file open (Notepad, Excel, etc.)."""
+    fp = cfg.get("file_path", "")
+    exe = cfg.get("exe_path", "")
+    if fp and os.path.exists(fp):
+        os.startfile(fp)
+    elif exe and os.path.exists(exe):
+        subprocess.Popen([exe])
+    else:
+        name = cfg.get("name", "").split(" - ")[-1].strip()
+        try:
+            from hands.core import open_app
+            open_app(name)
+        except Exception:
+            pass
+
+
 def _restore_document(cfg):
-    """Restore document file."""
-    path = cfg.get("file_path", "")
-    if path and os.path.exists(path):
-        os.startfile(path)
+    fp = cfg.get("file_path", "")
+    if fp and os.path.exists(fp):
+        os.startfile(fp)
+    else:
+        _restore_generic(cfg)
 
 
-def _restore_generic_app(cfg):
-    """Restore any app by exe path or name."""
-    exe_path = cfg.get("exe_path", "")
-    name     = cfg.get("name", "")
+def _restore_uwp(cfg):
+    """Restore UWP apps using protocol URIs."""
+    protocol = cfg.get("protocol", "")
+    if protocol:
+        os.startfile(protocol)
 
-    if exe_path and os.path.exists(exe_path):
-        subprocess.Popen([exe_path])
+
+def _restore_terminal(cfg):
+    """Restore PowerShell/CMD/Terminal with working directory."""
+    cwd = cfg.get("working_dir", "")
+    app_type = cfg.get("type", "powershell")
+
+    if app_type in ("powershell", "terminal"):
+        cmd = "powershell"
+    else:
+        cmd = "cmd"
+
+    if cwd and os.path.exists(cwd):
+        subprocess.Popen([cmd], cwd=cwd, creationflags=subprocess.CREATE_NEW_CONSOLE)
+    else:
+        subprocess.Popen([cmd], creationflags=subprocess.CREATE_NEW_CONSOLE)
+
+
+def _restore_generic(cfg):
+    exe = cfg.get("exe_path", "")
+    name = cfg.get("name", "")
+
+    if exe and os.path.exists(exe):
+        subprocess.Popen([exe])
         return
 
-    # Try via hands.core
+    clean = name.split(" - ")[-1].strip() if " - " in name else name
     try:
         from hands.core import open_app
-        app_name = name.split(" - ")[-1] if " - " in name else name
-        open_app(app_name)
-        return
+        open_app(clean)
     except Exception:
-        pass
-
-    # Try AppOpener
-    try:
-        import AppOpener
-        AppOpener.open(name)
-    except Exception:
-        pass
+        try:
+            import AppOpener
+            AppOpener.open(clean)
+        except Exception:
+            pass
