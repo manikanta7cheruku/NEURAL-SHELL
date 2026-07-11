@@ -67,12 +67,13 @@ def receive_tabs(payload: TabSyncPayload):
     )
 
     _tab_snapshots[profile] = {
-        "timestamp": payload.timestamp,
-        "browser":   payload.browser,
-        "profile":   profile,
-        "windows":   payload.windows,
-        "received":  datetime.now().isoformat(),
-        "tab_count": total_tabs,
+        "timestamp":    payload.timestamp,
+        "browser":      payload.browser,
+        "profile":      profile,
+        "windows":      payload.windows,
+        "received":     datetime.now().isoformat(),
+        "_received_ts": time.time(),
+        "tab_count":    total_tabs,
     }
 
     _last_update = time.time()
@@ -139,30 +140,51 @@ def get_tabs(profile: Optional[str] = None):
 
 @router.get("/api/chrome/tabs/status")
 def get_status():
-    """Check if Chrome extension is connected and sending data."""
-    age = time.time() - _last_update if _last_update > 0 else -1
+    """
+    Check Chrome extension status across ALL profiles.
+    Profile data is kept even when profile goes inactive.
+    A profile is 'active' if synced in last 60 seconds.
+    Connection is True if ANY profile synced in last 60 seconds.
+    """
+    now = time.time()
 
     total_tabs = 0
+    active_profiles = 0
     profile_details = []
+
     for prof_name, snap in _tab_snapshots.items():
         tab_count = snap.get("tab_count", 0)
         total_tabs += tab_count
+
+        received = snap.get("received", "")
+        last_sync_time = snap.get("_received_ts", 0)
+        age = now - last_sync_time if last_sync_time > 0 else -1
+        is_active = age >= 0 and age < 60  # 60 second window
+
+        if is_active:
+            active_profiles += 1
+
         profile_details.append({
-            "name":      prof_name,
-            "tabs":      tab_count,
-            "last_sync": snap.get("received", ""),
-            "windows":   len(snap.get("windows", [])),
+            "name":       prof_name,
+            "tabs":       tab_count,
+            "windows":    len(snap.get("windows", [])),
+            "last_sync":  received,
+            "active":     is_active,
+            "age_seconds": round(age, 1) if age >= 0 else -1,
         })
 
+    # Sort: active profiles first, then by tab count
+    profile_details.sort(key=lambda p: (not p["active"], -p["tabs"]))
+
+    connected = active_profiles > 0 or len(_tab_snapshots) > 0
+
     return {
-        "connected":       age >= 0 and age < 30,
-        "last_update":     _last_update,
-        "age_seconds":     round(age, 1) if age >= 0 else -1,
-        "profiles":        list(_tab_snapshots.keys()),
-        "profile_count":   len(_tab_snapshots),
-        "total_tabs":      total_tabs,
-        "profile_details": profile_details,
-        "extension_path":  get_extension_install_dir() if hasattr(sys.modules[__name__], 'get_extension_install_dir') else "",
+        "connected":        connected,
+        "total_tabs":       total_tabs,
+        "profile_count":    len(_tab_snapshots),
+        "active_profiles":  active_profiles,
+        "profile_details":  profile_details,
+        "extension_path":   get_extension_install_dir(),
     }
 
 @router.get("/api/chrome/setup/status")

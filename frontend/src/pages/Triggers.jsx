@@ -748,9 +748,14 @@ function ChromeTabSyncCard() {
               </div>
               <div>
                 <h4 className="text-[11px] font-semibold text-white/80">Chrome Tab Sync</h4>
-                <p className="text-[9px] text-green-400 mt-0.5">
-                  {status.total_tabs} tabs · {status.profile_count} profile{status.profile_count !== 1 ? 's' : ''}
-                </p>
+              <p className="text-[9px] text-green-400 mt-0.5">
+                {status.total_tabs} tabs · {status.profile_count} profile{status.profile_count !== 1 ? 's' : ''}{' '}
+                {status.active_profiles < status.profile_count && (
+                  <span className="text-white/30">
+                    ({status.active_profiles} active)
+                  </span>
+                )}
+              </p>
               </div>
             </div>
             <div className="flex items-center gap-2">
@@ -772,12 +777,20 @@ function ChromeTabSyncCard() {
             {/* Profile cards */}
             <div className="space-y-1.5">
               {profiles.map((p, i) => (
-                <div key={i} className="flex items-center justify-between px-3 py-2
-                                         bg-white/[0.02] border border-white/5 rounded-lg">
+                <div key={i} className={`flex items-center justify-between px-3 py-2
+                                         rounded-lg transition-all
+                                         ${p.active
+                                           ? 'bg-white/[0.02] border border-white/6'
+                                           : 'bg-white/[0.01] border border-white/4 opacity-70'}`}>
                   <div className="flex items-center gap-2.5">
-                    <div className="w-6 h-6 rounded-md bg-s-accent/8 border border-s-accent/12
-                                    flex items-center justify-center">
-                      <span className="text-[9px] text-s-accent font-bold">{i + 1}</span>
+                    <div className={`w-6 h-6 rounded-md flex items-center justify-center
+                                    ${p.active
+                                      ? 'bg-s-accent/8 border border-s-accent/12'
+                                      : 'bg-white/[0.03] border border-white/6'}`}>
+                      <span className={`text-[9px] font-bold
+                                       ${p.active ? 'text-s-accent' : 'text-white/30'}`}>
+                        {i + 1}
+                      </span>
                     </div>
                     <div>
                       <p className="text-[10px] text-white/70 font-medium">{p.name}</p>
@@ -787,8 +800,17 @@ function ChromeTabSyncCard() {
                     </div>
                   </div>
                   <div className="flex items-center gap-1">
-                    <div className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
-                    <span className="text-[7.5px] text-green-400/70">syncing</span>
+                    {p.active ? (
+                      <>
+                        <div className="w-1.5 h-1.5 rounded-full bg-green-400" />
+                        <span className="text-[7.5px] text-green-400/70">live</span>
+                      </>
+                    ) : (
+                      <>
+                        <div className="w-1.5 h-1.5 rounded-full bg-white/20" />
+                        <span className="text-[7.5px] text-white/25">cached</span>
+                      </>
+                    )}
                   </div>
                 </div>
               ))}
