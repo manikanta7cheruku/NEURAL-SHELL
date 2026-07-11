@@ -54,28 +54,46 @@ def prepare_extension():
     """
     source = get_extension_source()
     if not source:
+        # Also check if files already exist at install location
+        install_dir = get_extension_install_dir()
+        if os.path.exists(os.path.join(install_dir, "manifest.json")):
+            return True, install_dir, "Extension files already present."
         return False, "", "Extension source files not found."
 
     install_dir = get_extension_install_dir()
 
     try:
+        # Ensure directory exists
+        os.makedirs(install_dir, exist_ok=True)
+
         # Clear old files
         for item in os.listdir(install_dir):
             item_path = os.path.join(install_dir, item)
             if os.path.isfile(item_path):
-                os.remove(item_path)
+                try:
+                    os.remove(item_path)
+                except Exception:
+                    pass
 
-        # Copy fresh
+        # Copy fresh files
+        copied = 0
         for item in os.listdir(source):
             src = os.path.join(source, item)
             dst = os.path.join(install_dir, item)
             if os.path.isfile(src):
                 shutil.copy2(src, dst)
+                copied += 1
 
-        print(Fore.GREEN + f"[CHROME SETUP] Files ready at {install_dir}")
+        # Verify manifest.json was copied
+        if not os.path.exists(os.path.join(install_dir, "manifest.json")):
+            return False, "", "manifest.json failed to copy"
+
+        print(Fore.GREEN + f"[CHROME SETUP] {copied} files copied to {install_dir}")
         return True, install_dir, "Extension files prepared."
 
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return False, "", f"File copy failed: {e}"
 
 
@@ -107,10 +125,17 @@ def copy_path_to_clipboard(path):
 
 
 def open_chrome_extensions_page():
-    """Open Chrome to the extensions page."""
+    """Open Chrome extensions page. If Chrome is already running, opens as new tab."""
     chrome_exe = _find_chrome_exe()
     if not chrome_exe:
         return False, "Chrome not found"
+
+    try:
+        import webbrowser
+        webbrowser.open("chrome://extensions/")
+        return True, "Chrome extensions page opened"
+    except Exception:
+        pass
 
     try:
         subprocess.Popen([chrome_exe, "chrome://extensions/"])

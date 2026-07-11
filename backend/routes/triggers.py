@@ -555,13 +555,17 @@ def fire_trigger(trigger_id: int):
             )
             conn.commit()
 
-        # Execute via handler (imported to avoid circular dependency)
+        # Execute trigger action
         try:
             from main_modules.handlers.trigger_handler import execute_trigger_action
             success, message = execute_trigger_action(trigger)
-        except ImportError:
-            # Handler not built yet — return success anyway for testing
-            success, message = True, "Trigger fired (handler not integrated yet)"
+        except ImportError as ie:
+            print(Fore.YELLOW + f"[TRIGGERS] Handler import failed: {ie}")
+            success, message = False, f"Trigger handler not available: {ie}"
+        except Exception as ex:
+            print(Fore.RED + f"[TRIGGERS] Execution error: {ex}")
+            import traceback; traceback.print_exc()
+            success, message = False, str(ex)
 
         return {
             "success": success,

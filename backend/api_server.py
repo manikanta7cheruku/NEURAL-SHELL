@@ -212,7 +212,7 @@ app.include_router(voice_gates_routes.router)
 app.include_router(tasks_routes.router)
 app.include_router(triggers_routes.router)
 app.include_router(workspaces_routes.router)
-app.include_router(chrome_routes.router)
+app.include_router(chrome_routes.router)    
 from backend.routes import config_routes
 from backend.routes import license_routes
 from backend.routes import setup as setup_routes

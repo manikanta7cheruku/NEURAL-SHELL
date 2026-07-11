@@ -225,42 +225,77 @@ def execute_trigger_action(trigger):
 
     try:
         if action_type == "open_app":
-            app_name = action_data.get("app", "")
-            if not app_name:
+            # Support single app or multiple apps
+            apps_list = action_data.get("apps", [])
+            single_app = action_data.get("app", "")
+            if single_app and not apps_list:
+                apps_list = [single_app]
+
+            if not apps_list:
                 return False, "No app specified"
 
-            try:
-                from hands.core import open_app
-                open_app(app_name)
-            except Exception:
+            opened = []
+            for app_name in apps_list:
                 try:
-                    import AppOpener
-                    AppOpener.open(app_name)
+                    from hands.core import open_app
+                    import threading
+                    threading.Thread(target=open_app, args=(app_name,), daemon=True).start()
+                    opened.append(app_name)
                 except Exception:
-                    return False, f"Could not open {app_name}"
+                    try:
+                        import AppOpener
+                        AppOpener.open(app_name)
+                        opened.append(app_name)
+                    except Exception:
+                        pass
 
-            return True, f"Opened {app_name}"
+            if opened:
+                return True, f"Opened {', '.join(opened)}"
+            return False, "Could not open any apps"
 
         elif action_type == "open_url":
-            url = action_data.get("url", "")
-            if not url:
+            urls_list = action_data.get("urls", [])
+            single_url = action_data.get("url", "")
+            if single_url and not urls_list:
+                urls_list = [single_url]
+
+            if not urls_list:
                 return False, "No URL specified"
-            webbrowser.open(url)
-            return True, f"Opened {url}"
+
+            for url in urls_list:
+                webbrowser.open(url)
+
+            return True, f"Opened {len(urls_list)} URL{'s' if len(urls_list) > 1 else ''}"
 
         elif action_type == "open_file":
-            path = action_data.get("path", "")
-            if not path or not os.path.exists(path):
-                return False, f"File not found: {path}"
-            os.startfile(path)
-            return True, f"Opened {path}"
+            paths_list = action_data.get("paths", [])
+            single_path = action_data.get("path", "")
+            if single_path and not paths_list:
+                paths_list = [single_path]
+
+            if not paths_list:
+                return False, "No file specified"
+
+            for path in paths_list:
+                if os.path.exists(path):
+                    os.startfile(path)
+
+            return True, f"Opened {len(paths_list)} file{'s' if len(paths_list) > 1 else ''}"
 
         elif action_type == "open_folder":
-            path = action_data.get("path", "")
-            if not path or not os.path.exists(path):
-                return False, f"Folder not found: {path}"
-            subprocess.Popen(['explorer', path])
-            return True, f"Opened {path}"
+            paths_list = action_data.get("paths", [])
+            single_path = action_data.get("path", "")
+            if single_path and not paths_list:
+                paths_list = [single_path]
+
+            if not paths_list:
+                return False, "No folder specified"
+
+            for path in paths_list:
+                if os.path.exists(path):
+                    subprocess.Popen(['explorer', path])
+
+            return True, f"Opened {len(paths_list)} folder{'s' if len(paths_list) > 1 else ''}"
 
         elif action_type == "open_workspace":
             workspace_id   = action_data.get("workspace_id")
