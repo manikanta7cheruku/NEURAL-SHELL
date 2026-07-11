@@ -40,13 +40,14 @@ import subprocess
 import threading
 from datetime import datetime
 
-# Force hidden console on Windows
-if sys.platform == "win32":
+# Hide console window ONLY when running as pythonw (background daemon)
+# Do NOT hide when running as python (debugging) or when DEBUG flag is set
+if sys.platform == "win32" and not os.environ.get("SEVEN_DEBUG_DAEMON"):
     try:
         import ctypes
-        ctypes.windll.user32.ShowWindow(
-            ctypes.windll.kernel32.GetConsoleWindow(), 0
-        )
+        hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+        if hwnd and "pythonw" in sys.executable.lower():
+            ctypes.windll.user32.ShowWindow(hwnd, 0)
     except Exception:
         pass
 
@@ -466,28 +467,31 @@ def _show_notification(trigger_name, action_type):
 class HotkeyListener:
     """
     Global hotkey listener using pynput.
-    Monitors keyboard for configured key combos.
+    Fixed: uses virtual key codes (vk) instead of char for reliable
+    detection when modifier keys (Ctrl/Shift/Alt) are held.
     """
 
     def __init__(self):
-        self._triggers     = []     # list of trigger dicts
-        self._hotkey_map   = {}     # "ctrl+shift+f" → trigger dict
-        self._pressed_keys = set()  # currently held keys
+        self._triggers     = []
+        self._hotkey_map   = {}
+        self._pressed_mods = set()   # currently held modifier keys
         self._listener     = None
         self._running      = False
+        self._last_fire    = 0       # prevent rapid re-firing
 
     def reload(self, triggers):
-        """Reload trigger list (called when DB changes)."""
         self._triggers = triggers
         self._hotkey_map = {}
         for t in triggers:
             hk = t.get("hotkey")
             if hk:
-                self._hotkey_map[hk.lower()] = t
+                # Normalize: sort parts, lowercase
+                parts = sorted(hk.lower().replace(" ", "").split("+"))
+                normalized = "+".join(parts)
+                self._hotkey_map[normalized] = t
         print(f"[HOTKEY] Loaded {len(self._hotkey_map)} hotkey triggers")
 
     def start(self):
-        """Start listening for hotkeys in background thread."""
         if self._running:
             return
         self._running = True
@@ -497,32 +501,38 @@ class HotkeyListener:
 
             def on_press(key):
                 try:
-                    key_str = self._key_to_string(key)
-                    if key_str:
-                        self._pressed_keys.add(key_str)
-                        self._check_combo()
+                    name = self._resolve_key(key)
+                    if not name:
+                        return
+
+                    # Track modifiers separately
+                    if name in ("ctrl", "shift", "alt", "win"):
+                        self._pressed_mods.add(name)
+                    else:
+                        # Non-modifier key pressed — check combo
+                        self._try_match(name)
                 except Exception:
                     pass
 
             def on_release(key):
                 try:
-                    key_str = self._key_to_string(key)
-                    if key_str:
-                        self._pressed_keys.discard(key_str)
+                    name = self._resolve_key(key)
+                    if name and name in self._pressed_mods:
+                        self._pressed_mods.discard(name)
                 except Exception:
                     pass
 
             self._listener = keyboard.Listener(
                 on_press=on_press,
                 on_release=on_release,
-                suppress=False  # don't block keys from other apps
+                suppress=False
             )
             self._listener.daemon = True
             self._listener.start()
             print("[HOTKEY] Listener started")
 
         except ImportError:
-            print("[HOTKEY] pynput not installed — hotkeys disabled")
+            print("[HOTKEY] pynput not installed")
         except Exception as e:
             print(f"[HOTKEY] Listener failed: {e}")
 
@@ -531,148 +541,105 @@ class HotkeyListener:
         if self._listener:
             self._listener.stop()
 
-    def _key_to_string(self, key):
-        """Convert pynput key to normalized string."""
+    def _resolve_key(self, key):
+        """
+        Convert any pynput key to a simple string name.
+        Uses virtual key code (vk) for letters/numbers — this is the FIX.
+        When Ctrl is held, key.char is None but key.vk is always correct.
+        """
         from pynput import keyboard as kb
 
+        # Named special keys
         if isinstance(key, kb.Key):
-            key_map = {
-                kb.Key.ctrl_l:  "ctrl", kb.Key.ctrl_r:  "ctrl",
+            special = {
+                kb.Key.ctrl_l: "ctrl",   kb.Key.ctrl_r: "ctrl",
                 kb.Key.shift_l: "shift", kb.Key.shift_r: "shift",
-                kb.Key.alt_l:   "alt", kb.Key.alt_r:   "alt",
-                kb.Key.cmd:     "win",
-                kb.Key.space:   "space",
-                kb.Key.enter:   "enter",
-                kb.Key.tab:     "tab",
-                kb.Key.esc:     "esc",
+                kb.Key.alt_l: "alt",     kb.Key.alt_r: "alt",
+                kb.Key.alt_gr: "alt",
+                kb.Key.cmd: "win",       kb.Key.cmd_l: "win",
+                kb.Key.cmd_r: "win",
+                kb.Key.space: "space",
+                kb.Key.enter: "enter",
+                kb.Key.tab: "tab",
+                kb.Key.esc: "esc",
                 kb.Key.backspace: "backspace",
-                kb.Key.delete:  "delete",
-                kb.Key.home:    "home",
-                kb.Key.end:     "end",
+                kb.Key.delete: "delete",
+                kb.Key.home: "home",
+                kb.Key.end: "end",
                 kb.Key.page_up: "pageup",
                 kb.Key.page_down: "pagedown",
-                kb.Key.up:      "up",
-                kb.Key.down:    "down",
-                kb.Key.left:    "left",
-                kb.Key.right:   "right",
+                kb.Key.up: "up",
+                kb.Key.down: "down",
+                kb.Key.left: "left",
+                kb.Key.right: "right",
+                kb.Key.insert: "insert",
+                kb.Key.menu: "menu",
             }
             # F1-F12
             for i in range(1, 13):
-                key_map[getattr(kb.Key, f"f{i}", None)] = f"f{i}"
+                fk = getattr(kb.Key, f"f{i}", None)
+                if fk:
+                    special[fk] = f"f{i}"
 
-            return key_map.get(key)
+            return special.get(key)
 
-        if hasattr(key, 'char') and key.char:
-            return key.char.lower()
-
-        if hasattr(key, 'vk') and key.vk:
-            # Numeric keys 0-9
-            if 48 <= key.vk <= 57:
-                return str(key.vk - 48)
+        # Regular keys — ALWAYS use vk (virtual key code)
+        # This is the critical fix: when Ctrl is held, key.char = None
+        # but key.vk = 84 (for T), 67 (for C), etc.
+        vk = getattr(key, 'vk', None)
+        if vk is not None:
+            # A-Z
+            if 65 <= vk <= 90:
+                return chr(vk).lower()
+            # 0-9
+            if 48 <= vk <= 57:
+                return str(vk - 48)
             # Numpad 0-9
-            if 96 <= key.vk <= 105:
-                return f"num{key.vk - 96}"
+            if 96 <= vk <= 105:
+                return f"num{vk - 96}"
+            # Common symbols
+            sym = {
+                186: ";", 187: "=", 188: ",", 189: "-", 190: ".",
+                191: "/", 192: "`", 219: "[", 220: "\\", 221: "]", 222: "'",
+            }
+            if vk in sym:
+                return sym[vk]
+
+        # Last resort: try char
+        ch = getattr(key, 'char', None)
+        if ch and isinstance(ch, str) and len(ch) == 1 and ch.isprintable():
+            return ch.lower()
 
         return None
 
-    def _check_combo(self):
-        """Check if currently pressed keys match any configured hotkey."""
-        if not self._pressed_keys or not self._hotkey_map:
+    def _try_match(self, final_key):
+        """
+        Called when a non-modifier key is pressed.
+        Combines currently held modifiers + this key into a combo string.
+        Checks against registered hotkeys.
+        """
+        import time as _t
+
+        # Build combo: modifiers + final key
+        combo_parts = sorted(list(self._pressed_mods) + [final_key])
+        combo = "+".join(combo_parts)
+
+        # Prevent rapid double-fire (within 500ms)
+        now = _t.time()
+        if now - self._last_fire < 0.5:
             return
 
-        # Build current combo string (sorted for consistency)
-        current = "+".join(sorted(self._pressed_keys))
-
-        # Check against all registered hotkeys
-        for hotkey_str, trigger in self._hotkey_map.items():
-            # Normalize hotkey for comparison
-            hotkey_parts = sorted(hotkey_str.split("+"))
-            hotkey_normalized = "+".join(hotkey_parts)
-
-            if current == hotkey_normalized:
-                print(f"[HOTKEY] Match: {hotkey_str} → {trigger['name']}")
-
-                # Execute in separate thread to not block keyboard
-                threading.Thread(
-                    target=execute_trigger,
-                    args=(trigger,),
-                    daemon=True
-                ).start()
-
-                # Clear pressed keys to prevent repeat firing
-                self._pressed_keys.clear()
-                return
-
-
-# ─────────────────────────────────────────────────────────────────────────
-# AUDIO LISTENER (headset users only)
-# ─────────────────────────────────────────────────────────────────────────
-
-class AudioListener:
-    """
-    Listens for snap/clap patterns using DSP or YAMNet.
-    Only active if compatible mic detected.
-    """
-
-    def __init__(self):
-        self._detector  = None
-        self._triggers  = []
-        self._audio_map = {}  # "1_tap" → trigger, "2_tap" → trigger
-        self._running   = False
-
-    def reload(self, triggers):
-        """Reload audio pattern triggers."""
-        self._triggers = triggers
-        self._audio_map = {}
-        for t in triggers:
-            pattern = t.get("audio_pattern")
-            if pattern:
-                self._audio_map[pattern] = t
-        print(f"[AUDIO] Loaded {len(self._audio_map)} audio triggers")
-
-    def start(self):
-        """Start audio detection if any audio triggers exist and mic is compatible."""
-        if not self._audio_map:
-            print("[AUDIO] No audio triggers configured — skipping")
-            return
-
-        self._running = True
-
-        try:
-            from ears.audio_triggers import TriggerDetector
-
-            self._detector = TriggerDetector(sensitivity="medium")
-            self._detector.on_pattern = self._on_pattern
-            self._detector.start()
-            print("[AUDIO] Listener started (DSP mode)")
-
-        except Exception as e:
-            print(f"[AUDIO] Listener failed: {e}")
-
-    def stop(self):
-        self._running = False
-        if self._detector:
-            self._detector.stop()
-
-    def suppress(self, ms=3000):
-        """Suppress detection during voice/speech."""
-        if self._detector:
-            self._detector.suppress(ms)
-
-    def _on_pattern(self, count):
-        """Called when tap pattern detected."""
-        pattern_key = f"{count}_tap"
-        trigger = self._audio_map.get(pattern_key)
-
+        # Look up in hotkey map
+        trigger = self._hotkey_map.get(combo)
         if trigger:
-            print(f"[AUDIO] Pattern {pattern_key} → {trigger['name']}")
+            self._last_fire = now
+            print(f"[HOTKEY] Match: {combo} -> {trigger['name']}")
+
             threading.Thread(
                 target=execute_trigger,
                 args=(trigger,),
                 daemon=True
             ).start()
-        else:
-            print(f"[AUDIO] Pattern {pattern_key} — no trigger assigned")
 
 
 # ─────────────────────────────────────────────────────────────────────────
