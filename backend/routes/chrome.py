@@ -139,6 +139,59 @@ def get_status():
         "profile_count": len(_tab_snapshots),
     }
 
+@router.get("/api/chrome/setup/status")
+def get_setup_status():
+    """Check Chrome extension status."""
+    try:
+        from hands.chrome_setup import check_extension_status
+        return check_extension_status()
+    except Exception as e:
+        return {"installed": False, "connected": False, "error": str(e)}
+
+
+@router.post("/api/chrome/setup/prepare")
+def prepare_extension():
+    """Copy extension files and get the path for user to load."""
+    try:
+        from hands.chrome_setup import prepare_extension, copy_path_to_clipboard
+
+        success, path, message = prepare_extension()
+        if not success:
+            return {"success": False, "message": message}
+
+        # Copy path to clipboard for easy paste
+        copy_path_to_clipboard(path)
+
+        return {
+            "success": True,
+            "path":    path,
+            "message": "Extension ready. Path copied to clipboard.",
+        }
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+
+
+@router.post("/api/chrome/setup/open")
+def open_extensions_page():
+    """Open Chrome extensions page."""
+    try:
+        from hands.chrome_setup import open_chrome_extensions_page
+        success, message = open_chrome_extensions_page()
+        return {"success": success, "message": message}
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+
+
+@router.post("/api/chrome/setup/uninstall")
+def uninstall_extension():
+    """Remove extension files."""
+    try:
+        from hands.chrome_setup import uninstall_extension
+        success, message = uninstall_extension()
+        return {"success": success, "message": message}
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+
 
 # ── Direct access for workspace scanner ──────────────────────────────────
 
