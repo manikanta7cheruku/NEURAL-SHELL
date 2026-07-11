@@ -729,8 +729,139 @@ def main():
         print("[TRIGGER DAEMON] Stopped.")
 
 
+# ─────────────────────────────────────────────────────────────────────────
+# AUDIO LISTENER (headset users only)
+# ─────────────────────────────────────────────────────────────────────────
+
+class AudioListener:
+    """
+    Listens for snap/clap patterns using DSP or YAMNet.
+    Only active if compatible mic detected.
+    """
+
+    def __init__(self):
+        self._detector  = None
+        self._triggers  = []
+        self._audio_map = {}
+        self._running   = False
+
+    def reload(self, triggers):
+        self._triggers = triggers
+        self._audio_map = {}
+        for t in triggers:
+            pattern = t.get("audio_pattern")
+            if pattern:
+                self._audio_map[pattern] = t
+        print(f"[AUDIO] Loaded {len(self._audio_map)} audio triggers")
+
+    def start(self):
+        if not self._audio_map:
+            print("[AUDIO] No audio triggers configured — skipping")
+            return
+
+        self._running = True
+
+        try:
+            from ears.audio_triggers import TriggerDetector
+
+            self._detector = TriggerDetector(sensitivity="medium")
+            self._detector.on_pattern = self._on_pattern
+            self._detector.start()
+            print("[AUDIO] Listener started (DSP mode)")
+
+        except Exception as e:
+            print(f"[AUDIO] Listener failed: {e}")
+
+    def stop(self):
+        self._running = False
+        if self._detector:
+            self._detector.stop()
+
+    def suppress(self, ms=3000):
+        if self._detector:
+            self._detector.suppress(ms)
+
+    def _on_pattern(self, count):
+        pattern_key = f"{count}_tap"
+        trigger = self._audio_map.get(pattern_key)
+
+        if trigger:
+            print(f"[AUDIO] Pattern {pattern_key} -> {trigger['name']}")
+            threading.Thread(
+                target=execute_trigger,
+                args=(trigger,),
+                daemon=True
+            ).start()
+        else:
+            print(f"[AUDIO] Pattern {pattern_key} — no trigger assigned")
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# ENTRY POINT
+# ─────────────────────────────────────────────────────────────────────────
+
 if __name__ == "__main__":
     try:
         main()
     finally:
         release_lock()
+    """
+    Listens for snap/clap patterns using DSP or YAMNet.
+    Only active if compatible mic detected.
+    """
+
+    def __init__(self):
+        self._detector  = None
+        self._triggers  = []
+        self._audio_map = {}
+        self._running   = False
+
+    def reload(self, triggers):
+        self._triggers = triggers
+        self._audio_map = {}
+        for t in triggers:
+            pattern = t.get("audio_pattern")
+            if pattern:
+                self._audio_map[pattern] = t
+        print(f"[AUDIO] Loaded {len(self._audio_map)} audio triggers")
+
+    def start(self):
+        if not self._audio_map:
+            print("[AUDIO] No audio triggers configured — skipping")
+            return
+
+        self._running = True
+
+        try:
+            from ears.audio_triggers import TriggerDetector
+
+            self._detector = TriggerDetector(sensitivity="medium")
+            self._detector.on_pattern = self._on_pattern
+            self._detector.start()
+            print("[AUDIO] Listener started (DSP mode)")
+
+        except Exception as e:
+            print(f"[AUDIO] Listener failed: {e}")
+
+    def stop(self):
+        self._running = False
+        if self._detector:
+            self._detector.stop()
+
+    def suppress(self, ms=3000):
+        if self._detector:
+            self._detector.suppress(ms)
+
+    def _on_pattern(self, count):
+        pattern_key = f"{count}_tap"
+        trigger = self._audio_map.get(pattern_key)
+
+        if trigger:
+            print(f"[AUDIO] Pattern {pattern_key} -> {trigger['name']}")
+            threading.Thread(
+                target=execute_trigger,
+                args=(trigger,),
+                daemon=True
+            ).start()
+        else:
+            print(f"[AUDIO] Pattern {pattern_key} — no trigger assigned")
