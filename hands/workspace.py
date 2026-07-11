@@ -59,22 +59,41 @@ _OFFICE_PROCESSES = {
 _UWP_PROTOCOLS = {
     "systemsettings.exe":    "ms-settings:",
     "photos.exe":            "ms-photos:",
+    "calculatorapp.exe":     "calculator:",
     "calculator.exe":        "calculator:",
     "mspaint.exe":           "mspaint:",
     "windowsstore.exe":      "ms-windows-store:",
+    "whatsapp.exe":          "whatsapp:",
+}
+
+# Additional apps launched by protocol or start menu name
+_APP_LAUNCH_NAMES = {
+    "whatsapp.root": "whatsapp",
+    "calculatorapp": "calculator",
+    "photos":        "ms-photos:",
 }
 
 _SKIP_PROCESSES = {
-    "explorer.exe", "searchhost.exe", "shellexperiencehost.exe",
+    "searchhost.exe", "shellexperiencehost.exe",
     "startmenuexperiencehost.exe", "textinputhost.exe",
     "widgetservice.exe", "applicationframehost.exe",
     "runtimebroker.exe", "searchui.exe", "lockapp.exe",
     "taskmgr.exe", "rundll32.exe", "dllhost.exe",
     "sihost.exe", "ctfmon.exe", "securityhealthsystray.exe",
+    "clicktodo.exe", "phoneexperiencehost.exe",
+    "nvidia overlay.exe", "gamebar.exe", "gamebarftserver.exe",
+    "gamingservices.exe", "gamingservicesnet.exe",
 }
 
+# Skip Seven's own window (Electron)
+_SKIP_TITLES_CONTAINS = [
+    "nvidia geforce overlay",
+    "click to do",
+]
+
 _SKIP_TITLES = {"", "program manager", "windows input experience",
-                "microsoft text input application", "search"}
+                "microsoft text input application", "search",
+                "nvidia geforce overlay", "click to do"}
 
 
 # ── SCAN ─────────────────────────────────────────────────────────────────
@@ -109,7 +128,22 @@ def scan_current():
             if exe_name in _SKIP_PROCESSES:
                 return
 
-            seen_pids.add(pid)
+            # Skip system titles
+            if title.lower() in _SKIP_TITLES:
+                return
+
+            # Skip Seven's own Electron window
+            if "electron" in exe_name.lower() and "seven" in (exe_path or "").lower():
+                return
+
+            # Explorer special handling: skip "Program Manager" (desktop shell)
+            # but KEEP actual File Explorer windows
+            if exe_name == "explorer.exe":
+                if title.lower() == "program manager":
+                    return
+                # Don't add to seen_pids — multiple explorer windows share same process
+            else:
+                seen_pids.add(pid)
 
             # Window rect
             try:
@@ -192,7 +226,7 @@ def _classify(exe_name, exe_path, title, win_info, pid, proc):
             "window": win_info,
         }
 
-    # UWP apps
+    # UWP apps (Store apps, modern Windows apps)
     if exe_name in _UWP_PROTOCOLS:
         return {
             "type": "uwp",
@@ -201,8 +235,23 @@ def _classify(exe_name, exe_path, title, win_info, pid, proc):
             "window": win_info,
         }
 
-    # Explorer windows (not desktop shell)
-    if exe_name == "explorer.exe" and title.lower() != "program manager":
+    # UWP apps detected by path (SystemApps or WindowsApps)
+    if exe_path and ("SystemApps" in exe_path or "WindowsApps" in exe_path):
+        # Try to find a protocol or launch name
+        app_lower = exe_name.replace(".exe", "").lower()
+        protocol = _APP_LAUNCH_NAMES.get(app_lower, "")
+        if protocol:
+            return {
+                "type": "uwp",
+                "name": title or app_lower.title(),
+                "protocol": protocol,
+                "window": win_info,
+            }
+        # Skip unknown system apps
+        return None
+
+    # Explorer windows
+    if exe_name == "explorer.exe":
         return {
             "type": "explorer",
             "name": title,
@@ -220,6 +269,10 @@ def _classify(exe_name, exe_path, title, win_info, pid, proc):
             "file_path": file_path,
             "window": win_info,
         }
+
+    # Skip NVIDIA overlay and other system overlays
+    if "overlay" in exe_name.lower() or "overlay" in title.lower():
+        return None
 
     # Generic app
     clean_name = title.split(" - ")[-1].strip() if " - " in title else exe_name.replace(".exe", "").title()
@@ -337,6 +390,12 @@ def _enrich_vscode(apps):
             if entries:
                 recent = entries[0]
                 ws = recent.get("folderUri", "").replace("file:///", "").replace("/", "\\")
+                # URL-decode percent-encoded characters (m%3A → M:)
+                from urllib.parse import unquote
+                ws = unquote(ws)
+                # Fix drive letter casing
+                if len(ws) >= 2 and ws[1] == ":":
+                    ws = ws[0].upper() + ws[1:]
                 for vs in vscode_apps:
                     vs["workspace_path"] = ws
                     print(Fore.CYAN + f"[WORKSPACE] VS Code: {ws}")
@@ -380,6 +439,81 @@ def _scan_explorer_folders(apps):
         print(Fore.YELLOW + f"[WORKSPACE] Explorer scan error: {e}")
 
 
+
+# ── Chrome DevTools setup ────────────────────────────────────────────────
+
+def setup_chrome_devtools():
+    """
+    Modify Chrome shortcut to add --remote-debugging-port=9222.
+    This allows Seven to read Chrome tab URLs.
+    Returns True if setup succeeded, False otherwise.
+    
+    Called from Triggers settings UI when user clicks "Enable tab capture".
+    """
+    import winreg
+    import shutil
+
+    # Find Chrome shortcut in common locations
+    shortcuts = [
+        os.path.join(os.environ.get("APPDATA", ""),
+                     "Microsoft", "Internet Explorer", "Quick Launch",
+                     "User Pinned", "TaskBar", "Google Chrome.lnk"),
+        os.path.join(os.environ.get("PUBLIC", "C:\\Users\\Public"),
+                     "Desktop", "Google Chrome.lnk"),
+        os.path.join(os.path.expanduser("~"), "Desktop", "Google Chrome.lnk"),
+        os.path.join(os.environ.get("PROGRAMDATA", "C:\\ProgramData"),
+                     "Microsoft", "Windows", "Start Menu", "Programs",
+                     "Google Chrome.lnk"),
+    ]
+
+    chrome_exe = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
+    if not os.path.exists(chrome_exe):
+        chrome_exe = "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe"
+
+    if not os.path.exists(chrome_exe):
+        print(Fore.YELLOW + "[WORKSPACE] Chrome not found at standard location")
+        return False
+
+    flag = "--remote-debugging-port=9222"
+
+    try:
+        # Method 1: Create/modify registry for Chrome command line
+        # This adds the flag globally when Chrome launches
+        reg_path = r"Software\Google\Chrome\Application"
+        try:
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, reg_path, 0, winreg.KEY_ALL_ACCESS)
+        except FileNotFoundError:
+            key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, reg_path)
+
+        # Read current command line flags
+        try:
+            current_flags, _ = winreg.QueryValueEx(key, "CommandLineFlags")
+        except FileNotFoundError:
+            current_flags = ""
+
+        if flag not in current_flags:
+            new_flags = f"{current_flags} {flag}".strip()
+            winreg.SetValueEx(key, "CommandLineFlags", 0, winreg.REG_SZ, new_flags)
+            print(Fore.GREEN + f"[WORKSPACE] Chrome DevTools flag added: {flag}")
+
+        winreg.CloseKey(key)
+        return True
+
+    except Exception as e:
+        print(Fore.YELLOW + f"[WORKSPACE] Chrome DevTools setup failed: {e}")
+        return False
+
+
+def check_chrome_devtools():
+    """Check if Chrome DevTools is accessible."""
+    try:
+        import requests
+        r = requests.get("http://127.0.0.1:9222/json/version", timeout=2)
+        return r.status_code == 200
+    except Exception:
+        return False
+    
+    
 # ── RESTORE ──────────────────────────────────────────────────────────────
 
 def restore(apps_config):
@@ -436,12 +570,29 @@ def _restore_one(cfg):
 def _restore_browser(cfg):
     tabs = cfg.get("tabs", [])
     urls = [t["url"] for t in tabs if t.get("url") and t["url"].startswith("http")]
-    browser = {"chrome": "chrome", "edge": "msedge", "firefox": "firefox",
-               "brave": "brave"}.get(cfg["type"], "chrome")
+    browser_type = cfg.get("type", "chrome")
+
+    # Browser executable names for 'start' command
+    browser_cmd = {
+        "chrome": "chrome", "edge": "msedge", "firefox": "firefox",
+        "brave": "brave", "opera": "opera", "vivaldi": "vivaldi",
+    }.get(browser_type, "chrome")
+
     if urls:
-        subprocess.Popen(f'start {browser} {" ".join(urls)}', shell=True)
+        # Open first URL normally, rest as new tabs
+        first_url = urls[0]
+        rest_urls = urls[1:]
+
+        subprocess.Popen(f'start {browser_cmd} "{first_url}"', shell=True)
+
+        # Small delay then open remaining tabs
+        if rest_urls:
+            time.sleep(1)
+            for url in rest_urls:
+                subprocess.Popen(f'start {browser_cmd} "{url}"', shell=True)
+                time.sleep(0.3)
     else:
-        subprocess.Popen(f'start {browser}', shell=True)
+        subprocess.Popen(f'start {browser_cmd}', shell=True)
 
 
 def _restore_vscode(cfg):
@@ -499,16 +650,28 @@ def _restore_terminal(cfg):
     """Restore PowerShell/CMD/Terminal with working directory."""
     cwd = cfg.get("working_dir", "")
     app_type = cfg.get("type", "powershell")
+    title = cfg.get("name", "")
 
     if app_type in ("powershell", "terminal"):
-        cmd = "powershell"
+        exe = "powershell"
     else:
-        cmd = "cmd"
+        exe = "cmd"
+
+    # Try to use Windows Terminal if available
+    wt_path = os.path.join(os.environ.get("LOCALAPPDATA", ""),
+                           "Microsoft", "WindowsApps", "wt.exe")
+    use_wt = os.path.exists(wt_path)
 
     if cwd and os.path.exists(cwd):
-        subprocess.Popen([cmd], cwd=cwd, creationflags=subprocess.CREATE_NEW_CONSOLE)
+        if use_wt:
+            subprocess.Popen([wt_path, "-d", cwd, exe], creationflags=subprocess.CREATE_NEW_CONSOLE)
+        else:
+            subprocess.Popen([exe], cwd=cwd, creationflags=subprocess.CREATE_NEW_CONSOLE)
     else:
-        subprocess.Popen([cmd], creationflags=subprocess.CREATE_NEW_CONSOLE)
+        if use_wt:
+            subprocess.Popen([wt_path, exe], creationflags=subprocess.CREATE_NEW_CONSOLE)
+        else:
+            subprocess.Popen([exe], creationflags=subprocess.CREATE_NEW_CONSOLE)
 
 
 def _restore_generic(cfg):
