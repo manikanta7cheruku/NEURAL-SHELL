@@ -94,7 +94,7 @@ def _show_toast(trigger_name, action_type):
 
         toast = Notification(
             app_id="Seven AI",
-            title=f"⚡ {trigger_name}",
+            title=trigger_name,
             msg=body,
             duration="short"
         )
