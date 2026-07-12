@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="color-scheme" content="dark">
+<style>
+  *, *::before, *::after {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
+  html, body {
+    width: 340px;
+    height: 88px;
+    background: transparent;
+    overflow: hidden;
+    font-family: -apple-system, 'Segoe UI Variable Display', 'SF Pro Display',
+                 'Segoe UI', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  .card {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 340px;
+    height: 88px;
+
+    /* Fully transparent — Windows acrylic provides all the glass */
+    background: transparent;
+
+    border-bottom-left-radius: 12px;
+    border-bottom-right-radius: 12px;
+
+    padding: 14px 18px;
+    display: flex;
+    align-items: center;
+
+    /* Start hidden — animation only fires when .show class is added */
+    transform: translateY(-100%);
+    opacity: 0;
+    will-change: transform, opacity;
+  }
+
+  .card.show {
+    animation: slideDown 0.55s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+
+  .card.hiding {
+    animation: slideUp 0.38s cubic-bezier(0.65, 0, 0.85, 0.35) forwards;
+  }
+
+  @keyframes slideDown {
+    0% {
+      transform: translateY(-100%);
+      opacity: 0;
+    }
+    100% {
+      transform: translateY(0);
+      opacity: 1;
+    }
+  }
+
+  @keyframes slideUp {
+    0% {
+      transform: translateY(0);
+      opacity: 1;
+    }
+    100% {
+      transform: translateY(-100%);
+      opacity: 0;
+    }
+  }
+
+  .accent-bar {
+    width: 3px;
+    height: 32px;
+    background: linear-gradient(
+      180deg,
+      rgb(180, 150, 255),
+      rgb(140, 110, 240)
+    );
+    border-radius: 2px;
+    margin-right: 14px;
+    flex-shrink: 0;
+    box-shadow: 0 0 10px rgba(180, 150, 255, 0.5);
+  }
+
+  .text {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .title {
+    font-size: 13px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.98);
+    letter-spacing: -0.012em;
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  }
+
+  .subtitle-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+
+  .subtitle {
+    color: rgba(255, 255, 255, 0.7);
+    font-weight: 400;
+    letter-spacing: -0.005em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  }
+
+  .dot {
+    width: 2px;
+    height: 2px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.35);
+    flex-shrink: 0;
+  }
+
+  .detail {
+    color: rgb(200, 175, 255);
+    font-weight: 500;
+    letter-spacing: -0.005em;
+    font-size: 10.5px;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  }
+</style>
+</head>
+<body>
+
+<div class="card" id="card">
+  <div class="accent-bar"></div>
+  <div class="text">
+    <div class="title" id="titleEl">Seven</div>
+    <div class="subtitle-row">
+      <span class="subtitle" id="subtitleEl"></span>
+      <span class="dot" id="dotEl" style="display:none"></span>
+      <span class="detail" id="detailEl" style="display:none"></span>
+    </div>
+  </div>
+</div>
+
+<script>
+  let _timer = null;
+
+  function applyData(data) {
+    const {
+      title    = 'Seven',
+      subtitle = '',
+      detail   = '',
+      holdMs   = 3500,
+    } = data;
+
+    // Set text BEFORE animation starts — content is ready when card slides in
+    document.getElementById('titleEl').textContent = title;
+
+    const subEl = document.getElementById('subtitleEl');
+    subEl.textContent = subtitle;
+
+    const detEl = document.getElementById('detailEl');
+    const dotEl = document.getElementById('dotEl');
+    if (detail) {
+      detEl.textContent  = detail;
+      detEl.style.display = '';
+      if (subtitle) dotEl.style.display = '';
+    } else {
+      detEl.style.display = 'none';
+      dotEl.style.display = 'none';
+    }
+
+    // Trigger animation
+    const card = document.getElementById('card');
+    card.classList.add('show');
+
+    _timer = setTimeout(retract, holdMs);
+  }
+
+  window.__applyNotifData = applyData;
+
+  // Direct testing fallback (URL params)
+  if (!window.__NOTIF_DATA__) {
+    const p = new URLSearchParams(window.location.search);
+    if (p.get('title')) {
+      requestAnimationFrame(() => applyData({
+        title:    p.get('title')    || 'Seven',
+        subtitle: p.get('subtitle') || '',
+        detail:   p.get('detail')   || '',
+        holdMs:   parseInt(p.get('holdMs') || '3500'),
+      }));
+    }
+  }
+
+  function retract() {
+    if (_timer) { clearTimeout(_timer); _timer = null; }
+    const card = document.getElementById('card');
+    if (card.classList.contains('hiding')) return;
+    card.classList.remove('show');
+    card.classList.add('hiding');
+    setTimeout(() => {
+      if (window.electronAPI && window.electronAPI.close) {
+        window.electronAPI.close();
+      }
+    }, 400);
+  }
+</script>
+</body>
+</html>
