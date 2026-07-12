@@ -144,16 +144,42 @@ class WorkspaceHandler(BaseHandler):
             apps = workspace.get("apps", [])
             app_count = len(apps)
 
-            ctx.speak(f"Opening {name} workspace. {app_count} apps coming up.")
             ctx.update_status(f"Restoring: {name}", "#00ccff")
 
-            # Restore in background thread for speed
-            from hands.workspace import restore
-            threading.Thread(
-                target=restore,
-                args=(apps,),
-                daemon=True
-            ).start()
+            # Smart restore — only open what's missing
+            def _do_restore():
+                try:
+                    from hands.workspace import smart_restore
+                    opened, skipped = smart_restore(apps)
+
+                    # Show glassmorphic notification
+                    try:
+                        from seven_overlay.notifications import show_notification
+                        if opened > 0:
+                            show_notification(
+                                name,
+                                "workspace restored",
+                                f"{opened} opened · {skipped} already running"
+                            )
+                        else:
+                            show_notification(
+                                name,
+                                "already active",
+                                "all apps are running"
+                            )
+                    except Exception:
+                        pass
+
+                    # Speak result
+                    if opened > 0:
+                        ctx.speak(f"{name} workspace restored. {opened} apps opened.")
+                    else:
+                        ctx.speak(f"{name} workspace is already active.")
+                except Exception as e:
+                    print(f"[WORKSPACE] Restore error: {e}")
+                    ctx.speak(f"Could not restore {name} workspace.")
+
+            threading.Thread(target=_do_restore, daemon=True).start()
 
             # Update use stats
             import requests
