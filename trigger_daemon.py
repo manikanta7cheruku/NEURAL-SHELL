@@ -190,7 +190,7 @@ def is_seven_running():
 def execute_trigger(trigger):
     """
     Execute a trigger action.
-    Runs the appropriate handler based on action_type.
+    Shows notification INSTANTLY, then runs action.
     """
     action_type = trigger.get("action_type", "")
     action_data = trigger.get("action_data", {})
@@ -198,46 +198,109 @@ def execute_trigger(trigger):
 
     print(f"[TRIGGER DAEMON] Firing: {name} (type={action_type})")
 
-    try:
-        if action_type == "open_app":
-            _exec_open_app(action_data)
+    # ── STEP 1: Show notification IMMEDIATELY ──
+    if not trigger.get("silent", False):
+        try:
+            from seven_overlay.notifications import show_trigger_notification
 
-        elif action_type == "open_url":
-            _exec_open_url(action_data)
+            app_count = 0
+            tab_count = 0
+            app_names = ""
 
-        elif action_type == "open_file":
-            _exec_open_file(action_data)
+            if action_type == "open_workspace":
+                ws_id   = action_data.get("workspace_id")
+                ws_name = action_data.get("workspace_name")
 
-        elif action_type == "open_folder":
-            _exec_open_folder(action_data)
+                try:
+                    conn = sqlite3.connect(TRIGGERS_DB, timeout=5)
+                    conn.row_factory = sqlite3.Row
+                    conn.execute("PRAGMA journal_mode=WAL")
 
-        elif action_type == "open_workspace":
-            _exec_open_workspace(action_data)
+                    if ws_id:
+                        ws_row = conn.execute(
+                            "SELECT apps FROM workspaces WHERE id = ?",
+                            (ws_id,)
+                        ).fetchone()
+                    elif ws_name:
+                        ws_row = conn.execute(
+                            "SELECT apps FROM workspaces WHERE LOWER(name) = ?",
+                            (ws_name.lower(),)
+                        ).fetchone()
+                    else:
+                        ws_row = None
+                    conn.close()
 
-        elif action_type == "run_command":
-            _exec_run_command(action_data)
+                    if ws_row:
+                        apps_data = json.loads(ws_row["apps"] or "[]")
+                        app_count = len(apps_data)
+                        names_list = []
+                        for a in apps_data:
+                            n = a.get("name", "")
+                            if " - " in n:
+                                n = n.split(" - ")[-1].strip()
+                            names_list.append(n)
+                            tab_count += len(a.get("tabs", []))
+                        app_names = ",".join(names_list)
+                except Exception as we:
+                    print(f"[TRIGGER DAEMON] Workspace lookup: {we}")
 
-        elif action_type == "seven_action":
-            _exec_seven_action(action_data)
+            elif action_type == "open_app":
+                apps_list = action_data.get("apps", [])
+                single    = action_data.get("app", "")
+                if single and not apps_list:
+                    apps_list = [single]
+                app_count = len(apps_list)
+                app_names = ",".join(apps_list)
 
-        else:
-            print(f"[TRIGGER DAEMON] Unknown action type: {action_type}")
-            return
+            show_trigger_notification(
+                trigger_name=name,
+                action_type=action_type,
+                app_count=app_count,
+                tab_count=tab_count,
+                app_names=app_names,
+            )
+            print(f"[TRIGGER DAEMON] Notification fired instantly: {name}")
 
-        # Show notification with sound (unless silent)
-        if not trigger.get("silent", False):
-            try:
-                from hands.notifications import notify_trigger_fired
-                notify_trigger_fired(name, action_type, sound="default")
-            except ImportError:
-                _show_notification(name, action_type)
+        except Exception as ne:
+            print(f"[TRIGGER DAEMON] Notification failed: {ne}")
 
-        # Update stats
-        update_fire_stats(trigger.get("id"))
+    # ── STEP 2: Execute action in background ──
+    def _run_action():
+        try:
+            if action_type == "open_app":
+                _exec_open_app(action_data)
+            elif action_type == "open_url":
+                _exec_open_url(action_data)
+            elif action_type == "open_file":
+                _exec_open_file(action_data)
+            elif action_type == "open_folder":
+                _exec_open_folder(action_data)
+            elif action_type == "open_workspace":
+                _exec_open_workspace(action_data)
+            elif action_type == "run_command":
+                _exec_run_command(action_data)
+            elif action_type == "seven_action":
+                _exec_seven_action(action_data)
+            else:
+                print(f"[TRIGGER DAEMON] Unknown action type: {action_type}")
+                return
 
-    except Exception as e:
-        print(f"[TRIGGER DAEMON] Execution error: {e}")
-        import traceback; traceback.print_exc()
+            # Play sound after action starts
+            if not trigger.get("silent", False):
+                try:
+                    import winsound
+                    winsound.MessageBeep(winsound.MB_ICONASTERISK)
+                except Exception:
+                    pass
+
+            # Update stats
+            update_fire_stats(trigger.get("id"))
+
+        except Exception as e:
+            print(f"[TRIGGER DAEMON] Execution error: {e}")
+            import traceback; traceback.print_exc()
+
+    threading.Thread(target=_run_action, daemon=True).start()
 
 
 def _exec_open_app(data):
@@ -385,20 +448,24 @@ def _exec_open_workspace(data):
         except Exception:
             apps = []
 
-        # Launch all apps in parallel
-        threads = []
-        for app_config in apps:
-            t = threading.Thread(
-                target=_launch_workspace_app,
-                args=(app_config,),
-                daemon=True
-            )
-            t.start()
-            threads.append(t)
-
-        # Wait for all to launch (max 15 seconds)
-        for t in threads:
-            t.join(timeout=15)
+        # Smart restore — only open what's missing
+        try:
+            from hands.workspace import smart_restore
+            opened, skipped = smart_restore(apps)
+            print(f"[TRIGGER DAEMON] Smart restore: {opened} opened, {skipped} already running")
+        except ImportError:
+            # Fallback to full restore
+            threads = []
+            for app_config in apps:
+                t = threading.Thread(
+                    target=_launch_workspace_app,
+                    args=(app_config,),
+                    daemon=True
+                )
+                t.start()
+                threads.append(t)
+            for t in threads:
+                t.join(timeout=15)
 
         print(f"[TRIGGER DAEMON] Workspace restored: {workspace.get('name')} ({len(apps)} apps)")
 
@@ -743,7 +810,70 @@ class ReloadPoller:
                 pass
             time.sleep(2)
 
+def _ensure_overlay_daemon():
+    """
+    Make sure overlay_daemon.js is running.
+    Needed so notifications work even when Seven is closed.
+    """
+    try:
+        import socket as _sock
 
+        # Ping check
+        try:
+            s = _sock.create_connection(("127.0.0.1", 7891), timeout=0.5)
+            s.sendall(b'{"type":"ping"}\n')
+            s.settimeout(0.5)
+            data = s.recv(256)
+            s.close()
+            if b'"ok":true' in data or b'"ok": true' in data:
+                print("[TRIGGER DAEMON] Overlay daemon already running")
+                return
+        except Exception:
+            pass
+
+        # Not running — spawn it
+        project_root = PROJECT_ROOT
+
+        candidates = [
+            os.path.join(project_root, "node_modules", "electron", "dist", "electron.exe"),
+            os.path.join(project_root, "node_modules", ".bin", "electron.cmd"),
+            os.path.join(project_root, "frontend", "node_modules",
+                         "electron", "dist", "electron.exe"),
+        ]
+        electron_exe = None
+        for p in candidates:
+            if os.path.exists(p):
+                electron_exe = p
+                break
+
+        if not electron_exe:
+            print("[TRIGGER DAEMON] Electron not found — overlay disabled")
+            return
+
+        daemon_js = os.path.join(project_root, "electron", "overlay_daemon.js")
+        if not os.path.exists(daemon_js):
+            print(f"[TRIGGER DAEMON] overlay_daemon.js not found")
+            return
+
+        _CREATE_NO_WINDOW         = 0x08000000
+        _DETACHED_PROCESS         = 0x00000008
+        _CREATE_NEW_PROCESS_GROUP = 0x00000200
+
+        proc = subprocess.Popen(
+            [electron_exe, daemon_js],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL,
+            creationflags=_CREATE_NO_WINDOW | _DETACHED_PROCESS | _CREATE_NEW_PROCESS_GROUP,
+            close_fds=True,
+            start_new_session=True,
+        )
+        print(f"[TRIGGER DAEMON] Overlay daemon spawned (PID {proc.pid})")
+
+    except Exception as e:
+        print(f"[TRIGGER DAEMON] Overlay ensure failed: {e}")
+
+        # Attempt to restart the overlay daemon
 # ─────────────────────────────────────────────────────────────────────────
 # MAIN DAEMON LOOP
 # ─────────────────────────────────────────────────────────────────────────
@@ -755,6 +885,9 @@ def main():
     print("[TRIGGER DAEMON] Starting...")
     print(f"[TRIGGER DAEMON] DB: {TRIGGERS_DB}")
     print(f"[TRIGGER DAEMON] PID: {os.getpid()}")
+
+    # Ensure overlay daemon is running (for instant notifications)
+    _ensure_overlay_daemon()
 
     # Load initial triggers
     triggers = load_triggers()
