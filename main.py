@@ -270,6 +270,12 @@ def seven_logic():
     except Exception as _td_err:
         print(Fore.YELLOW + f"[SYSTEM] Trigger daemon skipped: {_td_err}")
 
+    try:
+        from main_modules.startup.trigger_daemon_launcher import launch_overlay_daemon
+        launch_overlay_daemon()
+    except Exception as _od_err:
+        print(Fore.YELLOW + f"[SYSTEM] Overlay daemon skipped: {_od_err}")
+
     # Register handlers
     try:
         register_all(ctx)
