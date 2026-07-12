@@ -536,7 +536,12 @@ def delete_trigger(trigger_id: int):
 
 @router.post("/api/triggers/{trigger_id}/fire")
 def fire_trigger(trigger_id: int):
-    """Manually fire a trigger (from UI test button)."""
+    """
+    Manually fire a trigger (from UI test button).
+    Shows notification INSTANTLY, executes action in background.
+    """
+    import threading
+
     try:
         with _get_conn() as conn:
             row = conn.execute(
@@ -555,21 +560,81 @@ def fire_trigger(trigger_id: int):
             )
             conn.commit()
 
-        # Execute trigger action
-        try:
-            from main_modules.handlers.trigger_handler import execute_trigger_action
-            success, message = execute_trigger_action(trigger)
-        except ImportError as ie:
-            print(Fore.YELLOW + f"[TRIGGERS] Handler import failed: {ie}")
-            success, message = False, f"Trigger handler not available: {ie}"
-        except Exception as ex:
-            print(Fore.RED + f"[TRIGGERS] Execution error: {ex}")
-            import traceback; traceback.print_exc()
-            success, message = False, str(ex)
+        # ── STEP 1: Show notification IMMEDIATELY (before doing anything) ──
+        if not trigger.get("silent", False):
+            try:
+                from seven_overlay.notifications import show_trigger_notification
+                from backend.routes.workspaces import (
+                    db_get_workspace_by_id,
+                    db_get_workspace_by_name,
+                )
 
+                action_type = trigger.get("action_type", "")
+                action_data = trigger.get("action_data", {})
+                name        = trigger.get("name", "Trigger")
+
+                app_count = 0
+                tab_count = 0
+                app_names = ""
+
+                if action_type == "open_workspace":
+                    ws_id   = action_data.get("workspace_id")
+                    ws_name = action_data.get("workspace_name")
+
+                    workspace = None
+                    if ws_id:
+                        workspace = db_get_workspace_by_id(ws_id)
+                    elif ws_name:
+                        workspace = db_get_workspace_by_name(ws_name)
+
+                    if workspace:
+                        apps = workspace.get("apps", [])
+                        app_count = len(apps)
+                        names_list = []
+                        for a in apps:
+                            n = a.get("name", "")
+                            if " - " in n:
+                                n = n.split(" - ")[-1].strip()
+                            names_list.append(n)
+                            tab_count += len(a.get("tabs", []))
+                        app_names = ",".join(names_list)
+
+                elif action_type == "open_app":
+                    apps_list = action_data.get("apps", [])
+                    single = action_data.get("app", "")
+                    if single and not apps_list:
+                        apps_list = [single]
+                    app_count = len(apps_list)
+                    app_names = ",".join(apps_list)
+
+                show_trigger_notification(
+                    trigger_name=name,
+                    action_type=action_type,
+                    app_count=app_count,
+                    tab_count=tab_count,
+                    app_names=app_names,
+                )
+                print(Fore.GREEN + f"[TRIGGERS] Notification fired instantly for '{name}'")
+
+            except Exception as ne:
+                print(Fore.YELLOW + f"[TRIGGERS] Notification failed: {ne}")
+
+        # ── STEP 2: Execute trigger action in BACKGROUND (non-blocking) ──
+        def _run_action():
+            try:
+                from main_modules.handlers.trigger_handler import execute_trigger_action
+                success, message = execute_trigger_action(trigger)
+                print(Fore.GREEN + f"[TRIGGERS] Action complete: {message}")
+            except Exception as ex:
+                print(Fore.RED + f"[TRIGGERS] Background execution error: {ex}")
+                import traceback; traceback.print_exc()
+
+        threading.Thread(target=_run_action, daemon=True).start()
+
+        # Return immediately — action runs in background
         return {
-            "success": success,
-            "message": message,
+            "success": True,
+            "message": "Trigger fired",
             "trigger_id": trigger_id,
         }
 
@@ -595,6 +660,28 @@ def _signal_daemon_reload():
             f.write(datetime.now().isoformat())
     except Exception as e:
         print(Fore.YELLOW + f"[TRIGGERS] Reload signal failed: {e}")
+
+
+# ── Layout endpoint ───────────────────────────────────────────────────────
+
+class LayoutRequest(BaseModel):
+    layout:    str        # maximize | split | grid | stack
+    app_names: list = []  # app names from the workspace
+
+
+@router.post("/api/triggers/layout")
+def apply_layout(body: LayoutRequest):
+    """
+    Apply window arrangement layout to restored workspace windows.
+    Called by the arrangement card when user clicks a layout option.
+    """
+    try:
+        from hands.window_layout import arrange_windows
+        success, message = arrange_windows(body.layout, body.app_names)
+        return {"success": success, "message": message}
+    except Exception as e:
+        print(Fore.RED + f"[TRIGGERS] layout error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ─────────────────────────────────────────────────────────────────────────
