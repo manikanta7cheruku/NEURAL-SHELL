@@ -355,45 +355,125 @@ def _extract_file_path(title):
 # ── Browser tabs ─────────────────────────────────────────────────────────
 
 def _enrich_browser_tabs(apps):
-    """Read Chrome tabs via Seven Tab Sync extension."""
+    """
+    Read Chrome tabs via Seven Tab Sync extension.
+    KEY: Each Chrome window gets ONLY its own profile's tabs.
+    Multiple Chrome windows = multiple profiles = separate tab lists.
+    """
     browsers = [a for a in apps if a.get("type") in ("chrome", "edge", "brave")]
     if not browsers:
         return
 
+    # Get tabs grouped by profile from extension
+    profile_tabs = {}
     try:
         from backend.routes.chrome import get_tabs_by_profile
         profile_tabs = get_tabs_by_profile()
-
-        if profile_tabs:
-            total = sum(len(t) for t in profile_tabs.values())
-            print(Fore.GREEN + f"[WORKSPACE] Chrome tabs: {total} across {len(profile_tabs)} profiles")
-
-            for browser in browsers:
-                all_tabs = []
-                for prof, tabs in profile_tabs.items():
-                    for tab in tabs:
-                        all_tabs.append({
-                            "url": tab["url"],
-                            "title": tab["title"],
-                            "profile": prof,
-                            "pinned": tab.get("pinned", False),
-                        })
-                browser["tabs"] = all_tabs
-                browser["profiles"] = list(profile_tabs.keys())
-            return
     except Exception as e:
         print(Fore.YELLOW + f"[WORKSPACE] Extension tab read: {e}")
 
-    # Fallback: window title only
-    for b in browsers:
-        title = b.get("window", {}).get("title", "")
+    if not profile_tabs:
+        # Fallback: window title only for each browser
+        for b in browsers:
+            title = b.get("window", {}).get("title", "")
+            for suffix in [" - Google Chrome", " - Microsoft Edge", " - Brave"]:
+                if title.endswith(suffix):
+                    title = title[:-len(suffix)]
+            b["tabs"] = [{"url": "", "title": title}]
+        print(Fore.YELLOW + "[WORKSPACE] Chrome tabs: title only (extension not installed)")
+        return
+
+    total = sum(len(t) for t in profile_tabs.values())
+    profile_names = list(profile_tabs.keys())
+    print(Fore.GREEN + f"[WORKSPACE] Chrome tabs: {total} across {len(profile_names)} profiles")
+
+    # CRITICAL: Match each browser window to ONE profile's tabs
+    # Strategy: assign profiles to browser windows in order
+    # If 2 Chrome windows and 2 profiles → window 1 gets profile 1, window 2 gets profile 2
+
+    if len(browsers) >= len(profile_names):
+        # More windows than profiles — assign one profile per window
+        for i, browser in enumerate(browsers):
+            if i < len(profile_names):
+                prof = profile_names[i]
+                tabs = profile_tabs[prof]
+                browser["tabs"] = [
+                    {
+                        "url": t["url"],
+                        "title": t["title"],
+                        "profile": prof,
+                        "pinned": t.get("pinned", False),
+                    }
+                    for t in tabs
+                ]
+                browser["profile_name"] = prof
+                print(Fore.CYAN + f"  Window '{browser.get('name', '?')}' → profile '{prof}' ({len(tabs)} tabs)")
+            else:
+                # Extra window without a profile — keep title only
+                title = browser.get("window", {}).get("title", "")
+                browser["tabs"] = [{"url": "", "title": title}]
+    else:
+        # More profiles than windows — merge remaining into last window
+        for i, browser in enumerate(browsers):
+            if i < len(profile_names) - 1:
+                prof = profile_names[i]
+                tabs = profile_tabs[prof]
+                browser["tabs"] = [
+                    {"url": t["url"], "title": t["title"], "profile": prof, "pinned": t.get("pinned", False)}
+                    for t in tabs
+                ]
+                browser["profile_name"] = prof
+            else:
+                # Last window gets all remaining profiles
+                remaining_tabs = []
+                for j in range(i, len(profile_names)):
+                    prof = profile_names[j]
+                    for t in profile_tabs[prof]:
+                        remaining_tabs.append(
+                            {"url": t["url"], "title": t["title"], "profile": prof, "pinned": t.get("pinned", False)}
+                        )
+                browser["tabs"] = remaining_tabs
+                browser["profile_name"] = profile_names[i]
+
+
+    # Try to match windows to profiles by title content
+    # If window title contains a tab title from a specific profile, reassign
+    _try_match_windows_to_profiles(browsers, profile_tabs)
+
+# helper function
+def _try_match_windows_to_profiles(browsers, profile_tabs):
+    """
+    Improve window-to-profile matching by checking if the active tab title
+    (shown in window title) matches any tab in a specific profile.
+    """
+    for browser in browsers:
+        window_title = browser.get("window", {}).get("title", "")
+        if not window_title:
+            continue
+
+        # Clean window title — remove " - Google Chrome" suffix
+        clean_title = window_title
         for suffix in [" - Google Chrome", " - Microsoft Edge", " - Brave"]:
-            if title.endswith(suffix):
-                title = title[:-len(suffix)]
-        b["tabs"] = [{"url": "", "title": title}]
-    print(Fore.YELLOW + "[WORKSPACE] Chrome tabs: title only (extension not installed)")
+            if clean_title.endswith(suffix):
+                clean_title = clean_title[:-len(suffix)]
+                break
 
-
+        # Check which profile has a tab matching this window title
+        for prof_name, tabs in profile_tabs.items():
+            for tab in tabs:
+                if tab.get("title", "").strip() == clean_title.strip():
+                    # This profile's tab is the active tab in this window
+                    # Reassign this window to this profile
+                    if browser.get("profile_name") != prof_name:
+                        print(Fore.CYAN + f"  Reassigned window → profile '{prof_name}' (title match)")
+                        browser["tabs"] = [
+                            {"url": t["url"], "title": t["title"], "profile": prof_name,
+                             "pinned": t.get("pinned", False)}
+                            for t in tabs
+                        ]
+                        browser["profile_name"] = prof_name
+                    return  # Found match, stop searching
+                
 # ── VS Code ──────────────────────────────────────────────────────────────
 
 def _enrich_vscode(apps):
@@ -521,9 +601,14 @@ def _restore_one(cfg):
 
 
 def _restore_browser(cfg):
-    """Restore browser with tabs from all profiles."""
+    """
+    Restore browser with ONLY this window's profile tabs.
+    Each Chrome entry in the workspace has its OWN set of tabs
+    from ONE profile. No cross-profile tab mixing.
+    """
     tabs = cfg.get("tabs", [])
     urls = [t["url"] for t in tabs if t.get("url", "").startswith("http")]
+    profile_name = cfg.get("profile_name", "")
 
     browser_type = cfg.get("type", "chrome")
     browser_cmd = {
@@ -533,17 +618,43 @@ def _restore_browser(cfg):
 
     if not urls:
         subprocess.Popen(f'start {browser_cmd}', shell=True)
+        print(f"[WORKSPACE] {browser_type}: launched (no tabs)")
         return
 
-    # Open in batches of 5
-    for i in range(0, len(urls), 5):
-        batch = urls[i:i+5]
-        url_args = " ".join(f'"{u}"' for u in batch)
-        subprocess.Popen(f'start {browser_cmd} {url_args}', shell=True)
-        if i + 5 < len(urls):
-            time.sleep(1)
+    # Find Chrome profile directory for this profile
+    # Chrome profiles are: Default, Profile 1, Profile 2, etc.
+    chrome_base = os.path.join(
+        os.environ.get("LOCALAPPDATA", ""),
+        "Google", "Chrome", "User Data"
+    )
 
-    print(f"[WORKSPACE] {browser_type}: {len(urls)} tabs opened")
+    profile_dir = _find_chrome_profile_dir(chrome_base, profile_name)
+
+    # Open tabs — use --profile-directory if we know which profile
+    chrome_exe = _find_chrome_exe()
+
+    if chrome_exe and profile_dir:
+        # Open first tab with profile flag (creates/focuses correct profile window)
+        first_url = urls[0]
+        cmd = [chrome_exe, f"--profile-directory={profile_dir}", first_url]
+        subprocess.Popen(cmd)
+        time.sleep(1.5)
+
+        # Open remaining tabs (they'll open in the same profile window)
+        for url in urls[1:]:
+            subprocess.Popen([chrome_exe, f"--profile-directory={profile_dir}", url])
+            time.sleep(0.3)
+
+        print(f"[WORKSPACE] {browser_type}: {len(urls)} tabs in profile '{profile_name}' ({profile_dir})")
+    else:
+        # Fallback: open without profile targeting
+        for i in range(0, len(urls), 5):
+            batch = urls[i:i+5]
+            url_args = " ".join(f'"{u}"' for u in batch)
+            subprocess.Popen(f'start {browser_cmd} {url_args}', shell=True)
+            if i + 5 < len(urls):
+                time.sleep(1)
+        print(f"[WORKSPACE] {browser_type}: {len(urls)} tabs (no profile targeting)")
 
 
 def _restore_vscode(cfg):
@@ -643,3 +754,64 @@ def _restore_generic(cfg):
             AppOpener.open(clean)
         except Exception:
             pass
+
+#helper functions
+def _find_chrome_exe():
+    """Find Chrome executable."""
+    for p in [
+        os.path.join(os.environ.get("PROGRAMFILES", ""), "Google", "Chrome", "Application", "chrome.exe"),
+        os.path.join(os.environ.get("PROGRAMFILES(X86)", ""), "Google", "Chrome", "Application", "chrome.exe"),
+        os.path.join(os.environ.get("LOCALAPPDATA", ""), "Google", "Chrome", "Application", "chrome.exe"),
+    ]:
+        if os.path.exists(p):
+            return p
+    return None
+
+
+def _find_chrome_profile_dir(chrome_base, profile_name):
+    """
+    Find Chrome profile directory name from Seven's profile name.
+    Seven profile names are like 'cherukumanikanta77' (from Gmail).
+    Chrome profile dirs are 'Default', 'Profile 1', 'Profile 2', etc.
+    We match by reading each profile's Preferences file for the account email.
+    """
+    if not os.path.exists(chrome_base):
+        return None
+
+    for item in os.listdir(chrome_base):
+        if item != "Default" and not item.startswith("Profile"):
+            continue
+
+        prefs_file = os.path.join(chrome_base, item, "Preferences")
+        if not os.path.exists(prefs_file):
+            continue
+
+        try:
+            import json
+            with open(prefs_file, "r", encoding="utf-8") as f:
+                prefs = json.load(f)
+
+            # Check account info
+            account_info = prefs.get("account_info", [])
+            for acc in account_info:
+                email = acc.get("email", "").lower()
+                # Match: profile_name 'cherukumanikanta77' matches email 'cherukumanikanta77@gmail.com'
+                if profile_name.lower() in email or email.split("@")[0] == profile_name.lower():
+                    print(Fore.CYAN + f"[WORKSPACE] Profile '{profile_name}' → Chrome dir '{item}'")
+                    return item
+
+            # Also check profile name in prefs
+            prof_name = prefs.get("profile", {}).get("name", "")
+            if prof_name.lower() == profile_name.lower():
+                return item
+
+        except Exception:
+            continue
+
+    # Fallback: if only one profile exists, use Default
+    profiles = [d for d in os.listdir(chrome_base)
+                if d == "Default" or d.startswith("Profile")]
+    if len(profiles) == 1:
+        return profiles[0]
+
+    return None
