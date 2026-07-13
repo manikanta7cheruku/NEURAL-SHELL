@@ -210,24 +210,37 @@ def _validate_hotkey_format(hotkey):
         )
 
 
+def _normalize_hotkey(hotkey: str) -> str:
+    """Normalize hotkey for consistent storage and conflict checking."""
+    MODIFIERS = {"ctrl", "shift", "alt", "win"}
+    parts = [p.strip().lower() for p in hotkey.replace(" ", "").split("+") if p.strip()]
+    mods  = sorted([p for p in parts if p in MODIFIERS])
+    keys  = sorted([p for p in parts if p not in MODIFIERS])
+    return "+".join(mods + keys)
+
+
 def _check_hotkey_conflict(hotkey, exclude_id=None):
     """Check if hotkey is already used by another trigger."""
     if not hotkey:
         return None
 
-    hotkey_normalized = hotkey.lower().replace(" ", "")
+    hotkey_normalized = _normalize_hotkey(hotkey)
 
     with _get_conn() as conn:
-        query = "SELECT id, name FROM triggers WHERE LOWER(hotkey) = ? AND enabled = 1"
-        params = [hotkey_normalized]
+        # Fetch all active hotkeys and normalize each for comparison
+        # (stored values may be in different order)
+        rows = conn.execute(
+            "SELECT id, name, hotkey FROM triggers WHERE hotkey IS NOT NULL AND enabled = 1"
+        ).fetchall()
 
-        if exclude_id is not None:
-            query += " AND id != ?"
-            params.append(exclude_id)
+    for row in rows:
+        if exclude_id is not None and row["id"] == exclude_id:
+            continue
+        stored = _normalize_hotkey(row["hotkey"])
+        if stored == hotkey_normalized:
+            return {"id": row["id"], "name": row["name"]}
 
-        row = conn.execute(query, params).fetchone()
-
-    return dict(row) if row else None
+    return None
 
 
 def _check_voice_phrase_conflict(phrase, exclude_id=None):
@@ -370,7 +383,7 @@ def create_trigger(body: TriggerCreate):
                     body.name.strip(),
                     body.action_type,
                     json.dumps(body.action_data),
-                    body.hotkey.lower().replace(" ", "") if body.hotkey else None,
+                    _normalize_hotkey(body.hotkey) if body.hotkey else None,
                     body.voice_phrase.lower().strip() if body.voice_phrase else None,
                     body.audio_pattern,
                     1 if body.enabled else 0,
