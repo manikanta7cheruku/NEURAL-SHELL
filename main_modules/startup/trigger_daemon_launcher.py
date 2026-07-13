@@ -41,23 +41,25 @@ def launch_trigger_daemon():
             print(Fore.YELLOW + "[SYSTEM] trigger_daemon.py not found")
             return
 
-        # Check if already running
+        # Check if already running using Windows mutex — reliable, no process scanning
         _already_running = False
         try:
-            import psutil
-            for proc in psutil.process_iter(['pid', 'cmdline']):
-                try:
-                    cmd = " ".join(proc.info['cmdline'] or [])
-                    if "trigger_daemon" in cmd and str(proc.pid) != str(os.getpid()):
-                        _already_running = True
-                        break
-                except Exception:
-                    pass
+            import ctypes
+            _test = ctypes.windll.kernel32.CreateMutexW(
+                None, False, "Global\\SevenTriggerDaemon_SingleInstance"
+            )
+            _err = ctypes.windll.kernel32.GetLastError()
+            if _test:
+                ctypes.windll.kernel32.CloseHandle(_test)
+            if _err == 183:  # ERROR_ALREADY_EXISTS
+                _already_running = True
         except Exception:
             pass
 
         if _already_running:
             print(Fore.CYAN + "[SYSTEM] Trigger daemon already running")
+            # Still re-register Task Scheduler to keep paths current
+            _register_trigger_daemon_startup(_pythonw, _daemon)
             return
 
         # Launch as fully detached process
