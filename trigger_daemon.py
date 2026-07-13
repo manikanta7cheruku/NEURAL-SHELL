@@ -394,7 +394,7 @@ def _ensure_overlay_alive() -> bool:
             return False
 
         print(f"[TRIGGER DAEMON] Found overlay_daemon.js: {daemon_js}")
-
+    
         subprocess.Popen(
             [electron_exe, daemon_js],
             stdout=subprocess.DEVNULL,
@@ -420,6 +420,79 @@ def _ensure_overlay_alive() -> bool:
         return False
 
 
+# Single lock — only one thread spawns overlay at a time
+_overlay_spawn_lock = threading.Lock()
+
+
+def _ensure_overlay_alive_safe() -> bool:
+    """
+    Ensure overlay daemon is running on port 7891.
+    Thread-safe — only one spawn attempt at a time.
+    Auto-recovers if daemon crashed.
+    """
+    if _is_overlay_alive():
+        return True
+
+    if not _overlay_spawn_lock.acquire(blocking=True, timeout=8):
+        return False
+
+    try:
+        if _is_overlay_alive():
+            return True
+
+        print("[TRIGGER DAEMON] Overlay daemon down — spawning...")
+
+        electron_exe = None
+        for _root in [PROJECT_ROOT, os.getcwd()]:
+            for _rel in [
+                os.path.join("node_modules", "electron", "dist", "electron.exe"),
+                os.path.join("node_modules", ".bin", "electron.cmd"),
+            ]:
+                _c = os.path.join(_root, _rel)
+                if os.path.exists(_c):
+                    electron_exe = _c
+                    break
+            if electron_exe:
+                break
+
+        if not electron_exe:
+            print("[TRIGGER DAEMON] Electron not found")
+            return False
+
+        daemon_js = None
+        for _root in [PROJECT_ROOT, os.getcwd()]:
+            _c = os.path.join(_root, "electron", "overlay_daemon.js")
+            if os.path.exists(_c):
+                daemon_js = _c
+                break
+
+        if not daemon_js:
+            print("[TRIGGER DAEMON] overlay_daemon.js not found")
+            return False
+
+        subprocess.Popen(
+            [electron_exe, daemon_js],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL,
+            creationflags=0x08000000 | 0x00000008 | 0x00000200,
+            close_fds=True,
+            start_new_session=True,
+        )
+
+        for _ in range(50):
+            time.sleep(0.1)
+            if _is_overlay_alive():
+                print("[TRIGGER DAEMON] Overlay daemon ready")
+                return True
+
+        print("[TRIGGER DAEMON] Overlay spawn timed out")
+        return False
+
+    finally:
+        _overlay_spawn_lock.release()
+
+
 def _fire_notification(name, action_type, app_count, tab_count, app_names):
     """Send notification to overlay_daemon. Auto-recovers if daemon crashed."""
     subtitle_map = {
@@ -442,7 +515,7 @@ def _fire_notification(name, action_type, app_count, tab_count, app_names):
     hold_ms = 3800 if action_type == "open_workspace" else 3200
 
     # Ensure daemon is alive — spawn if needed
-    if not _ensure_overlay_alive():
+    if not _ensure_overlay_alive_safe():
         print("[TRIGGER DAEMON] Overlay unavailable — notification skipped")
         return
 
