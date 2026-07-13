@@ -474,103 +474,99 @@ def _enrich_vscode(apps):
     except Exception as e:
         print(Fore.YELLOW + f"[WORKSPACE] VS Code state: {e}")
 # Smart restore — only launches apps that aren't already running.
+# Prevent concurrent workspace restores
+_restore_lock = threading.Lock()
+
+
 def smart_restore(apps_config):
     """
     Smart restore — only opens what's MISSING.
     Already-open apps are left alone (not re-launched, not focused).
-    
-    Compares saved workspace against currently running apps.
-    Only launches apps that aren't already running.
+    Thread-safe — blocks concurrent calls to prevent double-open.
     """
     if not apps_config:
         return 0, 0
 
-    # Scan what's currently open
+    # Block concurrent restores — prevents double-open when
+    # daemon and API both call smart_restore simultaneously
+    if not _restore_lock.acquire(blocking=True, timeout=30):
+        print(Fore.YELLOW + "[WORKSPACE] Restore already in progress — skipped")
+        return 0, 0
+
     try:
-        current_apps = scan_current()
-    except Exception:
-        current_apps = []
+        # Scan what's currently open
+        try:
+            current_apps = scan_current()
+        except Exception:
+            current_apps = []
 
-    # Build set of currently open app identifiers
-    open_ids = set()
-    for app in current_apps:
-        # Identify by: type + name combo OR exe_path
-        app_type = app.get("type", "")
-        name = app.get("name", "").lower()
-        exe = (app.get("exe_path") or "").lower()
+        # Build set of currently open app identifiers
+        open_ids = set()
+        for app in current_apps:
+            app_type = app.get("type", "")
+            name = app.get("name", "").lower()
+            exe = (app.get("exe_path") or "").lower()
 
-        if exe:
-            open_ids.add(exe)
-        if name:
-            open_ids.add(f"{app_type}:{name}")
+            if exe:
+                open_ids.add(exe)
+            if name:
+                open_ids.add(f"{app_type}:{name}")
 
-        # For browsers, track by profile
-        if app.get("profile_name"):
-            open_ids.add(f"chrome_profile:{app['profile_name']}")
+            if app.get("profile_name"):
+                open_ids.add(f"chrome_profile:{app['profile_name']}")
 
-        # For explorer, track by folder
-        if app.get("folder_path"):
-            open_ids.add(f"folder:{app['folder_path'].lower()}")
+            if app.get("folder_path"):
+                open_ids.add(f"folder:{app['folder_path'].lower()}")
 
-    # Filter: only restore what's NOT already open
-    missing = []
-    already_open = 0
+        # Filter: only restore what's NOT already open
+        missing = []
+        already_open = 0
 
-    for cfg in apps_config:
-        app_type = cfg.get("type", "")
-        name = cfg.get("name", "").lower()
-        exe = (cfg.get("exe_path") or "").lower()
-        profile = cfg.get("profile_name", "")
-        folder = (cfg.get("folder_path") or "").lower()
+        for cfg in apps_config:
+            app_type = cfg.get("type", "")
+            name = cfg.get("name", "").lower()
+            exe = (cfg.get("exe_path") or "").lower()
+            profile = cfg.get("profile_name", "")
+            folder = (cfg.get("folder_path") or "").lower()
 
-        is_open = False
+            is_open = False
 
-        # Check by exe path
-        if exe and exe in open_ids:
-            is_open = True
-
-        # Check by type:name
-        if f"{app_type}:{name}" in open_ids:
-            is_open = True
-
-        # Check Chrome by profile
-        if app_type in ("chrome", "edge") and profile:
-            if f"chrome_profile:{profile}" in open_ids:
+            if exe and exe in open_ids:
                 is_open = True
 
-        # Check explorer by folder
-        if app_type == "explorer" and folder:
-            if f"folder:{folder}" in open_ids:
+            if f"{app_type}:{name}" in open_ids:
                 is_open = True
 
-        # For Chrome: check if specific tabs are already open
-        # Don't reopen Chrome profile if it's already running
-        # BUT do open missing tabs
-        if is_open and app_type in ("chrome", "edge"):
-            # Chrome profile is open — check for missing tabs
-            saved_tabs = cfg.get("tabs", [])
-            saved_urls = {t.get("url", "") for t in saved_tabs if t.get("url")}
+            if app_type in ("chrome", "edge") and profile:
+                if f"chrome_profile:{profile}" in open_ids:
+                    is_open = True
 
-            # We can't easily check which tabs are currently open without extension
-            # So if Chrome profile is running, we skip it entirely
-            already_open += 1
-            continue
+            if app_type == "explorer" and folder:
+                if f"folder:{folder}" in open_ids:
+                    is_open = True
 
-        if is_open:
-            already_open += 1
-            continue
+            if is_open and app_type in ("chrome", "edge"):
+                already_open += 1
+                continue
 
-        missing.append(cfg)
+            if is_open:
+                already_open += 1
+                continue
 
-    # Restore only missing apps
-    if missing:
-        print(Fore.CYAN + f"[WORKSPACE] Smart restore: {len(missing)} missing, "
-              f"{already_open} already open")
-        restore(missing)
-    else:
-        print(Fore.GREEN + "[WORKSPACE] Everything already open")
+            missing.append(cfg)
 
-    return len(missing), already_open
+        # Restore only missing apps
+        if missing:
+            print(Fore.CYAN + f"[WORKSPACE] Smart restore: {len(missing)} missing, "
+                  f"{already_open} already open")
+            restore(missing)
+        else:
+            print(Fore.GREEN + "[WORKSPACE] Everything already open")
+
+        return len(missing), already_open
+
+    finally:
+        _restore_lock.release()
 
 
 # ── Explorer folders ─────────────────────────────────────────────────────
