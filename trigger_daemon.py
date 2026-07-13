@@ -293,8 +293,67 @@ def execute_trigger(trigger):
     ).start()
 
 
+def _ensure_overlay_alive() -> bool:
+    """
+    Check overlay daemon is running. If not, spawn it.
+    Overlay daemon is owned by trigger_daemon_launcher at startup,
+    but if it crashed we recover here.
+    """
+    if _is_overlay_alive():
+        return True
+
+    print("[TRIGGER DAEMON] Overlay daemon not responding — attempting spawn...")
+
+    try:
+        # Find Electron
+        candidates = [
+            os.path.join(PROJECT_ROOT, "node_modules", "electron", "dist", "electron.exe"),
+            os.path.join(PROJECT_ROOT, "node_modules", ".bin", "electron.cmd"),
+            os.path.join(PROJECT_ROOT, "frontend", "node_modules",
+                         "electron", "dist", "electron.exe"),
+        ]
+        electron_exe = None
+        for p in candidates:
+            if os.path.exists(p):
+                electron_exe = p
+                break
+
+        if not electron_exe:
+            print("[TRIGGER DAEMON] Electron not found — overlay unavailable")
+            return False
+
+        daemon_js = os.path.join(PROJECT_ROOT, "electron", "overlay_daemon.js")
+        if not os.path.exists(daemon_js):
+            print(f"[TRIGGER DAEMON] overlay_daemon.js not found")
+            return False
+
+        subprocess.Popen(
+            [electron_exe, daemon_js],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL,
+            creationflags=0x08000000 | 0x00000008 | 0x00000200,
+            close_fds=True,
+            start_new_session=True,
+        )
+
+        # Wait up to 4 seconds for daemon to be ready
+        for _ in range(40):
+            time.sleep(0.1)
+            if _is_overlay_alive():
+                print("[TRIGGER DAEMON] Overlay daemon recovered")
+                return True
+
+        print("[TRIGGER DAEMON] Overlay daemon spawn timed out")
+        return False
+
+    except Exception as e:
+        print(f"[TRIGGER DAEMON] Overlay spawn error: {e}")
+        return False
+
+
 def _fire_notification(name, action_type, app_count, tab_count, app_names):
-    """Send notification to overlay_daemon."""
+    """Send notification to overlay_daemon. Auto-recovers if daemon crashed."""
     subtitle_map = {
         "open_app":       "App launched",
         "open_url":       "URL opened",
@@ -314,8 +373,9 @@ def _fire_notification(name, action_type, app_count, tab_count, app_names):
     detail  = "  ·  ".join(parts)
     hold_ms = 3800 if action_type == "open_workspace" else 3200
 
-    if not _is_overlay_alive():
-        print("[TRIGGER DAEMON] Overlay daemon not running — notification skipped")
+    # Ensure daemon is alive — spawn if needed
+    if not _ensure_overlay_alive():
+        print("[TRIGGER DAEMON] Overlay unavailable — notification skipped")
         return
 
     _send_overlay({
@@ -595,6 +655,7 @@ class HotkeyListener:
         self._listener     = None
         self._running      = False
         self._last_fire    = 0
+        self._mod_reset_timer = None  # clears stuck modifiers
 
     def reload(self, triggers):
         self._triggers   = triggers
@@ -621,6 +682,7 @@ class HotkeyListener:
                         return
                     if name in ("ctrl", "shift", "alt", "win"):
                         self._pressed_mods.add(name)
+                        self._schedule_mod_reset()
                     else:
                         self._try_match(name)
                 except Exception:
@@ -722,11 +784,32 @@ class HotkeyListener:
         if trigger:
             self._last_fire = now
             print(f"[HOTKEY] Match: {combo} -> {trigger['name']}")
+            # Clear modifier state immediately after match
+            # Prevents stuck modifiers when window focus changes on trigger fire
+            self._pressed_mods.clear()
             threading.Thread(
                 target=execute_trigger,
                 args=(trigger,),
                 daemon=True
             ).start()
+        
+        # Schedule modifier state reset after 2 seconds of no activity
+        # This recovers from missed key-release events (focus change, UAC, etc.)
+        self._schedule_mod_reset()
+
+    def _schedule_mod_reset(self):
+        """Reset modifier state after 2s inactivity — recovers stuck keys."""
+        if self._mod_reset_timer:
+            self._mod_reset_timer.cancel()
+        self._mod_reset_timer = threading.Timer(2.0, self._reset_mods)
+        self._mod_reset_timer.daemon = True
+        self._mod_reset_timer.start()
+
+    def _reset_mods(self):
+        """Clear all pressed modifiers — called after inactivity timeout."""
+        if self._pressed_mods:
+            print(f"[HOTKEY] Clearing stuck modifiers: {self._pressed_mods}")
+            self._pressed_mods.clear()
 
 
 # ─────────────────────────────────────────────────────────────────────────
