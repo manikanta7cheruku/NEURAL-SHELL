@@ -343,13 +343,6 @@ function stopTriggerPolling() {
   }
 }
 
-function stopTriggerPolling() {
-  if (triggerPoller) {
-    clearInterval(triggerPoller);
-    triggerPoller = null;
-  }
-}
-
 // ── Tray icon ────────────────────────────────────────────────────────────────
 
 function createTray() {
