@@ -62,10 +62,9 @@ if (!gotLock) {
 }
 
 app.on('second-instance', () => {
-  // Another instance tried to start — do nothing
-  // main.js re-spawns panel_host on Python restart which triggers this
-  // We must NOT open the panel here — it would appear randomly
-  console.log('[PANEL HOST] Second instance signal ignored — panel stays closed');
+  // Ignore — main.js re-spawns this on every Python restart
+  // Opening panel here causes it to appear randomly
+  console.log('[PANEL HOST] Second instance signal ignored');
 });
 
 // ── Prevent default Electron window behavior ─────────────────────────────────
