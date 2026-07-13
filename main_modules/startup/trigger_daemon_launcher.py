@@ -41,7 +41,27 @@ def launch_trigger_daemon():
             print(Fore.YELLOW + "[SYSTEM] trigger_daemon.py not found")
             return
 
-        # Check if already running using Windows mutex — reliable, no process scanning
+        # Kill any wrong-Python daemon instances before starting
+        # This prevents system Python daemons from blocking venv daemon
+        _venv_pythonw_lower = _pythonw.lower()
+        try:
+            import psutil
+            for _proc in psutil.process_iter(['pid', 'name', 'cmdline', 'exe']):
+                try:
+                    _cmd = ' '.join(_proc.info['cmdline'] or [])
+                    _exe = (_proc.info['exe'] or '').lower()
+                    if 'trigger_daemon' in _cmd:
+                        # If running with wrong Python — kill it
+                        if _exe and _exe != _venv_pythonw_lower:
+                            print(Fore.YELLOW + f"[SYSTEM] Killing wrong-Python daemon "
+                                  f"(PID {_proc.pid}): {_exe}")
+                            _proc.kill()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        # Now check if correct daemon already running via mutex
         _already_running = False
         try:
             import ctypes
@@ -57,8 +77,7 @@ def launch_trigger_daemon():
             pass
 
         if _already_running:
-            print(Fore.CYAN + "[SYSTEM] Trigger daemon already running")
-            # Still re-register Task Scheduler to keep paths current
+            print(Fore.CYAN + "[SYSTEM] Trigger daemon already running (correct Python)")
             _register_trigger_daemon_startup(_pythonw, _daemon)
             return
 
