@@ -14,17 +14,28 @@ from colorama import Fore
 
 
 def launch_trigger_daemon():
-    """
-    Launch trigger_daemon.py as a truly independent process.
-    Survives Seven quit. Also registers in Windows Task Scheduler
-    for auto-start at login.
-    """
     try:
         _daemon = os.path.join(os.getcwd(), "trigger_daemon.py")
-        _python = sys.executable
-        _pythonw = _python.replace("python.exe", "pythonw.exe")
-        if not os.path.exists(_pythonw):
-            _pythonw = _python
+
+        # Always prefer venv Python — it has all required packages
+        # Never use system Python which lacks hands.workspace etc.
+        _project_root = os.getcwd()
+        _venv_pythonw = os.path.join(_project_root, "venv", "Scripts", "pythonw.exe")
+        _venv_python  = os.path.join(_project_root, "venv", "Scripts", "python.exe")
+
+        if os.path.exists(_venv_pythonw):
+            _pythonw = _venv_pythonw
+            print(Fore.CYAN + f"[SYSTEM] Using venv pythonw: {_pythonw}")
+        elif os.path.exists(_venv_python):
+            _pythonw = _venv_python
+            print(Fore.CYAN + f"[SYSTEM] Using venv python: {_pythonw}")
+        else:
+            # Fallback to current executable
+            _python  = sys.executable
+            _pythonw = _python.replace("python.exe", "pythonw.exe")
+            if not os.path.exists(_pythonw):
+                _pythonw = _python
+            print(Fore.YELLOW + f"[SYSTEM] venv not found, using: {_pythonw}")
 
         if not os.path.exists(_daemon):
             print(Fore.YELLOW + "[SYSTEM] trigger_daemon.py not found")
@@ -77,29 +88,19 @@ def launch_trigger_daemon():
 def _register_trigger_daemon_startup(pythonw_path, daemon_path):
     """
     Register trigger_daemon.py in Windows Task Scheduler.
-    Runs at every user login so triggers work even if Seven never opens.
-    Only registers once — subsequent calls are no-ops.
+    Always re-registers to keep paths current.
+    Falls back to Startup folder if schtasks fails.
     """
     try:
         task_name = "SevenTriggerDaemon"
 
-        # Check if already registered
-        check = subprocess.run(
-            ["schtasks", "/query", "/tn", task_name],
-            capture_output=True, text=True, timeout=5,
-            creationflags=0x08000000  # CREATE_NO_WINDOW
-        )
-        if check.returncode == 0:
-            # Already registered
-            return
-
-        # Register new task
         cmd = [
             "schtasks", "/create", "/f",
             "/tn", task_name,
             "/tr", f'"{pythonw_path}" "{daemon_path}"',
             "/sc", "onlogon",
             "/rl", "limited",
+            "/delay", "0000:30",
         ]
 
         result = subprocess.run(
@@ -107,12 +108,37 @@ def _register_trigger_daemon_startup(pythonw_path, daemon_path):
             creationflags=0x08000000
         )
         if result.returncode == 0:
-            print(Fore.GREEN + "[SYSTEM] Trigger daemon registered for auto-start at login")
+            print(Fore.GREEN + "[SYSTEM] Trigger daemon registered for auto-start at login ✓")
         else:
-            print(Fore.YELLOW + f"[SYSTEM] Trigger daemon auto-start registration failed: {result.stderr.strip()}")
+            print(Fore.YELLOW + f"[SYSTEM] schtasks failed: {result.stderr.strip()}")
+            _register_startup_folder_trigger(pythonw_path, daemon_path)
 
     except Exception as e:
         print(Fore.YELLOW + f"[SYSTEM] Trigger daemon registration error: {e}")
+        _register_startup_folder_trigger(pythonw_path, daemon_path)
+
+
+def _register_startup_folder_trigger(pythonw_path, daemon_path):
+    """Fallback: Startup folder .bat file. No admin rights needed."""
+    try:
+        import winreg
+        key = winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders"
+        )
+        startup_folder = winreg.QueryValueEx(key, "Startup")[0]
+        winreg.CloseKey(key)
+
+        bat_path = os.path.join(startup_folder, "SevenTriggerDaemon.bat")
+        with open(bat_path, 'w') as f:
+            f.write(
+                f'@echo off\n'
+                f'start "" /B "{pythonw_path}" "{daemon_path}"\n'
+            )
+        print(Fore.GREEN + f"[SYSTEM] Trigger daemon added to Startup folder ✓")
+
+    except Exception as e:
+        print(Fore.YELLOW + f"[SYSTEM] Startup folder fallback failed: {e}")
 
 # ─────────────────────────────────────────────────────────────────────────
 # OVERLAY DAEMON — Persistent Electron host for instant notifications
@@ -135,27 +161,41 @@ def launch_overlay_daemon():
         project_root = os.getcwd()
 
         # Find Electron
-        electron_candidates = [
-            os.path.join(project_root, "node_modules", "electron", "dist", "electron.exe"),
-            os.path.join(project_root, "node_modules", ".bin", "electron.cmd"),
-            os.path.join(project_root, "frontend", "node_modules",
-                         "electron", "dist", "electron.exe"),
-        ]
-
+        # Check multiple roots — cwd may differ from project root
+        _roots = list(dict.fromkeys([project_root, os.getcwd()]))
         electron_exe = None
-        for p in electron_candidates:
-            if os.path.exists(p):
-                electron_exe = p
+        for _root in _roots:
+            for _rel in [
+                os.path.join("node_modules", "electron", "dist", "electron.exe"),
+                os.path.join("node_modules", ".bin", "electron.cmd"),
+                os.path.join("frontend", "node_modules", "electron", "dist", "electron.exe"),
+            ]:
+                _c = os.path.join(_root, _rel)
+                if os.path.exists(_c):
+                    electron_exe = _c
+                    break
+            if electron_exe:
                 break
 
         if not electron_exe:
             print(Fore.YELLOW + "[SYSTEM] Electron not found — overlay daemon disabled")
+            print(Fore.YELLOW + f"[SYSTEM] Searched: {_roots}")
             return
 
-        daemon_js = os.path.join(project_root, "electron", "overlay_daemon.js")
-        if not os.path.exists(daemon_js):
-            print(Fore.YELLOW + f"[SYSTEM] overlay_daemon.js not found at {daemon_js}")
+        print(Fore.CYAN + f"[SYSTEM] Electron found: {electron_exe}")
+
+        daemon_js = None
+        for _root in _roots:
+            _c = os.path.join(_root, "electron", "overlay_daemon.js")
+            if os.path.exists(_c):
+                daemon_js = _c
+                break
+
+        if not daemon_js:
+            print(Fore.YELLOW + f"[SYSTEM] overlay_daemon.js not found in: {_roots}")
             return
+
+        print(Fore.CYAN + f"[SYSTEM] overlay_daemon.js: {daemon_js}")
 
         # Launch as fully detached process (survives Seven quit)
         _CREATE_NO_WINDOW         = 0x08000000
@@ -196,20 +236,11 @@ def _is_overlay_daemon_alive() -> bool:
 def _register_overlay_daemon_startup(electron_exe, daemon_js):
     """
     Register overlay_daemon.js in Windows Task Scheduler.
-    Runs at every user login so notifications work even if Seven never opens.
-    Only registers once.
+    Always re-registers to keep paths current.
+    Falls back to Startup folder if schtasks fails.
     """
     try:
         task_name = "SevenOverlayDaemon"
-
-        # Check if already registered
-        check = subprocess.run(
-            ["schtasks", "/query", "/tn", task_name],
-            capture_output=True, text=True, timeout=5,
-            creationflags=0x08000000
-        )
-        if check.returncode == 0:
-            return
 
         cmd = [
             "schtasks", "/create", "/f",
@@ -217,6 +248,7 @@ def _register_overlay_daemon_startup(electron_exe, daemon_js):
             "/tr", f'"{electron_exe}" "{daemon_js}"',
             "/sc", "onlogon",
             "/rl", "limited",
+            "/delay", "0000:45",
         ]
 
         result = subprocess.run(
@@ -224,9 +256,34 @@ def _register_overlay_daemon_startup(electron_exe, daemon_js):
             creationflags=0x08000000
         )
         if result.returncode == 0:
-            print(Fore.GREEN + "[SYSTEM] Overlay daemon registered for auto-start at login")
+            print(Fore.GREEN + "[SYSTEM] Overlay daemon registered for auto-start at login ✓")
         else:
-            print(Fore.YELLOW + f"[SYSTEM] Overlay daemon auto-start reg failed: {result.stderr.strip()}")
+            print(Fore.YELLOW + f"[SYSTEM] schtasks failed: {result.stderr.strip()}")
+            _register_startup_folder_overlay(electron_exe, daemon_js)
 
     except Exception as e:
         print(Fore.YELLOW + f"[SYSTEM] Overlay daemon registration error: {e}")
+        _register_startup_folder_overlay(electron_exe, daemon_js)
+
+
+def _register_startup_folder_overlay(electron_exe, daemon_js):
+    """Fallback: Startup folder .bat file. No admin rights needed."""
+    try:
+        import winreg
+        key = winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders"
+        )
+        startup_folder = winreg.QueryValueEx(key, "Startup")[0]
+        winreg.CloseKey(key)
+
+        bat_path = os.path.join(startup_folder, "SevenOverlayDaemon.bat")
+        with open(bat_path, 'w') as f:
+            f.write(
+                f'@echo off\n'
+                f'start "" /B "{electron_exe}" "{daemon_js}"\n'
+            )
+        print(Fore.GREEN + f"[SYSTEM] Overlay daemon added to Startup folder ✓")
+
+    except Exception as e:
+        print(Fore.YELLOW + f"[SYSTEM] Startup folder fallback failed: {e}")
