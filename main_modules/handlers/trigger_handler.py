@@ -152,21 +152,18 @@ class WorkspaceHandler(BaseHandler):
                     from hands.workspace import smart_restore
                     opened, skipped = smart_restore(apps)
 
-                    # Show glassmorphic notification
+                    # Show notification via overlay daemon
                     try:
-                        from seven_overlay.notifications import show_notification
-                        if opened > 0:
-                            show_notification(
-                                name,
-                                "workspace restored",
-                                f"{opened} opened · {skipped} already running"
-                            )
-                        else:
-                            show_notification(
-                                name,
-                                "already active",
-                                "all apps are running"
-                            )
+                        from seven_overlay.notifications import show_trigger_notification
+                        app_list = [a.get("name", "") for a in apps]
+                        app_names_str = ",".join(app_list)
+                        show_trigger_notification(
+                            trigger_name=name,
+                            action_type="open_workspace",
+                            app_count=len(apps),
+                            tab_count=sum(len(a.get("tabs", [])) for a in apps),
+                            app_names=app_names_str,
+                        )
                     except Exception:
                         pass
 
@@ -342,9 +339,17 @@ def execute_trigger_action(trigger):
                 return False, f"Workspace not found"
 
             apps = workspace.get("apps", [])
-            from hands.workspace import restore
+
+            def _do_smart_restore():
+                try:
+                    from hands.workspace import smart_restore
+                    smart_restore(apps)
+                except ImportError:
+                    from hands.workspace import restore
+                    restore(apps)
+
             import threading
-            threading.Thread(target=restore, args=(apps,), daemon=True).start()
+            threading.Thread(target=_do_smart_restore, daemon=True).start()
 
             return True, f"Restoring {workspace['name']} ({len(apps)} apps)"
 
