@@ -21,7 +21,7 @@ IPC_PORT = 7891
 # Track daemon health
 _daemon_healthy = False
 _daemon_last_check = 0
-_spawn_lock = None  # prevents concurrent spawn attempts
+_spawn_lock = threading.Lock()  # module-level — initialized once, never None
 
 
 def _root():
@@ -76,74 +76,68 @@ def _send_ipc(msg: dict, timeout: float = 0.5) -> bool:
         return False
 
 
+# Module-level lock — initialized once, never None
+_spawn_lock = threading.Lock()
+
+
 def _ensure_daemon_running():
     """
-    Check if overlay daemon is running. If not, spawn it.
-    Thread-safe — uses lock to prevent concurrent spawns.
+    Ensure overlay daemon is running on port 7891.
+    Thread-safe — module-level lock prevents concurrent spawns.
+    Called from notification threads — must never block long.
     """
-    global _daemon_healthy, _daemon_last_check, _spawn_lock
+    global _daemon_healthy, _daemon_last_check
 
-    import threading
-    if _spawn_lock is None:
-        _spawn_lock = threading.Lock()
-
-    # Skip check if we pinged recently
+    # Fast path — skip if recently confirmed alive
     now = time.time()
     if _daemon_healthy and (now - _daemon_last_check) < 5:
         return True
 
     _daemon_last_check = now
 
-    # Try ping first — fast path, no lock needed
+    # Already alive — return immediately
     if _send_ipc({"type": "ping"}, timeout=0.3):
         _daemon_healthy = True
         return True
 
-    # Daemon not responding — acquire lock before spawning
-    # This prevents multiple threads from spawning multiple daemons
-    if not _spawn_lock.acquire(blocking=False):
-        # Another thread is already spawning — wait and check
-        time.sleep(1.0)
-        return _send_ipc({"type": "ping"}, timeout=0.3)
+    # Dead — acquire lock before spawning
+    if not _spawn_lock.acquire(blocking=True, timeout=8):
+        return False
 
     try:
-        # Double-check after acquiring lock
+        # Double-check after lock — another thread may have spawned it
         if _send_ipc({"type": "ping"}, timeout=0.3):
             _daemon_healthy = True
             return True
 
         electron = _electron()
         if not electron:
-            print(Fore.YELLOW + "[OVERLAY] Electron not found — daemon can't start")
+            print(Fore.YELLOW + "[OVERLAY] Electron not found")
             return False
 
         daemon_js = os.path.join(_root(), "electron", "overlay_daemon.js")
         if not os.path.exists(daemon_js):
-            print(Fore.YELLOW + f"[OVERLAY] Daemon script missing: {daemon_js}")
+            print(Fore.YELLOW + "[OVERLAY] overlay_daemon.js not found")
             return False
 
         print(Fore.CYAN + "[OVERLAY] Spawning overlay daemon...")
-        try:
-            subprocess.Popen(
-                [electron, daemon_js],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                stdin=subprocess.DEVNULL,
-                creationflags=0x08000000 | 0x00000008 | 0x00000200,
-            )
-        except Exception as e:
-            print(Fore.YELLOW + f"[OVERLAY] Daemon spawn failed: {e}")
-            return False
+        subprocess.Popen(
+            [electron, daemon_js],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL,
+            creationflags=0x08000000 | 0x00000008 | 0x00000200,
+        )
 
-        # Wait up to 4 seconds for daemon to be ready
-        for _ in range(40):
+        # Wait up to 5 seconds
+        for _ in range(50):
             time.sleep(0.1)
             if _send_ipc({"type": "ping"}, timeout=0.2):
-                print(Fore.GREEN + "[OVERLAY] Daemon is ready")
+                print(Fore.GREEN + "[OVERLAY] Daemon ready")
                 _daemon_healthy = True
                 return True
 
-        print(Fore.YELLOW + "[OVERLAY] Daemon didn't respond in time")
+        print(Fore.YELLOW + "[OVERLAY] Spawn timed out")
         return False
 
     finally:
