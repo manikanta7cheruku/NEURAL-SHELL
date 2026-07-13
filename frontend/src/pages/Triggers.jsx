@@ -1302,10 +1302,11 @@ export default function Triggers() {
         )}
 
         {/* ── WORKSPACES TAB ───────────────────────────────────── */}
-            {/* Chrome Tab Sync Setup */}
-            <ChromeTabSyncCard />
         {tab === 'workspaces' && (
           <>
+            {/* Chrome Tab Sync Setup */}
+            <ChromeTabSyncCard />
+
             <button onClick={handleScan} disabled={scanning}
                     className="flex items-center gap-2.5 w-full px-4 py-3 mb-4
                                bg-white/[0.02] border border-white/8 rounded-2xl
