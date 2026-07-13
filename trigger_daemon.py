@@ -665,6 +665,8 @@ class HotkeyListener:
             if hk:
                 normalized = _normalize_hotkey(hk)
                 self._hotkey_map[normalized] = t
+                print(f"[HOTKEY DEBUG] Registered: '{hk}' → normalized='{normalized}' "
+                      f"for trigger '{t.get('name')}'")
         print(f"[HOTKEY] Loaded {len(self._hotkey_map)} hotkey triggers")
 
     def start(self):
@@ -779,6 +781,11 @@ class HotkeyListener:
             return
 
         combo = _normalize_hotkey("+".join(list(self._pressed_mods) + [final_key]))
+
+        # Debug — shows every key combo attempted (remove after testing)
+        print(f"[HOTKEY DEBUG] key='{final_key}' mods={self._pressed_mods} "
+              f"combo='{combo}' map_keys={list(self._hotkey_map.keys())}")
+
         trigger = self._hotkey_map.get(combo)
 
         if trigger:
