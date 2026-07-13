@@ -110,7 +110,9 @@ def _ensure_daemon_running():
             [electron, daemon_js],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            creationflags=0x08000000,  # CREATE_NO_WINDOW
+            stdin=subprocess.DEVNULL,
+            creationflags=0x08000000 | 0x00000008 | 0x00000200,
+            # CREATE_NO_WINDOW | DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
         )
     except Exception as e:
         print(Fore.YELLOW + f"[OVERLAY] Daemon spawn failed: {e}")
