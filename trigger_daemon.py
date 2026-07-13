@@ -56,19 +56,63 @@ PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-APPDATA       = os.environ.get('APPDATA', os.path.expanduser('~'))
-SEVEN_DATA    = os.path.join(APPDATA, 'SEVEN', 'seven_data')
-TRIGGERS_DB   = os.path.join(SEVEN_DATA, 'triggers.db')
-RELOAD_SIGNAL = os.path.join(SEVEN_DATA, 'trigger_reload.signal')
-LOCK_FILE     = os.path.join(APPDATA, 'SEVEN', 'trigger_daemon.lock')
+APPDATA      = os.environ.get('APPDATA', os.path.expanduser('~'))
+LOCK_FILE    = os.path.join(APPDATA, 'SEVEN', 'trigger_daemon.lock')
 
-# Also check local seven_data (dev mode)
+# ── DB path resolution ────────────────────────────────────────────────────
+# Priority 1: Local seven_data (dev mode — has actual triggers)
+# Priority 2: APPDATA seven_data (installed mode)
+# We check which one has the triggers table populated.
+
 LOCAL_SEVEN_DATA = os.path.join(PROJECT_ROOT, 'seven_data')
-LOCAL_DB = os.path.join(LOCAL_SEVEN_DATA, 'triggers.db')
-if os.path.exists(LOCAL_DB) and not os.path.exists(TRIGGERS_DB):
-    TRIGGERS_DB   = LOCAL_DB
-    SEVEN_DATA    = LOCAL_SEVEN_DATA
-    RELOAD_SIGNAL = os.path.join(LOCAL_SEVEN_DATA, 'trigger_reload.signal')
+LOCAL_DB         = os.path.join(LOCAL_SEVEN_DATA, 'triggers.db')
+APPDATA_SEVEN    = os.path.join(APPDATA, 'SEVEN', 'seven_data')
+APPDATA_DB       = os.path.join(APPDATA_SEVEN, 'triggers.db')
+
+
+def _resolve_db_path():
+    """
+    Find the correct triggers.db.
+    Returns the path that actually has the triggers table with data.
+    In dev mode: local seven_data always wins.
+    In production: APPDATA wins.
+    """
+    def _has_triggers(db_path):
+        if not os.path.exists(db_path):
+            return False
+        try:
+            import sqlite3 as _sq
+            c = _sq.connect(db_path, timeout=2)
+            count = c.execute(
+                "SELECT COUNT(*) FROM sqlite_master "
+                "WHERE type='table' AND name='triggers'"
+            ).fetchone()[0]
+            c.close()
+            return count > 0
+        except Exception:
+            return False
+
+    # Dev mode: local DB exists and has triggers table → use it
+    if _has_triggers(LOCAL_DB):
+        print(f"[TRIGGER DAEMON] Using LOCAL DB: {LOCAL_DB}")
+        return LOCAL_DB, LOCAL_SEVEN_DATA
+
+    # Production: APPDATA DB has triggers table → use it
+    if _has_triggers(APPDATA_DB):
+        print(f"[TRIGGER DAEMON] Using APPDATA DB: {APPDATA_DB}")
+        return APPDATA_DB, APPDATA_SEVEN
+
+    # Neither has triggers table yet — default to local in dev, APPDATA in prod
+    if os.path.exists(LOCAL_SEVEN_DATA):
+        print(f"[TRIGGER DAEMON] Defaulting to LOCAL (no triggers yet): {LOCAL_DB}")
+        return LOCAL_DB, LOCAL_SEVEN_DATA
+
+    print(f"[TRIGGER DAEMON] Defaulting to APPDATA: {APPDATA_DB}")
+    return APPDATA_DB, APPDATA_SEVEN
+
+
+TRIGGERS_DB, SEVEN_DATA = _resolve_db_path()
+RELOAD_SIGNAL = os.path.join(SEVEN_DATA, 'trigger_reload.signal')
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -306,26 +350,50 @@ def _ensure_overlay_alive() -> bool:
 
     try:
         # Find Electron
-        candidates = [
-            os.path.join(PROJECT_ROOT, "node_modules", "electron", "dist", "electron.exe"),
-            os.path.join(PROJECT_ROOT, "node_modules", ".bin", "electron.cmd"),
-            os.path.join(PROJECT_ROOT, "frontend", "node_modules",
-                         "electron", "dist", "electron.exe"),
+        # Find Electron — check multiple roots since cwd may differ
+        _roots_to_check = [
+            PROJECT_ROOT,
+            os.getcwd(),
+            os.path.dirname(PROJECT_ROOT),
         ]
+        # Remove duplicates while preserving order
+        _checked_roots = []
+        for _r in _roots_to_check:
+            if _r not in _checked_roots:
+                _checked_roots.append(_r)
+
         electron_exe = None
-        for p in candidates:
-            if os.path.exists(p):
-                electron_exe = p
+        for _root in _checked_roots:
+            for _rel in [
+                os.path.join("node_modules", "electron", "dist", "electron.exe"),
+                os.path.join("node_modules", ".bin", "electron.cmd"),
+                os.path.join("frontend", "node_modules", "electron", "dist", "electron.exe"),
+            ]:
+                _candidate = os.path.join(_root, _rel)
+                if os.path.exists(_candidate):
+                    electron_exe = _candidate
+                    break
+            if electron_exe:
                 break
 
         if not electron_exe:
-            print("[TRIGGER DAEMON] Electron not found — overlay unavailable")
+            print("[TRIGGER DAEMON] Electron not found in any known location")
+            print(f"[TRIGGER DAEMON] Searched roots: {_checked_roots}")
             return False
 
-        daemon_js = os.path.join(PROJECT_ROOT, "electron", "overlay_daemon.js")
-        if not os.path.exists(daemon_js):
-            print(f"[TRIGGER DAEMON] overlay_daemon.js not found")
+        # Find overlay_daemon.js
+        daemon_js = None
+        for _root in _checked_roots:
+            _candidate = os.path.join(_root, "electron", "overlay_daemon.js")
+            if os.path.exists(_candidate):
+                daemon_js = _candidate
+                break
+
+        if not daemon_js:
+            print(f"[TRIGGER DAEMON] overlay_daemon.js not found in: {_checked_roots}")
             return False
+
+        print(f"[TRIGGER DAEMON] Found overlay_daemon.js: {daemon_js}")
 
         subprocess.Popen(
             [electron_exe, daemon_js],
