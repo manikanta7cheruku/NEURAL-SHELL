@@ -28,6 +28,7 @@ COMMUNICATION:
   Reads: seven_data/triggers.db (SQLite WAL)
   Reads: seven_data/trigger_reload.signal (daemon reloads triggers)
   Checks: port 7777 to know if Seven is running
+  Sends: TCP 7891 to overlay_daemon for notifications + arrangement
 =============================================================================
 """
 
@@ -41,7 +42,6 @@ import threading
 from datetime import datetime
 
 # Hide console window ONLY when running as pythonw (background daemon)
-# Do NOT hide when running as python (debugging) or when DEBUG flag is set
 if sys.platform == "win32" and not os.environ.get("SEVEN_DEBUG_DAEMON"):
     try:
         import ctypes
@@ -56,18 +56,18 @@ PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-APPDATA      = os.environ.get('APPDATA', os.path.expanduser('~'))
-SEVEN_DATA   = os.path.join(APPDATA, 'SEVEN', 'seven_data')
-TRIGGERS_DB  = os.path.join(SEVEN_DATA, 'triggers.db')
+APPDATA       = os.environ.get('APPDATA', os.path.expanduser('~'))
+SEVEN_DATA    = os.path.join(APPDATA, 'SEVEN', 'seven_data')
+TRIGGERS_DB   = os.path.join(SEVEN_DATA, 'triggers.db')
 RELOAD_SIGNAL = os.path.join(SEVEN_DATA, 'trigger_reload.signal')
-LOCK_FILE    = os.path.join(APPDATA, 'SEVEN', 'trigger_daemon.lock')
+LOCK_FILE     = os.path.join(APPDATA, 'SEVEN', 'trigger_daemon.lock')
 
-# Also check local seven_data
+# Also check local seven_data (dev mode)
 LOCAL_SEVEN_DATA = os.path.join(PROJECT_ROOT, 'seven_data')
 LOCAL_DB = os.path.join(LOCAL_SEVEN_DATA, 'triggers.db')
 if os.path.exists(LOCAL_DB) and not os.path.exists(TRIGGERS_DB):
-    TRIGGERS_DB = LOCAL_DB
-    SEVEN_DATA = LOCAL_SEVEN_DATA
+    TRIGGERS_DB   = LOCAL_DB
+    SEVEN_DATA    = LOCAL_SEVEN_DATA
     RELOAD_SIGNAL = os.path.join(LOCAL_SEVEN_DATA, 'trigger_reload.signal')
 
 
@@ -80,9 +80,9 @@ def acquire_lock():
     try:
         import ctypes
         _mutex_name = "Global\\SevenTriggerDaemon_SingleInstance"
-        _kernel32 = ctypes.windll.kernel32
-        _mutex = _kernel32.CreateMutexW(None, True, _mutex_name)
-        _last_err = _kernel32.GetLastError()
+        _kernel32   = ctypes.windll.kernel32
+        _mutex      = _kernel32.CreateMutexW(None, True, _mutex_name)
+        _last_err   = _kernel32.GetLastError()
 
         if _last_err == 183:  # ERROR_ALREADY_EXISTS
             print("[TRIGGER DAEMON] Already running. Exiting.")
@@ -184,13 +184,45 @@ def is_seven_running():
 
 
 # ─────────────────────────────────────────────────────────────────────────
+# OVERLAY DAEMON COMMUNICATION
+# ─────────────────────────────────────────────────────────────────────────
+
+def _send_overlay(msg: dict, timeout: float = 0.5) -> bool:
+    """Send TCP message to overlay_daemon on port 7891."""
+    try:
+        import socket as _sock
+        s = _sock.create_connection(("127.0.0.1", 7891), timeout=timeout)
+        s.settimeout(timeout)
+        s.sendall((json.dumps(msg) + "\n").encode("utf-8"))
+        data = b""
+        while b"\n" not in data:
+            chunk = s.recv(1024)
+            if not chunk:
+                break
+            data += chunk
+        s.close()
+        if data:
+            resp = json.loads(data.decode("utf-8").strip())
+            return resp.get("ok", False)
+        return False
+    except Exception:
+        return False
+
+
+def _is_overlay_alive() -> bool:
+    """Ping overlay_daemon."""
+    return _send_overlay({"type": "ping"}, timeout=0.3)
+
+
+# ─────────────────────────────────────────────────────────────────────────
 # TRIGGER EXECUTION
 # ─────────────────────────────────────────────────────────────────────────
 
 def execute_trigger(trigger):
     """
     Execute a trigger action.
-    Shows notification INSTANTLY, then runs action.
+    Shows notification INSTANTLY, then runs action in background.
+    For workspace triggers: shows arrangement card after apps open.
     """
     action_type = trigger.get("action_type", "")
     action_data = trigger.get("action_data", {})
@@ -198,115 +230,164 @@ def execute_trigger(trigger):
 
     print(f"[TRIGGER DAEMON] Firing: {name} (type={action_type})")
 
-    # ── STEP 1: Show notification IMMEDIATELY ──
-    if not trigger.get("silent", False):
+    # ── Collect metadata for notification ──
+    app_count  = 0
+    tab_count  = 0
+    app_names  = ""
+
+    if action_type == "open_workspace":
+        ws_id   = action_data.get("workspace_id")
+        ws_name = action_data.get("workspace_name")
         try:
-            from seven_overlay.notifications import show_trigger_notification
-
-            app_count = 0
-            tab_count = 0
-            app_names = ""
-
-            if action_type == "open_workspace":
-                ws_id   = action_data.get("workspace_id")
-                ws_name = action_data.get("workspace_name")
-
-                try:
-                    conn = sqlite3.connect(TRIGGERS_DB, timeout=5)
-                    conn.row_factory = sqlite3.Row
-                    conn.execute("PRAGMA journal_mode=WAL")
-
-                    if ws_id:
-                        ws_row = conn.execute(
-                            "SELECT apps FROM workspaces WHERE id = ?",
-                            (ws_id,)
-                        ).fetchone()
-                    elif ws_name:
-                        ws_row = conn.execute(
-                            "SELECT apps FROM workspaces WHERE LOWER(name) = ?",
-                            (ws_name.lower(),)
-                        ).fetchone()
-                    else:
-                        ws_row = None
-                    conn.close()
-
-                    if ws_row:
-                        apps_data = json.loads(ws_row["apps"] or "[]")
-                        app_count = len(apps_data)
-                        names_list = []
-                        for a in apps_data:
-                            n = a.get("name", "")
-                            if " - " in n:
-                                n = n.split(" - ")[-1].strip()
-                            names_list.append(n)
-                            tab_count += len(a.get("tabs", []))
-                        app_names = ",".join(names_list)
-                except Exception as we:
-                    print(f"[TRIGGER DAEMON] Workspace lookup: {we}")
-
-            elif action_type == "open_app":
-                apps_list = action_data.get("apps", [])
-                single    = action_data.get("app", "")
-                if single and not apps_list:
-                    apps_list = [single]
-                app_count = len(apps_list)
-                app_names = ",".join(apps_list)
-
-            show_trigger_notification(
-                trigger_name=name,
-                action_type=action_type,
-                app_count=app_count,
-                tab_count=tab_count,
-                app_names=app_names,
-            )
-            print(f"[TRIGGER DAEMON] Notification fired instantly: {name}")
-
-        except Exception as ne:
-            print(f"[TRIGGER DAEMON] Notification failed: {ne}")
-
-    # ── STEP 2: Execute action in background ──
-    def _run_action():
-        try:
-            if action_type == "open_app":
-                _exec_open_app(action_data)
-            elif action_type == "open_url":
-                _exec_open_url(action_data)
-            elif action_type == "open_file":
-                _exec_open_file(action_data)
-            elif action_type == "open_folder":
-                _exec_open_folder(action_data)
-            elif action_type == "open_workspace":
-                _exec_open_workspace(action_data)
-            elif action_type == "run_command":
-                _exec_run_command(action_data)
-            elif action_type == "seven_action":
-                _exec_seven_action(action_data)
+            conn = sqlite3.connect(TRIGGERS_DB, timeout=5)
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA journal_mode=WAL")
+            if ws_id:
+                ws_row = conn.execute(
+                    "SELECT apps FROM workspaces WHERE id = ?", (ws_id,)
+                ).fetchone()
+            elif ws_name:
+                ws_row = conn.execute(
+                    "SELECT apps FROM workspaces WHERE LOWER(name) = ?",
+                    (ws_name.lower(),)
+                ).fetchone()
             else:
-                print(f"[TRIGGER DAEMON] Unknown action type: {action_type}")
-                return
+                ws_row = None
+            conn.close()
 
-            # Play sound after action starts
-            if not trigger.get("silent", False):
-                try:
-                    import winsound
-                    winsound.MessageBeep(winsound.MB_ICONASTERISK)
-                except Exception:
-                    pass
+            if ws_row:
+                apps_data  = json.loads(ws_row["apps"] or "[]")
+                app_count  = len(apps_data)
+                names_list = []
+                for a in apps_data:
+                    n = a.get("name", "")
+                    if " - " in n:
+                        n = n.split(" - ")[-1].strip()
+                    names_list.append(n)
+                    tab_count += len(a.get("tabs", []))
+                app_names = ",".join(names_list)
+        except Exception as we:
+            print(f"[TRIGGER DAEMON] Workspace lookup: {we}")
 
-            # Update stats
-            update_fire_stats(trigger.get("id"))
+    elif action_type == "open_app":
+        apps_list  = action_data.get("apps", [])
+        single     = action_data.get("app", "")
+        if single and not apps_list:
+            apps_list = [single]
+        app_count  = len(apps_list)
+        app_names  = ",".join(apps_list)
 
-        except Exception as e:
-            print(f"[TRIGGER DAEMON] Execution error: {e}")
-            import traceback; traceback.print_exc()
+    # ── STEP 1: Show notification immediately (non-blocking) ──
+    if not trigger.get("silent", False):
+        threading.Thread(
+            target=_fire_notification,
+            args=(name, action_type, app_count, tab_count, app_names),
+            daemon=True,
+        ).start()
 
-    threading.Thread(target=_run_action, daemon=True).start()
+    # ── STEP 2: Execute action + handle arrangement ──
+    threading.Thread(
+        target=_run_action_and_arrange,
+        args=(trigger, action_type, action_data, app_names),
+        daemon=True,
+    ).start()
+
+
+def _fire_notification(name, action_type, app_count, tab_count, app_names):
+    """Send notification to overlay_daemon."""
+    subtitle_map = {
+        "open_app":       "App launched",
+        "open_url":       "URL opened",
+        "open_workspace": "Workspace restored",
+        "open_file":      "File opened",
+        "open_folder":    "Folder opened",
+        "run_command":    "Command executed",
+        "seven_action":   "Action completed",
+    }
+    subtitle = subtitle_map.get(action_type, "Trigger fired")
+
+    parts = []
+    if app_count > 0:
+        parts.append(f"{app_count} app{'s' if app_count != 1 else ''}")
+    if tab_count > 0:
+        parts.append(f"{tab_count} tab{'s' if tab_count != 1 else ''}")
+    detail  = "  ·  ".join(parts)
+    hold_ms = 3800 if action_type == "open_workspace" else 3200
+
+    if not _is_overlay_alive():
+        print("[TRIGGER DAEMON] Overlay daemon not running — notification skipped")
+        return
+
+    _send_overlay({
+        "type": "notif",
+        "data": {
+            "title":    name,
+            "subtitle": subtitle,
+            "detail":   detail,
+            "holdMs":   hold_ms,
+        },
+    })
+    print(f"[TRIGGER DAEMON] Notification sent: {name}")
+
+
+def _run_action_and_arrange(trigger, action_type, action_data, app_names):
+    """Execute action, then send arrangement card for workspace triggers."""
+    name = trigger.get("name", "unnamed")
+
+    try:
+        if action_type == "open_app":
+            _exec_open_app(action_data)
+        elif action_type == "open_url":
+            _exec_open_url(action_data)
+        elif action_type == "open_file":
+            _exec_open_file(action_data)
+        elif action_type == "open_folder":
+            _exec_open_folder(action_data)
+        elif action_type == "open_workspace":
+            _exec_open_workspace(action_data)
+        elif action_type == "run_command":
+            _exec_run_command(action_data)
+        elif action_type == "seven_action":
+            _exec_seven_action(action_data)
+        else:
+            print(f"[TRIGGER DAEMON] Unknown action type: {action_type}")
+            return
+
+        # Play sound
+        if not trigger.get("silent", False):
+            try:
+                import winsound
+                winsound.MessageBeep(winsound.MB_ICONASTERISK)
+            except Exception:
+                pass
+
+        # ── STEP 3: Arrangement card (workspace only) ──
+        # Wait for notification to finish (hold + slide-up), then show arrangement
+        if action_type == "open_workspace" and not trigger.get("silent", False):
+            hold_ms = 3800
+            # Wait for notification to complete before showing arrangement
+            time.sleep((hold_ms + 500) / 1000.0)
+
+            app_list = [a.strip() for a in app_names.split(",") if a.strip()]
+            if app_list and _is_overlay_alive():
+                _send_overlay({
+                    "type": "arrange",
+                    "data": {"appNames": app_list},
+                })
+                print(f"[TRIGGER DAEMON] Arrangement card sent: {app_list}")
+
+        # Update stats
+        update_fire_stats(trigger.get("id"))
+
+    except Exception as e:
+        print(f"[TRIGGER DAEMON] Execution error: {e}")
+        import traceback
+        traceback.print_exc()
 
 
 def _exec_open_app(data):
     """Launch application(s). Supports single or multiple apps."""
-    # Support both single app and multi-app
-    apps_list = data.get("apps", [])
+    apps_list  = data.get("apps", [])
     single_app = data.get("app", "")
     if single_app and not apps_list:
         apps_list = [single_app]
@@ -319,51 +400,39 @@ def _exec_open_app(data):
         if not app_name:
             continue
 
-        # ALWAYS try direct launch first (fastest, most reliable)
-        launched = False
-
-        # Method 1: hands.core.open_app (Seven's own launcher)
+        # Method 1: hands.core.open_app
         try:
             from hands.core import open_app
             open_app(app_name)
             print(f"[TRIGGER DAEMON] Opened: {app_name}")
-            launched = True
             continue
         except Exception as e:
             print(f"[TRIGGER DAEMON] hands.core failed for {app_name}: {e}")
 
         # Method 2: AppOpener
-        if not launched:
-            try:
-                import AppOpener
-                AppOpener.open(app_name)
-                print(f"[TRIGGER DAEMON] Opened via AppOpener: {app_name}")
-                launched = True
-                continue
-            except Exception as e:
-                print(f"[TRIGGER DAEMON] AppOpener failed for {app_name}: {e}")
+        try:
+            import AppOpener
+            AppOpener.open(app_name)
+            print(f"[TRIGGER DAEMON] Opened via AppOpener: {app_name}")
+            continue
+        except Exception as e:
+            print(f"[TRIGGER DAEMON] AppOpener failed for {app_name}: {e}")
 
-        # Method 3: subprocess start command
-        if not launched:
-            try:
-                subprocess.Popen(f'start {app_name}', shell=True)
-                print(f"[TRIGGER DAEMON] Opened via start: {app_name}")
-                launched = True
-            except Exception as e:
-                print(f"[TRIGGER DAEMON] start command failed for {app_name}: {e}")
-
-        if not launched:
-            print(f"[TRIGGER DAEMON] FAILED to open: {app_name}")
+        # Method 3: shell start
+        try:
+            subprocess.Popen(f'start {app_name}', shell=True)
+            print(f"[TRIGGER DAEMON] Opened via start: {app_name}")
+        except Exception as e:
+            print(f"[TRIGGER DAEMON] start command failed for {app_name}: {e}")
 
 
 def _exec_open_url(data):
     """Open URL(s) in default browser."""
     import webbrowser
-    urls = data.get("urls", [])
+    urls   = data.get("urls", [])
     single = data.get("url", "")
     if single and not urls:
         urls = [single]
-
     for url in urls:
         if url:
             webbrowser.open(url)
@@ -372,11 +441,10 @@ def _exec_open_url(data):
 
 def _exec_open_file(data):
     """Open file(s) with default application."""
-    paths = data.get("paths", [])
+    paths  = data.get("paths", [])
     single = data.get("path", "")
     if single and not paths:
         paths = [single]
-
     for path in paths:
         if path and os.path.exists(path):
             os.startfile(path)
@@ -385,11 +453,10 @@ def _exec_open_file(data):
 
 def _exec_open_folder(data):
     """Open folder(s) in Explorer."""
-    paths = data.get("paths", [])
+    paths  = data.get("paths", [])
     single = data.get("path", "")
     if single and not paths:
         paths = [single]
-
     for path in paths:
         if path and os.path.exists(path):
             subprocess.Popen(['explorer', path])
@@ -397,13 +464,11 @@ def _exec_open_folder(data):
 
 
 def _exec_open_workspace(data):
-    """Restore a workspace by ID or name."""
+    """Restore a workspace by ID or name using smart_restore."""
     workspace_id   = data.get("workspace_id")
     workspace_name = data.get("workspace_name")
 
-    workspace = None
-
-    # Try via API first
+    # Try via API first (Seven is running)
     if is_seven_running():
         try:
             import requests
@@ -417,7 +482,7 @@ def _exec_open_workspace(data):
         except Exception:
             pass
 
-    # Direct DB lookup + execute
+    # Direct DB lookup + smart restore
     try:
         conn = sqlite3.connect(TRIGGERS_DB, timeout=5)
         conn.row_factory = sqlite3.Row
@@ -439,7 +504,8 @@ def _exec_open_workspace(data):
         conn.close()
 
         if not row:
-            print(f"[TRIGGER DAEMON] Workspace not found: id={workspace_id} name={workspace_name}")
+            print(f"[TRIGGER DAEMON] Workspace not found: "
+                  f"id={workspace_id} name={workspace_name}")
             return
 
         workspace = dict(row)
@@ -452,77 +518,18 @@ def _exec_open_workspace(data):
         try:
             from hands.workspace import smart_restore
             opened, skipped = smart_restore(apps)
-            print(f"[TRIGGER DAEMON] Smart restore: {opened} opened, {skipped} already running")
+            print(f"[TRIGGER DAEMON] Smart restore: "
+                  f"{opened} opened, {skipped} already running")
         except ImportError:
-            # Fallback to full restore
-            threads = []
-            for app_config in apps:
-                t = threading.Thread(
-                    target=_launch_workspace_app,
-                    args=(app_config,),
-                    daemon=True
-                )
-                t.start()
-                threads.append(t)
-            for t in threads:
-                t.join(timeout=15)
+            # Fallback: parallel full restore
+            from hands.workspace import restore
+            restore(apps)
 
-        print(f"[TRIGGER DAEMON] Workspace restored: {workspace.get('name')} ({len(apps)} apps)")
+        print(f"[TRIGGER DAEMON] Workspace restored: "
+              f"{workspace.get('name')} ({len(apps)} apps)")
 
     except Exception as e:
         print(f"[TRIGGER DAEMON] Workspace restore error: {e}")
-
-
-def _launch_workspace_app(app_config):
-    """Launch a single app from workspace config."""
-    app_type = app_config.get("type", "app")
-
-    try:
-        if app_type == "chrome":
-            tabs = app_config.get("tabs", [])
-            urls = [t.get("url", "") for t in tabs if t.get("url")]
-            if urls:
-                # Open Chrome with all tabs
-                chrome_cmd = f'start chrome {" ".join(urls)}'
-                subprocess.Popen(chrome_cmd, shell=True)
-            else:
-                subprocess.Popen(['start', 'chrome'], shell=True)
-
-        elif app_type == "vscode":
-            workspace_path = app_config.get("workspace_path", "")
-            if workspace_path and os.path.exists(workspace_path):
-                subprocess.Popen(['code', workspace_path])
-            else:
-                subprocess.Popen(['code'])
-
-        elif app_type == "explorer":
-            folder = app_config.get("folder_path", "")
-            if folder and os.path.exists(folder):
-                subprocess.Popen(['explorer', folder])
-
-        elif app_type == "app":
-            name = app_config.get("name", "")
-            exe  = app_config.get("exe_path")
-            if exe and os.path.exists(exe):
-                subprocess.Popen([exe])
-            elif name:
-                try:
-                    from hands.core import open_app
-                    open_app(name)
-                except ImportError:
-                    try:
-                        import AppOpener
-                        AppOpener.open(name)
-                    except Exception:
-                        pass
-
-        elif app_type == "file" or app_type == "pdf":
-            path = app_config.get("file_path", "")
-            if path and os.path.exists(path):
-                os.startfile(path)
-
-    except Exception as e:
-        print(f"[TRIGGER DAEMON] App launch error: {e}")
 
 
 def _exec_run_command(data):
@@ -538,11 +545,10 @@ def _exec_seven_action(data):
     if not action:
         return
 
-    # Try API if Seven is running
     if is_seven_running():
         try:
             import requests
-            r = requests.post(
+            requests.post(
                 "http://127.0.0.1:7777/api/chat",
                 json={"text": action, "speaker_id": "default"},
                 timeout=10
@@ -555,45 +561,21 @@ def _exec_seven_action(data):
     # Direct execution fallback for system commands
     action_lower = action.lower()
     try:
-        if "volume" in action_lower or "brightness" in action_lower or "mute" in action_lower:
-            from hands.system import manage_system
-            # Parse simple commands
-            if "max" in action_lower and "volume" in action_lower:
-                manage_system({"action": "volume_set", "value": "100"})
-            elif "volume" in action_lower:
-                # Try to extract number
-                import re
-                nums = re.findall(r'\d+', action_lower)
-                if nums:
-                    manage_system({"action": "volume_set", "value": nums[0]})
-            if "max" in action_lower and "brightness" in action_lower:
-                manage_system({"action": "brightness_set", "value": "100"})
-            elif "brightness" in action_lower:
-                import re
-                nums = re.findall(r'\d+', action_lower)
-                if nums:
-                    manage_system({"action": "brightness_set", "value": nums[0]})
-            if "mute" in action_lower:
-                manage_system({"action": "volume_mute"})
-            print(f"[TRIGGER DAEMON] Direct system action: {action}")
+        import re
+        from hands.system import manage_system
+        if "mute" in action_lower:
+            manage_system({"action": "volume_mute"})
+        elif "volume" in action_lower:
+            nums = re.findall(r'\d+', action_lower)
+            if nums:
+                manage_system({"action": "volume_set", "value": nums[0]})
+        elif "brightness" in action_lower:
+            nums = re.findall(r'\d+', action_lower)
+            if nums:
+                manage_system({"action": "brightness_set", "value": nums[0]})
+        print(f"[TRIGGER DAEMON] Direct system action: {action}")
     except Exception as e:
         print(f"[TRIGGER DAEMON] Direct action failed: {e}")
-
-
-def _show_notification(trigger_name, action_type):
-    """Show Windows toast notification for trigger fire."""
-    try:
-        from winotify import Notification, audio
-        toast = Notification(
-            app_id="Seven AI",
-            title="Trigger Fired",
-            msg=f"{trigger_name}",
-            duration="short"
-        )
-        toast.set_audio(audio.Default, loop=False)
-        toast.show()
-    except Exception:
-        pass
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -603,27 +585,24 @@ def _show_notification(trigger_name, action_type):
 class HotkeyListener:
     """
     Global hotkey listener using pynput.
-    Fixed: uses virtual key codes (vk) instead of char for reliable
-    detection when modifier keys (Ctrl/Shift/Alt) are held.
+    Uses virtual key codes (vk) for reliable detection when modifiers held.
     """
 
     def __init__(self):
         self._triggers     = []
         self._hotkey_map   = {}
-        self._pressed_mods = set()   # currently held modifier keys
+        self._pressed_mods = set()
         self._listener     = None
         self._running      = False
-        self._last_fire    = 0       # prevent rapid re-firing
+        self._last_fire    = 0
 
     def reload(self, triggers):
-        self._triggers = triggers
+        self._triggers   = triggers
         self._hotkey_map = {}
         for t in triggers:
             hk = t.get("hotkey")
             if hk:
-                # Normalize: sort parts, lowercase
-                parts = sorted(hk.lower().replace(" ", "").split("+"))
-                normalized = "+".join(parts)
+                normalized = _normalize_hotkey(hk)
                 self._hotkey_map[normalized] = t
         print(f"[HOTKEY] Loaded {len(self._hotkey_map)} hotkey triggers")
 
@@ -640,12 +619,9 @@ class HotkeyListener:
                     name = self._resolve_key(key)
                     if not name:
                         return
-
-                    # Track modifiers separately
                     if name in ("ctrl", "shift", "alt", "win"):
                         self._pressed_mods.add(name)
                     else:
-                        # Non-modifier key pressed — check combo
                         self._try_match(name)
                 except Exception:
                     pass
@@ -678,70 +654,56 @@ class HotkeyListener:
             self._listener.stop()
 
     def _resolve_key(self, key):
-        """
-        Convert any pynput key to a simple string name.
-        Uses virtual key code (vk) for letters/numbers — this is the FIX.
-        When Ctrl is held, key.char is None but key.vk is always correct.
-        """
+        """Convert pynput key to normalized string using vk codes."""
         from pynput import keyboard as kb
 
-        # Named special keys
         if isinstance(key, kb.Key):
             special = {
-                kb.Key.ctrl_l: "ctrl",   kb.Key.ctrl_r: "ctrl",
+                kb.Key.ctrl_l:  "ctrl",  kb.Key.ctrl_r:  "ctrl",
                 kb.Key.shift_l: "shift", kb.Key.shift_r: "shift",
-                kb.Key.alt_l: "alt",     kb.Key.alt_r: "alt",
-                kb.Key.alt_gr: "alt",
-                kb.Key.cmd: "win",       kb.Key.cmd_l: "win",
-                kb.Key.cmd_r: "win",
-                kb.Key.space: "space",
-                kb.Key.enter: "enter",
-                kb.Key.tab: "tab",
-                kb.Key.esc: "esc",
+                kb.Key.alt_l:   "alt",   kb.Key.alt_r:   "alt",
+                kb.Key.alt_gr:  "alt",
+                kb.Key.cmd:     "win",   kb.Key.cmd_l:   "win",
+                kb.Key.cmd_r:   "win",
+                kb.Key.space:   "space",
+                kb.Key.enter:   "enter",
+                kb.Key.tab:     "tab",
+                kb.Key.esc:     "esc",
                 kb.Key.backspace: "backspace",
-                kb.Key.delete: "delete",
-                kb.Key.home: "home",
-                kb.Key.end: "end",
+                kb.Key.delete:  "delete",
+                kb.Key.home:    "home",
+                kb.Key.end:     "end",
                 kb.Key.page_up: "pageup",
                 kb.Key.page_down: "pagedown",
-                kb.Key.up: "up",
-                kb.Key.down: "down",
-                kb.Key.left: "left",
-                kb.Key.right: "right",
-                kb.Key.insert: "insert",
-                kb.Key.menu: "menu",
+                kb.Key.up:      "up",
+                kb.Key.down:    "down",
+                kb.Key.left:    "left",
+                kb.Key.right:   "right",
+                kb.Key.insert:  "insert",
+                kb.Key.menu:    "menu",
             }
-            # F1-F12
             for i in range(1, 13):
                 fk = getattr(kb.Key, f"f{i}", None)
                 if fk:
                     special[fk] = f"f{i}"
-
             return special.get(key)
 
-        # Regular keys — ALWAYS use vk (virtual key code)
-        # This is the critical fix: when Ctrl is held, key.char = None
-        # but key.vk = 84 (for T), 67 (for C), etc.
         vk = getattr(key, 'vk', None)
         if vk is not None:
-            # A-Z
             if 65 <= vk <= 90:
                 return chr(vk).lower()
-            # 0-9
             if 48 <= vk <= 57:
                 return str(vk - 48)
-            # Numpad 0-9
             if 96 <= vk <= 105:
                 return f"num{vk - 96}"
-            # Common symbols
             sym = {
                 186: ";", 187: "=", 188: ",", 189: "-", 190: ".",
-                191: "/", 192: "`", 219: "[", 220: "\\", 221: "]", 222: "'",
+                191: "/", 192: "`", 219: "[", 220: "\\",
+                221: "]", 222: "'",
             }
             if vk in sym:
                 return sym[vk]
 
-        # Last resort: try char
         ch = getattr(key, 'char', None)
         if ch and isinstance(ch, str) and len(ch) == 1 and ch.isprintable():
             return ch.lower()
@@ -749,33 +711,86 @@ class HotkeyListener:
         return None
 
     def _try_match(self, final_key):
-        """
-        Called when a non-modifier key is pressed.
-        Combines currently held modifiers + this key into a combo string.
-        Checks against registered hotkeys.
-        """
-        import time as _t
-
-        # Build combo: modifiers + final key
-        combo_parts = sorted(list(self._pressed_mods) + [final_key])
-        combo = "+".join(combo_parts)
-
-        # Prevent rapid double-fire (within 500ms)
-        now = _t.time()
+        """Check current modifier + key combo against registered hotkeys."""
+        now = time.time()
         if now - self._last_fire < 0.5:
             return
 
-        # Look up in hotkey map
+        combo = _normalize_hotkey("+".join(list(self._pressed_mods) + [final_key]))
         trigger = self._hotkey_map.get(combo)
+
         if trigger:
             self._last_fire = now
             print(f"[HOTKEY] Match: {combo} -> {trigger['name']}")
-
             threading.Thread(
                 target=execute_trigger,
                 args=(trigger,),
                 daemon=True
             ).start()
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# AUDIO LISTENER
+# ─────────────────────────────────────────────────────────────────────────
+
+class AudioListener:
+    """
+    Listens for snap/clap patterns using DSP or YAMNet.
+    Only active if audio triggers are configured.
+    """
+
+    def __init__(self):
+        self._detector  = None
+        self._triggers  = []
+        self._audio_map = {}
+        self._running   = False
+
+    def reload(self, triggers):
+        self._triggers  = triggers
+        self._audio_map = {}
+        for t in triggers:
+            pattern = t.get("audio_pattern")
+            if pattern:
+                self._audio_map[pattern] = t
+        print(f"[AUDIO] Loaded {len(self._audio_map)} audio triggers")
+
+    def start(self):
+        if not self._audio_map:
+            print("[AUDIO] No audio triggers configured — skipping")
+            return
+
+        self._running = True
+
+        try:
+            from ears.audio_triggers import TriggerDetector
+            self._detector = TriggerDetector(sensitivity="medium")
+            self._detector.on_pattern = self._on_pattern
+            self._detector.start()
+            print("[AUDIO] Listener started (DSP mode)")
+        except Exception as e:
+            print(f"[AUDIO] Listener failed: {e}")
+
+    def stop(self):
+        self._running = False
+        if self._detector:
+            self._detector.stop()
+
+    def suppress(self, ms=3000):
+        if self._detector:
+            self._detector.suppress(ms)
+
+    def _on_pattern(self, count):
+        pattern_key = f"{count}_tap"
+        trigger = self._audio_map.get(pattern_key)
+        if trigger:
+            print(f"[AUDIO] Pattern {pattern_key} -> {trigger['name']}")
+            threading.Thread(
+                target=execute_trigger,
+                args=(trigger,),
+                daemon=True
+            ).start()
+        else:
+            print(f"[AUDIO] Pattern {pattern_key} — no trigger assigned")
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -792,7 +807,7 @@ class ReloadPoller:
 
     def start(self):
         self._running = True
-        self._thread = threading.Thread(target=self._poll, daemon=True)
+        self._thread  = threading.Thread(target=self._poll, daemon=True)
         self._thread.start()
         print("[RELOAD] DB change poller started")
 
@@ -810,70 +825,24 @@ class ReloadPoller:
                 pass
             time.sleep(2)
 
-def _ensure_overlay_daemon():
+
+# ─────────────────────────────────────────────────────────────────────────
+# HOTKEY NORMALIZATION (shared between listener + conflict check)
+# ─────────────────────────────────────────────────────────────────────────
+
+def _normalize_hotkey(hotkey: str) -> str:
     """
-    Make sure overlay_daemon.js is running.
-    Needed so notifications work even when Seven is closed.
+    Normalize hotkey string for consistent comparison.
+    'Ctrl+Shift+F' == 'shift+ctrl+f' == 'ctrl+f+shift' → 'ctrl+f+shift'
+    Modifiers always sorted first, then non-modifiers sorted after.
     """
-    try:
-        import socket as _sock
+    MODIFIERS = {"ctrl", "shift", "alt", "win"}
+    parts = [p.strip().lower() for p in hotkey.replace(" ", "").split("+") if p.strip()]
+    mods  = sorted([p for p in parts if p in MODIFIERS])
+    keys  = sorted([p for p in parts if p not in MODIFIERS])
+    return "+".join(mods + keys)
 
-        # Ping check
-        try:
-            s = _sock.create_connection(("127.0.0.1", 7891), timeout=0.5)
-            s.sendall(b'{"type":"ping"}\n')
-            s.settimeout(0.5)
-            data = s.recv(256)
-            s.close()
-            if b'"ok":true' in data or b'"ok": true' in data:
-                print("[TRIGGER DAEMON] Overlay daemon already running")
-                return
-        except Exception:
-            pass
 
-        # Not running — spawn it
-        project_root = PROJECT_ROOT
-
-        candidates = [
-            os.path.join(project_root, "node_modules", "electron", "dist", "electron.exe"),
-            os.path.join(project_root, "node_modules", ".bin", "electron.cmd"),
-            os.path.join(project_root, "frontend", "node_modules",
-                         "electron", "dist", "electron.exe"),
-        ]
-        electron_exe = None
-        for p in candidates:
-            if os.path.exists(p):
-                electron_exe = p
-                break
-
-        if not electron_exe:
-            print("[TRIGGER DAEMON] Electron not found — overlay disabled")
-            return
-
-        daemon_js = os.path.join(project_root, "electron", "overlay_daemon.js")
-        if not os.path.exists(daemon_js):
-            print(f"[TRIGGER DAEMON] overlay_daemon.js not found")
-            return
-
-        _CREATE_NO_WINDOW         = 0x08000000
-        _DETACHED_PROCESS         = 0x00000008
-        _CREATE_NEW_PROCESS_GROUP = 0x00000200
-
-        proc = subprocess.Popen(
-            [electron_exe, daemon_js],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            stdin=subprocess.DEVNULL,
-            creationflags=_CREATE_NO_WINDOW | _DETACHED_PROCESS | _CREATE_NEW_PROCESS_GROUP,
-            close_fds=True,
-            start_new_session=True,
-        )
-        print(f"[TRIGGER DAEMON] Overlay daemon spawned (PID {proc.pid})")
-
-    except Exception as e:
-        print(f"[TRIGGER DAEMON] Overlay ensure failed: {e}")
-
-        # Attempt to restart the overlay daemon
 # ─────────────────────────────────────────────────────────────────────────
 # MAIN DAEMON LOOP
 # ─────────────────────────────────────────────────────────────────────────
@@ -886,9 +855,6 @@ def main():
     print(f"[TRIGGER DAEMON] DB: {TRIGGERS_DB}")
     print(f"[TRIGGER DAEMON] PID: {os.getpid()}")
 
-    # Ensure overlay daemon is running (for instant notifications)
-    _ensure_overlay_daemon()
-
     # Load initial triggers
     triggers = load_triggers()
     print(f"[TRIGGER DAEMON] Loaded {len(triggers)} active triggers")
@@ -898,7 +864,6 @@ def main():
     audio_listener  = AudioListener()
 
     def reload_all():
-        """Reload all triggers from DB and distribute to listeners."""
         nonlocal triggers
         triggers = load_triggers()
         hotkey_listener.reload(triggers)
@@ -907,7 +872,7 @@ def main():
 
     reload_poller = ReloadPoller(on_reload=reload_all)
 
-    # Initial load into listeners
+    # Load into listeners
     hotkey_listener.reload(triggers)
     audio_listener.reload(triggers)
 
@@ -918,7 +883,6 @@ def main():
 
     print("[TRIGGER DAEMON] All listeners active. Waiting for triggers...")
 
-    # Keep alive
     try:
         while True:
             time.sleep(5)
@@ -932,73 +896,6 @@ def main():
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# AUDIO LISTENER (headset users only)
-# ─────────────────────────────────────────────────────────────────────────
-
-class AudioListener:
-    """
-    Listens for snap/clap patterns using DSP or YAMNet.
-    Only active if compatible mic detected.
-    """
-
-    def __init__(self):
-        self._detector  = None
-        self._triggers  = []
-        self._audio_map = {}
-        self._running   = False
-
-    def reload(self, triggers):
-        self._triggers = triggers
-        self._audio_map = {}
-        for t in triggers:
-            pattern = t.get("audio_pattern")
-            if pattern:
-                self._audio_map[pattern] = t
-        print(f"[AUDIO] Loaded {len(self._audio_map)} audio triggers")
-
-    def start(self):
-        if not self._audio_map:
-            print("[AUDIO] No audio triggers configured — skipping")
-            return
-
-        self._running = True
-
-        try:
-            from ears.audio_triggers import TriggerDetector
-
-            self._detector = TriggerDetector(sensitivity="medium")
-            self._detector.on_pattern = self._on_pattern
-            self._detector.start()
-            print("[AUDIO] Listener started (DSP mode)")
-
-        except Exception as e:
-            print(f"[AUDIO] Listener failed: {e}")
-
-    def stop(self):
-        self._running = False
-        if self._detector:
-            self._detector.stop()
-
-    def suppress(self, ms=3000):
-        if self._detector:
-            self._detector.suppress(ms)
-
-    def _on_pattern(self, count):
-        pattern_key = f"{count}_tap"
-        trigger = self._audio_map.get(pattern_key)
-
-        if trigger:
-            print(f"[AUDIO] Pattern {pattern_key} -> {trigger['name']}")
-            threading.Thread(
-                target=execute_trigger,
-                args=(trigger,),
-                daemon=True
-            ).start()
-        else:
-            print(f"[AUDIO] Pattern {pattern_key} — no trigger assigned")
-
-
-# ─────────────────────────────────────────────────────────────────────────
 # ENTRY POINT
 # ─────────────────────────────────────────────────────────────────────────
 
@@ -1007,63 +904,3 @@ if __name__ == "__main__":
         main()
     finally:
         release_lock()
-    """
-    Listens for snap/clap patterns using DSP or YAMNet.
-    Only active if compatible mic detected.
-    """
-
-    def __init__(self):
-        self._detector  = None
-        self._triggers  = []
-        self._audio_map = {}
-        self._running   = False
-
-    def reload(self, triggers):
-        self._triggers = triggers
-        self._audio_map = {}
-        for t in triggers:
-            pattern = t.get("audio_pattern")
-            if pattern:
-                self._audio_map[pattern] = t
-        print(f"[AUDIO] Loaded {len(self._audio_map)} audio triggers")
-
-    def start(self):
-        if not self._audio_map:
-            print("[AUDIO] No audio triggers configured — skipping")
-            return
-
-        self._running = True
-
-        try:
-            from ears.audio_triggers import TriggerDetector
-
-            self._detector = TriggerDetector(sensitivity="medium")
-            self._detector.on_pattern = self._on_pattern
-            self._detector.start()
-            print("[AUDIO] Listener started (DSP mode)")
-
-        except Exception as e:
-            print(f"[AUDIO] Listener failed: {e}")
-
-    def stop(self):
-        self._running = False
-        if self._detector:
-            self._detector.stop()
-
-    def suppress(self, ms=3000):
-        if self._detector:
-            self._detector.suppress(ms)
-
-    def _on_pattern(self, count):
-        pattern_key = f"{count}_tap"
-        trigger = self._audio_map.get(pattern_key)
-
-        if trigger:
-            print(f"[AUDIO] Pattern {pattern_key} -> {trigger['name']}")
-            threading.Thread(
-                target=execute_trigger,
-                args=(trigger,),
-                daemon=True
-            ).start()
-        else:
-            print(f"[AUDIO] Pattern {pattern_key} — no trigger assigned")
