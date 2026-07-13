@@ -35,14 +35,17 @@ def launch_schedule_daemon():
             pass
 
         if _daemon_count == 0 and os.path.exists(_daemon):
-            _CREATE_NO_WINDOW = 0x08000000
-            _DETACHED_PROCESS = 0x00000008
+            _CREATE_NO_WINDOW         = 0x08000000
+            _DETACHED_PROCESS         = 0x00000008
+            _CREATE_NEW_PROCESS_GROUP = 0x00000200
             subprocess.Popen(
                 [_pythonw, _daemon],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 stdin=subprocess.DEVNULL,
-                creationflags=_CREATE_NO_WINDOW | _DETACHED_PROCESS
+                creationflags=_CREATE_NO_WINDOW | _DETACHED_PROCESS | _CREATE_NEW_PROCESS_GROUP,
+                close_fds=True,
+                start_new_session=True,
             )
             print(Fore.CYAN + "[SYSTEM] Schedule daemon started (hidden)")
         elif _daemon_count > 0:
