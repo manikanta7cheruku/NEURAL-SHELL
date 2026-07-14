@@ -736,8 +736,6 @@ def smart_restore(apps_config):
         return 0, 0
 
     try:
-        time.sleep(0.3)
-
         try:
             current = scan_current()
         except Exception:
@@ -777,9 +775,12 @@ def smart_restore(apps_config):
 
         # Supplement Chrome profiles from local Chrome files
         # Works even when extension is not running
-        open_profiles.update(_get_open_chrome_profiles())
-
-        open_chrome_urls, open_chrome_domains = _get_open_chrome_tabs()
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as _pool:
+            _prof_future = _pool.submit(_get_open_chrome_profiles)
+            _tabs_future = _pool.submit(_get_open_chrome_tabs)
+            open_profiles.update(_prof_future.result(timeout=3))
+            open_chrome_urls, open_chrome_domains = _tabs_future.result(timeout=3)
         print(Fore.CYAN + f"[WORKSPACE] Open URLs: {len(open_chrome_urls)}, Domains: {len(open_chrome_domains)}")
 
         filtered_apps = [cfg for cfg in apps_config if _should_restore(cfg)]
