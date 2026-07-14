@@ -511,8 +511,8 @@ def _fire_notification(name, action_type, app_count, tab_count, app_names):
         parts.append(f"{app_count} app{'s' if app_count != 1 else ''}")
     if tab_count > 0:
         parts.append(f"{tab_count} tab{'s' if tab_count != 1 else ''}")
-    detail  = "  ·  ".join(parts)
-    hold_ms = 3800 if action_type == "open_workspace" else 3200
+    detail  = "  ·  ".join(parts) if parts else ""
+    hold_ms = 2000 if action_type == "open_workspace" else 3200
 
     # Ensure daemon is alive — spawn if needed
     if not _ensure_overlay_alive_safe():
@@ -536,6 +536,8 @@ def _run_action_and_arrange(trigger, action_type, action_data, app_names):
     name = trigger.get("name", "unnamed")
 
     try:
+        result = None
+
         if action_type == "open_app":
             _exec_open_app(action_data)
         elif action_type == "open_url":
@@ -545,7 +547,7 @@ def _run_action_and_arrange(trigger, action_type, action_data, app_names):
         elif action_type == "open_folder":
             _exec_open_folder(action_data)
         elif action_type == "open_workspace":
-            _exec_open_workspace(action_data)
+            result = _exec_open_workspace(action_data)
         elif action_type == "run_command":
             _exec_run_command(action_data)
         elif action_type == "seven_action":
@@ -562,20 +564,60 @@ def _run_action_and_arrange(trigger, action_type, action_data, app_names):
             except Exception:
                 pass
 
-        # ── STEP 3: Arrangement card (workspace only) ──
-        # Wait for notification to finish (hold + slide-up), then show arrangement
-        if action_type == "open_workspace" and not trigger.get("silent", False):
-            hold_ms = 3800
-            # Wait for notification to complete before showing arrangement
-            time.sleep((hold_ms + 500) / 1000.0)
+        # Workspace: show status notification if all already open
+        if action_type == "open_workspace" and result and not trigger.get("silent", False):
+            opened  = result.get("opened", 0)
+            skipped = result.get("skipped", 0)
+            total   = opened + skipped
 
-            app_list = [a.strip() for a in app_names.split(",") if a.strip()]
-            if app_list and _is_overlay_alive():
+            if opened == 0 and skipped > 0:
+                # Everything already open — show status notification
+                _ensure_overlay_alive_safe()
                 _send_overlay({
-                    "type": "arrange",
-                    "data": {"appNames": app_list},
+                    "type": "notif",
+                    "data": {
+                        "title":    name,
+                        "subtitle": "Already active",
+                        "detail":   f"All {skipped} app{'s' if skipped != 1 else ''} already open",
+                        "holdMs":   2500,
+                    },
                 })
-                print(f"[TRIGGER DAEMON] Arrangement card sent: {app_list}")
+                print(f"[TRIGGER DAEMON] All {skipped} apps already open")
+
+            elif opened > 0 and skipped > 0:
+                # Partial restore — update notification
+                _ensure_overlay_alive_safe()
+                _send_overlay({
+                    "type": "notif",
+                    "data": {
+                        "title":    name,
+                        "subtitle": "Workspace restored",
+                        "detail":   f"{opened} opened, {skipped} already running",
+                        "holdMs":   3000,
+                    },
+                })
+
+                # Show arrangement card after delay
+                hold_ms = 3000
+                time.sleep((hold_ms + 500) / 1000.0)
+                app_list = [a.strip() for a in app_names.split(",") if a.strip()]
+                if app_list and _is_overlay_alive():
+                    _send_overlay({
+                        "type": "arrange",
+                        "data": {"appNames": app_list},
+                    })
+
+            elif opened > 0:
+                # Full restore — show arrangement
+                hold_ms = 3800
+                time.sleep((hold_ms + 500) / 1000.0)
+                app_list = [a.strip() for a in app_names.split(",") if a.strip()]
+                if app_list and _is_overlay_alive():
+                    _send_overlay({
+                        "type": "arrange",
+                        "data": {"appNames": app_list},
+                    })
+                    print(f"[TRIGGER DAEMON] Arrangement card sent: {app_list}")
 
         # Update stats
         update_fire_stats(trigger.get("id"))
@@ -665,25 +707,13 @@ def _exec_open_folder(data):
 
 
 def _exec_open_workspace(data):
-    """Restore a workspace by ID or name using smart_restore."""
+    """
+    Restore a workspace by ID or name using smart_restore.
+    Returns {"opened": N, "skipped": N} for caller to show feedback.
+    """
     workspace_id   = data.get("workspace_id")
     workspace_name = data.get("workspace_name")
 
-    # Try via API first (Seven is running)
-    if is_seven_running():
-        try:
-            import requests
-            if workspace_id:
-                r = requests.post(
-                    f"http://127.0.0.1:7777/api/workspaces/{workspace_id}/restore",
-                    timeout=10
-                )
-                if r.status_code == 200:
-                    return
-        except Exception:
-            pass
-
-    # Direct DB lookup + smart restore
     try:
         conn = sqlite3.connect(TRIGGERS_DB, timeout=5)
         conn.row_factory = sqlite3.Row
@@ -700,14 +730,15 @@ def _exec_open_workspace(data):
             ).fetchone()
         else:
             conn.close()
-            return
+            print("[TRIGGER DAEMON] No workspace ID or name provided")
+            return {"opened": 0, "skipped": 0}
 
         conn.close()
 
         if not row:
             print(f"[TRIGGER DAEMON] Workspace not found: "
                   f"id={workspace_id} name={workspace_name}")
-            return
+            return {"opened": 0, "skipped": 0}
 
         workspace = dict(row)
         try:
@@ -715,22 +746,36 @@ def _exec_open_workspace(data):
         except Exception:
             apps = []
 
-        # Smart restore — only open what's missing
-        try:
-            from hands.workspace import smart_restore
-            opened, skipped = smart_restore(apps)
-            print(f"[TRIGGER DAEMON] Smart restore: "
-                  f"{opened} opened, {skipped} already running")
-        except ImportError:
-            # Fallback: parallel full restore
-            from hands.workspace import restore
-            restore(apps)
+        if not apps:
+            print("[TRIGGER DAEMON] Workspace has no apps")
+            return {"opened": 0, "skipped": 0}
 
-        print(f"[TRIGGER DAEMON] Workspace restored: "
+        from hands.workspace import smart_restore
+        opened, skipped = smart_restore(apps)
+        print(f"[TRIGGER DAEMON] Smart restore: "
+              f"{opened} opened, {skipped} already running")
+
+        if is_seven_running() and workspace_id:
+            try:
+                import requests
+                requests.post(
+                    f"http://127.0.0.1:7777/api/workspaces/{workspace_id}/restore"
+                    f"?stats_only=true",
+                    timeout=2,
+                )
+            except Exception:
+                pass
+
+        print(f"[TRIGGER DAEMON] Workspace done: "
               f"{workspace.get('name')} ({len(apps)} apps)")
+
+        return {"opened": opened, "skipped": skipped}
 
     except Exception as e:
         print(f"[TRIGGER DAEMON] Workspace restore error: {e}")
+        import traceback
+        traceback.print_exc()
+        return {"opened": 0, "skipped": 0}
 
 
 def _exec_run_command(data):
@@ -790,13 +835,16 @@ class HotkeyListener:
     """
 
     def __init__(self):
-        self._triggers     = []
-        self._hotkey_map   = {}
-        self._pressed_mods = set()
-        self._listener     = None
-        self._running      = False
-        self._last_fire    = 0
-        self._mod_reset_timer = None  # clears stuck modifiers
+        self._triggers        = []
+        self._hotkey_map      = {}
+        self._pressed_mods    = set()
+        self._listener        = None
+        self._running         = False
+        self._last_fire       = 0
+        self._mod_reset_timer = None
+        self._win32_registered = {}
+        self._win32_user32     = None
+        self._win32_thread     = None  # clears stuck modifiers
 
     def reload(self, triggers):
         self._triggers   = triggers
@@ -806,15 +854,157 @@ class HotkeyListener:
             if hk:
                 normalized = _normalize_hotkey(hk)
                 self._hotkey_map[normalized] = t
-                print(f"[HOTKEY DEBUG] Registered: '{hk}' → normalized='{normalized}' "
-                      f"for trigger '{t.get('name')}'")
+                print(f"[HOTKEY] Registered: '{hk}' → '{normalized}' "
+                      f"for '{t.get('name')}'")
         print(f"[HOTKEY] Loaded {len(self._hotkey_map)} hotkey triggers")
+
+        # If Win32 hotkeys active — unregister old and re-register new
+        if self._running and self._win32_registered:
+            try:
+                for hid in self._win32_registered:
+                    self._win32_user32.UnregisterHotKey(None, hid)
+                self._win32_registered = {}
+                print("[HOTKEY] Win32 hotkeys cleared for reload")
+            except Exception:
+                pass
+            self._try_register_hotkeys_win32()
 
     def start(self):
         if self._running:
             return
         self._running = True
 
+        # Try Windows RegisterHotKey first — proper system hotkey registration
+        # This prevents the error sound because Windows knows the hotkey is handled
+        if self._try_register_hotkeys_win32():
+            print("[HOTKEY] Using Windows RegisterHotKey (no error sound)")
+            return
+
+        # Fallback: pynput low-level hook
+        self._start_pynput()
+
+    def _try_register_hotkeys_win32(self) -> bool:
+        """
+        Register hotkeys via Windows RegisterHotKey API.
+        This is the correct way — no error sound, no conflicts.
+        Runs a message loop in a background thread.
+        """
+        if not self._hotkey_map:
+            return False
+
+        try:
+            import ctypes
+            import ctypes.wintypes
+
+            MOD_ALT     = 0x0001
+            MOD_CONTROL = 0x0002
+            MOD_SHIFT   = 0x0004
+            MOD_WIN     = 0x0008
+            MOD_NOREPEAT = 0x4000
+            WM_HOTKEY   = 0x0312
+
+            user32 = ctypes.windll.user32
+
+            # Map modifier names to flags
+            mod_map = {
+                "ctrl":  MOD_CONTROL,
+                "shift": MOD_SHIFT,
+                "alt":   MOD_ALT,
+                "win":   MOD_WIN,
+            }
+
+            # Map key names to virtual key codes
+            vk_map = {}
+            for c in "abcdefghijklmnopqrstuvwxyz":
+                vk_map[c] = ord(c.upper())
+            for i in range(10):
+                vk_map[str(i)] = ord(str(i))
+            for i in range(1, 13):
+                vk_map[f"f{i}"] = 0x6F + i  # F1=0x70
+            vk_map.update({
+                "space": 0x20, "enter": 0x0D, "tab": 0x09,
+                "esc": 0x1B, "backspace": 0x08, "delete": 0x2E,
+                "home": 0x24, "end": 0x23, "pageup": 0x21,
+                "pagedown": 0x22, "up": 0x26, "down": 0x28,
+                "left": 0x25, "right": 0x27, "insert": 0x2D,
+            })
+            # Fix F-key VKs
+            for i in range(1, 13):
+                vk_map[f"f{i}"] = 0x6F + i
+
+            registered = {}  # id → trigger
+
+            for idx, (combo, trigger) in enumerate(self._hotkey_map.items()):
+                parts = combo.split("+")
+                mods  = 0
+                vk    = 0
+
+                for part in parts:
+                    if part in mod_map:
+                        mods |= mod_map[part]
+                    elif part in vk_map:
+                        vk = vk_map[part]
+
+                if not vk:
+                    print(f"[HOTKEY] Cannot map key in combo: {combo}")
+                    continue
+
+                mods |= MOD_NOREPEAT
+                hotkey_id = idx + 1
+
+                ok = user32.RegisterHotKey(None, hotkey_id, mods, vk)
+                if ok:
+                    registered[hotkey_id] = trigger
+                    print(f"[HOTKEY] Registered: {combo} (id={hotkey_id})")
+                else:
+                    err = ctypes.windll.kernel32.GetLastError()
+                    print(f"[HOTKEY] RegisterHotKey failed for {combo}: err={err}")
+
+            if not registered:
+                print("[HOTKEY] No hotkeys registered via Win32 — falling back to pynput")
+                return False
+
+            # Store for reload/stop
+            self._win32_registered = registered
+            self._win32_user32     = user32
+
+            # Message loop in background thread
+            def _msg_loop():
+                msg = ctypes.wintypes.MSG()
+                while self._running:
+                    ret = user32.PeekMessageW(
+                        ctypes.byref(msg), None, 0, 0, 1  # PM_REMOVE
+                    )
+                    if ret:
+                        if msg.message == WM_HOTKEY:
+                            hid     = msg.wParam
+                            trigger = registered.get(hid)
+                            if trigger:
+                                now = time.time()
+                                if now - self._last_fire >= 1.0:
+                                    self._last_fire = now
+                                    print(f"[HOTKEY] Win32 match: id={hid} "
+                                          f"-> {trigger['name']}")
+                                    threading.Thread(
+                                        target=execute_trigger,
+                                        args=(trigger,),
+                                        daemon=True,
+                                    ).start()
+                    else:
+                        time.sleep(0.02)  # 20ms poll — low CPU
+
+            self._win32_thread = threading.Thread(
+                target=_msg_loop, daemon=True, name="HotkeyMsgLoop"
+            )
+            self._win32_thread.start()
+            return True
+
+        except Exception as e:
+            print(f"[HOTKEY] Win32 RegisterHotKey error: {e}")
+            return False
+
+    def _start_pynput(self):
+        """Fallback hotkey listener using pynput."""
         try:
             from pynput import keyboard
 
@@ -846,17 +1036,30 @@ class HotkeyListener:
             )
             self._listener.daemon = True
             self._listener.start()
-            print("[HOTKEY] Listener started")
+            print("[HOTKEY] pynput listener started (fallback mode)")
 
         except ImportError:
             print("[HOTKEY] pynput not installed")
         except Exception as e:
-            print(f"[HOTKEY] Listener failed: {e}")
+            print(f"[HOTKEY] pynput failed: {e}")
 
     def stop(self):
         self._running = False
+
+        # Unregister Win32 hotkeys
+        if hasattr(self, '_win32_registered') and self._win32_registered:
+            try:
+                for hid in self._win32_registered:
+                    self._win32_user32.UnregisterHotKey(None, hid)
+                print("[HOTKEY] Win32 hotkeys unregistered")
+            except Exception:
+                pass
+            self._win32_registered = {}
+
+        # Stop pynput if it was used
         if self._listener:
             self._listener.stop()
+            self._listener = None
 
     def _resolve_key(self, key):
         """Convert pynput key to normalized string using vk codes."""
@@ -918,7 +1121,8 @@ class HotkeyListener:
     def _try_match(self, final_key):
         """Check current modifier + key combo against registered hotkeys."""
         now = time.time()
-        if now - self._last_fire < 0.5:
+        # Debounce — prevent double-fire within 1 second
+        if now - self._last_fire < 1.0:
             return
 
         combo = _normalize_hotkey("+".join(list(self._pressed_mods) + [final_key]))
