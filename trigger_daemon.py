@@ -1150,28 +1150,7 @@ def _normalize_hotkey(hotkey: str) -> str:
 # MAIN DAEMON LOOP
 # ─────────────────────────────────────────────────────────────────────────
 
-def _kill_old_daemon():
-    """Kill any existing trigger_daemon processes before starting."""
-    try:
-        import psutil
-        my_pid = os.getpid()
-        for proc in psutil.process_iter(['pid', 'cmdline']):
-            try:
-                cmd = " ".join(proc.info['cmdline'] or [])
-                if 'trigger_daemon' in cmd and proc.info['pid'] != my_pid:
-                    print(f"[TRIGGER DAEMON] Killing old daemon PID {proc.info['pid']}")
-                    proc.kill()
-                    proc.wait(timeout=3)
-            except Exception:
-                pass
-    except ImportError:
-        pass
-    except Exception:
-        pass
-
-
 def main():
-    _kill_old_daemon()
     if not acquire_lock():
         return
 
