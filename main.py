@@ -258,23 +258,22 @@ def seven_logic():
     if sched_count > 0:
         print(Fore.CYAN + f"[SYSTEM] Scheduler: {sched_count} active schedules.")
 
-    # Morning brief
-    speak_morning_brief(ctx, config)
-
-    # Daemon launchers
+    # Launch daemons immediately — before morning brief
+    # Daemons are independent processes, no reason to delay
     launch_schedule_daemon()
 
-    try:
-        from main_modules.startup.trigger_daemon_launcher import launch_trigger_daemon
-        launch_trigger_daemon()
-    except Exception as _td_err:
-        print(Fore.YELLOW + f"[SYSTEM] Trigger daemon skipped: {_td_err}")
+    from main_modules.startup.trigger_daemon_launcher import (
+        launch_trigger_daemon,
+        launch_overlay_daemon,
+    )
+    print(Fore.CYAN + "[SYSTEM] Launching trigger daemon...")
+    launch_trigger_daemon()
+    print(Fore.CYAN + "[SYSTEM] Launching overlay daemon...")
+    launch_overlay_daemon()
+    print(Fore.CYAN + "[SYSTEM] Daemons launched")
 
-    try:
-        from main_modules.startup.trigger_daemon_launcher import launch_overlay_daemon
-        launch_overlay_daemon()
-    except Exception as _od_err:
-        print(Fore.YELLOW + f"[SYSTEM] Overlay daemon skipped: {_od_err}")
+    # Morning brief (after daemons are running)
+    speak_morning_brief(ctx, config)    
 
     # Register handlers
     try:
