@@ -35,16 +35,18 @@ def _get_project_root() -> str:
 
 def _get_venv_python(project_root: str) -> str:
     """
-    Always return venv python.exe with absolute path.
-    Never rely on sys.executable — it may be the wrong Python.
+    Return venv pythonw.exe for daemon spawning.
+    pythonw.exe has no console window and is fully independent —
+    it survives parent process exit without being killed.
+    python.exe is a console app and gets killed when the terminal closes.
     """
-    venv_python = os.path.join(project_root, "venv", "Scripts", "python.exe")
-    if os.path.exists(venv_python):
-        return venv_python
-
     venv_pythonw = os.path.join(project_root, "venv", "Scripts", "pythonw.exe")
     if os.path.exists(venv_pythonw):
         return venv_pythonw
+
+    venv_python = os.path.join(project_root, "venv", "Scripts", "python.exe")
+    if os.path.exists(venv_python):
+        return venv_python
 
     return sys.executable
 
@@ -186,6 +188,7 @@ def _register_trigger_startup(python: str, daemon: str):
         else:
             print(Fore.YELLOW + f"[TRIGGER] Task Scheduler failed: {result.stderr.strip()}")
             _register_trigger_startup_folder(python, daemon)
+            return
     except Exception as e:
         print(Fore.YELLOW + f"[TRIGGER] Task Scheduler error: {e}")
         _register_trigger_startup_folder(python, daemon)
