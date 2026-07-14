@@ -621,147 +621,146 @@ def _get_open_chrome_tabs() -> tuple:
     return open_urls, open_domains
 
 
+_restore_in_progress = threading.Lock()
+
+
 def smart_restore(apps_config):
     """
     Open only apps/tabs that are not already running.
-    URL matching is smart:
-      - Exact URL match → skip
-      - Base domain saved (youtube.com) + any YouTube tab open → skip
-      - Different page on same domain → open it
+    Thread-safe — only one restore runs at a time.
     """
     if not apps_config:
         return 0, 0
 
+    if not _restore_in_progress.acquire(blocking=False):
+        print(Fore.YELLOW + "[WORKSPACE] Restore already in progress, skipping")
+        return 0, 0
+
     try:
-        current = scan_current()
-    except Exception:
-        current = []
+        try:
+            current = scan_current()
+        except Exception:
+            current = []
 
-    # Build lookup sets
-    open_exes      = set()
-    open_ws_paths  = set()
-    open_folders   = set()
-    open_profiles  = set()
-    open_uwp       = set()
-    open_types     = set()
+        open_exes      = set()
+        open_ws_paths  = set()
+        open_folders   = set()
+        open_profiles  = set()
+        open_uwp       = set()
+        open_types     = set()
 
-    for app in current:
-        t    = (app.get("type")           or "").lower()
-        exe  = (app.get("exe_path")       or "").lower()
-        ws   = (app.get("workspace_path") or "").lower()
-        fld  = (app.get("folder_path")    or "").lower()
-        prof = (app.get("profile_name")   or "").lower()
-        prot = (app.get("protocol")       or "").lower()
-        name = (app.get("name")           or "").lower()
+        for app in current:
+            t    = (app.get("type")           or "").lower()
+            exe  = (app.get("exe_path")       or "").lower()
+            ws   = (app.get("workspace_path") or "").lower()
+            fld  = (app.get("folder_path")    or "").lower()
+            prof = (app.get("profile_name")   or "").lower()
+            prot = (app.get("protocol")       or "").lower()
+            name = (app.get("name")           or "").lower()
 
-        if exe:  open_exes.add(exe)
-        if ws:   open_ws_paths.add(ws)
-        if fld:  open_folders.add(fld)
-        if prof: open_profiles.add(prof)
-        if t:    open_types.add(t)
-        if t == "uwp":
-            if prot: open_uwp.add(prot)
-            if name: open_uwp.add(name)
+            if exe:  open_exes.add(exe)
+            if ws:   open_ws_paths.add(ws)
+            if fld:  open_folders.add(fld)
+            if prof: open_profiles.add(prof)
+            if t:    open_types.add(t)
+            if t == "uwp":
+                if prot: open_uwp.add(prot)
+                if name: open_uwp.add(name)
 
-    # Get open Chrome tabs — works with or without Seven running
-    open_chrome_urls, open_chrome_domains = _get_open_chrome_tabs()
-    print(Fore.CYAN + f"[WORKSPACE] Open URLs: {len(open_chrome_urls)}, "
-          f"Domains: {len(open_chrome_domains)}")
+        open_chrome_urls, open_chrome_domains = _get_open_chrome_tabs()
+        print(Fore.CYAN + f"[WORKSPACE] Open URLs: {len(open_chrome_urls)}, "
+              f"Domains: {len(open_chrome_domains)}")
 
-    missing      = []
-    already_open = 0
+        apps_config = [cfg for cfg in apps_config if _should_restore(cfg)]
 
-    apps_config = [cfg for cfg in apps_config if _should_restore(cfg)]
+        missing      = []
+        already_open = 0
 
-    for cfg in apps_config:
-        t    = (cfg.get("type")           or "").lower()
-        exe  = (cfg.get("exe_path")       or "").lower()
-        ws   = (cfg.get("workspace_path") or "").lower()
-        fld  = (cfg.get("folder_path")    or "").lower()
-        prof = (cfg.get("profile_name")   or "").lower()
-        prot = (cfg.get("protocol")       or "").lower()
-        name = (cfg.get("name")           or "").lower()
-        tabs = cfg.get("tabs", [])
+        for cfg in apps_config:
+            t    = (cfg.get("type")           or "").lower()
+            exe  = (cfg.get("exe_path")       or "").lower()
+            ws   = (cfg.get("workspace_path") or "").lower()
+            fld  = (cfg.get("folder_path")    or "").lower()
+            prof = (cfg.get("profile_name")   or "").lower()
+            prot = (cfg.get("protocol")       or "").lower()
+            name = (cfg.get("name")           or "").lower()
+            tabs = cfg.get("tabs", [])
 
-        is_open = False
+            is_open = False
 
-        if t in ("chrome", "edge", "brave", "firefox"):
-            if tabs and open_chrome_urls:
-                # Filter tabs — skip already open ones using smart URL matching
-                missing_tabs = []
-                skipped_tabs = 0
-                for tab in tabs:
-                    tab_url = tab.get("url", "")
-                    if not tab_url:
-                        continue
-                    if _url_matches(tab_url, open_chrome_urls, open_chrome_domains):
-                        skipped_tabs += 1
-                        print(Fore.CYAN + f"[WORKSPACE] Tab already open: {tab_url[:60]}")
-                    else:
-                        missing_tabs.append(tab)
+            if t in ("chrome", "edge", "brave", "firefox"):
+                if tabs and open_chrome_urls:
+                    missing_tabs = []
+                    skipped_tabs = 0
+                    for tab in tabs:
+                        tab_url = tab.get("url", "")
+                        if not tab_url:
+                            continue
+                        if _url_matches(tab_url, open_chrome_urls, open_chrome_domains):
+                            skipped_tabs += 1
+                        else:
+                            missing_tabs.append(tab)
 
-                if not missing_tabs:
-                    is_open = True
-                    print(Fore.CYAN + f"[WORKSPACE] Chrome '{prof}': "
-                          f"all {len(tabs)} tabs already open")
-                else:
-                    new_cfg = dict(cfg)
-                    new_cfg["tabs"] = missing_tabs
-                    new_cfg["_partial"] = True
-                    print(Fore.CYAN + f"[WORKSPACE] Chrome '{prof}': "
-                          f"{len(missing_tabs)} new, {skipped_tabs} already open")
-                    missing.append(new_cfg)
-                    continue
-
-            elif not tabs:
-                # No tabs saved — check if profile/Chrome is open
-                if prof and prof in open_profiles:
-                    is_open = True
-                elif "chrome" in open_types or "edge" in open_types:
-                    is_open = True
-
-        elif t == "vscode":
-            if ws and ws in open_ws_paths:
-                is_open = True
-
-        elif t == "explorer":
-            if fld and fld in open_folders:
-                is_open = True
-
-        elif t == "uwp":
-            if prot and prot in open_uwp:
-                is_open = True
-            elif name and name in open_uwp:
-                is_open = True
-
-        elif t in ("powershell", "cmd", "terminal"):
-            if t in open_types:
-                is_open = True
-
-        else:
-            if exe and exe in open_exes:
-                is_open = True
-            elif name:
-                for app in current:
-                    curr_name = (app.get("name") or "").lower()
-                    if name in curr_name or curr_name in name:
+                    if not missing_tabs:
                         is_open = True
-                        break
+                    else:
+                        new_cfg = dict(cfg)
+                        new_cfg["tabs"] = missing_tabs
+                        new_cfg["_partial"] = True
+                        missing.append(new_cfg)
+                        continue
 
-        if is_open:
-            already_open += 1
+                elif not tabs:
+                    if prof and prof in open_profiles:
+                        is_open = True
+                    elif t in open_types:
+                        is_open = True
+
+                else:
+                    # tabs exist but no URL data to compare — check by profile
+                    if prof and prof in open_profiles:
+                        is_open = True
+
+            elif t == "vscode":
+                if ws and ws in open_ws_paths:
+                    is_open = True
+
+            elif t == "explorer":
+                if fld and fld in open_folders:
+                    is_open = True
+
+            elif t == "uwp":
+                if prot and prot in open_uwp:
+                    is_open = True
+                elif name and name in open_uwp:
+                    is_open = True
+
+            else:
+                if exe and exe in open_exes:
+                    is_open = True
+                elif name:
+                    for app in current:
+                        curr_name = (app.get("name") or "").lower()
+                        if name in curr_name or curr_name in name:
+                            is_open = True
+                            break
+
+            if is_open:
+                already_open += 1
+            else:
+                missing.append(cfg)
+
+        if missing:
+            print(Fore.CYAN + f"[WORKSPACE] Opening {len(missing)} apps "
+                  f"({already_open} already running)")
+            restore(missing)
         else:
-            missing.append(cfg)
+            print(Fore.GREEN + "[WORKSPACE] All apps already open")
 
-    if missing:
-        print(Fore.CYAN + f"[WORKSPACE] Opening {len(missing)} apps "
-              f"({already_open} already running)")
-        restore(missing)
-    else:
-        print(Fore.GREEN + "[WORKSPACE] All apps already open — nothing to do")
+        return len(missing), already_open
 
-    return len(missing), already_open
-
+    finally:
+        _restore_in_progress.release()
 
 # ─────────────────────────────────────────────────────────────────────────
 # RESTORE
