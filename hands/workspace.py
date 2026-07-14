@@ -220,7 +220,15 @@ def scan_current():
 
     _enrich_chrome(apps)
     _enrich_vscode(apps)
-    _enrich_explorer(apps)
+
+    # COM must be initialized in the same thread that calls Shell COM
+    try:
+        import pythoncom
+        pythoncom.CoInitialize()
+        _enrich_explorer(apps)
+        pythoncom.CoUninitialize()
+    except Exception:
+        _enrich_explorer(apps)
 
     elapsed = int((time.time() - t0) * 1000)
     print(Fore.GREEN + f"[WORKSPACE] Scanned {len(apps)} apps in {elapsed}ms")
@@ -580,28 +588,20 @@ def _url_matches(saved_url: str, open_urls: set, open_domains: set) -> bool:
 
 def _get_open_chrome_profiles() -> set:
     """
-    Detect which Chrome profiles are CURRENTLY OPEN by checking
-    which profile directories have a lock file held by a running Chrome process.
-
-    Chrome creates a lock file at:
-      User Data/<Profile>/SingletonLock  (symlink on Linux)
-      User Data/<Profile>/lockfile       (Windows)
-
-    On Windows, the running Chrome process holds an open handle to
-    the Preferences file in the active profile directory.
-    We detect this by checking which profile dirs were modified recently.
+    Detect which Chrome profiles are currently open.
+    Uses Chrome's Preferences file last-write time — fast, no open_files() call.
+    Chrome updates the Preferences file every few seconds while running.
+    A profile modified within last 60 seconds is considered active.
     """
     profiles = set()
     try:
         import psutil
 
-        # Check if Chrome is actually running
-        chrome_pids = []
-        for p in psutil.process_iter(['pid', 'name']):
-            if p.info['name'] and p.info['name'].lower() == "chrome.exe":
-                chrome_pids.append(p.info['pid'])
-
-        if not chrome_pids:
+        chrome_running = any(
+            p.info['name'] and p.info['name'].lower() == "chrome.exe"
+            for p in psutil.process_iter(['name'])
+        )
+        if not chrome_running:
             return profiles
 
         chrome_base = os.path.join(
@@ -619,31 +619,16 @@ def _get_open_chrome_profiles() -> set:
             state = json.load(f)
 
         info_cache = state.get("profile", {}).get("info_cache", {})
+        now = time.time()
 
-        # Find which profile directories Chrome currently has open
-        # by checking open file handles of Chrome processes
-        open_profile_dirs = set()
-        try:
-            for pid in chrome_pids:
-                try:
-                    proc = psutil.Process(pid)
-                    for f in proc.open_files():
-                        fpath = f.path.lower().replace("/", "\\")
-                        chrome_base_lower = chrome_base.lower().replace("/", "\\")
-                        if chrome_base_lower in fpath:
-                            # Extract profile dir from path
-                            rel = fpath[len(chrome_base_lower):].lstrip("\\")
-                            parts = rel.split("\\")
-                            if parts:
-                                open_profile_dirs.add(parts[0])
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    pass
-        except Exception:
-            pass
-
-        # Map open profile dirs to emails
         for profile_dir, info in info_cache.items():
-            if profile_dir.lower() not in open_profile_dirs:
+            prefs_path = os.path.join(chrome_base, profile_dir, "Preferences")
+            if not os.path.exists(prefs_path):
+                continue
+
+            # Profile is active if Preferences modified within last 60 seconds
+            modified_ago = now - os.path.getmtime(prefs_path)
+            if modified_ago > 60:
                 continue
 
             email = (
@@ -654,7 +639,6 @@ def _get_open_chrome_profiles() -> set:
             if email:
                 profiles.add(email)
                 profiles.add(email.split("@")[0])
-                print(Fore.CYAN + f"[WORKSPACE] Active Chrome profile: {email}")
 
     except Exception as e:
         print(Fore.YELLOW + f"[WORKSPACE] Chrome profile detection: {e}")
@@ -738,14 +722,15 @@ def smart_restore(apps_config):
     try:
         import concurrent.futures
 
-        # Run scan + Chrome detection fully in parallel
-        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as _pool:
-            _scan_future = _pool.submit(scan_current)
+        # Chrome detection runs in parallel while scan runs in this thread
+        # scan_current uses COM which has thread affinity — must stay in caller thread
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as _pool:
             _prof_future = _pool.submit(_get_open_chrome_profiles)
             _tabs_future = _pool.submit(_get_open_chrome_tabs)
 
+            # Scan runs here while Chrome detection runs in background
             try:
-                current = _scan_future.result(timeout=5)
+                current = scan_current()
             except Exception:
                 current = []
 
@@ -1017,17 +1002,14 @@ def _restore_browser(cfg):
     profile_dir  = _find_chrome_profile_dir(chrome_base, profile_name)
 
     if profile_dir:
-        # Open first URL (creates/focuses window)
         subprocess.Popen(
             [chrome_exe, f"--profile-directory={profile_dir}", urls[0]]
         )
-        time.sleep(1.5)
-        # Open remaining URLs as new tabs
+        # Open all remaining tabs immediately — no sleep needed
         for url in urls[1:]:
             subprocess.Popen(
                 [chrome_exe, f"--profile-directory={profile_dir}", url]
             )
-            time.sleep(0.4)
         partial = cfg.get("_partial", False)
         print(Fore.CYAN + f"[WORKSPACE] Chrome '{profile_name}': "
               f"{'partial restore — ' if partial else ''}{len(urls)} tabs")
