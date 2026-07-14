@@ -6,6 +6,7 @@ Captures all visible user apps, Chrome tabs (via extension),
 VS Code workspace, Explorer folders, terminals.
 
 Restore is smart — only opens what is genuinely missing.
+Tabs are matched at URL level — no duplicate tab opening.
 """
 
 import os
@@ -25,32 +26,96 @@ except ImportError:
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# SKIP LISTS
+# WINDOW FILTERING
+# Matches Task Manager's "Apps" section exactly.
+# Scans EVERY app the user has open. Only skips Seven itself.
+# Uses the same method as Task Manager: visible + has taskbar presence.
 # ─────────────────────────────────────────────────────────────────────────
 
-_SKIP_EXE = {
-    "searchhost.exe", "shellexperiencehost.exe",
-    "startmenuexperiencehost.exe", "textinputhost.exe",
-    "widgetservice.exe", "applicationframehost.exe",
-    "runtimebroker.exe", "lockapp.exe", "dllhost.exe",
-    "ctfmon.exe", "sihost.exe", "taskhostw.exe",
-    "backgroundtaskhost.exe", "shellhost.exe", "smartscreen.exe",
-    "phoneexperiencehost.exe", "clicktodo.exe",
-    "nvidia overlay.exe", "msedgewebview2.exe", "electron.exe",
-}
 
-_SKIP_TITLE = {
-    "", "program manager", "windows input experience",
-    "microsoft text input application",
-    "nvidia geforce overlay", "nvidia geforce overlay dt",
-    "click to do",
-}
+def _is_seven_process(exe_name: str, exe_path: str) -> bool:
+    """Only skip Seven's own processes. Nothing else."""
+    name_lower = exe_name.lower()
+    path_lower = exe_path.lower()
 
-_SKIP_PATH_FRAGMENTS = [
-    "mk-projects\\seven",
-    "nvidia corporation\\nvidia app",
-    "microsoftwindows.client.coreai",
-]
+    if name_lower not in ("electron.exe", "pythonw.exe", "python.exe"):
+        return False
+
+    _seven_markers = (
+        "mk-projects\\seven",
+        "\\seven\\electron",
+        "\\seven\\python",
+        "program files\\seven",
+        "appdata\\local\\seven",
+    )
+    return any(marker in path_lower for marker in _seven_markers)
+
+
+def _has_taskbar_presence(hwnd: int) -> bool:
+    """
+    Returns True if this window would appear in the Windows taskbar.
+    Uses the exact same logic Windows uses internally:
+
+    A window gets a taskbar button if:
+      1. Visible
+      2. Top-level (no owner window)
+      3. Not a tool window (WS_EX_TOOLWINDOW)
+      4. Has a non-empty title
+      5. Has real screen area (not a ghost/hidden window)
+      6. Not cloaked (Windows hides some UWP windows via DWM cloak)
+    """
+    try:
+        import win32con
+
+        title = win32gui.GetWindowText(hwnd)
+        if not title or not title.strip():
+            return False
+
+        if title.strip().lower() == "program manager":
+            return False
+
+        if not win32gui.IsWindowVisible(hwnd):
+            return False
+
+        ex_style = win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE)
+        if ex_style & win32con.WS_EX_TOOLWINDOW:
+            return False
+
+        owner = win32gui.GetWindow(hwnd, win32con.GW_OWNER)
+        if owner:
+            return False
+
+        # DWM cloaked check: Windows hides some UWP app windows
+        # even though they are technically "visible". This catches
+        # Settings, Calculator etc. that are running but minimized
+        # to tray or were auto-started by Windows.
+        try:
+            import ctypes
+            DWMWA_CLOAKED = 14
+            cloaked = ctypes.c_int(0)
+            hr = ctypes.windll.dwmapi.DwmGetWindowAttribute(
+                hwnd, DWMWA_CLOAKED,
+                ctypes.byref(cloaked), ctypes.sizeof(cloaked)
+            )
+            if hr == 0 and cloaked.value != 0:
+                return False
+        except Exception:
+            pass
+
+        try:
+            rect = win32gui.GetWindowRect(hwnd)
+            w = rect[2] - rect[0]
+            h = rect[3] - rect[1]
+            if w <= 0 or h <= 0:
+                return False
+        except Exception:
+            return False
+
+        return True
+
+    except Exception:
+        return False
+
 
 # ─────────────────────────────────────────────────────────────────────────
 # APP TYPE MAPS
@@ -77,21 +142,14 @@ _OFFICE = {
 }
 
 _TERMINALS = {
-    "powershell.exe":    "powershell",
-    "pwsh.exe":          "powershell",
-    "cmd.exe":           "cmd",
+    "powershell.exe":      "powershell",
+    "pwsh.exe":            "powershell",
+    "cmd.exe":             "cmd",
     "windowsterminal.exe": "terminal",
-    "wt.exe":            "terminal",
+    "wt.exe":              "terminal",
 }
 
-_UWP_PROTOCOLS = {
-    "whatsapp.root.exe":  "whatsapp:",
-    "systemsettings.exe": "ms-settings:",
-    "calculatorapp.exe":  "calculator:",
-    "calculator.exe":     "calculator:",
-    "photos.exe":         "ms-photos:",
-    "mspaint.exe":        "mspaint:",
-}
+_UWP_PROTOCOLS = {}
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -99,25 +157,34 @@ _UWP_PROTOCOLS = {
 # ─────────────────────────────────────────────────────────────────────────
 
 def scan_current():
-    """Scan all visible user windows and return app configs."""
+    """
+    Scan all visible user-opened windows and return app configs.
+
+    Filters out:
+    - System utilities (Task Manager, Settings, etc.)
+    - SEVEN's own processes
+    - Admin-elevated terminals (Administrator: PowerShell)
+    - GPU overlays
+    - Background services
+    """
     print(Fore.CYAN + "[WORKSPACE] Scanning desktop...")
     t0 = time.time()
 
-    apps        = []
-    seen_titles = set()
+    apps      = []
+    seen_pids = set()
 
     def _cb(hwnd, _):
         try:
-            if not win32gui.IsWindowVisible(hwnd):
+            if not _has_taskbar_presence(hwnd):
                 return
 
             title = win32gui.GetWindowText(hwnd)
-            if not title or title.lower().strip() in _SKIP_TITLE:
-                return
-            if title in seen_titles:
-                return
 
             _, pid = win32process.GetWindowThreadProcessId(hwnd)
+
+            if pid in seen_pids:
+                return
+
             try:
                 proc     = psutil.Process(pid)
                 exe_name = proc.name().lower()
@@ -125,14 +192,10 @@ def scan_current():
             except Exception:
                 return
 
-            if exe_name in _SKIP_EXE:
+            if _is_seven_process(exe_name, exe_path):
                 return
 
-            exe_lower = exe_path.lower()
-            if any(f in exe_lower for f in _SKIP_PATH_FRAGMENTS):
-                return
-
-            seen_titles.add(title)
+            seen_pids.add(pid)
 
             try:
                 rect     = win32gui.GetWindowRect(hwnd)
@@ -165,6 +228,8 @@ def scan_current():
 
 
 def _classify(exe_name, exe_path, title, win_info, proc):
+    """Classify a window into an app config."""
+
     # Browser
     if exe_name in _BROWSERS:
         return {
@@ -196,7 +261,7 @@ def _classify(exe_name, exe_path, title, win_info, proc):
             "window":   win_info,
         }
 
-    # Terminals
+    # Terminals — only non-admin ones reach here
     if exe_name in _TERMINALS:
         cwd = ""
         try:
@@ -211,32 +276,12 @@ def _classify(exe_name, exe_path, title, win_info, proc):
             "window":      win_info,
         }
 
-    # Known UWP by exe name
-    if exe_name in _UWP_PROTOCOLS:
-        return {
-            "type":     "uwp",
-            "name":     title or exe_name.replace(".exe", "").title(),
-            "protocol": _UWP_PROTOCOLS[exe_name],
-            "window":   win_info,
-        }
-
-    # UWP by path
+    # UWP apps (from WindowsApps or SystemApps)
     if exe_path and ("WindowsApps" in exe_path or "SystemApps" in exe_path):
-        for known, proto in _UWP_PROTOCOLS.items():
-            if known.split(".")[0] in exe_name:
-                return {
-                    "type":     "uwp",
-                    "name":     title,
-                    "protocol": proto,
-                    "window":   win_info,
-                }
-        if any(s in exe_name for s in ["background", "host", "broker", "service"]):
-            return None
         return {
             "type":     "uwp",
-            "name":     title,
+            "name":     title or exe_name.replace(".exe", "").replace(".", " ").title(),
             "exe_path": exe_path,
-            "protocol": "",
             "window":   win_info,
         }
 
@@ -244,16 +289,12 @@ def _classify(exe_name, exe_path, title, win_info, proc):
     if exe_name == "explorer.exe":
         return {
             "type":        "explorer",
-            "name":        title,
+            "name":        f"File Explorer: {title}" if title else "File Explorer",
             "folder_path": "",
             "window":      win_info,
         }
 
-    # Skip overlays
-    if "overlay" in exe_name or "overlay" in title.lower():
-        return None
-
-    # Generic
+    # Generic app — name derived from window title
     return {
         "type":     "app",
         "name":     _app_name(title, exe_name),
@@ -263,9 +304,28 @@ def _classify(exe_name, exe_path, title, win_info, proc):
 
 
 def _app_name(title, exe_name):
+    """
+    Extract clean app name from window title.
+    Uses the title itself — no hardcoded name database.
+    Most apps put their name after the last " - " in the title.
+    """
+    if exe_name == "explorer.exe":
+        if title and title.strip():
+            return f"File Explorer: {title.strip()}"
+        return "File Explorer"
+
     if " - " in title:
-        return title.split(" - ")[-1].strip()
-    return exe_name.replace(".exe", "").title()
+        parts = title.split(" - ")
+        app_part = parts[-1].strip()
+        if app_part:
+            return app_part
+        if len(parts) >= 2:
+            return parts[-2].strip()
+
+    if title and title.strip():
+        return title.strip()
+
+    return exe_name.replace(".exe", "").replace(".", " ").title()
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -286,7 +346,6 @@ def _enrich_chrome(apps):
         print(Fore.YELLOW + f"[WORKSPACE] Chrome extension: {e}")
 
     if not profile_tabs:
-        # No extension — keep browser window with title only, no tabs
         for b in browser_entries:
             b["tabs"] = []
             b.pop("_is_browser", None)
@@ -312,20 +371,22 @@ def _enrich_chrome(apps):
             for t in tabs
             if t.get("url", "") and
                not t["url"].startswith("chrome://") and
-               not t["url"].startswith("chrome-extension://")
+               not t["url"].startswith("chrome-extension://") and
+               not t["url"].startswith("edge://")
         ]
         if not clean:
             continue
         total += len(clean)
+        tab_count = len(clean)
         apps.append({
             "type":         browser_type,
-            "name":         f"Chrome ({prof})",
+            "name":         f"Chrome ({prof}) - {tab_count} tab{'s' if tab_count != 1 else ''}",
             "exe_path":     exe_path,
             "tabs":         clean,
             "profile_name": prof,
             "window":       {"title": f"Chrome - {prof}"},
         })
-        print(Fore.CYAN + f"  Chrome profile '{prof}': {len(clean)} tabs")
+        print(Fore.CYAN + f"  Chrome profile '{prof}': {tab_count} tabs")
 
     print(Fore.GREEN + f"[WORKSPACE] Chrome: {total} tabs, {len(profile_tabs)} profiles")
 
@@ -356,12 +417,13 @@ def _enrich_vscode(apps):
             if entries:
                 ws = entries[0].get("folderUri", "")
                 ws = ws.replace("file:///", "").replace("/", "\\")
-                from urllib.parse import unquote
                 ws = unquote(ws)
                 if len(ws) >= 2 and ws[1] == ":":
                     ws = ws[0].upper() + ws[1:]
                 for v in vscode_entries:
                     v["workspace_path"] = ws
+                    # Clean up the name to just show the folder, not full title
+                    v["name"] = "Visual Studio Code"
                 print(Fore.CYAN + f"[WORKSPACE] VS Code: {ws}")
     except Exception as e:
         print(Fore.YELLOW + f"[WORKSPACE] VS Code state: {e}")
@@ -383,10 +445,10 @@ def _enrich_explorer(apps):
             try:
                 w = windows.Item(i)
                 if w and w.LocationURL:
-                    path = unquote(
+                    path_str = unquote(
                         w.LocationURL.replace("file:///", "").replace("/", "\\")
                     )
-                    folders.append({"path": path, "name": w.LocationName or ""})
+                    folders.append({"path": path_str, "name": w.LocationName or ""})
             except Exception:
                 continue
         for i, exp in enumerate(explorers):
@@ -402,82 +464,263 @@ def _enrich_explorer(apps):
 # SMART RESTORE
 # ─────────────────────────────────────────────────────────────────────────
 
+def _normalize_url(url: str) -> str:
+    """
+    Normalize URL for comparison.
+    Strips www, trailing slashes, fragments, query params for base URLs.
+    Returns (domain, full_normalized) tuple for flexible matching.
+    """
+    url = url.strip().rstrip("/")
+    # Remove fragment
+    if "#" in url:
+        url = url[:url.index("#")]
+    # Lowercase
+    url = url.lower()
+    # Normalize www
+    url = url.replace("://www.", "://")
+    return url
+
+
+def _extract_domain(url: str) -> str:
+    """
+    Extract just the domain from a URL.
+    https://app.outlier.ai/login  →  app.outlier.ai
+    https://youtube.com           →  youtube.com
+    https://www.youtube.com/watch →  youtube.com
+    """
+    url = url.strip().lower()
+    # Remove scheme
+    for scheme in ("https://", "http://"):
+        if url.startswith(scheme):
+            url = url[len(scheme):]
+            break
+    # Remove www
+    if url.startswith("www."):
+        url = url[4:]
+    # Take only the domain part (before first slash)
+    domain = url.split("/")[0]
+    # Remove port
+    domain = domain.split(":")[0]
+    return domain
+
+
+def _is_base_url(url: str) -> bool:
+    """
+    True if URL is just a homepage/base with no meaningful path.
+    https://youtube.com        → True  (base)
+    https://youtube.com/       → True  (base)
+    https://youtube.com/watch  → False (specific page)
+    https://app.outlier.ai/login → False (specific page)
+    """
+    url = url.strip().rstrip("/").lower()
+    url = url.replace("://www.", "://")
+    # Remove scheme
+    for scheme in ("https://", "http://"):
+        if url.startswith(scheme):
+            url = url[len(scheme):]
+            break
+    # Remove domain
+    parts = url.split("/", 1)
+    if len(parts) == 1:
+        return True   # no path at all
+    path = parts[1].strip().rstrip("/")
+    return path == ""  # empty path = base URL
+
+
+def _url_matches(saved_url: str, open_urls: set, open_domains: set) -> bool:
+    """
+    Check if a saved URL is already open.
+
+    Rules:
+      1. Exact normalized match → True
+      2. Saved URL is a BASE URL (e.g. youtube.com) AND
+         that domain is open with ANY path → True
+         (user has YouTube open, no need to open youtube.com again)
+      3. Otherwise → False
+    """
+    if not saved_url:
+        return False
+
+    normalized = _normalize_url(saved_url)
+    domain     = _extract_domain(saved_url)
+
+    # Rule 1: exact match
+    if normalized in open_urls:
+        return True
+
+    # Rule 2: base URL + domain already open with any page
+    if _is_base_url(saved_url) and domain in open_domains:
+        return True
+
+    return False
+
+
+def _get_open_chrome_tabs() -> tuple:
+    """
+    Get all currently open Chrome tab URLs.
+
+    Returns (open_urls: set, open_domains: set)
+
+    Works in TWO modes:
+      1. Seven running  → via Chrome extension API (backend route)
+      2. Seven closed   → direct Chrome DevTools Protocol on port 9222
+
+    Both return normalized URLs + domains for matching.
+    """
+    open_urls    = set()
+    open_domains = set()
+
+    # ── Mode 1: Chrome extension via Seven backend ──
+    try:
+        from backend.routes.chrome import get_tabs_by_profile
+        profile_tabs = get_tabs_by_profile()
+        if profile_tabs:
+            for tabs in profile_tabs.values():
+                for t in tabs:
+                    url = t.get("url", "")
+                    if url and url.startswith("http"):
+                        norm   = _normalize_url(url)
+                        domain = _extract_domain(url)
+                        open_urls.add(norm)
+                        open_domains.add(domain)
+            if open_urls:
+                print(Fore.CYAN + f"[WORKSPACE] Chrome tabs via extension: "
+                      f"{len(open_urls)} URLs, {len(open_domains)} domains")
+                return open_urls, open_domains
+    except Exception:
+        pass
+
+    # ── Mode 2: Direct Chrome DevTools Protocol (works when Seven closed) ──
+    try:
+        import urllib.request
+        import json as _json
+
+        req = urllib.request.urlopen(
+            "http://127.0.0.1:9222/json",
+            timeout=2
+        )
+        tabs_data = _json.loads(req.read().decode("utf-8"))
+
+        for tab in tabs_data:
+            url = tab.get("url", "")
+            if url and url.startswith("http"):
+                norm   = _normalize_url(url)
+                domain = _extract_domain(url)
+                open_urls.add(norm)
+                open_domains.add(domain)
+
+        if open_urls:
+            print(Fore.CYAN + f"[WORKSPACE] Chrome tabs via DevTools: "
+                  f"{len(open_urls)} URLs, {len(open_domains)} domains")
+
+    except Exception as e:
+        print(Fore.YELLOW + f"[WORKSPACE] Chrome tab detection failed: {e}")
+        print(Fore.YELLOW + "[WORKSPACE] Launch Chrome with "
+              "--remote-debugging-port=9222 for tab detection")
+
+    return open_urls, open_domains
+
+
 def smart_restore(apps_config):
     """
-    Open only apps that are not already running.
-
-    Matching per type:
-      chrome/browser → by profile name (from extension)
-                        if no extension → always restore (tabs unknown)
-      vscode         → by workspace_path
-      terminal       → by exe path (same terminal type = skip)
-      explorer       → by folder_path
-      uwp            → by protocol/name
-      everything else→ by exe_path
+    Open only apps/tabs that are not already running.
+    URL matching is smart:
+      - Exact URL match → skip
+      - Base domain saved (youtube.com) + any YouTube tab open → skip
+      - Different page on same domain → open it
     """
     if not apps_config:
         return 0, 0
 
-    # What's currently open
     try:
         current = scan_current()
     except Exception:
         current = []
 
-    # Index current state
+    # Build lookup sets
     open_exes      = set()
     open_ws_paths  = set()
     open_folders   = set()
     open_profiles  = set()
     open_uwp       = set()
+    open_types     = set()
 
     for app in current:
-        t    = (app.get("type")          or "").lower()
-        exe  = (app.get("exe_path")      or "").lower()
-        ws   = (app.get("workspace_path")or "").lower()
-        fld  = (app.get("folder_path")   or "").lower()
-        prof = (app.get("profile_name")  or "").lower()
-        prot = (app.get("protocol")      or "").lower()
-        name = (app.get("name")          or "").lower()
+        t    = (app.get("type")           or "").lower()
+        exe  = (app.get("exe_path")       or "").lower()
+        ws   = (app.get("workspace_path") or "").lower()
+        fld  = (app.get("folder_path")    or "").lower()
+        prof = (app.get("profile_name")   or "").lower()
+        prot = (app.get("protocol")       or "").lower()
+        name = (app.get("name")           or "").lower()
 
-        if exe:
-            open_exes.add(exe)
-        if ws:
-            open_ws_paths.add(ws)
-        if fld:
-            open_folders.add(fld)
-        if prof:
-            open_profiles.add(prof)
+        if exe:  open_exes.add(exe)
+        if ws:   open_ws_paths.add(ws)
+        if fld:  open_folders.add(fld)
+        if prof: open_profiles.add(prof)
+        if t:    open_types.add(t)
         if t == "uwp":
-            if prot:
-                open_uwp.add(prot)
-            if name:
-                open_uwp.add(name)
+            if prot: open_uwp.add(prot)
+            if name: open_uwp.add(name)
+
+    # Get open Chrome tabs — works with or without Seven running
+    open_chrome_urls, open_chrome_domains = _get_open_chrome_tabs()
+    print(Fore.CYAN + f"[WORKSPACE] Open URLs: {len(open_chrome_urls)}, "
+          f"Domains: {len(open_chrome_domains)}")
 
     missing      = []
     already_open = 0
 
+    apps_config = [cfg for cfg in apps_config if _should_restore(cfg)]
+
     for cfg in apps_config:
-        t    = (cfg.get("type")          or "").lower()
-        exe  = (cfg.get("exe_path")      or "").lower()
-        ws   = (cfg.get("workspace_path")or "").lower()
-        fld  = (cfg.get("folder_path")   or "").lower()
-        prof = (cfg.get("profile_name")  or "").lower()
-        prot = (cfg.get("protocol")      or "").lower()
-        name = (cfg.get("name")          or "").lower()
+        t    = (cfg.get("type")           or "").lower()
+        exe  = (cfg.get("exe_path")       or "").lower()
+        ws   = (cfg.get("workspace_path") or "").lower()
+        fld  = (cfg.get("folder_path")    or "").lower()
+        prof = (cfg.get("profile_name")   or "").lower()
+        prot = (cfg.get("protocol")       or "").lower()
+        name = (cfg.get("name")           or "").lower()
         tabs = cfg.get("tabs", [])
 
         is_open = False
 
         if t in ("chrome", "edge", "brave", "firefox"):
-            # Extension installed → we know profile → match by profile
-            # Extension NOT installed → open_profiles is empty → always restore
-            if prof and open_profiles and prof in open_profiles:
-                is_open = True
-            # If no profile saved or no extension data → restore
+            if tabs and open_chrome_urls:
+                # Filter tabs — skip already open ones using smart URL matching
+                missing_tabs = []
+                skipped_tabs = 0
+                for tab in tabs:
+                    tab_url = tab.get("url", "")
+                    if not tab_url:
+                        continue
+                    if _url_matches(tab_url, open_chrome_urls, open_chrome_domains):
+                        skipped_tabs += 1
+                        print(Fore.CYAN + f"[WORKSPACE] Tab already open: {tab_url[:60]}")
+                    else:
+                        missing_tabs.append(tab)
+
+                if not missing_tabs:
+                    is_open = True
+                    print(Fore.CYAN + f"[WORKSPACE] Chrome '{prof}': "
+                          f"all {len(tabs)} tabs already open")
+                else:
+                    new_cfg = dict(cfg)
+                    new_cfg["tabs"] = missing_tabs
+                    new_cfg["_partial"] = True
+                    print(Fore.CYAN + f"[WORKSPACE] Chrome '{prof}': "
+                          f"{len(missing_tabs)} new, {skipped_tabs} already open")
+                    missing.append(new_cfg)
+                    continue
+
+            elif not tabs:
+                # No tabs saved — check if profile/Chrome is open
+                if prof and prof in open_profiles:
+                    is_open = True
+                elif "chrome" in open_types or "edge" in open_types:
+                    is_open = True
 
         elif t == "vscode":
-            # Match only if same workspace folder is open
             if ws and ws in open_ws_paths:
                 is_open = True
 
@@ -491,10 +734,19 @@ def smart_restore(apps_config):
             elif name and name in open_uwp:
                 is_open = True
 
+        elif t in ("powershell", "cmd", "terminal"):
+            if t in open_types:
+                is_open = True
+
         else:
-            # terminal, powershell, cmd, office, notepad, generic app
             if exe and exe in open_exes:
                 is_open = True
+            elif name:
+                for app in current:
+                    curr_name = (app.get("name") or "").lower()
+                    if name in curr_name or curr_name in name:
+                        is_open = True
+                        break
 
         if is_open:
             already_open += 1
@@ -506,7 +758,7 @@ def smart_restore(apps_config):
               f"({already_open} already running)")
         restore(missing)
     else:
-        print(Fore.GREEN + "[WORKSPACE] All apps already open")
+        print(Fore.GREEN + "[WORKSPACE] All apps already open — nothing to do")
 
     return len(missing), already_open
 
@@ -515,10 +767,61 @@ def smart_restore(apps_config):
 # RESTORE
 # ─────────────────────────────────────────────────────────────────────────
 
+def _should_restore(cfg: dict) -> bool:
+    """
+    Return True if this app should be restored.
+    Only skips Seven's own processes. Everything else restores.
+    If user had it open when they saved, they want it back.
+    """
+    exe  = (cfg.get("exe_path") or "").lower()
+    name = (cfg.get("name") or "").lower().strip()
+
+    if not name and not exe:
+        return False
+
+    exe_name = os.path.basename(exe) if exe else ""
+    if exe_name in ("electron.exe", "pythonw.exe", "python.exe"):
+        _seven_markers = (
+            "mk-projects\\seven", "\\seven\\electron",
+            "\\seven\\python", "program files\\seven",
+            "appdata\\local\\seven",
+        )
+        if any(marker in exe for marker in _seven_markers):
+            return False
+
+    return True
+
+
 def restore(apps_config):
-    """Launch all apps in parallel threads."""
+    """Launch all apps in parallel threads. Filters system apps first."""
     if not apps_config:
         return
+
+    # Filter out system/internal apps before restoring
+    clean_config = [cfg for cfg in apps_config if _should_restore(cfg)]
+
+    skipped = len(apps_config) - len(clean_config)
+    if skipped > 0:
+        print(Fore.YELLOW + f"[WORKSPACE] Filtered {skipped} system apps from restore")
+
+    if not clean_config:
+        print(Fore.GREEN + "[WORKSPACE] Nothing to restore after filtering")
+        return
+
+    print(Fore.CYAN + f"[WORKSPACE] Restoring {len(clean_config)} apps...")
+    t0      = time.time()
+    threads = []
+
+    for cfg in clean_config:
+        th = threading.Thread(target=_restore_one, args=(cfg,), daemon=True)
+        th.start()
+        threads.append(th)
+
+    for th in threads:
+        th.join(timeout=20)
+
+    elapsed = int((time.time() - t0) * 1000)
+    print(Fore.GREEN + f"[WORKSPACE] Done in {elapsed}ms")
 
     print(Fore.CYAN + f"[WORKSPACE] Restoring {len(apps_config)} apps...")
     t0      = time.time()
@@ -562,6 +865,11 @@ def _restore_one(cfg):
 
 
 def _restore_browser(cfg):
+    """
+    Restore browser tabs.
+    If _partial=True, only the missing_tabs subset is opened.
+    Tabs are opened in the correct Chrome profile.
+    """
     tabs         = cfg.get("tabs", [])
     urls         = [t["url"] for t in tabs
                     if t.get("url", "").startswith("http")]
@@ -569,10 +877,11 @@ def _restore_browser(cfg):
     chrome_exe   = _find_chrome_exe()
 
     if not urls:
-        subprocess.Popen("start chrome", shell=True)
+        # No URLs to open — nothing to do
         return
 
     if not chrome_exe:
+        # Fallback: open via shell
         for url in urls:
             subprocess.Popen(f'start chrome "{url}"', shell=True)
             time.sleep(0.3)
@@ -585,16 +894,20 @@ def _restore_browser(cfg):
     profile_dir  = _find_chrome_profile_dir(chrome_base, profile_name)
 
     if profile_dir:
+        # Open first URL (creates/focuses window)
         subprocess.Popen(
             [chrome_exe, f"--profile-directory={profile_dir}", urls[0]]
         )
-        time.sleep(2)
+        time.sleep(1.5)
+        # Open remaining URLs as new tabs
         for url in urls[1:]:
             subprocess.Popen(
                 [chrome_exe, f"--profile-directory={profile_dir}", url]
             )
-            time.sleep(0.5)
-        print(f"[WORKSPACE] Chrome '{profile_name}': {len(urls)} tabs")
+            time.sleep(0.4)
+        partial = cfg.get("_partial", False)
+        print(Fore.CYAN + f"[WORKSPACE] Chrome '{profile_name}': "
+              f"{'partial restore — ' if partial else ''}{len(urls)} tabs")
     else:
         for url in urls:
             subprocess.Popen([chrome_exe, url])
@@ -602,11 +915,30 @@ def _restore_browser(cfg):
 
 
 def _restore_vscode(cfg):
-    ws = cfg.get("workspace_path", "")
+    """Restore VS Code. Uses workspace_path if available, else exe_path."""
+    ws  = cfg.get("workspace_path", "")
+    exe = cfg.get("exe_path", "")
+
     if ws and os.path.exists(ws):
-        subprocess.Popen(["code", ws])
-    else:
-        subprocess.Popen(["code"])
+        try:
+            subprocess.Popen(["code", ws])
+            return
+        except Exception:
+            pass
+
+    # Fallback: launch VS Code directly via exe
+    if exe and os.path.exists(exe):
+        try:
+            subprocess.Popen([exe])
+            return
+        except Exception:
+            pass
+
+    # Last resort: shell command
+    try:
+        subprocess.Popen("code", shell=True)
+    except Exception:
+        pass
 
 
 def _restore_explorer(cfg):
