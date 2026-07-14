@@ -736,17 +736,35 @@ def smart_restore(apps_config):
         return 0, 0
 
     try:
-        try:
-            current = scan_current()
-        except Exception:
-            current = []
+        import concurrent.futures
 
-        open_exes      = set()
-        open_ws_paths  = set()
-        open_folders   = set()
-        open_profiles  = set()
-        open_uwp       = set()
-        open_types     = set()
+        # Run scan + Chrome detection fully in parallel
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as _pool:
+            _scan_future = _pool.submit(scan_current)
+            _prof_future = _pool.submit(_get_open_chrome_profiles)
+            _tabs_future = _pool.submit(_get_open_chrome_tabs)
+
+            try:
+                current = _scan_future.result(timeout=5)
+            except Exception:
+                current = []
+
+            try:
+                _extra_profiles = _prof_future.result(timeout=3)
+            except Exception:
+                _extra_profiles = set()
+
+            try:
+                open_chrome_urls, open_chrome_domains = _tabs_future.result(timeout=3)
+            except Exception:
+                open_chrome_urls, open_chrome_domains = set(), set()
+
+        open_exes     = set()
+        open_ws_paths = set()
+        open_folders  = set()
+        open_profiles = set()
+        open_uwp      = set()
+        open_types    = set()
 
         for app in current:
             t    = (app.get("type") or "").lower()
@@ -757,35 +775,22 @@ def smart_restore(apps_config):
             prot = (app.get("protocol") or "").lower()
             name = (app.get("name") or "").lower()
 
-            if exe:
-                open_exes.add(exe)
-            if ws:
-                open_ws_paths.add(ws)
-            if fld:
-                open_folders.add(fld)
-            if prof:
-                open_profiles.add(prof)
-            if t:
-                open_types.add(t)
+            if exe:  open_exes.add(exe)
+            if ws:   open_ws_paths.add(ws)
+            if fld:  open_folders.add(fld)
+            if prof: open_profiles.add(prof)
+            if t:    open_types.add(t)
             if t == "uwp":
-                if prot:
-                    open_uwp.add(prot)
-                if name:
-                    open_uwp.add(name)
+                if prot: open_uwp.add(prot)
+                if name: open_uwp.add(name)
 
-        # Supplement Chrome profiles from local Chrome files
-        # Works even when extension is not running
-        import concurrent.futures
-        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as _pool:
-            _prof_future = _pool.submit(_get_open_chrome_profiles)
-            _tabs_future = _pool.submit(_get_open_chrome_tabs)
-            open_profiles.update(_prof_future.result(timeout=3))
-            open_chrome_urls, open_chrome_domains = _tabs_future.result(timeout=3)
-        print(Fore.CYAN + f"[WORKSPACE] Open URLs: {len(open_chrome_urls)}, Domains: {len(open_chrome_domains)}")
+        open_profiles.update(_extra_profiles)
+        print(Fore.CYAN + f"[WORKSPACE] Open URLs: {len(open_chrome_urls)}, "
+              f"Domains: {len(open_chrome_domains)}")
 
         filtered_apps = [cfg for cfg in apps_config if _should_restore(cfg)]
 
-        missing = []
+        missing      = []
         already_open = 0
 
         for cfg in filtered_apps:
@@ -798,7 +803,6 @@ def smart_restore(apps_config):
             name = (cfg.get("name") or "").lower()
             tabs = cfg.get("tabs", [])
 
-            # ── Browsers ─────────────────────────────────────────────
             if t in ("chrome", "edge", "brave", "firefox"):
                 if tabs and open_chrome_urls:
                     missing_tabs = []
@@ -815,13 +819,15 @@ def smart_restore(apps_config):
 
                     if not missing_tabs:
                         already_open += 1
-                        print(Fore.CYAN + f"[WORKSPACE] Chrome '{prof}': all {len(tabs)} tabs already open")
+                        print(Fore.CYAN + f"[WORKSPACE] Chrome '{prof}': "
+                              f"all {len(tabs)} tabs already open")
                     else:
                         new_cfg = dict(cfg)
                         new_cfg["tabs"] = missing_tabs
                         new_cfg["_partial"] = True
                         missing.append(new_cfg)
-                        print(Fore.CYAN + f"[WORKSPACE] Chrome '{prof}': {len(missing_tabs)} new, {skipped_tabs} already open")
+                        print(Fore.CYAN + f"[WORKSPACE] Chrome '{prof}': "
+                              f"{len(missing_tabs)} new, {skipped_tabs} already open")
 
                 elif tabs and not open_chrome_urls:
                     if prof and prof in open_profiles:
@@ -839,7 +845,6 @@ def smart_restore(apps_config):
                         missing.append(cfg)
                         print(Fore.YELLOW + f"[WORKSPACE] Missing browser: {name}")
 
-            # ── VS Code ─────────────────────────────────────────────
             elif t == "vscode":
                 if ws and ws in open_ws_paths:
                     already_open += 1
@@ -851,7 +856,6 @@ def smart_restore(apps_config):
                     missing.append(cfg)
                     print(Fore.YELLOW + f"[WORKSPACE] Missing: {name}")
 
-            # ── Explorer ────────────────────────────────────────────
             elif t == "explorer":
                 if fld and fld in open_folders:
                     already_open += 1
@@ -860,7 +864,6 @@ def smart_restore(apps_config):
                     missing.append(cfg)
                     print(Fore.YELLOW + f"[WORKSPACE] Missing explorer: {name}")
 
-            # ── UWP ─────────────────────────────────────────────────
             elif t == "uwp":
                 if (prot and prot in open_uwp) or (name and name in open_uwp):
                     already_open += 1
@@ -869,20 +872,19 @@ def smart_restore(apps_config):
                     missing.append(cfg)
                     print(Fore.YELLOW + f"[WORKSPACE] Missing uwp: {name}")
 
-            # ── Everything else ────────────────────────────────────
             else:
                 is_open = False
 
                 if exe and exe in open_exes:
                     is_open = True
                     print(Fore.CYAN + f"[WORKSPACE] Already open (exe): {name}")
-
                 elif name:
                     for app in current:
                         curr_name = (app.get("name") or "").lower()
                         if name in curr_name or curr_name in name:
                             is_open = True
-                            print(Fore.CYAN + f"[WORKSPACE] Already open (name): {name} ~ {curr_name}")
+                            print(Fore.CYAN + f"[WORKSPACE] Already open (name): "
+                                  f"{name} ~ {curr_name}")
                             break
 
                 if is_open:
@@ -892,7 +894,8 @@ def smart_restore(apps_config):
                     print(Fore.YELLOW + f"[WORKSPACE] Missing: {name}")
 
         if missing:
-            print(Fore.CYAN + f"[WORKSPACE] Opening {len(missing)} apps ({already_open} already running)")
+            print(Fore.CYAN + f"[WORKSPACE] Opening {len(missing)} apps "
+                  f"({already_open} already running)")
             restore(missing)
         else:
             print(Fore.GREEN + "[WORKSPACE] All apps already open")
