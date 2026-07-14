@@ -323,20 +323,186 @@ def execute_trigger(trigger):
         app_count  = len(apps_list)
         app_names  = ",".join(apps_list)
 
-    # ── STEP 1: Show notification immediately (non-blocking) ──
-    if not trigger.get("silent", False):
-        threading.Thread(
-            target=_fire_notification,
-            args=(name, action_type, app_count, tab_count, app_names),
-            daemon=True,
-        ).start()
-
-    # ── STEP 2: Execute action + handle arrangement ──
     threading.Thread(
-        target=_run_action_and_arrange,
-        args=(trigger, action_type, action_data, app_names),
+        target=_execute_trigger_complete,
+        args=(trigger, name, action_type, action_data, app_count, tab_count, app_names),
         daemon=True,
     ).start()
+
+
+def _execute_trigger_complete(trigger, name, action_type, action_data,
+                               app_count, tab_count, app_names):
+    """
+    Complete trigger execution in one thread.
+    Order: notification → action → sound → feedback → stats.
+    Overlay spawn never blocks the action.
+    """
+    # Fire notification immediately — skip if overlay not ready
+    if not trigger.get("silent", False):
+        _fire_notification(name, action_type, app_count, tab_count, app_names)
+
+    # Execute action
+    result = None
+    try:
+        if action_type == "open_app":
+            _exec_open_app(action_data)
+        elif action_type == "open_url":
+            _exec_open_url(action_data)
+        elif action_type == "open_file":
+            _exec_open_file(action_data)
+        elif action_type == "open_folder":
+            _exec_open_folder(action_data)
+        elif action_type == "open_workspace":
+            result = _exec_open_workspace(action_data)
+        elif action_type == "run_command":
+            _exec_run_command(action_data)
+        elif action_type == "seven_action":
+            _exec_seven_action(action_data)
+        else:
+            print(f"[TRIGGER DAEMON] Unknown action: {action_type}")
+            return
+    except Exception as e:
+        print(f"[TRIGGER DAEMON] Action error: {e}")
+        import traceback
+        traceback.print_exc()
+        return
+
+    # Sound
+    if not trigger.get("silent", False):
+        try:
+            import winsound
+            winsound.MessageBeep(winsound.MB_ICONASTERISK)
+        except Exception:
+            pass
+
+    # Workspace feedback notification
+    if action_type == "open_workspace" and result and not trigger.get("silent", False):
+        opened  = result.get("opened", 0)
+        skipped = result.get("skipped", 0)
+
+        if opened == 0 and skipped > 0:
+            _send_overlay({
+                "type": "notif",
+                "data": {
+                    "title":    name,
+                    "subtitle": "Already active",
+                    "detail":   f"All {skipped} app{'s' if skipped != 1 else ''} already open",
+                    "holdMs":   2500,
+                },
+            })
+
+        elif opened > 0 and skipped > 0:
+            _send_overlay({
+                "type": "notif",
+                "data": {
+                    "title":    name,
+                    "subtitle": "Workspace restored",
+                    "detail":   f"{opened} opened · {skipped} already running",
+                    "holdMs":   3000,
+                },
+            })
+            time.sleep(3.5)
+            app_list = [a.strip() for a in app_names.split(",") if a.strip()]
+            if app_list and _is_overlay_alive():
+                _send_overlay({"type": "arrange", "data": {"appNames": app_list}})
+
+        elif opened > 0:
+            time.sleep(4.3)
+            app_list = [a.strip() for a in app_names.split(",") if a.strip()]
+            if app_list and _is_overlay_alive():
+                _send_overlay({"type": "arrange", "data": {"appNames": app_list}})
+
+    # Stats
+    update_fire_stats(trigger.get("id"))
+
+
+def _execute_trigger_complete(trigger, name, action_type, action_data,
+                               app_count, tab_count, app_names):
+    """
+    Complete trigger execution in a single thread.
+    Notification → Action → Arrangement → Stats.
+    No concurrent threads to prevent double-execution.
+    """
+    # Step 1: Ensure overlay is ready
+    _ensure_overlay_alive_safe()
+
+    # Step 2: Show notification
+    if not trigger.get("silent", False):
+        _fire_notification(name, action_type, app_count, tab_count, app_names)
+
+    # Step 3: Execute action
+    result = None
+    try:
+        if action_type == "open_app":
+            _exec_open_app(action_data)
+        elif action_type == "open_url":
+            _exec_open_url(action_data)
+        elif action_type == "open_file":
+            _exec_open_file(action_data)
+        elif action_type == "open_folder":
+            _exec_open_folder(action_data)
+        elif action_type == "open_workspace":
+            result = _exec_open_workspace(action_data)
+        elif action_type == "run_command":
+            _exec_run_command(action_data)
+        elif action_type == "seven_action":
+            _exec_seven_action(action_data)
+        else:
+            print(f"[TRIGGER DAEMON] Unknown action: {action_type}")
+            return
+    except Exception as e:
+        print(f"[TRIGGER DAEMON] Action error: {e}")
+        import traceback
+        traceback.print_exc()
+        return
+
+    # Step 4: Sound
+    if not trigger.get("silent", False):
+        try:
+            import winsound
+            winsound.MessageBeep(winsound.MB_ICONASTERISK)
+        except Exception:
+            pass
+
+    # Step 5: Smart feedback notification for workspace
+    if action_type == "open_workspace" and result and not trigger.get("silent", False):
+        opened  = result.get("opened", 0)
+        skipped = result.get("skipped", 0)
+
+        if opened == 0 and skipped > 0:
+            _send_overlay({
+                "type": "notif",
+                "data": {
+                    "title":    name,
+                    "subtitle": "Already active",
+                    "detail":   f"All {skipped} app{'s' if skipped != 1 else ''} already open",
+                    "holdMs":   2500,
+                },
+            })
+
+        elif opened > 0 and skipped > 0:
+            _send_overlay({
+                "type": "notif",
+                "data": {
+                    "title":    name,
+                    "subtitle": "Workspace restored",
+                    "detail":   f"{opened} opened · {skipped} already running",
+                    "holdMs":   3000,
+                },
+            })
+            time.sleep(3.5)
+            app_list = [a.strip() for a in app_names.split(",") if a.strip()]
+            if app_list and _is_overlay_alive():
+                _send_overlay({"type": "arrange", "data": {"appNames": app_list}})
+
+        elif opened > 0:
+            time.sleep(4.3)
+            app_list = [a.strip() for a in app_names.split(",") if a.strip()]
+            if app_list and _is_overlay_alive():
+                _send_overlay({"type": "arrange", "data": {"appNames": app_list}})
+
+    # Step 6: Update fire stats
+    update_fire_stats(trigger.get("id"))
 
 
 def _ensure_overlay_alive() -> bool:
@@ -365,37 +531,26 @@ def _ensure_overlay_alive() -> bool:
                 _checked_roots.append(_r)
 
         electron_exe = None
-        for _root in _checked_roots:
-            for _rel in [
-                os.path.join("node_modules", "electron", "dist", "electron.exe"),
-                os.path.join("node_modules", ".bin", "electron.cmd"),
-                os.path.join("frontend", "node_modules", "electron", "dist", "electron.exe"),
-            ]:
-                _candidate = os.path.join(_root, _rel)
-                if os.path.exists(_candidate):
-                    electron_exe = _candidate
-                    break
-            if electron_exe:
+        for _rel in [
+            os.path.join("node_modules", "electron", "dist", "electron.exe"),
+            os.path.join("node_modules", ".bin", "electron.cmd"),
+            os.path.join("frontend", "node_modules", "electron", "dist", "electron.exe"),
+        ]:
+            _c = os.path.join(PROJECT_ROOT, _rel)
+            if os.path.exists(_c):
+                electron_exe = _c
                 break
 
         if not electron_exe:
-            print("[TRIGGER DAEMON] Electron not found in any known location")
-            print(f"[TRIGGER DAEMON] Searched roots: {_checked_roots}")
+            print(f"[TRIGGER DAEMON] Electron not found in {PROJECT_ROOT}")
             return False
 
-        # Find overlay_daemon.js
-        daemon_js = None
-        for _root in _checked_roots:
-            _candidate = os.path.join(_root, "electron", "overlay_daemon.js")
-            if os.path.exists(_candidate):
-                daemon_js = _candidate
-                break
-
-        if not daemon_js:
-            print(f"[TRIGGER DAEMON] overlay_daemon.js not found in: {_checked_roots}")
+        daemon_js = os.path.join(PROJECT_ROOT, "electron", "overlay_daemon.js")
+        if not os.path.exists(daemon_js):
+            print(f"[TRIGGER DAEMON] overlay_daemon.js not found: {daemon_js}")
             return False
 
-        print(f"[TRIGGER DAEMON] Found overlay_daemon.js: {daemon_js}")
+        print(f"[TRIGGER DAEMON] Overlay: {electron_exe}")
     
         subprocess.Popen(
             [electron_exe, daemon_js],
@@ -444,33 +599,36 @@ def _ensure_overlay_alive_safe() -> bool:
 
         print("[TRIGGER DAEMON] Overlay daemon down — spawning...")
 
+        # Use PROJECT_ROOT only — it's set from __file__ at module load
+        # so it's always correct regardless of cwd
+        _search_roots = [PROJECT_ROOT]
+
         electron_exe = None
-        for _root in [PROJECT_ROOT, os.getcwd()]:
+        for _root in _search_roots:
             for _rel in [
                 os.path.join("node_modules", "electron", "dist", "electron.exe"),
                 os.path.join("node_modules", ".bin", "electron.cmd"),
+                os.path.join("frontend", "node_modules", "electron", "dist", "electron.exe"),
             ]:
                 _c = os.path.join(_root, _rel)
                 if os.path.exists(_c):
                     electron_exe = _c
+                    print(f"[TRIGGER DAEMON] Electron found: {_c}")
                     break
             if electron_exe:
                 break
 
         if not electron_exe:
-            print("[TRIGGER DAEMON] Electron not found")
+            print(f"[TRIGGER DAEMON] Electron not found in {PROJECT_ROOT}")
+            print(f"[TRIGGER DAEMON] Searched: node_modules/electron/dist/electron.exe")
             return False
 
-        daemon_js = None
-        for _root in [PROJECT_ROOT, os.getcwd()]:
-            _c = os.path.join(_root, "electron", "overlay_daemon.js")
-            if os.path.exists(_c):
-                daemon_js = _c
-                break
-
-        if not daemon_js:
-            print("[TRIGGER DAEMON] overlay_daemon.js not found")
+        daemon_js = os.path.join(PROJECT_ROOT, "electron", "overlay_daemon.js")
+        if not os.path.exists(daemon_js):
+            print(f"[TRIGGER DAEMON] overlay_daemon.js not found: {daemon_js}")
             return False
+
+        print(f"[TRIGGER DAEMON] Spawning overlay: {electron_exe}")
 
         subprocess.Popen(
             [electron_exe, daemon_js],
@@ -482,13 +640,13 @@ def _ensure_overlay_alive_safe() -> bool:
             start_new_session=True,
         )
 
-        for _ in range(50):
+        for _ in range(150):
             time.sleep(0.1)
             if _is_overlay_alive():
                 print("[TRIGGER DAEMON] Overlay daemon ready")
                 return True
 
-        print("[TRIGGER DAEMON] Overlay spawn timed out")
+        print("[TRIGGER DAEMON] Overlay spawn timed out after 15s")
         return False
 
     finally:
@@ -516,9 +674,8 @@ def _fire_notification(name, action_type, app_count, tab_count, app_names):
     detail  = "  ·  ".join(parts) if parts else ""
     hold_ms = 2000 if action_type == "open_workspace" else 3200
 
-    # Ensure daemon is alive — spawn if needed
-    if not _ensure_overlay_alive_safe():
-        print("[TRIGGER DAEMON] Overlay unavailable — notification skipped")
+    if not _is_overlay_alive():
+        print("[TRIGGER DAEMON] Overlay not ready — notification skipped")
         return
 
     _send_overlay({
@@ -531,103 +688,6 @@ def _fire_notification(name, action_type, app_count, tab_count, app_names):
         },
     })
     print(f"[TRIGGER DAEMON] Notification sent: {name}")
-
-
-def _run_action_and_arrange(trigger, action_type, action_data, app_names):
-    """Execute action, then send arrangement card for workspace triggers."""
-    name = trigger.get("name", "unnamed")
-
-    try:
-        result = None
-
-        if action_type == "open_app":
-            _exec_open_app(action_data)
-        elif action_type == "open_url":
-            _exec_open_url(action_data)
-        elif action_type == "open_file":
-            _exec_open_file(action_data)
-        elif action_type == "open_folder":
-            _exec_open_folder(action_data)
-        elif action_type == "open_workspace":
-            result = _exec_open_workspace(action_data)
-        elif action_type == "run_command":
-            _exec_run_command(action_data)
-        elif action_type == "seven_action":
-            _exec_seven_action(action_data)
-        else:
-            print(f"[TRIGGER DAEMON] Unknown action type: {action_type}")
-            return
-
-        # Play sound
-        if not trigger.get("silent", False):
-            try:
-                import winsound
-                winsound.MessageBeep(winsound.MB_ICONASTERISK)
-            except Exception:
-                pass
-
-        # Workspace: show status notification if all already open
-        if action_type == "open_workspace" and result and not trigger.get("silent", False):
-            opened  = result.get("opened", 0)
-            skipped = result.get("skipped", 0)
-            total   = opened + skipped
-
-            if opened == 0 and skipped > 0:
-                # Everything already open — show status notification
-                _ensure_overlay_alive_safe()
-                _send_overlay({
-                    "type": "notif",
-                    "data": {
-                        "title":    name,
-                        "subtitle": "Already active",
-                        "detail":   f"All {skipped} app{'s' if skipped != 1 else ''} already open",
-                        "holdMs":   2500,
-                    },
-                })
-                print(f"[TRIGGER DAEMON] All {skipped} apps already open")
-
-            elif opened > 0 and skipped > 0:
-                # Partial restore — update notification
-                _ensure_overlay_alive_safe()
-                _send_overlay({
-                    "type": "notif",
-                    "data": {
-                        "title":    name,
-                        "subtitle": "Workspace restored",
-                        "detail":   f"{opened} opened, {skipped} already running",
-                        "holdMs":   3000,
-                    },
-                })
-
-                # Show arrangement card after delay
-                hold_ms = 3000
-                time.sleep((hold_ms + 500) / 1000.0)
-                app_list = [a.strip() for a in app_names.split(",") if a.strip()]
-                if app_list and _is_overlay_alive():
-                    _send_overlay({
-                        "type": "arrange",
-                        "data": {"appNames": app_list},
-                    })
-
-            elif opened > 0:
-                # Full restore — show arrangement
-                hold_ms = 3800
-                time.sleep((hold_ms + 500) / 1000.0)
-                app_list = [a.strip() for a in app_names.split(",") if a.strip()]
-                if app_list and _is_overlay_alive():
-                    _send_overlay({
-                        "type": "arrange",
-                        "data": {"appNames": app_list},
-                    })
-                    print(f"[TRIGGER DAEMON] Arrangement card sent: {app_list}")
-
-        # Update stats
-        update_fire_stats(trigger.get("id"))
-
-    except Exception as e:
-        print(f"[TRIGGER DAEMON] Execution error: {e}")
-        import traceback
-        traceback.print_exc()
 
 
 def _exec_open_app(data):
@@ -811,19 +871,38 @@ def _exec_seven_action(data):
     try:
         import re
         from hands.system import manage_system
+
         if "mute" in action_lower:
-            manage_system({"action": "volume_mute"})
+            result = manage_system({"action": "volume_mute"})
+            print(f"[TRIGGER DAEMON] Mute: {result}")
+
         elif "volume" in action_lower:
             nums = re.findall(r'\d+', action_lower)
             if nums:
-                manage_system({"action": "volume_set", "value": nums[0]})
+                result = manage_system({"action": "volume_set", "value": nums[0]})
+                print(f"[TRIGGER DAEMON] Volume {nums[0]}%: {result}")
+
         elif "brightness" in action_lower:
+            # "max the brightness" → 100, "brightness 10" → 10
             nums = re.findall(r'\d+', action_lower)
             if nums:
-                manage_system({"action": "brightness_set", "value": nums[0]})
-        print(f"[TRIGGER DAEMON] Direct system action: {action}")
+                val = nums[0]
+            elif "max" in action_lower:
+                val = "100"
+            elif "min" in action_lower:
+                val = "10"
+            else:
+                val = "100"
+            result = manage_system({"action": "brightness_set", "value": val})
+            print(f"[TRIGGER DAEMON] Brightness {val}%: {result}")
+
+        else:
+            print(f"[TRIGGER DAEMON] Unknown direct action: {action}")
+
     except Exception as e:
         print(f"[TRIGGER DAEMON] Direct action failed: {e}")
+        import traceback
+        traceback.print_exc()
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -965,7 +1044,7 @@ class HotkeyListener:
     def _check_combo(self):
         """Check if currently pressed keys match any registered hotkey."""
         now = time.time()
-        if now - self._last_fire < 0.8:
+        if now - self._last_fire < 0.3:
             return
 
         MODIFIERS = {"ctrl", "shift", "alt", "win"}
@@ -1178,6 +1257,20 @@ def main():
     # Load into listeners
     hotkey_listener.reload(triggers)
     audio_listener.reload(triggers)
+
+    # Pre-warm overlay daemon at startup
+    threading.Thread(target=_ensure_overlay_alive_safe, daemon=True).start()
+
+    # Pre-load heavy modules so first trigger fires instantly
+    def _preload():
+        try:
+            import hands.workspace
+            import hands.system
+            import hands.core
+            print("[TRIGGER DAEMON] Modules pre-loaded")
+        except Exception:
+            pass
+    threading.Thread(target=_preload, daemon=True).start()
 
     # Start all listeners
     hotkey_listener.start()
