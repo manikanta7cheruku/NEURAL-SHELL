@@ -430,7 +430,10 @@ def _enrich_vscode(apps):
 
 
 def _enrich_explorer(apps):
-    """Get Explorer window paths via Shell COM."""
+    """
+    Get Explorer window paths via Shell COM.
+    Saves both folder_path and display name.
+    """
     explorers = [a for a in apps if a.get("type") == "explorer"]
     if not explorers:
         return
@@ -438,26 +441,47 @@ def _enrich_explorer(apps):
     try:
         import win32com.client
         from urllib.parse import unquote
+
         shell   = win32com.client.Dispatch("Shell.Application")
         windows = shell.Windows()
         folders = []
+
         for i in range(windows.Count):
             try:
                 w = windows.Item(i)
-                if w and w.LocationURL:
-                    path_str = unquote(
-                        w.LocationURL.replace("file:///", "").replace("/", "\\")
+                if not w:
+                    continue
+                url  = w.LocationURL or ""
+                loc  = w.LocationName or ""
+                path = ""
+
+                if url:
+                    path = unquote(
+                        url.replace("file:///", "").replace("/", "\\")
                     )
-                    folders.append({"path": path_str, "name": w.LocationName or ""})
+                    # Fix drive letter casing
+                    if len(path) >= 2 and path[1] == ":":
+                        path = path[0].upper() + path[1:]
+
+                if path or loc:
+                    folders.append({"path": path, "name": loc})
+
             except Exception:
                 continue
+
         for i, exp in enumerate(explorers):
             if i < len(folders):
-                exp["folder_path"] = folders[i]["path"]
-                if folders[i]["name"]:
-                    exp["name"] = folders[i]["name"]
+                f = folders[i]
+                if f["path"]:
+                    exp["folder_path"] = f["path"]
+                if f["name"]:
+                    exp["name"] = f"File Explorer: {f['name']}"
+                print(Fore.CYAN + f"[WORKSPACE] Explorer: {f['path']} ({f['name']})")
+            else:
+                print(Fore.YELLOW + "[WORKSPACE] Explorer: could not get path from Shell COM")
+
     except Exception as e:
-        print(Fore.YELLOW + f"[WORKSPACE] Explorer: {e}")
+        print(Fore.YELLOW + f"[WORKSPACE] Explorer enrichment failed: {e}")
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -554,23 +578,101 @@ def _url_matches(saved_url: str, open_urls: set, open_domains: set) -> bool:
 
     return False
 
+def _get_open_chrome_profiles() -> set:
+    """
+    Detect which Chrome profiles are CURRENTLY OPEN by checking
+    which profile directories have a lock file held by a running Chrome process.
+
+    Chrome creates a lock file at:
+      User Data/<Profile>/SingletonLock  (symlink on Linux)
+      User Data/<Profile>/lockfile       (Windows)
+
+    On Windows, the running Chrome process holds an open handle to
+    the Preferences file in the active profile directory.
+    We detect this by checking which profile dirs were modified recently.
+    """
+    profiles = set()
+    try:
+        import psutil
+
+        # Check if Chrome is actually running
+        chrome_pids = []
+        for p in psutil.process_iter(['pid', 'name']):
+            if p.info['name'] and p.info['name'].lower() == "chrome.exe":
+                chrome_pids.append(p.info['pid'])
+
+        if not chrome_pids:
+            return profiles
+
+        chrome_base = os.path.join(
+            os.environ.get("LOCALAPPDATA", ""),
+            "Google", "Chrome", "User Data"
+        )
+        if not os.path.exists(chrome_base):
+            return profiles
+
+        local_state_path = os.path.join(chrome_base, "Local State")
+        if not os.path.exists(local_state_path):
+            return profiles
+
+        with open(local_state_path, "r", encoding="utf-8") as f:
+            state = json.load(f)
+
+        info_cache = state.get("profile", {}).get("info_cache", {})
+
+        # Find which profile directories Chrome currently has open
+        # by checking open file handles of Chrome processes
+        open_profile_dirs = set()
+        try:
+            for pid in chrome_pids:
+                try:
+                    proc = psutil.Process(pid)
+                    for f in proc.open_files():
+                        fpath = f.path.lower().replace("/", "\\")
+                        chrome_base_lower = chrome_base.lower().replace("/", "\\")
+                        if chrome_base_lower in fpath:
+                            # Extract profile dir from path
+                            rel = fpath[len(chrome_base_lower):].lstrip("\\")
+                            parts = rel.split("\\")
+                            if parts:
+                                open_profile_dirs.add(parts[0])
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+        except Exception:
+            pass
+
+        # Map open profile dirs to emails
+        for profile_dir, info in info_cache.items():
+            if profile_dir.lower() not in open_profile_dirs:
+                continue
+
+            email = (
+                info.get("user_name") or
+                info.get("signin", {}).get("login", "") or
+                ""
+            ).lower()
+            if email:
+                profiles.add(email)
+                profiles.add(email.split("@")[0])
+                print(Fore.CYAN + f"[WORKSPACE] Active Chrome profile: {email}")
+
+    except Exception as e:
+        print(Fore.YELLOW + f"[WORKSPACE] Chrome profile detection: {e}")
+
+    return profiles
 
 def _get_open_chrome_tabs() -> tuple:
     """
     Get all currently open Chrome tab URLs.
+    Returns (open_urls: set, open_domains: set).
 
-    Returns (open_urls: set, open_domains: set)
-
-    Works in TWO modes:
-      1. Seven running  → via Chrome extension API (backend route)
-      2. Seven closed   → direct Chrome DevTools Protocol on port 9222
-
-    Both return normalized URLs + domains for matching.
+    Mode 1: Chrome extension via Seven backend (instant).
+    Mode 2: Chrome DevTools Protocol on port 9222 (fast socket check first).
     """
     open_urls    = set()
     open_domains = set()
 
-    # ── Mode 1: Chrome extension via Seven backend ──
+    # Mode 1: Chrome extension via Seven backend
     try:
         from backend.routes.chrome import get_tabs_by_profile
         profile_tabs = get_tabs_by_profile()
@@ -590,17 +692,19 @@ def _get_open_chrome_tabs() -> tuple:
     except Exception:
         pass
 
-    # ── Mode 2: Direct Chrome DevTools Protocol (works when Seven closed) ──
+    # Mode 2: DevTools Protocol — check port is open first (no timeout wasted)
+    import socket as _socket
+    try:
+        _s = _socket.create_connection(("127.0.0.1", 9222), timeout=0.1)
+        _s.close()
+    except Exception:
+        return open_urls, open_domains
+
     try:
         import urllib.request
         import json as _json
-
-        req = urllib.request.urlopen(
-            "http://127.0.0.1:9222/json",
-            timeout=2
-        )
+        req = urllib.request.urlopen("http://127.0.0.1:9222/json", timeout=0.5)
         tabs_data = _json.loads(req.read().decode("utf-8"))
-
         for tab in tabs_data:
             url = tab.get("url", "")
             if url and url.startswith("http"):
@@ -608,18 +712,13 @@ def _get_open_chrome_tabs() -> tuple:
                 domain = _extract_domain(url)
                 open_urls.add(norm)
                 open_domains.add(domain)
-
         if open_urls:
             print(Fore.CYAN + f"[WORKSPACE] Chrome tabs via DevTools: "
                   f"{len(open_urls)} URLs, {len(open_domains)} domains")
-
-    except Exception as e:
-        print(Fore.YELLOW + f"[WORKSPACE] Chrome tab detection failed: {e}")
-        print(Fore.YELLOW + "[WORKSPACE] Launch Chrome with "
-              "--remote-debugging-port=9222 for tab detection")
+    except Exception:
+        pass
 
     return open_urls, open_domains
-
 
 _restore_in_progress = threading.Lock()
 
@@ -627,16 +726,18 @@ _restore_in_progress = threading.Lock()
 def smart_restore(apps_config):
     """
     Open only apps/tabs that are not already running.
-    Thread-safe — only one restore runs at a time.
+    Returns (opened_count, already_open_count).
     """
     if not apps_config:
         return 0, 0
 
-    if not _restore_in_progress.acquire(blocking=False):
-        print(Fore.YELLOW + "[WORKSPACE] Restore already in progress, skipping")
+    if not _restore_in_progress.acquire(blocking=True, timeout=30):
+        print(Fore.YELLOW + "[WORKSPACE] Restore lock timeout — skipping")
         return 0, 0
 
     try:
+        time.sleep(0.3)
+
         try:
             current = scan_current()
         except Exception:
@@ -650,48 +751,58 @@ def smart_restore(apps_config):
         open_types     = set()
 
         for app in current:
-            t    = (app.get("type")           or "").lower()
-            exe  = (app.get("exe_path")       or "").lower()
+            t    = (app.get("type") or "").lower()
+            exe  = (app.get("exe_path") or "").lower()
             ws   = (app.get("workspace_path") or "").lower()
-            fld  = (app.get("folder_path")    or "").lower()
-            prof = (app.get("profile_name")   or "").lower()
-            prot = (app.get("protocol")       or "").lower()
-            name = (app.get("name")           or "").lower()
+            fld  = (app.get("folder_path") or "").lower()
+            prof = (app.get("profile_name") or "").lower()
+            prot = (app.get("protocol") or "").lower()
+            name = (app.get("name") or "").lower()
 
-            if exe:  open_exes.add(exe)
-            if ws:   open_ws_paths.add(ws)
-            if fld:  open_folders.add(fld)
-            if prof: open_profiles.add(prof)
-            if t:    open_types.add(t)
+            if exe:
+                open_exes.add(exe)
+            if ws:
+                open_ws_paths.add(ws)
+            if fld:
+                open_folders.add(fld)
+            if prof:
+                open_profiles.add(prof)
+            if t:
+                open_types.add(t)
             if t == "uwp":
-                if prot: open_uwp.add(prot)
-                if name: open_uwp.add(name)
+                if prot:
+                    open_uwp.add(prot)
+                if name:
+                    open_uwp.add(name)
+
+        # Supplement Chrome profiles from local Chrome files
+        # Works even when extension is not running
+        open_profiles.update(_get_open_chrome_profiles())
 
         open_chrome_urls, open_chrome_domains = _get_open_chrome_tabs()
-        print(Fore.CYAN + f"[WORKSPACE] Open URLs: {len(open_chrome_urls)}, "
-              f"Domains: {len(open_chrome_domains)}")
+        print(Fore.CYAN + f"[WORKSPACE] Open URLs: {len(open_chrome_urls)}, Domains: {len(open_chrome_domains)}")
 
-        apps_config = [cfg for cfg in apps_config if _should_restore(cfg)]
+        filtered_apps = [cfg for cfg in apps_config if _should_restore(cfg)]
 
-        missing      = []
+        missing = []
         already_open = 0
 
-        for cfg in apps_config:
-            t    = (cfg.get("type")           or "").lower()
-            exe  = (cfg.get("exe_path")       or "").lower()
+        for cfg in filtered_apps:
+            t    = (cfg.get("type") or "").lower()
+            exe  = (cfg.get("exe_path") or "").lower()
             ws   = (cfg.get("workspace_path") or "").lower()
-            fld  = (cfg.get("folder_path")    or "").lower()
-            prof = (cfg.get("profile_name")   or "").lower()
-            prot = (cfg.get("protocol")       or "").lower()
-            name = (cfg.get("name")           or "").lower()
+            fld  = (cfg.get("folder_path") or "").lower()
+            prof = (cfg.get("profile_name") or "").lower()
+            prot = (cfg.get("protocol") or "").lower()
+            name = (cfg.get("name") or "").lower()
             tabs = cfg.get("tabs", [])
 
-            is_open = False
-
+            # ── Browsers ─────────────────────────────────────────────
             if t in ("chrome", "edge", "brave", "firefox"):
                 if tabs and open_chrome_urls:
                     missing_tabs = []
                     skipped_tabs = 0
+
                     for tab in tabs:
                         tab_url = tab.get("url", "")
                         if not tab_url:
@@ -702,57 +813,85 @@ def smart_restore(apps_config):
                             missing_tabs.append(tab)
 
                     if not missing_tabs:
-                        is_open = True
+                        already_open += 1
+                        print(Fore.CYAN + f"[WORKSPACE] Chrome '{prof}': all {len(tabs)} tabs already open")
                     else:
                         new_cfg = dict(cfg)
                         new_cfg["tabs"] = missing_tabs
                         new_cfg["_partial"] = True
                         missing.append(new_cfg)
-                        continue
+                        print(Fore.CYAN + f"[WORKSPACE] Chrome '{prof}': {len(missing_tabs)} new, {skipped_tabs} already open")
 
-                elif not tabs:
+                elif tabs and not open_chrome_urls:
                     if prof and prof in open_profiles:
-                        is_open = True
-                    elif t in open_types:
-                        is_open = True
+                        already_open += 1
+                        print(Fore.CYAN + f"[WORKSPACE] Browser already open: {name}")
+                    else:
+                        missing.append(cfg)
+                        print(Fore.YELLOW + f"[WORKSPACE] Missing browser: {name}")
 
                 else:
-                    # tabs exist but no URL data to compare — check by profile
-                    if prof and prof in open_profiles:
-                        is_open = True
+                    if (prof and prof in open_profiles) or (t in open_types):
+                        already_open += 1
+                        print(Fore.CYAN + f"[WORKSPACE] Browser already open: {name}")
+                    else:
+                        missing.append(cfg)
+                        print(Fore.YELLOW + f"[WORKSPACE] Missing browser: {name}")
 
+            # ── VS Code ─────────────────────────────────────────────
             elif t == "vscode":
                 if ws and ws in open_ws_paths:
-                    is_open = True
+                    already_open += 1
+                    print(Fore.CYAN + f"[WORKSPACE] Already open (workspace): {name}")
+                elif exe and exe in open_exes:
+                    already_open += 1
+                    print(Fore.CYAN + f"[WORKSPACE] Already open (exe): {name}")
+                else:
+                    missing.append(cfg)
+                    print(Fore.YELLOW + f"[WORKSPACE] Missing: {name}")
 
+            # ── Explorer ────────────────────────────────────────────
             elif t == "explorer":
                 if fld and fld in open_folders:
-                    is_open = True
+                    already_open += 1
+                    print(Fore.CYAN + f"[WORKSPACE] Already open (folder): {name}")
+                else:
+                    missing.append(cfg)
+                    print(Fore.YELLOW + f"[WORKSPACE] Missing explorer: {name}")
 
+            # ── UWP ─────────────────────────────────────────────────
             elif t == "uwp":
-                if prot and prot in open_uwp:
-                    is_open = True
-                elif name and name in open_uwp:
-                    is_open = True
+                if (prot and prot in open_uwp) or (name and name in open_uwp):
+                    already_open += 1
+                    print(Fore.CYAN + f"[WORKSPACE] Already open (uwp): {name}")
+                else:
+                    missing.append(cfg)
+                    print(Fore.YELLOW + f"[WORKSPACE] Missing uwp: {name}")
 
+            # ── Everything else ────────────────────────────────────
             else:
+                is_open = False
+
                 if exe and exe in open_exes:
                     is_open = True
+                    print(Fore.CYAN + f"[WORKSPACE] Already open (exe): {name}")
+
                 elif name:
                     for app in current:
                         curr_name = (app.get("name") or "").lower()
                         if name in curr_name or curr_name in name:
                             is_open = True
+                            print(Fore.CYAN + f"[WORKSPACE] Already open (name): {name} ~ {curr_name}")
                             break
 
-            if is_open:
-                already_open += 1
-            else:
-                missing.append(cfg)
+                if is_open:
+                    already_open += 1
+                else:
+                    missing.append(cfg)
+                    print(Fore.YELLOW + f"[WORKSPACE] Missing: {name}")
 
         if missing:
-            print(Fore.CYAN + f"[WORKSPACE] Opening {len(missing)} apps "
-                  f"({already_open} already running)")
+            print(Fore.CYAN + f"[WORKSPACE] Opening {len(missing)} apps ({already_open} already running)")
             restore(missing)
         else:
             print(Fore.GREEN + "[WORKSPACE] All apps already open")
@@ -768,40 +907,36 @@ def smart_restore(apps_config):
 
 def _should_restore(cfg: dict) -> bool:
     """
-    Return True if this app should be restored.
-    Only skips Seven's own processes. Everything else restores.
-    If user had it open when they saved, they want it back.
+    Only skip Seven's own processes.
+    If the user saved it in a workspace, Seven should restore it.
     """
     exe  = (cfg.get("exe_path") or "").lower()
-    name = (cfg.get("name") or "").lower().strip()
+    name = (cfg.get("name") or "").strip()
 
     if not name and not exe:
         return False
 
     exe_name = os.path.basename(exe) if exe else ""
-    if exe_name in ("electron.exe", "pythonw.exe", "python.exe"):
-        _seven_markers = (
-            "mk-projects\\seven", "\\seven\\electron",
-            "\\seven\\python", "program files\\seven",
+    if exe_name in ("electron.exe", "python.exe", "pythonw.exe"):
+        seven_markers = (
+            "mk-projects\\seven",
+            "\\seven\\electron",
+            "\\seven\\python",
+            "program files\\seven",
             "appdata\\local\\seven",
         )
-        if any(marker in exe for marker in _seven_markers):
+        if any(marker in exe for marker in seven_markers):
             return False
 
     return True
 
 
 def restore(apps_config):
-    """Launch all apps in parallel threads. Filters system apps first."""
+    """Launch all apps in parallel threads."""
     if not apps_config:
         return
 
-    # Filter out system/internal apps before restoring
     clean_config = [cfg for cfg in apps_config if _should_restore(cfg)]
-
-    skipped = len(apps_config) - len(clean_config)
-    if skipped > 0:
-        print(Fore.YELLOW + f"[WORKSPACE] Filtered {skipped} system apps from restore")
 
     if not clean_config:
         print(Fore.GREEN + "[WORKSPACE] Nothing to restore after filtering")
@@ -812,21 +947,6 @@ def restore(apps_config):
     threads = []
 
     for cfg in clean_config:
-        th = threading.Thread(target=_restore_one, args=(cfg,), daemon=True)
-        th.start()
-        threads.append(th)
-
-    for th in threads:
-        th.join(timeout=20)
-
-    elapsed = int((time.time() - t0) * 1000)
-    print(Fore.GREEN + f"[WORKSPACE] Done in {elapsed}ms")
-
-    print(Fore.CYAN + f"[WORKSPACE] Restoring {len(apps_config)} apps...")
-    t0      = time.time()
-    threads = []
-
-    for cfg in apps_config:
         th = threading.Thread(target=_restore_one, args=(cfg,), daemon=True)
         th.start()
         threads.append(th)
@@ -941,11 +1061,40 @@ def _restore_vscode(cfg):
 
 
 def _restore_explorer(cfg):
+    """
+    Open File Explorer at the saved folder path.
+    Falls back to opening the folder from the saved name if path missing.
+    """
     folder = cfg.get("folder_path", "")
+    name   = cfg.get("name", "")
+
     if folder and os.path.exists(folder):
         subprocess.Popen(["explorer", folder])
-    else:
-        subprocess.Popen(["explorer"])
+        print(Fore.GREEN + f"[WORKSPACE] Explorer opened: {folder}")
+        return
+
+    # Try to extract folder path from enriched name
+    # Name format: "File Explorer: EDU - File Explorer" or "File Explorer: C:\Users\..."
+    if name:
+        # Strip "File Explorer: " prefix
+        clean = name
+        for prefix in ("File Explorer: ", "File Explorer — ", "File Explorer - "):
+            if name.startswith(prefix):
+                clean = name[len(prefix):]
+                break
+
+        # Remove " - File Explorer" suffix
+        if " - File Explorer" in clean:
+            clean = clean.replace(" - File Explorer", "").strip()
+
+        if os.path.exists(clean):
+            subprocess.Popen(["explorer", clean])
+            print(Fore.GREEN + f"[WORKSPACE] Explorer opened from name: {clean}")
+            return
+
+    # Last resort — open My Computer
+    subprocess.Popen(["explorer"])
+    print(Fore.YELLOW + "[WORKSPACE] Explorer opened without folder (path not found)")
 
 
 def _restore_editor(cfg):
