@@ -210,12 +210,37 @@ def _validate_hotkey_format(hotkey):
         )
 
 
+_SHIFT_SYMBOLS = {
+    "!": "1", "@": "2", "#": "3", "$": "4", "%": "5",
+    "^": "6", "&": "7", "*": "8", "(": "9", ")": "0",
+    "_": "-", "+": "=", "~": "`", "{": "[", "}": "]",
+    "|": "\\", ":": ";", '"': "'", "<": ",", ">": ".",
+    "?": "/",
+}
+
+
 def _normalize_hotkey(hotkey: str) -> str:
-    """Normalize hotkey for consistent storage and conflict checking."""
+    """
+    Normalize hotkey for consistent storage and conflict checking.
+    Shift+! becomes shift+1 (maps symbols to their base key).
+    """
     MODIFIERS = {"ctrl", "shift", "alt", "win"}
     parts = [p.strip().lower() for p in hotkey.replace(" ", "").split("+") if p.strip()]
-    mods  = sorted([p for p in parts if p in MODIFIERS])
-    keys  = sorted([p for p in parts if p not in MODIFIERS])
+
+    mods = sorted(p for p in parts if p in MODIFIERS)
+    keys = []
+    for p in parts:
+        if p in MODIFIERS:
+            continue
+        if p in _SHIFT_SYMBOLS:
+            keys.append(_SHIFT_SYMBOLS[p])
+            if "shift" not in mods:
+                mods.append("shift")
+                mods.sort()
+        else:
+            keys.append(p)
+
+    keys.sort()
     return "+".join(mods + keys)
 
 
