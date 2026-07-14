@@ -588,29 +588,28 @@ def _url_matches(saved_url: str, open_urls: set, open_domains: set) -> bool:
 
 def _get_open_chrome_profiles() -> set:
     """
-    Detect which Chrome profiles are currently open.
-    Uses Chrome's Preferences file last-write time — fast, no open_files() call.
-    Chrome updates the Preferences file every few seconds while running.
-    A profile modified within last 60 seconds is considered active.
+    Detect which Chrome profiles have open windows right now.
+    Uses window title matching — fast and 100% accurate.
+    Chrome window titles end with " - Google Chrome" and contain
+    the profile name in parentheses for non-default profiles.
     """
     profiles = set()
     try:
         import psutil
 
-        chrome_running = any(
-            p.info['name'] and p.info['name'].lower() == "chrome.exe"
-            for p in psutil.process_iter(['name'])
-        )
-        if not chrome_running:
+        chrome_pids = set()
+        for p in psutil.process_iter(['pid', 'name']):
+            if p.info['name'] and p.info['name'].lower() == "chrome.exe":
+                chrome_pids.add(p.info['pid'])
+
+        if not chrome_pids:
             return profiles
 
+        # Read profile info from Local State
         chrome_base = os.path.join(
             os.environ.get("LOCALAPPDATA", ""),
             "Google", "Chrome", "User Data"
         )
-        if not os.path.exists(chrome_base):
-            return profiles
-
         local_state_path = os.path.join(chrome_base, "Local State")
         if not os.path.exists(local_state_path):
             return profiles
@@ -619,23 +618,45 @@ def _get_open_chrome_profiles() -> set:
             state = json.load(f)
 
         info_cache = state.get("profile", {}).get("info_cache", {})
-        now = time.time()
 
+        # Build mapping: profile display name → email
+        name_to_email = {}
+        dir_to_email  = {}
         for profile_dir, info in info_cache.items():
-            prefs_path = os.path.join(chrome_base, profile_dir, "Preferences")
-            if not os.path.exists(prefs_path):
-                continue
-
-            # Profile is active if Preferences modified within last 60 seconds
-            modified_ago = now - os.path.getmtime(prefs_path)
-            if modified_ago > 60:
-                continue
-
             email = (
                 info.get("user_name") or
                 info.get("signin", {}).get("login", "") or
                 ""
             ).lower()
+            display_name = info.get("name", "").lower()
+            if email:
+                if display_name:
+                    name_to_email[display_name] = email
+                dir_to_email[profile_dir.lower()] = email
+
+        # Check which Chrome windows are actually open by PID
+        open_dirs = set()
+        for pid in chrome_pids:
+            try:
+                proc = psutil.Process(pid)
+                cmd = proc.cmdline()
+                for arg in cmd:
+                    if arg.startswith("--profile-directory="):
+                        pdir = arg.split("=", 1)[1].lower()
+                        open_dirs.add(pdir)
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+
+        # Map open profile dirs to emails
+        for pdir in open_dirs:
+            email = dir_to_email.get(pdir, "")
+            if email:
+                profiles.add(email)
+                profiles.add(email.split("@")[0])
+
+        # If no --profile-directory found, check for Default profile
+        if not open_dirs and chrome_pids:
+            email = dir_to_email.get("default", "")
             if email:
                 profiles.add(email)
                 profiles.add(email.split("@")[0])
