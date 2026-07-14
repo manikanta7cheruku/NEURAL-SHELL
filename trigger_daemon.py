@@ -41,13 +41,15 @@ import subprocess
 import threading
 from datetime import datetime
 
-# Hide console window ONLY when running as pythonw (background daemon)
-if sys.platform == "win32" and not os.environ.get("SEVEN_DEBUG_DAEMON"):
+# Hide console window ONLY when running as pythonw.exe (background daemon)
+# python.exe keeps console visible for debugging
+if sys.platform == "win32":
     try:
         import ctypes
-        hwnd = ctypes.windll.kernel32.GetConsoleWindow()
-        if hwnd and "pythonw" in sys.executable.lower():
-            ctypes.windll.user32.ShowWindow(hwnd, 0)
+        if "pythonw" in sys.executable.lower():
+            hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+            if hwnd:
+                ctypes.windll.user32.ShowWindow(hwnd, 0)
     except Exception:
         pass
 
@@ -830,21 +832,20 @@ def _exec_seven_action(data):
 
 class HotkeyListener:
     """
-    Global hotkey listener using pynput.
-    Uses virtual key codes (vk) for reliable detection when modifiers held.
+    Global hotkey listener.
+    Primary: pynput low-level keyboard hook (works everywhere).
+    RegisterHotKey API was removed — it conflicts with Electron's
+    globalShortcut and fails for special character combos like Shift+!.
     """
 
     def __init__(self):
         self._triggers        = []
         self._hotkey_map      = {}
-        self._pressed_mods    = set()
+        self._pressed_keys    = set()
         self._listener        = None
         self._running         = False
         self._last_fire       = 0
         self._mod_reset_timer = None
-        self._win32_registered = {}
-        self._win32_user32     = None
-        self._win32_thread     = None  # clears stuck modifiers
 
     def reload(self, triggers):
         self._triggers   = triggers
@@ -854,314 +855,153 @@ class HotkeyListener:
             if hk:
                 normalized = _normalize_hotkey(hk)
                 self._hotkey_map[normalized] = t
-                print(f"[HOTKEY] Registered: '{hk}' → '{normalized}' "
-                      f"for '{t.get('name')}'")
-        print(f"[HOTKEY] Loaded {len(self._hotkey_map)} hotkey triggers")
-
-        # If Win32 hotkeys active — unregister old and re-register new
-        if self._running and self._win32_registered:
-            try:
-                for hid in self._win32_registered:
-                    self._win32_user32.UnregisterHotKey(None, hid)
-                self._win32_registered = {}
-                print("[HOTKEY] Win32 hotkeys cleared for reload")
-            except Exception:
-                pass
-            self._try_register_hotkeys_win32()
+                print(f"[HOTKEY] Mapped: '{hk}' -> '{normalized}' "
+                      f"-> '{t.get('name')}'")
+        print(f"[HOTKEY] {len(self._hotkey_map)} hotkeys active")
 
     def start(self):
         if self._running:
             return
         self._running = True
 
-        # Try Windows RegisterHotKey first — proper system hotkey registration
-        # This prevents the error sound because Windows knows the hotkey is handled
-        if self._try_register_hotkeys_win32():
-            print("[HOTKEY] Using Windows RegisterHotKey (no error sound)")
-            return
-
-        # Fallback: pynput low-level hook
-        self._start_pynput()
-
-    def _try_register_hotkeys_win32(self) -> bool:
-        """
-        Register hotkeys via Windows RegisterHotKey API.
-        This is the correct way — no error sound, no conflicts.
-        Runs a message loop in a background thread.
-        """
-        if not self._hotkey_map:
-            return False
-
-        try:
-            import ctypes
-            import ctypes.wintypes
-
-            MOD_ALT     = 0x0001
-            MOD_CONTROL = 0x0002
-            MOD_SHIFT   = 0x0004
-            MOD_WIN     = 0x0008
-            MOD_NOREPEAT = 0x4000
-            WM_HOTKEY   = 0x0312
-
-            user32 = ctypes.windll.user32
-
-            # Map modifier names to flags
-            mod_map = {
-                "ctrl":  MOD_CONTROL,
-                "shift": MOD_SHIFT,
-                "alt":   MOD_ALT,
-                "win":   MOD_WIN,
-            }
-
-            # Map key names to virtual key codes
-            vk_map = {}
-            for c in "abcdefghijklmnopqrstuvwxyz":
-                vk_map[c] = ord(c.upper())
-            for i in range(10):
-                vk_map[str(i)] = ord(str(i))
-            for i in range(1, 13):
-                vk_map[f"f{i}"] = 0x6F + i  # F1=0x70
-            vk_map.update({
-                "space": 0x20, "enter": 0x0D, "tab": 0x09,
-                "esc": 0x1B, "backspace": 0x08, "delete": 0x2E,
-                "home": 0x24, "end": 0x23, "pageup": 0x21,
-                "pagedown": 0x22, "up": 0x26, "down": 0x28,
-                "left": 0x25, "right": 0x27, "insert": 0x2D,
-            })
-            # Fix F-key VKs
-            for i in range(1, 13):
-                vk_map[f"f{i}"] = 0x6F + i
-
-            registered = {}  # id → trigger
-
-            for idx, (combo, trigger) in enumerate(self._hotkey_map.items()):
-                parts = combo.split("+")
-                mods  = 0
-                vk    = 0
-
-                for part in parts:
-                    if part in mod_map:
-                        mods |= mod_map[part]
-                    elif part in vk_map:
-                        vk = vk_map[part]
-
-                if not vk:
-                    print(f"[HOTKEY] Cannot map key in combo: {combo}")
-                    continue
-
-                mods |= MOD_NOREPEAT
-                hotkey_id = idx + 1
-
-                ok = user32.RegisterHotKey(None, hotkey_id, mods, vk)
-                if ok:
-                    registered[hotkey_id] = trigger
-                    print(f"[HOTKEY] Registered: {combo} (id={hotkey_id})")
-                else:
-                    err = ctypes.windll.kernel32.GetLastError()
-                    print(f"[HOTKEY] RegisterHotKey failed for {combo}: err={err}")
-
-            if not registered:
-                print("[HOTKEY] No hotkeys registered via Win32 — falling back to pynput")
-                return False
-
-            # Store for reload/stop
-            self._win32_registered = registered
-            self._win32_user32     = user32
-
-            # Message loop in background thread
-            def _msg_loop():
-                msg = ctypes.wintypes.MSG()
-                while self._running:
-                    ret = user32.PeekMessageW(
-                        ctypes.byref(msg), None, 0, 0, 1  # PM_REMOVE
-                    )
-                    if ret:
-                        if msg.message == WM_HOTKEY:
-                            hid     = msg.wParam
-                            trigger = registered.get(hid)
-                            if trigger:
-                                now = time.time()
-                                if now - self._last_fire >= 1.0:
-                                    self._last_fire = now
-                                    print(f"[HOTKEY] Win32 match: id={hid} "
-                                          f"-> {trigger['name']}")
-                                    threading.Thread(
-                                        target=execute_trigger,
-                                        args=(trigger,),
-                                        daemon=True,
-                                    ).start()
-                    else:
-                        time.sleep(0.02)  # 20ms poll — low CPU
-
-            self._win32_thread = threading.Thread(
-                target=_msg_loop, daemon=True, name="HotkeyMsgLoop"
-            )
-            self._win32_thread.start()
-            return True
-
-        except Exception as e:
-            print(f"[HOTKEY] Win32 RegisterHotKey error: {e}")
-            return False
-
-    def _start_pynput(self):
-        """Fallback hotkey listener using pynput."""
         try:
             from pynput import keyboard
 
             def on_press(key):
                 try:
-                    name = self._resolve_key(key)
+                    name = self._key_name(key)
                     if not name:
                         return
-                    if name in ("ctrl", "shift", "alt", "win"):
-                        self._pressed_mods.add(name)
-                        self._schedule_mod_reset()
-                    else:
-                        self._try_match(name)
+                    self._pressed_keys.add(name)
+                    self._check_combo()
+                    self._schedule_reset()
                 except Exception:
                     pass
 
             def on_release(key):
                 try:
-                    name = self._resolve_key(key)
-                    if name and name in self._pressed_mods:
-                        self._pressed_mods.discard(name)
+                    name = self._key_name(key)
+                    if name:
+                        self._pressed_keys.discard(name)
                 except Exception:
                     pass
 
             self._listener = keyboard.Listener(
                 on_press=on_press,
                 on_release=on_release,
-                suppress=False
+                suppress=False,
             )
             self._listener.daemon = True
             self._listener.start()
-            print("[HOTKEY] pynput listener started (fallback mode)")
+            print("[HOTKEY] Listener started")
 
         except ImportError:
-            print("[HOTKEY] pynput not installed")
+            print("[HOTKEY] pynput not installed — hotkeys disabled")
         except Exception as e:
-            print(f"[HOTKEY] pynput failed: {e}")
+            print(f"[HOTKEY] Start failed: {e}")
 
     def stop(self):
         self._running = False
-
-        # Unregister Win32 hotkeys
-        if hasattr(self, '_win32_registered') and self._win32_registered:
-            try:
-                for hid in self._win32_registered:
-                    self._win32_user32.UnregisterHotKey(None, hid)
-                print("[HOTKEY] Win32 hotkeys unregistered")
-            except Exception:
-                pass
-            self._win32_registered = {}
-
-        # Stop pynput if it was used
         if self._listener:
             self._listener.stop()
             self._listener = None
 
-    def _resolve_key(self, key):
-        """Convert pynput key to normalized string using vk codes."""
+    def _key_name(self, key):
+        """Convert any pynput key to a normalized string name."""
         from pynput import keyboard as kb
 
+        # Named special keys
         if isinstance(key, kb.Key):
-            special = {
-                kb.Key.ctrl_l:  "ctrl",  kb.Key.ctrl_r:  "ctrl",
+            _map = {
+                kb.Key.ctrl_l: "ctrl", kb.Key.ctrl_r: "ctrl",
                 kb.Key.shift_l: "shift", kb.Key.shift_r: "shift",
-                kb.Key.alt_l:   "alt",   kb.Key.alt_r:   "alt",
-                kb.Key.alt_gr:  "alt",
-                kb.Key.cmd:     "win",   kb.Key.cmd_l:   "win",
-                kb.Key.cmd_r:   "win",
-                kb.Key.space:   "space",
-                kb.Key.enter:   "enter",
-                kb.Key.tab:     "tab",
-                kb.Key.esc:     "esc",
-                kb.Key.backspace: "backspace",
-                kb.Key.delete:  "delete",
-                kb.Key.home:    "home",
-                kb.Key.end:     "end",
-                kb.Key.page_up: "pageup",
-                kb.Key.page_down: "pagedown",
-                kb.Key.up:      "up",
-                kb.Key.down:    "down",
-                kb.Key.left:    "left",
-                kb.Key.right:   "right",
-                kb.Key.insert:  "insert",
-                kb.Key.menu:    "menu",
+                kb.Key.alt_l: "alt", kb.Key.alt_r: "alt",
+                kb.Key.alt_gr: "alt",
+                kb.Key.cmd: "win", kb.Key.cmd_l: "win", kb.Key.cmd_r: "win",
+                kb.Key.space: "space", kb.Key.enter: "enter",
+                kb.Key.tab: "tab", kb.Key.esc: "esc",
+                kb.Key.backspace: "backspace", kb.Key.delete: "delete",
+                kb.Key.home: "home", kb.Key.end: "end",
+                kb.Key.page_up: "pageup", kb.Key.page_down: "pagedown",
+                kb.Key.up: "up", kb.Key.down: "down",
+                kb.Key.left: "left", kb.Key.right: "right",
+                kb.Key.insert: "insert", kb.Key.menu: "menu",
+                kb.Key.caps_lock: "capslock", kb.Key.num_lock: "numlock",
             }
-            for i in range(1, 13):
+            for i in range(1, 25):
                 fk = getattr(kb.Key, f"f{i}", None)
                 if fk:
-                    special[fk] = f"f{i}"
-            return special.get(key)
+                    _map[fk] = f"f{i}"
+            return _map.get(key)
 
+        # Virtual key code — most reliable when modifiers are held
         vk = getattr(key, 'vk', None)
         if vk is not None:
+            # Letters A-Z
             if 65 <= vk <= 90:
                 return chr(vk).lower()
+            # Numbers 0-9 (top row)
             if 48 <= vk <= 57:
                 return str(vk - 48)
+            # Numpad 0-9
             if 96 <= vk <= 105:
                 return f"num{vk - 96}"
-            sym = {
+            # Symbols by VK code
+            _sym = {
                 186: ";", 187: "=", 188: ",", 189: "-", 190: ".",
                 191: "/", 192: "`", 219: "[", 220: "\\",
                 221: "]", 222: "'",
             }
-            if vk in sym:
-                return sym[vk]
+            if vk in _sym:
+                return _sym[vk]
 
+        # Character fallback — handles Shift+1 = '!' etc.
         ch = getattr(key, 'char', None)
         if ch and isinstance(ch, str) and len(ch) == 1 and ch.isprintable():
             return ch.lower()
 
         return None
 
-    def _try_match(self, final_key):
-        """Check current modifier + key combo against registered hotkeys."""
+    def _check_combo(self):
+        """Check if currently pressed keys match any registered hotkey."""
         now = time.time()
-        # Debounce — prevent double-fire within 1 second
-        if now - self._last_fire < 1.0:
+        if now - self._last_fire < 0.8:
             return
 
-        combo = _normalize_hotkey("+".join(list(self._pressed_mods) + [final_key]))
+        MODIFIERS = {"ctrl", "shift", "alt", "win"}
+        mods = sorted(k for k in self._pressed_keys if k in MODIFIERS)
+        keys = sorted(k for k in self._pressed_keys if k not in MODIFIERS)
 
-        # Debug — shows every key combo attempted (remove after testing)
-        print(f"[HOTKEY DEBUG] key='{final_key}' mods={self._pressed_mods} "
-              f"combo='{combo}' map_keys={list(self._hotkey_map.keys())}")
+        raw_combo = "+".join(mods + keys)
+        if not raw_combo:
+            return
 
+        combo = _normalize_hotkey(raw_combo)
         trigger = self._hotkey_map.get(combo)
+
+        print(f"[HOTKEY DEBUG] pressed={sorted(self._pressed_keys)} raw='{raw_combo}' normalized='{combo}'")
 
         if trigger:
             self._last_fire = now
-            print(f"[HOTKEY] Match: {combo} -> {trigger['name']}")
-            # Clear modifier state immediately after match
-            # Prevents stuck modifiers when window focus changes on trigger fire
-            self._pressed_mods.clear()
+            self._pressed_keys.clear()
+            print(f"[HOTKEY] FIRED: {combo} -> {trigger['name']}")
             threading.Thread(
                 target=execute_trigger,
                 args=(trigger,),
-                daemon=True
+                daemon=True,
             ).start()
-        
-        # Schedule modifier state reset after 2 seconds of no activity
-        # This recovers from missed key-release events (focus change, UAC, etc.)
-        self._schedule_mod_reset()
 
-    def _schedule_mod_reset(self):
-        """Reset modifier state after 2s inactivity — recovers stuck keys."""
+    def _schedule_reset(self):
+        """Clear pressed keys after 3s inactivity — prevents stuck state."""
         if self._mod_reset_timer:
             self._mod_reset_timer.cancel()
-        self._mod_reset_timer = threading.Timer(2.0, self._reset_mods)
+        self._mod_reset_timer = threading.Timer(3.0, self._reset_keys)
         self._mod_reset_timer.daemon = True
         self._mod_reset_timer.start()
 
-    def _reset_mods(self):
-        """Clear all pressed modifiers — called after inactivity timeout."""
-        if self._pressed_mods:
-            print(f"[HOTKEY] Clearing stuck modifiers: {self._pressed_mods}")
-            self._pressed_mods.clear()
+    def _reset_keys(self):
+        if self._pressed_keys:
+            self._pressed_keys.clear()
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -1265,16 +1105,44 @@ class ReloadPoller:
 # HOTKEY NORMALIZATION (shared between listener + conflict check)
 # ─────────────────────────────────────────────────────────────────────────
 
+# Shift+number produces these symbols — map them back to the number
+_SHIFT_SYMBOLS = {
+    "!": "1", "@": "2", "#": "3", "$": "4", "%": "5",
+    "^": "6", "&": "7", "*": "8", "(": "9", ")": "0",
+    "_": "-", "+": "=", "~": "`", "{": "[", "}": "]",
+    "|": "\\", ":": ";", '"': "'", "<": ",", ">": ".",
+    "?": "/",
+}
+
+
 def _normalize_hotkey(hotkey: str) -> str:
     """
     Normalize hotkey string for consistent comparison.
-    'Ctrl+Shift+F' == 'shift+ctrl+f' == 'ctrl+f+shift' → 'ctrl+f+shift'
-    Modifiers always sorted first, then non-modifiers sorted after.
+
+    Handles:
+      - Modifier order: 'Ctrl+Shift+F' == 'shift+ctrl+f' → 'ctrl+shift+f'
+      - Shift symbols: 'Shift+!' → 'shift+1' (because keyboard sends VK for '1')
+      - Case insensitive
     """
     MODIFIERS = {"ctrl", "shift", "alt", "win"}
     parts = [p.strip().lower() for p in hotkey.replace(" ", "").split("+") if p.strip()]
-    mods  = sorted([p for p in parts if p in MODIFIERS])
-    keys  = sorted([p for p in parts if p not in MODIFIERS])
+
+    mods = sorted(p for p in parts if p in MODIFIERS)
+    keys = []
+    for p in parts:
+        if p in MODIFIERS:
+            continue
+        # If it's a shift-produced symbol, convert to the base key
+        if p in _SHIFT_SYMBOLS:
+            keys.append(_SHIFT_SYMBOLS[p])
+            # Ensure shift is in modifiers since the symbol implies it
+            if "shift" not in mods:
+                mods.append("shift")
+                mods.sort()
+        else:
+            keys.append(p)
+
+    keys.sort()
     return "+".join(mods + keys)
 
 
@@ -1282,7 +1150,28 @@ def _normalize_hotkey(hotkey: str) -> str:
 # MAIN DAEMON LOOP
 # ─────────────────────────────────────────────────────────────────────────
 
+def _kill_old_daemon():
+    """Kill any existing trigger_daemon processes before starting."""
+    try:
+        import psutil
+        my_pid = os.getpid()
+        for proc in psutil.process_iter(['pid', 'cmdline']):
+            try:
+                cmd = " ".join(proc.info['cmdline'] or [])
+                if 'trigger_daemon' in cmd and proc.info['pid'] != my_pid:
+                    print(f"[TRIGGER DAEMON] Killing old daemon PID {proc.info['pid']}")
+                    proc.kill()
+                    proc.wait(timeout=3)
+            except Exception:
+                pass
+    except ImportError:
+        pass
+    except Exception:
+        pass
+
+
 def main():
+    _kill_old_daemon()
     if not acquire_lock():
         return
 
