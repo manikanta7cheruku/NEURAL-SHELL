@@ -14,8 +14,93 @@ from colorama import Fore
 
 
 def launch_trigger_daemon():
+    """
+    Launch trigger_daemon.py as a detached background process.
+    Survives Seven closing. Auto-kills old instances first.
+    """
     try:
         _daemon = os.path.join(os.getcwd(), "trigger_daemon.py")
+
+        if not os.path.exists(_daemon):
+            print(Fore.YELLOW + f"[TRIGGER] trigger_daemon.py not found at {_daemon}")
+            return
+
+        # Find venv Python
+        _project_root = os.getcwd()
+        _venv_pythonw = os.path.join(_project_root, "venv", "Scripts", "pythonw.exe")
+        _venv_python  = os.path.join(_project_root, "venv", "Scripts", "python.exe")
+
+        if os.path.exists(_venv_pythonw):
+            _pythonw = _venv_pythonw
+        elif os.path.exists(_venv_python):
+            _pythonw = _venv_python
+        else:
+            _pythonw = sys.executable
+            print(Fore.YELLOW + f"[TRIGGER] venv not found, using {_pythonw}")
+
+        print(Fore.CYAN + f"[TRIGGER] Python: {_pythonw}")
+        print(Fore.CYAN + f"[TRIGGER] Daemon: {_daemon}")
+
+        # Kill ALL existing trigger_daemon processes first
+        try:
+            import psutil
+            _my_pid = os.getpid()
+            _killed = 0
+            for _proc in psutil.process_iter(['pid', 'cmdline']):
+                try:
+                    _cmd = ' '.join(_proc.info['cmdline'] or [])
+                    if 'trigger_daemon' in _cmd and _proc.info['pid'] != _my_pid:
+                        print(Fore.YELLOW + f"[TRIGGER] Killing old daemon PID {_proc.info['pid']}")
+                        _proc.kill()
+                        _proc.wait(timeout=3)
+                        _killed += 1
+                except Exception:
+                    pass
+            if _killed:
+                print(Fore.YELLOW + f"[TRIGGER] Killed {_killed} old daemon(s)")
+        except Exception as _ke:
+            print(Fore.YELLOW + f"[TRIGGER] Kill check failed: {_ke}")
+
+        # Launch as detached process
+        _CREATE_NO_WINDOW         = 0x08000000
+        _DETACHED_PROCESS         = 0x00000008
+        _CREATE_NEW_PROCESS_GROUP = 0x00000200
+
+        print(Fore.CYAN + "[TRIGGER] Spawning daemon...")
+
+        proc = subprocess.Popen(
+            [_pythonw, _daemon],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL,
+            creationflags=_CREATE_NO_WINDOW | _DETACHED_PROCESS | _CREATE_NEW_PROCESS_GROUP,
+            close_fds=True,
+            start_new_session=True,
+            cwd=_project_root,
+        )
+
+        print(Fore.GREEN + f"[TRIGGER] Daemon spawned PID {proc.pid}")
+
+        # Verify it's actually running after 1 second
+        import time
+        time.sleep(1)
+
+        try:
+            import psutil
+            if psutil.pid_exists(proc.pid):
+                print(Fore.GREEN + f"[TRIGGER] Daemon confirmed running ✓")
+            else:
+                print(Fore.RED + f"[TRIGGER] Daemon PID {proc.pid} died immediately!")
+        except Exception:
+            pass
+
+        # Register for auto-start at login
+        _register_trigger_daemon_startup(_pythonw, _daemon)
+
+    except Exception as _e:
+        print(Fore.RED + f"[TRIGGER] Launch failed: {_e}")
+        import traceback
+        traceback.print_exc()
 
         # Always prefer venv Python — it has all required packages
         # Never use system Python which lacks hands.workspace etc.
@@ -41,25 +126,23 @@ def launch_trigger_daemon():
             print(Fore.YELLOW + "[SYSTEM] trigger_daemon.py not found")
             return
 
-        # Kill any wrong-Python daemon instances before starting
-        # This prevents system Python daemons from blocking venv daemon
-        _venv_pythonw_lower = _pythonw.lower()
+        # Kill ALL existing trigger_daemon instances before starting fresh
+        # Ensures clean state — no stale daemons from previous sessions
         try:
             import psutil
+            _my_pid = os.getpid()
             for _proc in psutil.process_iter(['pid', 'name', 'cmdline', 'exe']):
                 try:
                     _cmd = ' '.join(_proc.info['cmdline'] or [])
-                    _exe = (_proc.info['exe'] or '').lower()
-                    if 'trigger_daemon' in _cmd:
-                        # If running with wrong Python — kill it
-                        if _exe and _exe != _venv_pythonw_lower:
-                            print(Fore.YELLOW + f"[SYSTEM] Killing wrong-Python daemon "
-                                  f"(PID {_proc.pid}): {_exe}")
-                            _proc.kill()
+                    if 'trigger_daemon' in _cmd and _proc.info['pid'] != _my_pid:
+                        print(Fore.YELLOW + f"[SYSTEM] Killing old daemon "
+                              f"(PID {_proc.info['pid']})")
+                        _proc.kill()
+                        _proc.wait(timeout=3)
                 except Exception:
                     pass
         except Exception:
-            pass
+            pass    
 
         # Now check if correct daemon already running via mutex
         _already_running = False
