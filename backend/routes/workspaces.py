@@ -281,9 +281,11 @@ def scan_current_workspace():
 
 
 @router.post("/api/workspaces/{workspace_id}/restore")
-def restore_workspace(workspace_id: int):
+def restore_workspace(workspace_id: int, stats_only: bool = False):
     """
     Restore a saved workspace — launches all apps in parallel.
+    stats_only=True: only updates use_count, does NOT launch apps.
+    Used by trigger_daemon to update stats after it already restored.
     """
     try:
         with _get_conn() as conn:
@@ -292,7 +294,10 @@ def restore_workspace(workspace_id: int):
             ).fetchone()
 
             if not row:
-                raise HTTPException(status_code=404, detail=f"Workspace {workspace_id} not found")
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Workspace {workspace_id} not found"
+                )
 
             workspace = _row_to_dict(row)
 
@@ -302,20 +307,22 @@ def restore_workspace(workspace_id: int):
             )
             conn.commit()
 
-        # Launch workspace restore in background thread for speed
-        import threading
-        from hands.workspace import restore
-        threading.Thread(
-            target=restore,
-            args=(workspace["apps"],),
-            daemon=True
-        ).start()
+        # stats_only=True means daemon already restored — just update stats
+        if not stats_only:
+            import threading
+            from hands.workspace import smart_restore
+            threading.Thread(
+                target=smart_restore,
+                args=(workspace["apps"],),
+                daemon=True
+            ).start()
 
         return {
-            "success":    True,
-            "workspace":  workspace["name"],
-            "app_count":  len(workspace["apps"]),
-            "message":    f"Restoring {workspace['name']} ({len(workspace['apps'])} apps)",
+            "success":   True,
+            "workspace": workspace["name"],
+            "app_count": len(workspace["apps"]),
+            "message":   f"{'Stats updated' if stats_only else 'Restoring'}: "
+                         f"{workspace['name']} ({len(workspace['apps'])} apps)",
         }
 
     except HTTPException:
