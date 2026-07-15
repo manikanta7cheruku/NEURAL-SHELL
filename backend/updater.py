@@ -6,7 +6,9 @@ import tempfile
 
 SERVER_URL  = "https://seven-server-u2rp.onrender.com"
 TIMEOUT     = 25
-CHECK_DELAY = 15
+CHECK_DELAY    = 15       # first check after 15 seconds
+RECHECK_DELAY  = 7200     # recheck every 2 hours
+_version_logged = False   # log version only once
 
 def _get_cache_file():
     appdata = os.environ.get("APPDATA", "")
@@ -122,7 +124,6 @@ def _read_current_version():
                 with open(vp, "r", encoding="utf-8") as f:
                     v = f.read().strip().lstrip("\ufeff")
                 if v:
-                    print("[UPDATER] Version " + v + " (from version.txt)")
                     return v
 
         # Fallback: package.json for dev mode
@@ -143,7 +144,6 @@ def _read_current_version():
                 print("[UPDATER] Version " + v + " (from package.json)")
                 return v
 
-        print("[UPDATER] No version source found")
         return "1.1.0"
     except Exception as e:
         print("[UPDATER] Version read error: " + str(e))
@@ -174,7 +174,6 @@ def _read_current_version():
                 with open(p, "r", encoding="utf-8") as f:
                     content = f.read().lstrip("\ufeff")
                     v = json.loads(content).get("version", "1.1.0")
-                print("[UPDATER] Version " + v + " from " + p)
                 return v
 
         print("[UPDATER] package.json not found anywhere")
@@ -267,8 +266,18 @@ def check_for_updates(force=False):
 def start_auto_check():
     def _delayed():
         import time
+        global _version_logged
+
+        # Log version once at startup
+        v = _read_current_version()
+        if not _version_logged:
+            print(f"[UPDATER] Version {v}")
+            _version_logged = True
+
         time.sleep(CHECK_DELAY)
         check_for_updates()
+
+        # Auto-download if applicable
         time.sleep(3)
         info = _state.get("info")
         if (
@@ -279,6 +288,11 @@ def start_auto_check():
             and not _state.get("download_path")
         ):
             start_download_thread()
+
+        # Recheck every 2 hours — silently
+        while True:
+            time.sleep(RECHECK_DELAY)
+            check_for_updates()
 
     t = threading.Thread(target=_delayed, daemon=True, name="UpdateAutoCheck")
     t.start()
