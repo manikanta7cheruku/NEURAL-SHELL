@@ -233,7 +233,7 @@ def is_seven_running():
 # OVERLAY DAEMON COMMUNICATION
 # ─────────────────────────────────────────────────────────────────────────
 
-def _send_overlay(msg: dict, timeout: float = 0.5) -> bool:
+def _send_overlay(msg: dict, timeout: float = 0.3) -> bool:
     """Send TCP message to overlay_daemon on port 7891."""
     try:
         import socket as _sock
@@ -334,12 +334,15 @@ def _execute_trigger_complete(trigger, name, action_type, action_data,
                                app_count, tab_count, app_names):
     """
     Complete trigger execution in one thread.
-    Order: notification → action → sound → feedback → stats.
-    Overlay spawn never blocks the action.
+    Action fires FIRST, notification in background.
     """
-    # Fire notification immediately — skip if overlay not ready
-    if not trigger.get("silent", False):
-        _fire_notification(name, action_type, app_count, tab_count, app_names)
+    # Non-workspace: fire notification in background thread — never blocks action
+    if not trigger.get("silent", False) and action_type != "open_workspace":
+        threading.Thread(
+            target=_fire_notification,
+            args=(name, action_type, app_count, tab_count, app_names),
+            daemon=True,
+        ).start()
 
     # Execute action
     result = None
@@ -674,10 +677,6 @@ def _fire_notification(name, action_type, app_count, tab_count, app_names):
     detail  = "  ·  ".join(parts) if parts else ""
     hold_ms = 2000 if action_type == "open_workspace" else 3200
 
-    if not _is_overlay_alive():
-        print("[TRIGGER DAEMON] Overlay not ready — notification skipped")
-        return
-
     _send_overlay({
         "type": "notif",
         "data": {
@@ -687,7 +686,6 @@ def _fire_notification(name, action_type, app_count, tab_count, app_names):
             "holdMs":   hold_ms,
         },
     })
-    print(f"[TRIGGER DAEMON] Notification sent: {name}")
 
 
 def _exec_open_app(data):
@@ -846,6 +844,24 @@ def _exec_run_command(data):
     if cmd:
         subprocess.Popen(cmd, shell=True)
 
+def _set_brightness_direct(level: int):
+    """Set screen brightness instantly."""
+    level = max(0, min(100, level))
+    try:
+        subprocess.Popen(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command",
+             f"(Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightnessMethods)"
+             f".WmiSetBrightness(0,{level})"],
+            creationflags=0x08000000,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        try:
+            from hands.system import manage_system
+            manage_system({"action": "brightness_set", "value": str(level)})
+        except Exception:
+            pass
 
 def _exec_seven_action(data):
     """Execute internal Seven action via API or direct."""
@@ -883,18 +899,19 @@ def _exec_seven_action(data):
                 print(f"[TRIGGER DAEMON] Volume {nums[0]}%: {result}")
 
         elif "brightness" in action_lower:
-            # "max the brightness" → 100, "brightness 10" → 10
             nums = re.findall(r'\d+', action_lower)
             if nums:
-                val = nums[0]
+                val = int(nums[0])
             elif "max" in action_lower:
-                val = "100"
+                val = 100
             elif "min" in action_lower:
-                val = "10"
+                val = 10
             else:
-                val = "100"
-            result = manage_system({"action": "brightness_set", "value": val})
-            print(f"[TRIGGER DAEMON] Brightness {val}%: {result}")
+                val = 100
+
+            # Direct WMI call — instant, no Seven API needed
+            _set_brightness_direct(val)
+            print(f"[TRIGGER DAEMON] Brightness {val}% (direct)")
 
         else:
             print(f"[TRIGGER DAEMON] Unknown direct action: {action}")
