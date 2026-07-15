@@ -128,14 +128,29 @@ def _load_offline_embedder_standalone(model_name: str):
         print(Fore.GREEN + "[MEMORY] Using ChromaDB native SentenceTransformer embedder")
         return ef
     except Exception as e:
-        print(Fore.YELLOW + f"[MEMORY] ChromaDB native embedder failed: {e}")
-        print(Fore.YELLOW + "[MEMORY] Falling back to manual embedder")
+        if "meta tensor" in str(e).lower() or "to_empty" in str(e).lower():
+            print(Fore.YELLOW + "[MEMORY] Meta tensor issue — using manual embedder")
+        else:
+            print(Fore.YELLOW + f"[MEMORY] ChromaDB native embedder failed: {e}")
 
-    # Manual fallback - only if ChromaDB utility unavailable
+    # Manual fallback — load model avoiding meta tensor issue
     try:
-        model = SentenceTransformer(model_local_path, local_files_only=True)
+        import torch
+        # Use empty init to avoid meta tensor problem
+        model = SentenceTransformer.__new__(SentenceTransformer)
+        SentenceTransformer.__init__(
+            model,
+            model_local_path,
+            device="cpu",
+        )
     except Exception:
-        model = SentenceTransformer(model_name)
+        try:
+            model = SentenceTransformer(
+                model_local_path,
+                local_files_only=True
+            )
+        except Exception:
+            model = SentenceTransformer(model_name)
 
     class _FallbackEmbedder:
         def __init__(self, m):
