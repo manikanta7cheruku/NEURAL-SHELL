@@ -1161,7 +1161,7 @@ class AudioListener:
 
         try:
             from ears.audio_triggers import TriggerDetector
-            self._detector = TriggerDetector(sensitivity="medium")
+            self._detector = TriggerDetector(sensitivity="high")
             self._detector.on_pattern = self._on_pattern
             self._detector.start()
             print("[AUDIO] Listener started (DSP mode)")
