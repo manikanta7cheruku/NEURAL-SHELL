@@ -25,7 +25,11 @@ const net  = require('node:net');
 const IPC_PORT = 7891;
 
 // Prevent multiple daemons
-const gotLock = app.requestSingleInstanceLock({ key: 'seven-overlay-daemon' });
+// Use a unique app name for the overlay daemon to get its own instance lock
+// This must be set BEFORE app.requestSingleInstanceLock()
+app.setName('SevenOverlayDaemon');
+
+const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   console.log('[OVERLAY DAEMON] Another instance running, exiting');
   app.quit();
@@ -77,7 +81,7 @@ function createNotifWindow() {
     },
   });
 
-  notifWindow.setAlwaysOnTop(true, 'screen-saver', 1);
+  notifWindow.setAlwaysOnTop(true, 'pop-up-menu', 999);
   notifWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   notifWindow.setIgnoreMouseEvents(true, { forward: true });
 
@@ -127,7 +131,7 @@ function createArrangeWindow() {
     },
   });
 
-  arrangeWindow.setAlwaysOnTop(true, 'screen-saver', 1);
+  arrangeWindow.setAlwaysOnTop(true, 'pop-up-menu', 999);
   arrangeWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
 
   const htmlPath = path.join(__dirname, '..', 'seven_overlay', 'arrangement.html');
@@ -147,12 +151,19 @@ function createArrangeWindow() {
 
 function showNotification(data) {
   if (!notifWindow || notifWindow.isDestroyed()) {
-    console.warn('[OVERLAY DAEMON] Notif window not ready');
+    console.warn('[OVERLAY DAEMON] Notif window not ready — recreating');
+    createNotifWindow();
+    setTimeout(() => showNotification(data), 300);
     return;
   }
 
-  // Hide first if already showing (reset animation)
-  try { notifWindow.hide(); } catch (e) {}
+  // Force-reset: hide, reposition, then show fresh
+  try {
+    notifWindow.hide();
+    const { width: sw } = screen.getPrimaryDisplay().workArea;
+    const W = 340;
+    notifWindow.setPosition(Math.round((sw - W) / 2), 0);
+  } catch (e) {}
 
   // Inject data & trigger animation
   const script = `
@@ -176,8 +187,8 @@ function showNotification(data) {
     console.error('[OVERLAY DAEMON] Notif inject failed:', e.message);
   });
 
-  // Show without stealing focus
   notifWindow.showInactive();
+  notifWindow.moveTop();
 }
 
 function showArrangement(data) {
