@@ -53,6 +53,15 @@ if sys.platform == "win32":
     except Exception:
         pass
 
+# Force UTF-8 encoding for all output — fixes Whisper checkmark character
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+        os.environ['PYTHONIOENCODING'] = 'utf-8'
+    except Exception:
+        pass
+
 # Ensure project root is in path
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 if PROJECT_ROOT not in sys.path:
@@ -1310,7 +1319,14 @@ def main():
 
     try:
         while True:
-            time.sleep(5)
+            time.sleep(30)
+            # Health check — respawn overlay if it died
+            if not _is_overlay_alive():
+                print("[TRIGGER DAEMON] Overlay daemon down — respawning...")
+                threading.Thread(
+                    target=_ensure_overlay_alive_safe,
+                    daemon=True
+                ).start()
     except KeyboardInterrupt:
         print("[TRIGGER DAEMON] Stopping...")
         hotkey_listener.stop()
