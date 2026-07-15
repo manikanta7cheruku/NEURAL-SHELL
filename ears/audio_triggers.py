@@ -50,7 +50,7 @@ except ImportError:
 # ─────────────────────────────────────────────────────────────────────────
 
 SAMPLE_RATE = 16000
-CHUNK_SIZE  = 800          # 50ms
+CHUNK_SIZE  = 160          # 10ms at 16kHz base rate
 CHANNELS    = 1
 FORMAT      = pyaudio.paInt16
 
@@ -61,31 +61,32 @@ FORMAT      = pyaudio.paInt16
 
 SENSITIVITY_PROFILES = {
     "low": {
-        "onset_peak_min":  0.20,
-        "leap_ratio":      8.0,
-        "decay_ms":        250,
-        "decay_ratio":     0.4,
+        "event_floor":    0.03,
+        "snap_peak_min":  0.18,
+        "max_event_ms":   35,
+        "min_event_ms":   5,
+        "leap_ratio":     6.0,
     },
     "medium": {
-        "onset_peak_min":  0.15,
-        "leap_ratio":      5.0,
-        "decay_ms":        300,
-        "decay_ratio":     0.5,
+        "event_floor":    0.025,
+        "snap_peak_min":  0.12,
+        "max_event_ms":   40,
+        "min_event_ms":   5,
+        "leap_ratio":     4.0,
     },
     "high": {
-        "onset_peak_min":  0.08,
-        "leap_ratio":      3.0,
-        "decay_ms":        350,
-        "decay_ratio":     0.6,
+        "event_floor":    0.02,
+        "snap_peak_min":  0.09,
+        "max_event_ms":   45,
+        "min_event_ms":   5,
+        "leap_ratio":     3.0,
     },
 }
 
 # Pattern grouping
-PATTERN_WINDOW_MS = 900
-TAP_COOLDOWN_MS   = 200
-
-# Cooldown after pattern fires
-POST_PATTERN_COOLDOWN_MS = 1500
+PATTERN_WINDOW_MS        = 600   # wait 600ms after last tap before firing pattern
+TAP_COOLDOWN_MS          = 150   # min 150ms between taps (prevents double-counting one snap)
+POST_PATTERN_COOLDOWN_MS = 1200  # 1.2s cooldown after pattern fires
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -237,20 +238,22 @@ class TriggerDetector:
         # Store last ~500ms of peak values (10 chunks at 50ms each)
         self._peak_history = deque(maxlen=10)
 
-        # Candidate onset awaiting decay confirmation
-        # (timestamp, peak_amp)
-        self._candidate = None
-        self._candidate_history = deque(maxlen=20)  # peaks after candidate
+        # Current transient event being tracked
+        # {"start": float, "peak": float, "samples": [float]}
+        self._event = None
 
         self._load_thresholds()
 
     def _load_thresholds(self):
-        profile = SENSITIVITY_PROFILES.get(self.sensitivity,
-                                            SENSITIVITY_PROFILES["medium"])
-        self.onset_peak_min = profile["onset_peak_min"]
-        self.leap_ratio     = profile["leap_ratio"]
-        self.decay_ms       = profile["decay_ms"]
-        self.decay_ratio    = profile["decay_ratio"]
+        profile = SENSITIVITY_PROFILES.get(
+            self.sensitivity,
+            SENSITIVITY_PROFILES["medium"]
+        )
+        self.event_floor   = profile["event_floor"]
+        self.snap_peak_min = profile["snap_peak_min"]
+        self.max_event_ms  = profile["max_event_ms"]
+        self.min_event_ms  = profile["min_event_ms"]
+        self.leap_ratio    = profile["leap_ratio"]
 
     def set_sensitivity(self, level):
         if level in SENSITIVITY_PROFILES:
@@ -304,7 +307,7 @@ class TriggerDetector:
                 try:
                     info = self._audio.get_device_info_by_index(self.device_index)
                     actual_rate = int(info['defaultSampleRate'])
-                    actual_chunk = int(actual_rate * 0.05)
+                    actual_chunk = int(actual_rate * 0.01)
                     actual_channels = min(2, int(info['maxInputChannels']))
                     print(Fore.CYAN + f"[TRIGGERS] Device rate: {actual_rate}Hz, "
                           f"chunk: {actual_chunk}, channels: {actual_channels}")
@@ -362,88 +365,75 @@ class TriggerDetector:
                 if self.debug and peak_amp > 0.15:
                     print(f"  peak={peak_amp:.3f}")
 
-                # If tracking a candidate, watch its decay
-                if self._candidate is not None:
-                    self._track_candidate(peak_amp, now)
-                else:
-                    # Look for new onset
-                    self._detect_onset(peak_amp, now)
-
+                self._track_event(peak_amp, now)
                 self._peak_history.append(peak_amp)
                 self._check_pattern_ready()
 
             except Exception:
                 time.sleep(0.3)
 
-    def _detect_onset(self, peak_amp, now):
+    def _track_event(self, peak_amp, now):
         """
-        Detect a sudden LEAP in loudness = onset of a tap event.
-        No pre-silence requirement — just needs to be significantly louder
-        than the recent past.
-        """
+        Track short transient events and classify as snap/clap taps.
 
-        # Must be loud enough
-        if peak_amp < self.onset_peak_min:
+        Logic:
+          - start event when peak rises above event_floor
+          - continue event while above floor
+          - when it falls back below floor, finalize event
+          - confirm tap only if:
+              * peak is high enough
+              * duration is short enough
+              * event is a strong leap over recent background
+        """
+        # Start or continue event
+        if peak_amp >= self.event_floor:
+            if self._event is None:
+                self._event = {
+                    "start": now,
+                    "peak": peak_amp,
+                    "samples": [peak_amp],
+                }
+            else:
+                self._event["samples"].append(peak_amp)
+                if peak_amp > self._event["peak"]:
+                    self._event["peak"] = peak_amp
             return
 
-        # Compute recent average (excluding last chunk to avoid tap itself)
-        if len(self._peak_history) < 3:
+        # Event ended → classify it
+        if self._event is None:
             return
 
-        recent = list(self._peak_history)[-6:]  # last 300ms
-        recent_avg = sum(recent) / len(recent)
+        event_start = self._event["start"]
+        event_peak  = self._event["peak"]
+        samples     = self._event["samples"]
+        duration_ms = (now - event_start) * 1000.0
 
-        # LEAP check: current peak must be much louder than recent average
-        if recent_avg < 0.01:  # avoid division issues, treat as silence
+        # Background leap check
+        recent = list(self._peak_history)[-10:]  # ~100ms history now
+        recent_avg = (sum(recent) / len(recent)) if recent else 0.01
+        if recent_avg < 0.01:
             recent_avg = 0.01
 
-        leap = peak_amp / recent_avg
-        if leap < self.leap_ratio:
-            return
+        leap = event_peak / recent_avg
 
-        # Post-pattern cooldown
-        if (now - self._last_pattern_time) * 1000 < POST_PATTERN_COOLDOWN_MS:
-            return
+        is_tap = (
+            event_peak >= self.snap_peak_min and
+            duration_ms >= self.min_event_ms and
+            duration_ms <= self.max_event_ms and
+            leap >= self.leap_ratio
+        )
 
-        # Onset detected — start candidate tracking
-        self._candidate = (now, peak_amp)
-        self._candidate_history.clear()
         if self.debug:
-            print(Fore.CYAN + f"  ? ONSET (peak={peak_amp:.3f}, leap={leap:.1f}x) "
-                  f"— tracking decay")
+            print(
+                Fore.CYAN +
+                f"  event peak={event_peak:.3f} dur={duration_ms:.0f}ms "
+                f"leap={leap:.1f}x -> {'TAP' if is_tap else 'reject'}"
+            )
 
-    def _track_candidate(self, peak_amp, now):
-        """
-        Track the candidate's decay pattern.
-        Real snap: decays quickly to below decay_ratio of peak within decay_ms.
-        Sustained sound (music, siren): stays loud.
-        """
-        cand_time, cand_peak = self._candidate
-        elapsed_ms = (now - cand_time) * 1000
+        if is_tap:
+            self._register_tap(event_start)
 
-        self._candidate_history.append(peak_amp)
-
-        # Check if we're past the decay window
-        if elapsed_ms >= self.decay_ms:
-            # Compute average peak over decay window
-            if self._candidate_history:
-                decay_avg = sum(self._candidate_history) / len(self._candidate_history)
-                decay_pct = decay_avg / cand_peak
-
-                if decay_pct <= self.decay_ratio:
-                    # Good decay — confirmed tap
-                    if self.debug:
-                        print(Fore.GREEN + f"  ✓ CONFIRMED (decay to "
-                              f"{decay_pct*100:.0f}% in {elapsed_ms:.0f}ms)")
-                    self._register_tap(cand_time)
-                else:
-                    # Bad decay — sustained sound, not a tap
-                    if self.debug:
-                        print(Fore.YELLOW + f"  ✗ REJECTED (poor decay, "
-                              f"still at {decay_pct*100:.0f}% after {elapsed_ms:.0f}ms)")
-
-            self._candidate = None
-            self._candidate_history.clear()
+        self._event = None
 
     def _register_tap(self, timestamp):
         if self._pending_taps:
