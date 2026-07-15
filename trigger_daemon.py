@@ -67,6 +67,12 @@ PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
+# Also add SEVEN_APP_PATH if set by Electron
+_app_path = os.environ.get("SEVEN_APP_PATH", "")
+if _app_path and _app_path not in sys.path:
+    sys.path.insert(0, _app_path)
+    PROJECT_ROOT = _app_path
+
 APPDATA      = os.environ.get('APPDATA', os.path.expanduser('~'))
 LOCK_FILE    = os.path.join(APPDATA, 'SEVEN', 'trigger_daemon.lock')
 
