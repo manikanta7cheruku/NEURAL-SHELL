@@ -1102,8 +1102,6 @@ class HotkeyListener:
         combo = _normalize_hotkey(raw_combo)
         trigger = self._hotkey_map.get(combo)
 
-        print(f"[HOTKEY DEBUG] pressed={sorted(self._pressed_keys)} raw='{raw_combo}' normalized='{combo}'")
-
         if trigger:
             self._last_fire = now
             self._pressed_keys.clear()
