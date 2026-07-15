@@ -61,20 +61,20 @@ FORMAT      = pyaudio.paInt16
 
 SENSITIVITY_PROFILES = {
     "low": {
-        "onset_peak_min":  0.85,   # very loud events only
-        "leap_ratio":      6.0,    # peak must be 6x louder than 200ms ago
-        "decay_ms":        250,    # must decay within 250ms
-        "decay_ratio":     0.4,    # decay to 40% of peak
+        "onset_peak_min":  0.50,
+        "leap_ratio":      5.0,
+        "decay_ms":        250,
+        "decay_ratio":     0.4,
     },
     "medium": {
-        "onset_peak_min":  0.60,   # loud events (real snaps/claps)
-        "leap_ratio":      4.0,    # peak must be 4x louder than 200ms ago
-        "decay_ms":        300,    # must decay within 300ms
-        "decay_ratio":     0.5,    # decay to 50% of peak
+        "onset_peak_min":  0.25,
+        "leap_ratio":      3.0,
+        "decay_ms":        300,
+        "decay_ratio":     0.5,
     },
     "high": {
-        "onset_peak_min":  0.40,
-        "leap_ratio":      3.0,
+        "onset_peak_min":  0.15,
+        "leap_ratio":      2.5,
         "decay_ms":        350,
         "decay_ratio":     0.6,
     },
@@ -92,9 +92,68 @@ POST_PATTERN_COOLDOWN_MS = 1500
 # TRIGGER DETECTOR
 # ─────────────────────────────────────────────────────────────────────────
 
+def _find_best_input_device():
+    """
+    Auto-select the best available microphone.
+    Priority: HyperX/headset > USB external > default
+    """
+    try:
+        import pyaudio
+        pa = pyaudio.PyAudio()
+        count = pa.get_device_count()
+
+        # Priority keywords — prefer external/headset over laptop mic
+        priority_keywords = [
+            "hyperx", "headset", "usb", "wireless",
+            "stinger", "cloud", "external"
+        ]
+        low_priority = ["array", "omen", "amd", "realtek", "laptop"]
+
+        best_device = None
+        best_score  = -1
+
+        for i in range(count):
+            try:
+                info = pa.get_device_info_by_index(i)
+                if info['maxInputChannels'] < 1:
+                    continue
+                name = info['name'].lower()
+
+                score = 0
+                for kw in priority_keywords:
+                    if kw in name:
+                        score += 2
+                for kw in low_priority:
+                    if kw in name:
+                        score -= 1
+
+                # Prefer DirectSound over WDM-KS for stability
+                if "directsound" in name or "wasapi" in name:
+                    score += 1
+
+                if score > best_score:
+                    best_score  = score
+                    best_device = i
+
+            except Exception:
+                continue
+
+        pa.terminate()
+
+        if best_device is not None:
+            print(Fore.CYAN + f"[TRIGGERS] Auto-selected device {best_device}")
+            return best_device
+
+    except Exception:
+        pass
+
+    return None
+
 class TriggerDetector:
 
     def __init__(self, sensitivity="medium", device_index=None, debug=False):
+        if device_index is None:
+            device_index = _find_best_input_device()
         self.sensitivity  = sensitivity
         self.device_index = device_index
         self.debug        = debug
