@@ -1,7 +1,12 @@
 /**
  * panel_window.js
  * Manages the slide-in task panel window.
- * Called from main.js.
+ * Panel opens ONLY via:
+ *   - Alt+Shift+T shortcut
+ *   - Voice command ("Seven show tasks")
+ *   - IPC 'show-task-panel' event
+ * 
+ * NEVER opens from trigger hotkey execution.
  */
 
 const {
@@ -13,8 +18,7 @@ const fs   = require('node:fs');
 
 let panelWindow    = null;
 let panelServer    = null;
-let triggerPoller  = null;
-let navigateFn     = null; // set by main.js to navigate Seven to /tasks
+let navigateFn     = null;
 
 // ── Panel server (Python) ─────────────────────────────────────────────────────
 
@@ -83,7 +87,7 @@ function createPanelWindow(appSourcePath) {
   panelWindow = new BrowserWindow({
     width:       panelW,
     height:      height,
-    x:           screenW,       // Start offscreen right (slides in via CSS)
+    x:           screenW,
     y:           0,
     frame:       false,
     transparent: false,
@@ -107,16 +111,13 @@ function createPanelWindow(appSourcePath) {
   panelWindow.loadFile(panelHtml);
 
   panelWindow.once('ready-to-show', () => {
-    // Move to right edge — CSS handles slide animation
     const { width: sw } = screen.getPrimaryDisplay().workAreaSize;
     panelWindow.setPosition(sw - panelW, 0);
     panelWindow.show();
     panelWindow.focus();
   });
 
-  // Click outside → close
   panelWindow.on('blur', () => {
-    // Small delay to allow button clicks inside panel first
     setTimeout(() => {
       if (panelWindow && !panelWindow.isDestroyed() && !panelWindow.isFocused()) {
         closePanelWindow();
@@ -133,7 +134,6 @@ function createPanelWindow(appSourcePath) {
 
 function closePanelWindow() {
   if (!panelWindow || panelWindow.isDestroyed()) return;
-  // Tell panel HTML to animate out first
   panelWindow.webContents.executeJavaScript(`
     (function() {
       const p = document.getElementById('panel');
@@ -158,37 +158,6 @@ function togglePanel(appSourcePath) {
   }
 }
 
-// ── Daemon trigger polling ────────────────────────────────────────────────────
-
-function startTriggerPolling(appSourcePath) {
-  if (triggerPoller) return;
-
-  triggerPoller = setInterval(() => {
-    const req = http.get('http://127.0.0.1:7778/panel/trigger', (res) => {
-      let data = '';
-      res.on('data', d => data += d);
-      res.on('end', () => {
-        try {
-          const json = JSON.parse(data);
-          if (json.triggered) {
-            console.log('[PANEL] Daemon trigger received:', json.data);
-            createPanelWindow(appSourcePath);
-          }
-        } catch (e) {}
-      });
-    });
-    req.on('error', () => {}); // panel server might not be running yet
-    req.setTimeout(1000, () => req.destroy());
-  }, 3000); // poll every 3 seconds
-}
-
-function stopTriggerPolling() {
-  if (triggerPoller) {
-    clearInterval(triggerPoller);
-    triggerPoller = null;
-  }
-}
-
 // ── IPC from panel HTML ───────────────────────────────────────────────────────
 
 function registerIPC(navigateCallback) {
@@ -202,7 +171,7 @@ function registerIPC(navigateCallback) {
     if (navigateFn) navigateFn('/tasks');
   });
 
-  // Voice/API trigger — main.js calls this when user asks for tasks
+  // Only opened by explicit voice command or IPC — NOT by trigger hotkeys
   ipcMain.on('show-task-panel', (_, appSourcePath) => {
     createPanelWindow(appSourcePath);
   });
@@ -242,8 +211,8 @@ module.exports = {
   createPanelWindow,
   closePanelWindow,
   togglePanel,
-  startTriggerPolling,
-  stopTriggerPolling,
+  // startTriggerPolling REMOVED — triggers must never open panel
+  // stopTriggerPolling  REMOVED
   registerShortcut,
   unregisterShortcut,
   registerIPC,
