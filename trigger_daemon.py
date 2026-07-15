@@ -845,63 +845,13 @@ def _exec_run_command(data):
         subprocess.Popen(cmd, shell=True)
 
 def _set_brightness_direct(level: int):
-    """Set screen brightness instantly via Windows IOCTL — no smooth transition."""
+    """Set screen brightness on laptop via WMI."""
     level = max(0, min(100, level))
-
-    # Method 1: Direct Win32 IOCTL — truly instant, no animation
     try:
-        import ctypes
-
-        # SetBrightness via DXVA (Display Driver)
-        # PhysicalMonitorEnumerationAPI
-        dxva = ctypes.windll.LoadLibrary("dxva2.dll")
-        user32 = ctypes.windll.user32
-
-        # Get primary monitor handle
-        monitor = user32.MonitorFromWindow(0, 1)  # MONITOR_DEFAULTTOPRIMARY
-
-        # Get physical monitor
-        class PHYSICAL_MONITOR(ctypes.Structure):
-            _fields_ = [
-                ("hPhysicalMonitor", ctypes.c_void_p),
-                ("szPhysicalMonitorDescription", ctypes.c_wchar * 128),
-            ]
-
-        num_monitors = ctypes.c_ulong()
-        dxva.GetNumberOfPhysicalMonitorsFromHMONITOR(
-            monitor, ctypes.byref(num_monitors)
-        )
-
-        if num_monitors.value > 0:
-            physical = (PHYSICAL_MONITOR * num_monitors.value)()
-            dxva.GetPhysicalMonitorsFromHMONITOR(
-                monitor, num_monitors.value, physical
-            )
-            dxva.SetMonitorBrightness(
-                physical[0].hPhysicalMonitor, level
-            )
-            dxva.DestroyPhysicalMonitors(num_monitors.value, physical)
-            return
-
-    except Exception:
-        pass
-
-    # Method 2: WMI via PowerShell subprocess (fallback for laptops)
-    try:
-        subprocess.Popen(
-            ["powershell", "-NoProfile", "-NonInteractive", "-Command",
-             f"$m = Get-CimInstance -Namespace root/WMI -ClassName WmiMonitorBrightnessMethods;"
-             f"$m | Invoke-CimMethod -MethodName WmiSetBrightness -Arguments @{{Timeout=0; Brightness={level}}}"],
-            creationflags=0x08000000,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-    except Exception:
-        try:
-            from hands.system import manage_system
-            manage_system({"action": "brightness_set", "value": str(level)})
-        except Exception:
-            pass
+        from hands.system import manage_system
+        manage_system({"action": "brightness_set", "value": str(level)})
+    except Exception as e:
+        print(f"[TRIGGER DAEMON] Brightness failed: {e}")
 
 def _exec_seven_action(data):
     """Execute internal Seven action via API or direct."""
