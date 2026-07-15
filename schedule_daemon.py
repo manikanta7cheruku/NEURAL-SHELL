@@ -289,7 +289,7 @@ def main():
 
     print("[DAEMON] Seven schedule daemon started")
     fired = load_fired()
-    _last_overdue_notif = 0  # cooldown tracker — prevents notification spam
+    _last_overdue_notif = 0  # unix timestamp — 30 min cooldown
 
     while True:
         try:
@@ -365,15 +365,16 @@ def main():
                     _tconn.close()
 
                     # Notify if overdue — max once per 30 minutes
-                    _now_ts = time.time()
                     if _overdue > 0 and not is_seven_running():
-                        if _now_ts - _last_overdue_notif > 1800:  # 30 min cooldown
+                        if time.time() - _last_overdue_notif > 1800:
                             _task_msg = (
-                                f"You have {_overdue} overdue task{'s' if _overdue != 1 else ''}."
-                                + (f" Plus {_due_today} due today." if _due_today > 0 else "")
+                                f"You have {_overdue} overdue task"
+                                f"{'s' if _overdue != 1 else ''}."
+                                + (f" Plus {_due_today} due today."
+                                   if _due_today > 0 else "")
                             )
                             fire_notification(_task_msg, "reminder")
-                            _last_overdue_notif = _now_ts
+                            _last_overdue_notif = time.time()
 
             except Exception as _te:
                 print(f"[DAEMON] Task check error: {_te}")
