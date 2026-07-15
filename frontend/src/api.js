@@ -12,6 +12,18 @@ const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
 });
 
+// Separate instance for slow endpoints like workspace scan
+export const apiSlow = axios.create({
+  baseURL: BASE_URL,
+  timeout: 60000,
+  headers: { 'Content-Type': 'application/json' },
+});
+
+apiSlow.interceptors.response.use(
+  r => r,
+  e => { console.error('[API SLOW]', e.message); return Promise.reject(e); }
+);
+
 api.interceptors.response.use(
   r => r,
   e => { console.error('[API]', e.message); return Promise.reject(e); }
