@@ -35,18 +35,26 @@ def _get_project_root() -> str:
 
 def _get_venv_python(project_root: str) -> str:
     """
-    Return venv pythonw.exe for daemon spawning.
-    pythonw.exe has no console window and is fully independent —
-    it survives parent process exit without being killed.
-    python.exe is a console app and gets killed when the terminal closes.
-    """
-    venv_pythonw = os.path.join(project_root, "venv", "Scripts", "pythonw.exe")
-    if os.path.exists(venv_pythonw):
-        return venv_pythonw
+    Find the correct Python executable for daemon spawning.
 
-    venv_python = os.path.join(project_root, "venv", "Scripts", "python.exe")
-    if os.path.exists(venv_python):
-        return venv_python
+    Priority order:
+      1. Packaged embedded Python (production install)
+      2. Venv pythonw.exe (dev mode, no console = survives terminal close)
+      3. Venv python.exe (dev fallback)
+      4. Current interpreter (last resort)
+    """
+    candidates = [
+        # Production: embedded Python in installed app
+        os.path.join(project_root, "python", "pythonw.exe"),
+        os.path.join(project_root, "python", "python.exe"),
+        # Dev: venv
+        os.path.join(project_root, "venv", "Scripts", "pythonw.exe"),
+        os.path.join(project_root, "venv", "Scripts", "python.exe"),
+    ]
+    for c in candidates:
+        if os.path.exists(c):
+            print(Fore.CYAN + f"[TRIGGER] Using Python: {c}")
+            return c
 
     return sys.executable
 
@@ -208,14 +216,17 @@ def launch_trigger_daemon():
 def _register_trigger_startup(python: str, daemon: str):
     """
     Register trigger_daemon in Windows Task Scheduler.
-    After this runs once, Windows auto-starts the daemon at every login.
-    Seven never needs to be open for hotkeys to work.
+    Always re-registers to keep paths current after updates.
+    Uses three fallback methods to ensure registration always succeeds.
     """
+    task_name = "SevenTriggerDaemon"
+
+    # Always register with current correct paths
     try:
         result = subprocess.run(
             [
                 "schtasks", "/create", "/f",
-                "/tn", "SevenTriggerDaemon",
+                "/tn", task_name,
                 "/tr", f'"{python}" "{daemon}"',
                 "/sc", "onlogon",
                 "/rl", "limited",
@@ -226,14 +237,31 @@ def _register_trigger_startup(python: str, daemon: str):
         )
         if result.returncode == 0:
             print(Fore.GREEN + "[TRIGGER] Registered in Task Scheduler ✓")
-            print(Fore.GREEN + "[TRIGGER] Daemon will auto-start at every Windows login")
-        else:
-            print(Fore.YELLOW + f"[TRIGGER] Task Scheduler failed: {result.stderr.strip()}")
-            _register_trigger_startup_folder(python, daemon)
             return
+        else:
+            print(Fore.YELLOW + f"[TRIGGER] schtasks failed: {result.stderr.strip()}")
     except Exception as e:
-        print(Fore.YELLOW + f"[TRIGGER] Task Scheduler error: {e}")
-        _register_trigger_startup_folder(python, daemon)
+        print(Fore.YELLOW + f"[TRIGGER] schtasks error: {e}")
+
+    # Fallback 1: Startup folder .bat file
+    _register_trigger_startup_folder(python, daemon)
+
+    # Fallback 2: Registry Run key (works even without admin)
+    try:
+        import winreg
+        key = winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\CurrentVersion\Run",
+            0, winreg.KEY_SET_VALUE
+        )
+        winreg.SetValueEx(
+            key, "SevenTriggerDaemon", 0, winreg.REG_SZ,
+            f'"{python}" "{daemon}"'
+        )
+        winreg.CloseKey(key)
+        print(Fore.GREEN + "[TRIGGER] Registered in Registry Run key ✓")
+    except Exception as e:
+        print(Fore.YELLOW + f"[TRIGGER] Registry fallback failed: {e}")
 
 
 def _register_trigger_startup_folder(python: str, daemon: str):
@@ -332,7 +360,8 @@ def _register_overlay_startup(electron: str, daemon_js: str):
 
 
 def _register_overlay_startup_folder(electron: str, daemon_js: str):
-    """Fallback: add to Windows Startup folder."""
+    """Fallback: Startup folder + Registry Run key."""
+    # Startup folder
     try:
         import winreg
         key = winreg.OpenKey(
@@ -346,4 +375,21 @@ def _register_overlay_startup_folder(electron: str, daemon_js: str):
             f.write(f'@echo off\nstart "" /B "{electron}" "{daemon_js}"\n')
         print(Fore.GREEN + "[OVERLAY] Added to Startup folder ✓")
     except Exception as e:
-        print(Fore.YELLOW + f"[OVERLAY] Startup registration failed: {e}")
+        print(Fore.YELLOW + f"[OVERLAY] Startup folder failed: {e}")
+
+    # Registry Run key fallback
+    try:
+        import winreg
+        key = winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\CurrentVersion\Run",
+            0, winreg.KEY_SET_VALUE
+        )
+        winreg.SetValueEx(
+            key, "SevenOverlayDaemon", 0, winreg.REG_SZ,
+            f'"{electron}" "{daemon_js}"'
+        )
+        winreg.CloseKey(key)
+        print(Fore.GREEN + "[OVERLAY] Registered in Registry Run key ✓")
+    except Exception as e:
+        print(Fore.YELLOW + f"[OVERLAY] Registry fallback failed: {e}")
