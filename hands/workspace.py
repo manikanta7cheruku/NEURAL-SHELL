@@ -170,8 +170,8 @@ def scan_current():
     print(Fore.CYAN + "[WORKSPACE] Scanning desktop...")
     t0 = time.time()
 
-    apps      = []
-    seen_pids = set()
+    apps         = []
+    seen_windows = set()
 
     def _cb(hwnd, _):
         try:
@@ -181,9 +181,6 @@ def scan_current():
             title = win32gui.GetWindowText(hwnd)
 
             _, pid = win32process.GetWindowThreadProcessId(hwnd)
-
-            if pid in seen_pids:
-                return
 
             try:
                 proc     = psutil.Process(pid)
@@ -195,7 +192,12 @@ def scan_current():
             if _is_seven_process(exe_name, exe_path):
                 return
 
-            seen_pids.add(pid)
+            # Deduplicate by actual visible window, not by PID.
+            # Chrome/Explorer/Office can have multiple top-level windows under one PID.
+            window_key = (pid, title.strip().lower())
+            if window_key in seen_windows:
+                return
+            seen_windows.add(window_key)
 
             try:
                 rect     = win32gui.GetWindowRect(hwnd)
@@ -589,23 +591,16 @@ def _url_matches(saved_url: str, open_urls: set, open_domains: set) -> bool:
 def _get_open_chrome_profiles() -> set:
     """
     Detect which Chrome profiles have open windows right now.
-    Uses window title matching — fast and 100% accurate.
-    Chrome window titles end with " - Google Chrome" and contain
-    the profile name in parentheses for non-default profiles.
+    Reads all visible Chrome window titles and matches them against
+    profile names from Chrome's Local State file.
+
+    Chrome window titles format:
+      Default profile:  "YouTube - Google Chrome"
+      Named profile:    "YouTube - Google Chrome - Profile Name"
+      or:               "YouTube - Profile Name - Google Chrome"
     """
     profiles = set()
     try:
-        import psutil
-
-        chrome_pids = set()
-        for p in psutil.process_iter(['pid', 'name']):
-            if p.info['name'] and p.info['name'].lower() == "chrome.exe":
-                chrome_pids.add(p.info['pid'])
-
-        if not chrome_pids:
-            return profiles
-
-        # Read profile info from Local State
         chrome_base = os.path.join(
             os.environ.get("LOCALAPPDATA", ""),
             "Google", "Chrome", "User Data"
@@ -619,52 +614,172 @@ def _get_open_chrome_profiles() -> set:
 
         info_cache = state.get("profile", {}).get("info_cache", {})
 
-        # Build mapping: profile display name → email
-        name_to_email = {}
-        dir_to_email  = {}
+        # Build profile name → email mapping
+        profile_map = {}
+        default_email = ""
         for profile_dir, info in info_cache.items():
             email = (
                 info.get("user_name") or
                 info.get("signin", {}).get("login", "") or
                 ""
             ).lower()
-            display_name = info.get("name", "").lower()
+            display_name = (info.get("name") or "").lower()
             if email:
                 if display_name:
-                    name_to_email[display_name] = email
-                dir_to_email[profile_dir.lower()] = email
+                    profile_map[display_name] = email
+                if profile_dir.lower() == "default":
+                    default_email = email
 
-        # Check which Chrome windows are actually open by PID
-        open_dirs = set()
-        for pid in chrome_pids:
+        if not profile_map and not default_email:
+            return profiles
+
+        # Get all Chrome window titles
+        chrome_titles = []
+
+        def _cb(hwnd, _):
+            if not win32gui.IsWindowVisible(hwnd):
+                return
+            title = win32gui.GetWindowText(hwnd)
+            if not title:
+                return
             try:
+                _, pid = win32process.GetWindowThreadProcessId(hwnd)
                 proc = psutil.Process(pid)
-                cmd = proc.cmdline()
-                for arg in cmd:
-                    if arg.startswith("--profile-directory="):
-                        pdir = arg.split("=", 1)[1].lower()
-                        open_dirs.add(pdir)
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                if proc.name().lower() == "chrome.exe":
+                    chrome_titles.append(title.lower())
+            except Exception:
                 pass
 
-        # Map open profile dirs to emails
-        for pdir in open_dirs:
-            email = dir_to_email.get(pdir, "")
-            if email:
-                profiles.add(email)
-                profiles.add(email.split("@")[0])
+        win32gui.EnumWindows(_cb, None)
 
-        # If no --profile-directory found, check for Default profile
-        if not open_dirs and chrome_pids:
-            email = dir_to_email.get("default", "")
-            if email:
-                profiles.add(email)
-                profiles.add(email.split("@")[0])
+        if not chrome_titles:
+            return profiles
+
+        # Match window titles against profile names
+        matched_any = False
+        for title in chrome_titles:
+            for display_name, email in profile_map.items():
+                if display_name in title:
+                    profiles.add(email)
+                    profiles.add(email.split("@")[0])
+                    matched_any = True
+
+        # If Chrome is open but no profile name matched in title,
+        # it's the default profile (title has no profile suffix)
+        if not matched_any and chrome_titles and default_email:
+            profiles.add(default_email)
+            profiles.add(default_email.split("@")[0])
 
     except Exception as e:
         print(Fore.YELLOW + f"[WORKSPACE] Chrome profile detection: {e}")
 
     return profiles
+
+def _browser_profile_matches_window(saved_cfg: dict, current_browser_titles: list) -> bool:
+    """
+    Infer whether a saved Chrome profile is already open by comparing
+    its saved tab titles/domains against the currently visible Chrome
+    window titles.
+
+    This is the fallback path when extension sync / DevTools URL data
+    is not available.
+    """
+    tabs = saved_cfg.get("tabs", []) or []
+    if not tabs or not current_browser_titles:
+        return False
+
+    candidates = set()
+
+    for tab in tabs[:10]:
+        t = (tab.get("title") or "").strip().lower()
+        u = (tab.get("url") or "").strip().lower()
+
+        if t and len(t) >= 4:
+            candidates.add(t)
+
+        if u:
+            d = _extract_domain(u)
+            if d:
+                candidates.add(d.replace("www.", ""))
+
+    for win_title in current_browser_titles:
+        w = (win_title or "").lower()
+        for c in candidates:
+            if c and c in w:
+                return True
+
+    return False
+
+def _browser_profile_matches_window(saved_cfg: dict, current_browser_titles: list) -> bool:
+    """
+    Infer whether a saved browser profile is already open by comparing
+    saved tab titles/domains against currently visible browser window titles.
+
+    This is the fallback path when extension sync / DevTools URL data
+    is unavailable.
+    """
+    tabs = saved_cfg.get("tabs", []) or []
+    if not tabs or not current_browser_titles:
+        return False
+
+    stop_words = {
+        "google", "chrome", "free", "online", "the", "and",
+        "for", "with", "your", "from", "app", "www", "com", "net", "org"
+    }
+
+    candidates = set()
+
+    for tab in tabs[:10]:
+        title = (tab.get("title") or "").strip().lower()
+        url   = (tab.get("url") or "").strip().lower()
+
+        if title:
+            candidates.add(title)
+
+            # Fragments split by separators
+            for frag in re.split(r"[|\-:•]+", title):
+                frag = frag.strip()
+                if len(frag) >= 4:
+                    candidates.add(frag)
+
+            # Strong title tokens
+            for tok in re.findall(r"[a-z0-9]+", title):
+                if len(tok) >= 5 and tok not in stop_words:
+                    candidates.add(tok)
+
+        if url:
+            domain = _extract_domain(url)
+            if domain:
+                candidates.add(domain)
+                for part in domain.split("."):
+                    part = part.strip().lower()
+                    if len(part) >= 4 and part not in stop_words:
+                        candidates.add(part)
+
+    # Direct substring match
+    for win_title in current_browser_titles:
+        w = (win_title or "").lower()
+        for c in candidates:
+            if c and c in w:
+                return True
+
+    # Token overlap match
+    for win_title in current_browser_titles:
+        w_tokens = {
+            tok for tok in re.findall(r"[a-z0-9]+", (win_title or "").lower())
+            if len(tok) >= 4 and tok not in stop_words
+        }
+
+        for tab in tabs[:10]:
+            title = (tab.get("title") or "").lower()
+            t_tokens = {
+                tok for tok in re.findall(r"[a-z0-9]+", title)
+                if len(tok) >= 4 and tok not in stop_words
+            }
+            if len(t_tokens & w_tokens) >= 2:
+                return True
+
+    return False
 
 def _get_open_chrome_tabs() -> tuple:
     """
@@ -765,12 +880,13 @@ def smart_restore(apps_config):
             except Exception:
                 open_chrome_urls, open_chrome_domains = set(), set()
 
-        open_exes     = set()
-        open_ws_paths = set()
-        open_folders  = set()
-        open_profiles = set()
-        open_uwp      = set()
-        open_types    = set()
+        open_exes      = set()
+        open_ws_paths  = set()
+        open_folders   = set()
+        open_profiles  = set()
+        open_uwp       = set()
+        open_types     = set()
+        browser_titles = []
 
         for app in current:
             t    = (app.get("type") or "").lower()
@@ -781,14 +897,27 @@ def smart_restore(apps_config):
             prot = (app.get("protocol") or "").lower()
             name = (app.get("name") or "").lower()
 
-            if exe:  open_exes.add(exe)
-            if ws:   open_ws_paths.add(ws)
-            if fld:  open_folders.add(fld)
-            if prof: open_profiles.add(prof)
-            if t:    open_types.add(t)
+            if exe:
+                open_exes.add(exe)
+            if ws:
+                open_ws_paths.add(ws)
+            if fld:
+                open_folders.add(fld)
+            if prof:
+                open_profiles.add(prof)
+            if t:
+                open_types.add(t)
+
+            if t in ("chrome", "edge", "brave", "firefox"):
+                win_title = ((app.get("window") or {}).get("title") or app.get("name") or "").strip()
+                if win_title:
+                    browser_titles.append(win_title)
+
             if t == "uwp":
-                if prot: open_uwp.add(prot)
-                if name: open_uwp.add(name)
+                if prot:
+                    open_uwp.add(prot)
+                if name:
+                    open_uwp.add(name)
 
         open_profiles.update(_extra_profiles)
         print(Fore.CYAN + f"[WORKSPACE] Open URLs: {len(open_chrome_urls)}, "
@@ -836,7 +965,9 @@ def smart_restore(apps_config):
                               f"{len(missing_tabs)} new, {skipped_tabs} already open")
 
                 elif tabs and not open_chrome_urls:
-                    if prof and prof in open_profiles:
+                    inferred_open = _browser_profile_matches_window(cfg, browser_titles)
+
+                    if inferred_open or (prof and prof in open_profiles):
                         already_open += 1
                         print(Fore.CYAN + f"[WORKSPACE] Browser already open: {name}")
                     else:
