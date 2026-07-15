@@ -854,11 +854,70 @@ def _set_brightness_direct(level: int):
         print(f"[TRIGGER DAEMON] Brightness failed: {e}")
 
 def _exec_seven_action(data):
-    """Execute internal Seven action via API or direct."""
+    """
+    Execute internal Seven action.
+
+    Priority:
+      1. Direct deterministic system actions first
+         (brightness, volume, mute)
+      2. API/chat fallback only for unknown actions
+    """
     action = data.get("action", "")
     if not action:
         return
 
+    action_lower = action.lower().strip()
+
+    try:
+        import re
+        from hands.system import manage_system
+
+        # ── DIRECT SYSTEM ACTIONS FIRST ───────────────────────────────
+
+        # Mute / unmute
+        if "mute" in action_lower and "unmute" not in action_lower:
+            result = manage_system({"action": "volume_mute"})
+            print(f"[TRIGGER DAEMON] Mute direct: {result}")
+            return
+
+        # Volume set
+        if "volume" in action_lower:
+            nums = re.findall(r'\d+', action_lower)
+            if nums:
+                result = manage_system({"action": "volume_set", "value": nums[0]})
+                print(f"[TRIGGER DAEMON] Volume {nums[0]}% direct: {result}")
+                return
+            if "max" in action_lower or "full" in action_lower:
+                result = manage_system({"action": "volume_set", "value": "100"})
+                print(f"[TRIGGER DAEMON] Volume 100% direct: {result}")
+                return
+            if "min" in action_lower or "low" in action_lower:
+                result = manage_system({"action": "volume_set", "value": "10"})
+                print(f"[TRIGGER DAEMON] Volume 10% direct: {result}")
+                return
+
+        # Brightness set
+        if "brightness" in action_lower or "bright" in action_lower or "dim" in action_lower:
+            nums = re.findall(r'\d+', action_lower)
+            if nums:
+                val = nums[0]
+            elif "max" in action_lower or "full" in action_lower or "high" in action_lower:
+                val = "100"
+            elif "min" in action_lower or "low" in action_lower or "dim" in action_lower:
+                val = "10"
+            else:
+                val = "100"
+
+            result = manage_system({"action": "brightness_set", "value": val})
+            print(f"[TRIGGER DAEMON] Brightness {val}% direct: {result}")
+            return
+
+    except Exception as e:
+        print(f"[TRIGGER DAEMON] Direct system action failed: {e}")
+        import traceback
+        traceback.print_exc()
+
+    # ── FALLBACK: SEND TO SEVEN CHAT API ─────────────────────────────
     if is_seven_running():
         try:
             import requests
@@ -867,49 +926,12 @@ def _exec_seven_action(data):
                 json={"text": action, "speaker_id": "default"},
                 timeout=10
             )
-            print(f"[TRIGGER DAEMON] Seven action via API: {action}")
+            print(f"[TRIGGER DAEMON] Seven action via API fallback: {action}")
             return
         except Exception as e:
-            print(f"[TRIGGER DAEMON] API call failed: {e}")
+            print(f"[TRIGGER DAEMON] API fallback failed: {e}")
 
-    # Direct execution fallback for system commands
-    action_lower = action.lower()
-    try:
-        import re
-        from hands.system import manage_system
-
-        if "mute" in action_lower:
-            result = manage_system({"action": "volume_mute"})
-            print(f"[TRIGGER DAEMON] Mute: {result}")
-
-        elif "volume" in action_lower:
-            nums = re.findall(r'\d+', action_lower)
-            if nums:
-                result = manage_system({"action": "volume_set", "value": nums[0]})
-                print(f"[TRIGGER DAEMON] Volume {nums[0]}%: {result}")
-
-        elif "brightness" in action_lower:
-            nums = re.findall(r'\d+', action_lower)
-            if nums:
-                val = int(nums[0])
-            elif "max" in action_lower:
-                val = 100
-            elif "min" in action_lower:
-                val = 10
-            else:
-                val = 100
-
-            # Direct WMI call — instant, no Seven API needed
-            _set_brightness_direct(val)
-            print(f"[TRIGGER DAEMON] Brightness {val}% (direct)")
-
-        else:
-            print(f"[TRIGGER DAEMON] Unknown direct action: {action}")
-
-    except Exception as e:
-        print(f"[TRIGGER DAEMON] Direct action failed: {e}")
-        import traceback
-        traceback.print_exc()
+    print(f"[TRIGGER DAEMON] No direct handler and Seven not running: {action}")
 
 
 # ─────────────────────────────────────────────────────────────────────────
