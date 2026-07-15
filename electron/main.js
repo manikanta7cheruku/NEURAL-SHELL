@@ -709,6 +709,17 @@ function launchPanelHost() {
       }
     });
 
+    // Clear any stale panel trigger files from previous session
+    // Prevents phantom panel opens when Seven restarts
+    try {
+      const APPDATA = process.env.APPDATA || require('os').homedir();
+      const triggerFile = path.join(APPDATA, 'SEVEN', 'panel_trigger.json');
+      if (fs.existsSync(triggerFile)) {
+        fs.unlinkSync(triggerFile);
+        console.log('[STARTUP] Cleared stale panel_trigger.json');
+      }
+    } catch (e) {}
+
     // Launch panel host as independent detached process
     // Stays alive even after Seven quits
     launchPanelHost();
