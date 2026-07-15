@@ -51,19 +51,38 @@ def _get_venv_python(project_root: str) -> str:
     return sys.executable
 
 
-def _kill_existing(name_fragment: str):
-    """Kill all processes whose command line contains name_fragment."""
+def _kill_existing(name_fragment: str, correct_python: str = ""):
+    """
+    Kill all processes whose command line contains name_fragment.
+    If correct_python is given, only kills processes NOT using that Python.
+    This preserves the correct daemon if already running.
+    """
     my_pid = os.getpid()
+    correct_lower = correct_python.lower() if correct_python else ""
+
     try:
         import psutil
-        for proc in psutil.process_iter(['pid', 'cmdline']):
+        for proc in psutil.process_iter(['pid', 'cmdline', 'exe']):
             try:
                 cmd = " ".join(proc.info['cmdline'] or [])
-                if name_fragment in cmd and proc.info['pid'] != my_pid:
-                    print(Fore.YELLOW + f"[DAEMON] Killing old {name_fragment} "
-                          f"PID {proc.info['pid']}")
-                    proc.kill()
-                    proc.wait(timeout=3)
+                exe = (proc.info['exe'] or "").lower()
+
+                if name_fragment not in cmd:
+                    continue
+                if proc.info['pid'] == my_pid:
+                    continue
+
+                # If we know the correct Python, only kill wrong-Python daemons
+                if correct_lower and exe == correct_lower:
+                    print(Fore.CYAN + f"[DAEMON] Correct daemon already running "
+                          f"PID {proc.info['pid']} — keeping")
+                    continue
+
+                print(Fore.YELLOW + f"[DAEMON] Killing wrong daemon "
+                      f"PID {proc.info['pid']} exe={exe}")
+                proc.kill()
+                proc.wait(timeout=3)
+
             except Exception:
                 pass
     except ImportError:
@@ -140,11 +159,34 @@ def launch_trigger_daemon():
         print(Fore.RED + f"[TRIGGER] Python not found: {python}")
         return
 
-    # Kill stale instances
-    _kill_existing("trigger_daemon")
-    time.sleep(0.5)
+    # Kill wrong-Python daemons, keep correct one if already running
+    _kill_existing("trigger_daemon", correct_python=python)
+    time.sleep(0.3)
 
-    # Spawn
+    # Check if correct daemon already running after killing wrong ones
+    already_running = False
+    try:
+        import psutil
+        python_lower = python.lower()
+        for proc in psutil.process_iter(['pid', 'cmdline', 'exe']):
+            try:
+                cmd = " ".join(proc.info['cmdline'] or [])
+                exe = (proc.info['exe'] or "").lower()
+                if "trigger_daemon" in cmd and exe == python_lower:
+                    already_running = True
+                    print(Fore.CYAN + f"[TRIGGER] Correct daemon already running "
+                          f"PID {proc.info['pid']} ✓")
+                    break
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    if already_running:
+        _register_trigger_startup(python, daemon)
+        return
+
+    # Spawn fresh daemon
     try:
         pid = _spawn_detached([python, daemon], cwd=root)
         print(Fore.CYAN + f"[TRIGGER] Spawned PID {pid}")
