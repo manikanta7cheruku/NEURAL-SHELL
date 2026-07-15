@@ -20,16 +20,37 @@ from colorama import Fore
 
 def _get_project_root() -> str:
     """
-    Always returns the SEVEN project root directory.
-    Works regardless of cwd — uses this file's absolute location.
-    trigger_daemon_launcher.py is at:
-      SEVEN/main_modules/startup/trigger_daemon_launcher.py
-    So project root is 2 levels up.
+    Returns SEVEN project root directory.
+
+    Dev mode:    M:\Manikanta\Apps\MK-Projects\SEVEN
+    Production:  C:\Users\Username\AppData\Local\Programs\SEVEN\resources\app
+
+    Uses __file__ location — always correct regardless of cwd.
     """
-    this_file = os.path.abspath(__file__)
-    startup_dir     = os.path.dirname(this_file)
+    this_file        = os.path.abspath(__file__)
+    startup_dir      = os.path.dirname(this_file)
     main_modules_dir = os.path.dirname(startup_dir)
-    project_root    = os.path.dirname(main_modules_dir)
+    project_root     = os.path.dirname(main_modules_dir)
+
+    # In production, verify this is right by checking main.py exists
+    if os.path.exists(os.path.join(project_root, "main.py")):
+        return project_root
+
+    # Fallback: check registry for install path
+    try:
+        import winreg
+        key = winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"Software\SevenAI"
+        )
+        install_dir = winreg.QueryValueEx(key, "InstallDir")[0]
+        winreg.CloseKey(key)
+        app_path = os.path.join(install_dir, "resources", "app")
+        if os.path.exists(os.path.join(app_path, "main.py")):
+            return app_path
+    except Exception:
+        pass
+
     return project_root
 
 
