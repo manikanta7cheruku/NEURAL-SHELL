@@ -61,20 +61,20 @@ FORMAT      = pyaudio.paInt16
 
 SENSITIVITY_PROFILES = {
     "low": {
-        "onset_peak_min":  0.50,
-        "leap_ratio":      5.0,
+        "onset_peak_min":  0.20,
+        "leap_ratio":      8.0,
         "decay_ms":        250,
         "decay_ratio":     0.4,
     },
     "medium": {
-        "onset_peak_min":  0.25,
-        "leap_ratio":      3.0,
+        "onset_peak_min":  0.15,
+        "leap_ratio":      5.0,
         "decay_ms":        300,
         "decay_ratio":     0.5,
     },
     "high": {
-        "onset_peak_min":  0.15,
-        "leap_ratio":      2.5,
+        "onset_peak_min":  0.08,
+        "leap_ratio":      3.0,
         "decay_ms":        350,
         "decay_ratio":     0.6,
     },
@@ -94,60 +94,117 @@ POST_PATTERN_COOLDOWN_MS = 1500
 
 def _find_best_input_device():
     """
-    Auto-select the best available microphone.
-    Priority: HyperX/headset > USB external > default
+    Auto-select the best microphone for snap detection.
+
+    Selection criteria:
+      1. Has input channels
+      2. Low background noise (avg < 0.05 over 0.5s sample)
+      3. Good dynamic range (max/avg ratio > 2)
+      4. Prefer WASAPI over DirectSound over MME
+      5. Prefer headset/external over built-in array mics
+
+    Avoids saturated devices (avg > 0.3).
     """
     try:
         import pyaudio
         pa = pyaudio.PyAudio()
         count = pa.get_device_count()
 
-        # Priority keywords — prefer external/headset over laptop mic
-        priority_keywords = [
-            "hyperx", "headset", "usb", "wireless",
-            "stinger", "cloud", "external"
-        ]
-        low_priority = ["array", "omen", "amd", "realtek", "laptop"]
+        headset_keywords  = ["hyperx", "stinger", "cloud", "headset",
+                              "usb", "wireless", "external"]
+        builtin_keywords  = ["array", "omen", "amd", "realtek", "laptop",
+                              "internal", "integrated"]
 
-        best_device = None
-        best_score  = -1
+        candidates = []
 
         for i in range(count):
             try:
                 info = pa.get_device_info_by_index(i)
                 if info['maxInputChannels'] < 1:
                     continue
+
                 name = info['name'].lower()
+                rate = int(info['defaultSampleRate'])
+                chunk = int(rate * 0.05)
 
-                score = 0
-                for kw in priority_keywords:
-                    if kw in name:
+                # Quick 0.5s noise floor sample
+                try:
+                    stream = pa.open(
+                        format=pyaudio.paInt16,
+                        channels=1,
+                        rate=rate,
+                        input=True,
+                        frames_per_buffer=chunk,
+                        input_device_index=i,
+                    )
+                    levels = []
+                    for _ in range(10):
+                        raw = stream.read(chunk, exception_on_overflow=False)
+                        s = (np.frombuffer(raw, dtype=np.int16)
+                             .astype(np.float32) / 32768.0)
+                        levels.append(float(np.abs(s).max()))
+                    stream.stop_stream()
+                    stream.close()
+
+                    avg = sum(levels) / len(levels)
+                    mx  = max(levels)
+
+                    # Skip saturated devices
+                    if avg > 0.3:
+                        continue
+
+                    # Skip completely silent (disconnected/dummy)
+                    # unless it's a headset (may be silent when no sound)
+                    score = 0
+
+                    # Low noise floor = good
+                    if avg < 0.02:
+                        score += 3
+                    elif avg < 0.05:
+                        score += 1
+
+                    # Headset/external preferred
+                    for kw in headset_keywords:
+                        if kw in name:
+                            score += 3
+                            break
+
+                    # Built-in array = lower priority
+                    for kw in builtin_keywords:
+                        if kw in name:
+                            score -= 2
+                            break
+
+                    # WASAPI preferred (lower latency, cleaner signal)
+                    if "wasapi" in name:
                         score += 2
-                for kw in low_priority:
-                    if kw in name:
-                        score -= 1
+                    elif "directsound" in name:
+                        score += 1
 
-                # Prefer DirectSound over WDM-KS for stability
-                if "directsound" in name or "wasapi" in name:
-                    score += 1
+                    candidates.append((score, i, info['name'], avg, mx))
 
-                if score > best_score:
-                    best_score  = score
-                    best_device = i
+                except Exception:
+                    pass
 
             except Exception:
                 continue
 
         pa.terminate()
 
-        if best_device is not None:
-            print(Fore.CYAN + f"[TRIGGERS] Auto-selected device {best_device}")
-            return best_device
+        if not candidates:
+            print(Fore.YELLOW + "[TRIGGERS] No suitable input device found")
+            return None
 
-    except Exception:
-        pass
+        candidates.sort(reverse=True)
+        best_score, best_idx, best_name, best_avg, best_max = candidates[0]
 
-    return None
+        print(Fore.CYAN + f"[TRIGGERS] Selected device {best_idx}: "
+              f"{best_name} (noise={best_avg:.3f})")
+        return best_idx
+
+    except Exception as e:
+        print(Fore.YELLOW + f"[TRIGGERS] Device selection failed: {e}")
+        return None
 
 class TriggerDetector:
 
