@@ -21,10 +21,6 @@ from colorama import Fore
 def _get_project_root() -> str:
     """
     Returns SEVEN project root directory.
-
-    Dev mode:    M:\Manikanta\Apps\MK-Projects\SEVEN
-    Production:  C:\Users\Username\AppData\Local\Programs\SEVEN\resources\app
-
     Uses __file__ location — always correct regardless of cwd.
     """
     this_file        = os.path.abspath(__file__)
