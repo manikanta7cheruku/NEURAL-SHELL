@@ -100,7 +100,9 @@ const useTriggers = create((set, get) => ({
 
   scanWorkspace: async () => {
     try {
-      const r = await api.post('/workspaces/scan');
+      // Scan can take 10-30 seconds — use slow API instance
+      const { apiSlow } = await import('../api');
+      const r = await apiSlow.post('/workspaces/scan');
       return { ok: r.data.success, apps: r.data.apps, count: r.data.app_count };
     } catch {
       return { ok: false, apps: [], count: 0 };
