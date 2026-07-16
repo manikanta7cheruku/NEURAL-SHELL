@@ -99,8 +99,8 @@ function createNotifWindow() {
 
 function createArrangeWindow() {
   const { width: sw } = screen.getPrimaryDisplay().workArea;
-  const W = 280;
-  const H = 240;
+  const W = 400;
+  const H = 220;
 
   arrangeWindow = new BrowserWindow({
     width:              W,
@@ -154,7 +154,7 @@ function createArrangeWindow() {
     setTimeout(createArrangeWindow, 500);
   });
 
-  console.log('[OVERLAY DAEMON] Arrangement window pre-loaded (280x240)');
+  console.log('[OVERLAY DAEMON] Arrangement window pre-loaded (400x220)');
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -214,8 +214,8 @@ function showArrangement(data) {
   try { arrangeWindow.hide(); } catch (e) {}
 
   const { width: sw } = screen.getPrimaryDisplay().workArea;
-  const W = 280;
-  const H = 240;
+  const W = 400;
+  const H = 220;
   try {
     arrangeWindow.setSize(W, H);
     arrangeWindow.setMinimumSize(W, H);
@@ -314,6 +314,16 @@ function handleMessage(msg, socket) {
       socket.write(JSON.stringify({ ok: true }) + '\n');
       break;
 
+    case 'apply_layout':
+      applyLayoutDirect(data)
+        .then((result) => {
+          socket.write(JSON.stringify({ ok: true, result }) + '\n');
+        })
+        .catch((err) => {
+          socket.write(JSON.stringify({ ok: false, error: err.message }) + '\n');
+        });
+      break;
+
     case 'ping':
       socket.write(JSON.stringify({ ok: true, pong: true }) + '\n');
       break;
@@ -321,6 +331,92 @@ function handleMessage(msg, socket) {
     default:
       socket.write(JSON.stringify({ ok: false, error: 'unknown type' }) + '\n');
   }
+}
+
+
+async function applyLayoutDirect(data) {
+  const http = require('node:http');
+  const payload = JSON.stringify(data);
+
+  return new Promise((resolve, reject) => {
+    // Try Seven backend first (has full layout engine)
+    const req = http.request({
+      hostname: '127.0.0.1',
+      port: 7777,
+      path: '/api/triggers/layout',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(payload),
+      },
+      timeout: 500,
+    }, (res) => {
+      let body = '';
+      res.on('data', c => body += c);
+      res.on('end', () => resolve({ via: 'backend', body }));
+    });
+
+    req.on('error', () => {
+      // Backend down — fall back to spawning Python directly
+      spawnPythonLayout(data).then(resolve).catch(reject);
+    });
+    req.on('timeout', () => {
+      req.destroy();
+      spawnPythonLayout(data).then(resolve).catch(reject);
+    });
+
+    req.write(payload);
+    req.end();
+  });
+}
+
+
+function spawnPythonLayout(data) {
+  const { spawn } = require('node:child_process');
+  const path = require('node:path');
+
+  return new Promise((resolve, reject) => {
+    const projectRoot = path.join(__dirname, '..');
+    const pyw = path.join(projectRoot, 'venv', 'Scripts', 'pythonw.exe');
+    const py  = path.join(projectRoot, 'venv', 'Scripts', 'python.exe');
+    const fs  = require('node:fs');
+    const python = fs.existsSync(pyw) ? pyw : py;
+
+    const script = `
+import sys, json
+sys.path.insert(0, r"${projectRoot.replace(/\\/g, '\\\\')}")
+data = json.loads(sys.stdin.read())
+layout = data.get("layout", "maximize")
+hwnd_list = data.get("hwnd_list", [])
+minimize_hwnds = data.get("minimize_hwnds", [])
+
+try:
+    import win32gui, win32con
+    for h in minimize_hwnds:
+        try: win32gui.ShowWindow(int(float(h)), win32con.SW_MINIMIZE)
+        except: pass
+except: pass
+
+from hands.window_layout import arrange_specific_windows
+ok, msg = arrange_specific_windows(hwnd_list, layout)
+print(json.dumps({"success": ok, "message": msg}))
+`;
+
+    const child = spawn(python, ['-c', script], {
+      cwd: projectRoot,
+      windowsHide: true,
+    });
+
+    let output = '';
+    child.stdout.on('data', c => output += c.toString());
+    child.stdin.write(JSON.stringify(data));
+    child.stdin.end();
+
+    child.on('close', () => {
+      resolve({ via: 'python-direct', output: output.trim() });
+    });
+    child.on('error', reject);
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────
