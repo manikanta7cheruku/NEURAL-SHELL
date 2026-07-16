@@ -99,8 +99,8 @@ function createNotifWindow() {
 
 function createArrangeWindow() {
   const { width: sw } = screen.getPrimaryDisplay().workArea;
-  const W = 360;
-  const H = 320;
+  const W = 280;
+  const H = 240;
 
   arrangeWindow = new BrowserWindow({
     width:              W,
@@ -136,9 +136,14 @@ function createArrangeWindow() {
 
   arrangeWindow.on('blur', () => {
     if (!arrangeWindow || arrangeWindow.isDestroyed()) return;
-    arrangeWindow.webContents.executeJavaScript(
-      'if (typeof retract === "function") retract();'
-    ).catch(() => {});
+    if (!arrangeWindow.isVisible()) return;
+    setTimeout(() => {
+      if (!arrangeWindow || arrangeWindow.isDestroyed()) return;
+      if (arrangeWindow.isFocused()) return;
+      arrangeWindow.webContents.executeJavaScript(
+        'if (typeof retract === "function") retract();'
+      ).catch(() => {});
+    }, 200);
   });
 
   const htmlPath = path.join(__dirname, '..', 'seven_overlay', 'arrangement.html');
@@ -149,7 +154,7 @@ function createArrangeWindow() {
     setTimeout(createArrangeWindow, 500);
   });
 
-  console.log('[OVERLAY DAEMON] Arrangement window pre-loaded (420x520)');
+  console.log('[OVERLAY DAEMON] Arrangement window pre-loaded (280x240)');
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -209,11 +214,13 @@ function showArrangement(data) {
   try { arrangeWindow.hide(); } catch (e) {}
 
   const { width: sw } = screen.getPrimaryDisplay().workArea;
-  const W = 360;
-  const H = 320;
+  const W = 280;
+  const H = 240;
   try {
-    arrangeWindow.setPosition(Math.round((sw - W) / 2), 0);
     arrangeWindow.setSize(W, H);
+    arrangeWindow.setMinimumSize(W, H);
+    arrangeWindow.setMaximumSize(W, H);
+    arrangeWindow.setPosition(Math.round((sw - W) / 2), 0);
   } catch (e) {}
 
   const script = `
