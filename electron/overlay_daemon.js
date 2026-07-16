@@ -201,6 +201,7 @@ function showNotification(data) {
 
   notifWindow.showInactive();
   notifWindow.moveTop();
+  scheduleAutoHide(notifWindow, (data.holdMs || 3500) + 2000);
 }
 
 function showArrangement(data) {
@@ -243,6 +244,7 @@ function showArrangement(data) {
 
   arrangeWindow.showInactive();
   arrangeWindow.focus();
+  scheduleAutoHide(arrangeWindow, 20000);
 }
 
 // Hide handlers (called by HTML after animation completes)
@@ -252,6 +254,18 @@ ipcMain.on('overlay-close', (event) => {
     senderWin.hide();
   }
 });
+
+// Auto-hide safety: force-hide notification after 8s no matter what
+// Prevents stuck cards if animation callback never fires
+function scheduleAutoHide(win, maxMs) {
+  if (!win) return;
+  setTimeout(() => {
+    if (win && !win.isDestroyed() && win.isVisible()) {
+      console.log('[OVERLAY DAEMON] Auto-hide safety triggered');
+      win.hide();
+    }
+  }, maxMs);
+}
 
 // ─────────────────────────────────────────────────────────────────────────
 // TCP SERVER (Python → Electron)
