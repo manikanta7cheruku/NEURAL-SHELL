@@ -99,8 +99,8 @@ function createNotifWindow() {
 
 function createArrangeWindow() {
   const { width: sw } = screen.getPrimaryDisplay().workArea;
-  const W = 340;
-  const H = 140;
+  const W = 360;
+  const H = 320;
 
   arrangeWindow = new BrowserWindow({
     width:              W,
@@ -134,6 +134,13 @@ function createArrangeWindow() {
   arrangeWindow.setAlwaysOnTop(true, 'pop-up-menu', 999);
   arrangeWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
 
+  arrangeWindow.on('blur', () => {
+    if (!arrangeWindow || arrangeWindow.isDestroyed()) return;
+    arrangeWindow.webContents.executeJavaScript(
+      'if (typeof retract === "function") retract();'
+    ).catch(() => {});
+  });
+
   const htmlPath = path.join(__dirname, '..', 'seven_overlay', 'arrangement.html');
   arrangeWindow.loadFile(htmlPath);
 
@@ -142,7 +149,7 @@ function createArrangeWindow() {
     setTimeout(createArrangeWindow, 500);
   });
 
-  console.log('[OVERLAY DAEMON] Arrangement window pre-loaded');
+  console.log('[OVERLAY DAEMON] Arrangement window pre-loaded (420x520)');
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -197,9 +204,17 @@ function showArrangement(data) {
     return;
   }
 
-  arrangeAppNames = data.appNames || [];
+  arrangeAppNames = (data.windows || []).map(w => w.title || '');
 
   try { arrangeWindow.hide(); } catch (e) {}
+
+  const { width: sw } = screen.getPrimaryDisplay().workArea;
+  const W = 360;
+  const H = 320;
+  try {
+    arrangeWindow.setPosition(Math.round((sw - W) / 2), 0);
+    arrangeWindow.setSize(W, H);
+  } catch (e) {}
 
   const script = `
     (function() {
