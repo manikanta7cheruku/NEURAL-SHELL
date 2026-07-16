@@ -49,7 +49,70 @@ _SKIP_EXE = {
 }
 
 
-# ── Public entry point ────────────────────────────────────────────────────
+# ── Public entry points ───────────────────────────────────────────────────
+
+def arrange_specific_windows(hwnd_list: list, layout: str,
+                              split_direction: str = "vertical") -> tuple:
+    """
+    Arrange exact windows by handle list.
+    Called from arrangement card — only touches what user selected.
+
+    Args:
+        hwnd_list:       list of int window handles (from arrangement card)
+        layout:          'maximize' | 'split_vertical' | 'split_horizontal'
+                         | 'grid' | 'stack'
+        split_direction: 'vertical' | 'horizontal' (for split layout)
+
+    Returns:
+        (success: bool, message: str)
+    """
+    if not WIN32_OK:
+        return False, "pywin32 not available"
+
+    if not hwnd_list:
+        return False, "No windows provided"
+
+    layout = layout.lower().strip()
+
+    # Build handle tuples with titles
+    handles = []
+    for hwnd in hwnd_list:
+        try:
+            hwnd = int(float(hwnd))
+            if not win32gui.IsWindow(hwnd):
+                print(f"[LAYOUT] Invalid hwnd: {hwnd}")
+                continue
+            title = win32gui.GetWindowText(hwnd) or f"Window {hwnd}"
+            print(f"[LAYOUT] Valid hwnd {hwnd}: '{title}'")
+            handles.append((hwnd, title))
+        except Exception as e:
+            print(f"[LAYOUT] hwnd parse error {hwnd}: {e}")
+            continue
+
+    if not handles:
+        print(f"[LAYOUT] No valid handles from list: {hwnd_list}")
+
+    if not handles:
+        return False, "No valid windows found"
+
+    print(Fore.CYAN + f"[LAYOUT] arrange_specific: {len(handles)} windows as '{layout}'")
+
+    mx, my, mw, mh = _work_area()
+
+    if layout == "maximize":
+        return _do_maximize(handles)
+    elif layout in ("split_vertical", "split", "split vertical"):
+        return _do_split(handles, mx, my, mw, mh, direction="vertical")
+    elif layout in ("split_horizontal", "split horizontal"):
+        return _do_split(handles, mx, my, mw, mh, direction="horizontal")
+    elif layout == "grid":
+        return _do_grid(handles, mx, my, mw, mh)
+    elif layout == "stack":
+        return _do_stack(handles, mx, my, mw, mh)
+    else:
+        print(Fore.RED + f"[LAYOUT] Unknown layout received: '{layout}'")
+        return False, f"Unknown layout: {layout}"
+
 
 def arrange_windows(layout: str, app_names: list) -> tuple:
     """
@@ -111,10 +174,15 @@ def _do_maximize(handles):
     count = 0
     for hwnd, name in handles:
         try:
-            _restore_first(hwnd)
+            print(Fore.CYAN + f"[LAYOUT] Maximizing hwnd={hwnd} '{name}'")
+            placement = win32gui.GetWindowPlacement(hwnd)
+            if placement[1] == win32con.SW_SHOWMINIMIZED:
+                win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+                time.sleep(0.12)
             win32gui.ShowWindow(hwnd, win32con.SW_SHOWMAXIMIZED)
+            win32gui.SetForegroundWindow(hwnd)
             count += 1
-            time.sleep(0.05)
+            time.sleep(0.08)
         except Exception as e:
             print(Fore.YELLOW + f"[LAYOUT] Maximize skip '{name}': {e}")
 
@@ -125,31 +193,34 @@ def _do_maximize(handles):
     return True, f"Maximized {count} windows"
 
 
-def _do_split(handles, mx, my, mw, mh):
+def _do_split(handles, mx, my, mw, mh, direction="vertical"):
     """
-    Split first 2 windows side by side.
-    If more than 2 windows — maximize the rest behind them.
+    Split first 2 windows side by side (vertical) or top/bottom (horizontal).
+    If more than 2 windows — minimize the rest.
     """
     if len(handles) == 1:
-        # Only one window — just maximize it
         return _do_maximize(handles)
 
-    half = mw // 2
+    if direction == "horizontal":
+        half_h = mh // 2
+        _place(handles[0], mx, my,          mw, half_h)
+        _place(handles[1], mx, my + half_h, mw, half_h)
+        label = f"{handles[0][1]} / {handles[1][1]}"
+        print(Fore.GREEN + f"[LAYOUT] Split H: {label}")
+    else:
+        half_w = mw // 2
+        _place(handles[0], mx,          my, half_w, mh)
+        _place(handles[1], mx + half_w, my, half_w, mh)
+        label = f"{handles[0][1]} | {handles[1][1]}"
+        print(Fore.GREEN + f"[LAYOUT] Split V: {label}")
 
-    # First two windows — side by side
-    _place(handles[0], mx,        my, half, mh)
-    _place(handles[1], mx + half, my, half, mh)
-
-    # Remaining windows — maximize behind
     for hwnd, name in handles[2:]:
         try:
-            _restore_first(hwnd)
-            win32gui.ShowWindow(hwnd, win32con.SW_SHOWMAXIMIZED)
+            win32gui.ShowWindow(hwnd, win32con.SW_MINIMIZE)
         except Exception:
             pass
 
-    print(Fore.GREEN + f"[LAYOUT] Split: {handles[0][1]} | {handles[1][1]}")
-    return True, f"Split: {handles[0][1]} and {handles[1][1]}"
+    return True, f"Split {direction}: {label}"
 
 
 def _do_grid(handles, mx, my, mw, mh):
@@ -174,11 +245,9 @@ def _do_grid(handles, mx, my, mw, mh):
         x, y, w, h = positions[i]
         _place(handles[i], x, y, w, h)
 
-    # Extra windows — maximize behind grid
     for hwnd, name in handles[4:]:
         try:
-            _restore_first(hwnd)
-            win32gui.ShowWindow(hwnd, win32con.SW_SHOWMAXIMIZED)
+            win32gui.ShowWindow(hwnd, win32con.SW_MINIMIZE)
         except Exception:
             pass
 
@@ -199,11 +268,9 @@ def _do_stack(handles, mx, my, mw, mh):
     _place(handles[0], mx, my,          mw, half_h)
     _place(handles[1], mx, my + half_h, mw, half_h)
 
-    # Remaining windows — maximize behind
     for hwnd, name in handles[2:]:
         try:
-            _restore_first(hwnd)
-            win32gui.ShowWindow(hwnd, win32con.SW_SHOWMAXIMIZED)
+            win32gui.ShowWindow(hwnd, win32con.SW_MINIMIZE)
         except Exception:
             pass
 
