@@ -634,10 +634,10 @@ def _execute_trigger_complete(trigger, name, action_type, action_data,
                     "title":    name,
                     "subtitle": "Workspace restored",
                     "detail":   f"{opened} opened · {skipped} already running",
-                    "holdMs":   3000,
+                    "holdMs":   2200,
                 },
             })
-            time.sleep(3.5)
+            time.sleep(1.5)
             app_list = [a.strip() for a in app_names.split(",") if a.strip()]
             if app_list and _is_overlay_alive():
                 triggered_wins, other_wins = _get_windows_for_arrange(app_list)
@@ -651,7 +651,7 @@ def _execute_trigger_complete(trigger, name, action_type, action_data,
                     })
 
         elif opened > 0:
-            time.sleep(4.3)
+            time.sleep(1.8)
             app_list = [a.strip() for a in app_names.split(",") if a.strip()]
             if app_list and _is_overlay_alive():
                 triggered_wins, other_wins = _get_windows_for_arrange(app_list)
@@ -667,7 +667,7 @@ def _execute_trigger_complete(trigger, name, action_type, action_data,
     elif action_type == "open_app" and not trigger.get("silent", False):
         app_list = [a.strip() for a in app_names.split(",") if a.strip()]
         if len(app_list) >= 2:
-            time.sleep(3.0)
+            time.sleep(1.5)
             if _is_overlay_alive():
                 triggered_wins, other_wins = _get_windows_for_arrange(app_list)
                 if triggered_wins:
