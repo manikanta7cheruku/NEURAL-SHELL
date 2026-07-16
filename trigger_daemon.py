@@ -352,6 +352,28 @@ def _get_windows_by_workspace_apps(workspace_apps: list) -> tuple:
 
         win32gui.EnumWindows(_cb, None)
 
+        # Also enumerate ALL top-level windows including elevated ones
+        # For elevated processes psutil can't read exe, so match by title
+        all_titles = []
+
+        def _cb_titles(hwnd, _):
+            if not win32gui.IsWindowVisible(hwnd):
+                return
+            title = win32gui.GetWindowText(hwnd)
+            if not title:
+                return
+            try:
+                rect = win32gui.GetWindowRect(hwnd)
+                w = rect[2] - rect[0]
+                h = rect[3] - rect[1]
+                if w < 100 or h < 100:
+                    return
+            except Exception:
+                return
+            all_titles.append({"hwnd": hwnd, "title": title})
+
+        win32gui.EnumWindows(_cb_titles, None)
+
         triggered = []
         used = set()
 
@@ -360,6 +382,8 @@ def _get_windows_by_workspace_apps(workspace_apps: list) -> tuple:
             exe_basename = _os.path.basename(exe_path).lower() if exe_path else ""
             app_type = (ws_app.get("type") or "").lower()
             display_name = ws_app.get("name", "")
+            ws_window = ws_app.get("window", {}) or {}
+            expected_title = (ws_window.get("title") or "").lower()
 
             match = None
 
@@ -381,23 +405,51 @@ def _get_windows_by_workspace_apps(workspace_apps: list) -> tuple:
                         match = w
                         break
 
-            # Priority 3: chrome profile match by window title
+            # Priority 2b: elevated process fallback — match by exact window title
+            # (Task Manager, elevated PowerShell etc. can't be read via psutil
+            #  when Seven isn't elevated)
+            if not match and expected_title:
+                for t in all_titles:
+                    if t["hwnd"] in used:
+                        continue
+                    if t["title"].lower() == expected_title:
+                        match = {
+                            "hwnd":  t["hwnd"],
+                            "title": t["title"],
+                            "exe":   exe_basename or "unknown",
+                            "full_exe": "",
+                            "triggered": False,
+                        }
+                        break
+
+            # Priority 3: chrome profile match — score windows by tab title relevance
             if not match and app_type == "chrome":
                 profile = (ws_app.get("profile_name") or "").lower()
-                if profile:
-                    for w in visible:
-                        if w["hwnd"] in used:
-                            continue
-                        if "chrome" in w["exe"].lower() and profile in w["title"].lower():
-                            match = w
+                tabs = ws_app.get("tabs", []) or []
+                tab_titles = [(t.get("title", "") or "").lower() for t in tabs]
+
+                best = None
+                best_score = 0
+                for w in visible:
+                    if w["hwnd"] in used:
+                        continue
+                    if "chrome" not in w["exe"].lower():
+                        continue
+                    wtitle = w["title"].lower()
+                    score = 0
+                    if profile and profile in wtitle:
+                        score += 10
+                    for tt in tab_titles:
+                        if tt and len(tt) > 6 and tt[:20] in wtitle:
+                            score += 5
                             break
-                    if not match:
-                        for w in visible:
-                            if w["hwnd"] in used:
-                                continue
-                            if "chrome" in w["exe"].lower():
-                                match = w
-                                break
+                    if score == 0:
+                        score = 1
+                    if score > best_score:
+                        best_score = score
+                        best = w
+                if best:
+                    match = best
 
             # Priority 4: explorer folder match by title
             if not match and app_type == "explorer":
@@ -628,97 +680,6 @@ def execute_trigger(trigger):
               app_count, tab_count, app_names, workspace_apps),
         daemon=True,
     ).start()
-
-
-def _execute_trigger_complete(trigger, name, action_type, action_data,
-                               app_count, tab_count, app_names,
-                               workspace_apps=None):
-    """
-    Complete trigger execution in one thread.
-    Action fires FIRST, notification in background.
-    """
-    workspace_apps = workspace_apps or []
-    # Non-workspace: fire notification in background thread — never blocks action
-    if not trigger.get("silent", False) and action_type != "open_workspace":
-        threading.Thread(
-            target=_fire_notification,
-            args=(name, action_type, app_count, tab_count, app_names),
-            daemon=True,
-        ).start()
-
-    # Execute action
-    result = None
-    try:
-        if action_type == "open_app":
-            _exec_open_app(action_data)
-        elif action_type == "open_url":
-            _exec_open_url(action_data)
-        elif action_type == "open_file":
-            _exec_open_file(action_data)
-        elif action_type == "open_folder":
-            _exec_open_folder(action_data)
-        elif action_type == "open_workspace":
-            result = _exec_open_workspace(action_data)
-        elif action_type == "run_command":
-            _exec_run_command(action_data)
-        elif action_type == "seven_action":
-            _exec_seven_action(action_data)
-        else:
-            print(f"[TRIGGER DAEMON] Unknown action: {action_type}")
-            return
-    except Exception as e:
-        print(f"[TRIGGER DAEMON] Action error: {e}")
-        import traceback
-        traceback.print_exc()
-        return
-
-    # Sound
-    if not trigger.get("silent", False):
-        try:
-            import winsound
-            winsound.MessageBeep(winsound.MB_ICONASTERISK)
-        except Exception:
-            pass
-
-    # Workspace feedback notification
-    if action_type == "open_workspace" and result and not trigger.get("silent", False):
-        opened  = result.get("opened", 0)
-        skipped = result.get("skipped", 0)
-
-        if opened == 0 and skipped > 0:
-            _send_overlay({
-                "type": "notif",
-                "data": {
-                    "title":    name,
-                    "subtitle": "Already active",
-                    "detail":   f"All {skipped} app{'s' if skipped != 1 else ''} already open",
-                    "holdMs":   2500,
-                },
-            })
-
-        elif opened > 0 and skipped > 0:
-            _send_overlay({
-                "type": "notif",
-                "data": {
-                    "title":    name,
-                    "subtitle": "Workspace restored",
-                    "detail":   f"{opened} opened · {skipped} already running",
-                    "holdMs":   3000,
-                },
-            })
-            time.sleep(3.5)
-            app_list = [a.strip() for a in app_names.split(",") if a.strip()]
-            if app_list and _is_overlay_alive():
-                _send_overlay({"type": "arrange", "data": {"appNames": app_list}})
-
-        elif opened > 0:
-            time.sleep(4.3)
-            app_list = [a.strip() for a in app_names.split(",") if a.strip()]
-            if app_list and _is_overlay_alive():
-                _send_overlay({"type": "arrange", "data": {"appNames": app_list}})
-
-    # Stats
-    update_fire_stats(trigger.get("id"))
 
 
 def _execute_trigger_complete(trigger, name, action_type, action_data,
