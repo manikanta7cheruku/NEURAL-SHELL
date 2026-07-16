@@ -275,6 +275,124 @@ def _is_overlay_alive() -> bool:
     return _send_overlay({"type": "ping"}, timeout=0.3)
 
 
+def _get_windows_for_arrange(app_names: list) -> tuple:
+    """
+    Find window handles for triggered apps ONLY.
+    Returns (triggered_windows, other_windows).
+
+    STRICT MATCHING: only returns windows whose exe or title clearly
+    matches an app name in app_names. Never returns unrelated windows
+    as "triggered" — that would maximize the user's Task Manager etc.
+    """
+    try:
+        import win32gui
+        import win32process
+        import psutil
+
+        _SKIP_TITLES_SET = {
+            "", "program manager", "microsoft text input application",
+            "windows input experience", "nvidia geforce overlay",
+            "nvidia geforce overlay dt", "settings",
+        }
+        _SKIP_EXE_SET = {
+            "searchhost.exe", "shellexperiencehost.exe",
+            "startmenuexperiencehost.exe", "textinputhost.exe",
+            "runtimebroker.exe", "applicationframehost.exe",
+            "msedgewebview2.exe", "nvidia overlay.exe",
+            "nvcontainer.exe", "nvidia share.exe",
+            "widgets.exe", "widgetservice.exe",
+            "lockapp.exe", "systemsettings.exe",
+        }
+
+        visible = []
+
+        def _cb(hwnd, _):
+            if not win32gui.IsWindowVisible(hwnd):
+                return
+            title = win32gui.GetWindowText(hwnd)
+            title_stripped = title.lower().strip() if title else ""
+            if not title or title_stripped in _SKIP_TITLES_SET:
+                return
+            if "nvidia" in title_stripped and "overlay" in title_stripped:
+                return
+            try:
+                _, pid = win32process.GetWindowThreadProcessId(hwnd)
+                proc = psutil.Process(pid)
+                exe = proc.name()
+                if exe.lower() in _SKIP_EXE_SET:
+                    return
+                if exe.lower() == "electron.exe":
+                    return
+                # Skip zero-size / off-screen windows
+                try:
+                    rect = win32gui.GetWindowRect(hwnd)
+                    w = rect[2] - rect[0]
+                    h = rect[3] - rect[1]
+                    if w < 100 or h < 100:
+                        return
+                except Exception:
+                    pass
+                visible.append({"hwnd": hwnd, "title": title,
+                                 "exe": exe, "triggered": False})
+            except Exception:
+                pass
+
+        win32gui.EnumWindows(_cb, None)
+
+        # STRICT matching — only exact or clear substring match
+        triggered = []
+        used = set()
+
+        for app_name in app_names:
+            if not app_name:
+                continue
+            name_low = app_name.lower().strip()
+            name_key = name_low.replace(".exe", "").replace(" ", "")
+
+            best = None
+            best_score = 0
+            for w in visible:
+                if w["hwnd"] in used:
+                    continue
+                title_low = w["title"].lower()
+                exe_low = w["exe"].lower().replace(".exe", "")
+
+                score = 0
+                # Exe name matches app name closely
+                if exe_low == name_key or exe_low.startswith(name_key) \
+                        or name_key.startswith(exe_low):
+                    score = 5
+                # App name found as whole word in title
+                elif name_low in title_low:
+                    score = 4
+                # Exe name found in title (e.g. "chrome" in "GitHub - Chrome")
+                elif exe_low in title_low and len(exe_low) >= 4:
+                    score = 3
+
+                if score > best_score:
+                    best_score = score
+                    best = w
+
+            # Require MINIMUM score of 3 — no weak matches
+            if best and best_score >= 3:
+                best = dict(best)
+                best["triggered"] = True
+                triggered.append(best)
+                used.add(best["hwnd"])
+                print(f"[TRIGGER DAEMON] Matched '{app_name}' -> "
+                      f"'{best['title']}' (score={best_score})")
+            else:
+                print(f"[TRIGGER DAEMON] No match for '{app_name}'")
+
+        other = [w for w in visible if w["hwnd"] not in used]
+        return triggered, other
+
+    except Exception as e:
+        print(f"[TRIGGER DAEMON] Window enumeration failed: {e}")
+        import traceback; traceback.print_exc()
+        return [], []
+
+
 # ─────────────────────────────────────────────────────────────────────────
 # TRIGGER EXECUTION
 # ─────────────────────────────────────────────────────────────────────────
@@ -482,7 +600,7 @@ def _execute_trigger_complete(trigger, name, action_type, action_data,
         except Exception:
             pass
 
-    # Step 5: Smart feedback notification for workspace
+    # Step 5: Feedback + arrangement card
     if action_type == "open_workspace" and result and not trigger.get("silent", False):
         opened  = result.get("opened", 0)
         skipped = result.get("skipped", 0)
@@ -497,6 +615,17 @@ def _execute_trigger_complete(trigger, name, action_type, action_data,
                     "holdMs":   2500,
                 },
             })
+            app_list = [a.strip() for a in app_names.split(",") if a.strip()]
+            if app_list and _is_overlay_alive():
+                triggered_wins, other_wins = _get_windows_for_arrange(app_list)
+                if triggered_wins:
+                    _send_overlay({
+                        "type": "arrange",
+                        "data": {
+                            "windows":    triggered_wins,
+                            "allWindows": other_wins,
+                        },
+                    })
 
         elif opened > 0 and skipped > 0:
             _send_overlay({
@@ -511,13 +640,44 @@ def _execute_trigger_complete(trigger, name, action_type, action_data,
             time.sleep(3.5)
             app_list = [a.strip() for a in app_names.split(",") if a.strip()]
             if app_list and _is_overlay_alive():
-                _send_overlay({"type": "arrange", "data": {"appNames": app_list}})
+                triggered_wins, other_wins = _get_windows_for_arrange(app_list)
+                if triggered_wins:
+                    _send_overlay({
+                        "type": "arrange",
+                        "data": {
+                            "windows":    triggered_wins,
+                            "allWindows": other_wins,
+                        },
+                    })
 
         elif opened > 0:
             time.sleep(4.3)
             app_list = [a.strip() for a in app_names.split(",") if a.strip()]
             if app_list and _is_overlay_alive():
-                _send_overlay({"type": "arrange", "data": {"appNames": app_list}})
+                triggered_wins, other_wins = _get_windows_for_arrange(app_list)
+                if triggered_wins:
+                    _send_overlay({
+                        "type": "arrange",
+                        "data": {
+                            "windows":    triggered_wins,
+                            "allWindows": other_wins,
+                        },
+                    })
+
+    elif action_type == "open_app" and not trigger.get("silent", False):
+        app_list = [a.strip() for a in app_names.split(",") if a.strip()]
+        if len(app_list) >= 2:
+            time.sleep(3.0)
+            if _is_overlay_alive():
+                triggered_wins, other_wins = _get_windows_for_arrange(app_list)
+                if triggered_wins:
+                    _send_overlay({
+                        "type": "arrange",
+                        "data": {
+                            "windows":    triggered_wins,
+                            "allWindows": other_wins,
+                        },
+                    })
 
     # Step 6: Update fire stats
     update_fire_stats(trigger.get("id"))
