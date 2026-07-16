@@ -170,6 +170,7 @@ def _do_maximize(handles):
     """
     Maximize all windows.
     Most reliable layout — uses SW_SHOWMAXIMIZED.
+    Skips SetForegroundWindow (requires foreground rights, fails silently).
     """
     count = 0
     for hwnd, name in handles:
@@ -178,11 +179,10 @@ def _do_maximize(handles):
             placement = win32gui.GetWindowPlacement(hwnd)
             if placement[1] == win32con.SW_SHOWMINIMIZED:
                 win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-                time.sleep(0.12)
+                time.sleep(0.10)
             win32gui.ShowWindow(hwnd, win32con.SW_SHOWMAXIMIZED)
-            win32gui.SetForegroundWindow(hwnd)
             count += 1
-            time.sleep(0.08)
+            time.sleep(0.05)
         except Exception as e:
             print(Fore.YELLOW + f"[LAYOUT] Maximize skip '{name}': {e}")
 
