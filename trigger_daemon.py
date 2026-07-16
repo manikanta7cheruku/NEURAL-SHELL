@@ -275,6 +275,169 @@ def _is_overlay_alive() -> bool:
     return _send_overlay({"type": "ping"}, timeout=0.3)
 
 
+def _get_windows_by_workspace_apps(workspace_apps: list) -> tuple:
+    """
+    Find window handles by matching workspace app definitions.
+    Uses exe_path for accurate matching — no fuzzy name matching.
+
+    Args:
+        workspace_apps: list of dicts from workspace DB, each with
+                        exe_path, name, type, etc.
+
+    Returns:
+        (triggered_windows, other_windows) — list of dicts with
+        hwnd, title, exe, triggered.
+    """
+    try:
+        import win32gui
+        import win32process
+        import psutil
+        import os as _os
+
+        _SKIP_TITLES_SET = {
+            "", "program manager", "microsoft text input application",
+            "windows input experience", "nvidia geforce overlay",
+            "nvidia geforce overlay dt", "settings",
+        }
+        _SKIP_EXE_SET = {
+            "searchhost.exe", "shellexperiencehost.exe",
+            "startmenuexperiencehost.exe", "textinputhost.exe",
+            "runtimebroker.exe", "applicationframehost.exe",
+            "msedgewebview2.exe", "nvidia overlay.exe",
+            "nvcontainer.exe", "nvidia share.exe",
+            "widgets.exe", "widgetservice.exe",
+            "lockapp.exe", "systemsettings.exe",
+        }
+
+        visible = []
+
+        def _cb(hwnd, _):
+            if not win32gui.IsWindowVisible(hwnd):
+                return
+            title = win32gui.GetWindowText(hwnd)
+            title_stripped = title.lower().strip() if title else ""
+            if not title or title_stripped in _SKIP_TITLES_SET:
+                return
+            if "nvidia" in title_stripped and "overlay" in title_stripped:
+                return
+            try:
+                _, pid = win32process.GetWindowThreadProcessId(hwnd)
+                proc = psutil.Process(pid)
+                exe_name = proc.name()
+                if exe_name.lower() in _SKIP_EXE_SET:
+                    return
+                if exe_name.lower() == "electron.exe":
+                    return
+                try:
+                    rect = win32gui.GetWindowRect(hwnd)
+                    w = rect[2] - rect[0]
+                    h = rect[3] - rect[1]
+                    if w < 100 or h < 100:
+                        return
+                except Exception:
+                    pass
+                try:
+                    full_exe = proc.exe() or ""
+                except Exception:
+                    full_exe = ""
+                visible.append({
+                    "hwnd":     hwnd,
+                    "title":    title,
+                    "exe":      exe_name,
+                    "full_exe": full_exe.lower(),
+                    "triggered": False,
+                })
+            except Exception:
+                pass
+
+        win32gui.EnumWindows(_cb, None)
+
+        triggered = []
+        used = set()
+
+        for ws_app in workspace_apps:
+            exe_path = (ws_app.get("exe_path") or "").lower()
+            exe_basename = _os.path.basename(exe_path).lower() if exe_path else ""
+            app_type = (ws_app.get("type") or "").lower()
+            display_name = ws_app.get("name", "")
+
+            match = None
+
+            # Priority 1: exact full path match
+            if exe_path:
+                for w in visible:
+                    if w["hwnd"] in used:
+                        continue
+                    if w["full_exe"] == exe_path:
+                        match = w
+                        break
+
+            # Priority 2: exe basename match (e.g. Taskmgr.exe)
+            if not match and exe_basename:
+                for w in visible:
+                    if w["hwnd"] in used:
+                        continue
+                    if w["exe"].lower() == exe_basename:
+                        match = w
+                        break
+
+            # Priority 3: chrome profile match by window title
+            if not match and app_type == "chrome":
+                profile = (ws_app.get("profile_name") or "").lower()
+                if profile:
+                    for w in visible:
+                        if w["hwnd"] in used:
+                            continue
+                        if "chrome" in w["exe"].lower() and profile in w["title"].lower():
+                            match = w
+                            break
+                    if not match:
+                        for w in visible:
+                            if w["hwnd"] in used:
+                                continue
+                            if "chrome" in w["exe"].lower():
+                                match = w
+                                break
+
+            # Priority 4: explorer folder match by title
+            if not match and app_type == "explorer":
+                folder = _os.path.basename(ws_app.get("folder_path", "")).lower()
+                if folder:
+                    for w in visible:
+                        if w["hwnd"] in used:
+                            continue
+                        if "explorer.exe" in w["exe"].lower() and folder in w["title"].lower():
+                            match = w
+                            break
+
+            if match:
+                m = dict(match)
+                m["triggered"] = True
+                m.pop("full_exe", None)
+                triggered.append(m)
+                used.add(match["hwnd"])
+                print(f"[TRIGGER DAEMON] Matched '{display_name}' -> "
+                      f"'{match['title']}' ({match['exe']})")
+            else:
+                print(f"[TRIGGER DAEMON] No window found for '{display_name}' "
+                      f"(exe={exe_basename or 'none'}, type={app_type})")
+
+        other = []
+        for w in visible:
+            if w["hwnd"] in used:
+                continue
+            w2 = dict(w)
+            w2.pop("full_exe", None)
+            other.append(w2)
+
+        return triggered, other
+
+    except Exception as e:
+        print(f"[TRIGGER DAEMON] Workspace-app enumeration failed: {e}")
+        import traceback; traceback.print_exc()
+        return [], []
+
+
 def _get_windows_for_arrange(app_names: list) -> tuple:
     """
     Find window handles for triggered apps ONLY.
@@ -414,6 +577,8 @@ def execute_trigger(trigger):
     tab_count  = 0
     app_names  = ""
 
+    workspace_apps = []
+
     if action_type == "open_workspace":
         ws_id   = action_data.get("workspace_id")
         ws_name = action_data.get("workspace_name")
@@ -435,10 +600,10 @@ def execute_trigger(trigger):
             conn.close()
 
             if ws_row:
-                apps_data  = json.loads(ws_row["apps"] or "[]")
-                app_count  = len(apps_data)
+                workspace_apps = json.loads(ws_row["apps"] or "[]")
+                app_count  = len(workspace_apps)
                 names_list = []
-                for a in apps_data:
+                for a in workspace_apps:
                     n = a.get("name", "")
                     if " - " in n:
                         n = n.split(" - ")[-1].strip()
@@ -455,20 +620,24 @@ def execute_trigger(trigger):
             apps_list = [single]
         app_count  = len(apps_list)
         app_names  = ",".join(apps_list)
+        workspace_apps = [{"name": a, "exe_path": ""} for a in apps_list]
 
     threading.Thread(
         target=_execute_trigger_complete,
-        args=(trigger, name, action_type, action_data, app_count, tab_count, app_names),
+        args=(trigger, name, action_type, action_data,
+              app_count, tab_count, app_names, workspace_apps),
         daemon=True,
     ).start()
 
 
 def _execute_trigger_complete(trigger, name, action_type, action_data,
-                               app_count, tab_count, app_names):
+                               app_count, tab_count, app_names,
+                               workspace_apps=None):
     """
     Complete trigger execution in one thread.
     Action fires FIRST, notification in background.
     """
+    workspace_apps = workspace_apps or []
     # Non-workspace: fire notification in background thread — never blocks action
     if not trigger.get("silent", False) and action_type != "open_workspace":
         threading.Thread(
@@ -553,12 +722,14 @@ def _execute_trigger_complete(trigger, name, action_type, action_data,
 
 
 def _execute_trigger_complete(trigger, name, action_type, action_data,
-                               app_count, tab_count, app_names):
+                               app_count, tab_count, app_names,
+                               workspace_apps=None):
     """
     Complete trigger execution in a single thread.
     Notification → Action → Arrangement → Stats.
     No concurrent threads to prevent double-execution.
     """
+    workspace_apps = workspace_apps or []
     # Step 1: Ensure overlay is ready
     _ensure_overlay_alive_safe()
 
@@ -615,17 +786,8 @@ def _execute_trigger_complete(trigger, name, action_type, action_data,
                     "holdMs":   2500,
                 },
             })
-            app_list = [a.strip() for a in app_names.split(",") if a.strip()]
-            if app_list and _is_overlay_alive():
-                triggered_wins, other_wins = _get_windows_for_arrange(app_list)
-                if triggered_wins:
-                    _send_overlay({
-                        "type": "arrange",
-                        "data": {
-                            "windows":    triggered_wins,
-                            "allWindows": other_wins,
-                        },
-                    })
+            time.sleep(0.8)
+            _fire_arrangement_card(workspace_apps)
 
         elif opened > 0 and skipped > 0:
             _send_overlay({
@@ -638,49 +800,42 @@ def _execute_trigger_complete(trigger, name, action_type, action_data,
                 },
             })
             time.sleep(1.5)
-            app_list = [a.strip() for a in app_names.split(",") if a.strip()]
-            if app_list and _is_overlay_alive():
-                triggered_wins, other_wins = _get_windows_for_arrange(app_list)
-                if triggered_wins:
-                    _send_overlay({
-                        "type": "arrange",
-                        "data": {
-                            "windows":    triggered_wins,
-                            "allWindows": other_wins,
-                        },
-                    })
+            _fire_arrangement_card(workspace_apps)
 
         elif opened > 0:
             time.sleep(1.8)
-            app_list = [a.strip() for a in app_names.split(",") if a.strip()]
-            if app_list and _is_overlay_alive():
-                triggered_wins, other_wins = _get_windows_for_arrange(app_list)
-                if triggered_wins:
-                    _send_overlay({
-                        "type": "arrange",
-                        "data": {
-                            "windows":    triggered_wins,
-                            "allWindows": other_wins,
-                        },
-                    })
+            _fire_arrangement_card(workspace_apps)
 
     elif action_type == "open_app" and not trigger.get("silent", False):
-        app_list = [a.strip() for a in app_names.split(",") if a.strip()]
-        if len(app_list) >= 2:
+        if len(workspace_apps) >= 2:
             time.sleep(1.5)
-            if _is_overlay_alive():
-                triggered_wins, other_wins = _get_windows_for_arrange(app_list)
-                if triggered_wins:
-                    _send_overlay({
-                        "type": "arrange",
-                        "data": {
-                            "windows":    triggered_wins,
-                            "allWindows": other_wins,
-                        },
-                    })
+            _fire_arrangement_card(workspace_apps)
 
     # Step 6: Update fire stats
     update_fire_stats(trigger.get("id"))
+
+
+def _fire_arrangement_card(workspace_apps):
+    """Send arrangement card using exe_path matching (accurate)."""
+    if not workspace_apps:
+        return
+    if not _is_overlay_alive():
+        print("[TRIGGER DAEMON] Overlay not alive — skipping arrangement card")
+        return
+
+    triggered_wins, other_wins = _get_windows_by_workspace_apps(workspace_apps)
+    print(f"[TRIGGER DAEMON] Arrangement: {len(triggered_wins)} triggered, "
+          f"{len(other_wins)} other")
+    if triggered_wins:
+        _send_overlay({
+            "type": "arrange",
+            "data": {
+                "windows":    triggered_wins,
+                "allWindows": other_wins,
+            },
+        })
+    else:
+        print("[TRIGGER DAEMON] No triggered windows found — no arrangement card")
 
 
 def _ensure_overlay_alive() -> bool:
