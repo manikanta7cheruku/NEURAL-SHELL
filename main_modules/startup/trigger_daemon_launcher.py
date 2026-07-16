@@ -232,13 +232,15 @@ def launch_trigger_daemon():
 
 def _register_trigger_startup(python: str, daemon: str):
     """
-    Register trigger_daemon in Windows Task Scheduler.
-    Always re-registers to keep paths current after updates.
-    Uses three fallback methods to ensure registration always succeeds.
+    Register trigger_daemon for auto-start at login.
+    Uses ONLY ONE method — Task Scheduler preferred, Registry fallback.
+    NEVER registers in multiple places — that creates duplicate daemons.
+    Cleans up any old duplicate registrations from previous versions.
     """
     task_name = "SevenTriggerDaemon"
 
-    # Always register with current correct paths
+    _cleanup_duplicate_registrations(task_name)
+
     try:
         result = subprocess.run(
             [
@@ -260,10 +262,6 @@ def _register_trigger_startup(python: str, daemon: str):
     except Exception as e:
         print(Fore.YELLOW + f"[TRIGGER] schtasks error: {e}")
 
-    # Fallback 1: Startup folder .bat file
-    _register_trigger_startup_folder(python, daemon)
-
-    # Fallback 2: Registry Run key (works even without admin)
     try:
         import winreg
         key = winreg.OpenKey(
@@ -276,9 +274,47 @@ def _register_trigger_startup(python: str, daemon: str):
             f'"{python}" "{daemon}"'
         )
         winreg.CloseKey(key)
-        print(Fore.GREEN + "[TRIGGER] Registered in Registry Run key ✓")
+        print(Fore.GREEN + "[TRIGGER] Registered in Registry Run key ✓ (Task Scheduler unavailable)")
     except Exception as e:
         print(Fore.YELLOW + f"[TRIGGER] Registry fallback failed: {e}")
+
+
+def _cleanup_duplicate_registrations(task_name: str):
+    """
+    Remove ALL alternate registrations for the daemon.
+    Prevents multiple daemon instances at login.
+    Called before registering the primary method.
+    """
+    try:
+        import winreg
+        key = winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\CurrentVersion\Run",
+            0, winreg.KEY_SET_VALUE
+        )
+        try:
+            winreg.DeleteValue(key, task_name)
+            print(Fore.CYAN + f"[TRIGGER] Removed duplicate Registry entry: {task_name}")
+        except FileNotFoundError:
+            pass
+        winreg.CloseKey(key)
+    except Exception:
+        pass
+
+    try:
+        import winreg
+        key = winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders",
+        )
+        startup = winreg.QueryValueEx(key, "Startup")[0]
+        winreg.CloseKey(key)
+        bat = os.path.join(startup, f"{task_name}.bat")
+        if os.path.exists(bat):
+            os.remove(bat)
+            print(Fore.CYAN + f"[TRIGGER] Removed duplicate Startup .bat: {bat}")
+    except Exception:
+        pass
 
 
 def _register_trigger_startup_folder(python: str, daemon: str):
@@ -354,12 +390,18 @@ def launch_overlay_daemon():
 
 
 def _register_overlay_startup(electron: str, daemon_js: str):
-    """Register overlay_daemon in Windows Task Scheduler."""
+    """
+    Register overlay_daemon for auto-start at login.
+    ONE method only — Task Scheduler preferred, Registry fallback.
+    """
+    task_name = "SevenOverlayDaemon"
+    _cleanup_duplicate_registrations(task_name)
+
     try:
         result = subprocess.run(
             [
                 "schtasks", "/create", "/f",
-                "/tn", "SevenOverlayDaemon",
+                "/tn", task_name,
                 "/tr", f'"{electron}" "{daemon_js}"',
                 "/sc", "onlogon",
                 "/rl", "limited",
@@ -369,32 +411,11 @@ def _register_overlay_startup(electron: str, daemon_js: str):
             creationflags=0x08000000,
         )
         if result.returncode == 0:
-            print(Fore.GREEN + "[OVERLAY] Registered for auto-start at login ✓")
-        else:
-            _register_overlay_startup_folder(electron, daemon_js)
-    except Exception:
-        _register_overlay_startup_folder(electron, daemon_js)
-
-
-def _register_overlay_startup_folder(electron: str, daemon_js: str):
-    """Fallback: Startup folder + Registry Run key."""
-    # Startup folder
-    try:
-        import winreg
-        key = winreg.OpenKey(
-            winreg.HKEY_CURRENT_USER,
-            r"Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders",
-        )
-        startup = winreg.QueryValueEx(key, "Startup")[0]
-        winreg.CloseKey(key)
-        bat = os.path.join(startup, "SevenOverlayDaemon.bat")
-        with open(bat, "w") as f:
-            f.write(f'@echo off\nstart "" /B "{electron}" "{daemon_js}"\n')
-        print(Fore.GREEN + "[OVERLAY] Added to Startup folder ✓")
+            print(Fore.GREEN + "[OVERLAY] Registered in Task Scheduler ✓")
+            return
     except Exception as e:
-        print(Fore.YELLOW + f"[OVERLAY] Startup folder failed: {e}")
+        print(Fore.YELLOW + f"[OVERLAY] schtasks error: {e}")
 
-    # Registry Run key fallback
     try:
         import winreg
         key = winreg.OpenKey(
@@ -407,6 +428,6 @@ def _register_overlay_startup_folder(electron: str, daemon_js: str):
             f'"{electron}" "{daemon_js}"'
         )
         winreg.CloseKey(key)
-        print(Fore.GREEN + "[OVERLAY] Registered in Registry Run key ✓")
+        print(Fore.GREEN + "[OVERLAY] Registered in Registry ✓ (Task Scheduler unavailable)")
     except Exception as e:
         print(Fore.YELLOW + f"[OVERLAY] Registry fallback failed: {e}")
