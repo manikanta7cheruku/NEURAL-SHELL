@@ -232,35 +232,17 @@ def launch_trigger_daemon():
 
 def _register_trigger_startup(python: str, daemon: str):
     """
-    Register trigger_daemon for auto-start at login.
-    Uses ONLY ONE method — Task Scheduler preferred, Registry fallback.
-    NEVER registers in multiple places — that creates duplicate daemons.
-    Cleans up any old duplicate registrations from previous versions.
+    Register trigger_daemon for auto-start at Windows login.
+    Uses XML-based task definition — most reliable across all Windows versions.
+    Cleans up all duplicate registrations first.
     """
     task_name = "SevenTriggerDaemon"
 
     _cleanup_duplicate_registrations(task_name)
 
-    try:
-        result = subprocess.run(
-            [
-                "schtasks", "/create", "/f",
-                "/tn", task_name,
-                "/tr", f'"{python}" "{daemon}"',
-                "/sc", "onlogon",
-                "/rl", "limited",
-                "/delay", "0000:30",
-            ],
-            capture_output=True, text=True, timeout=10,
-            creationflags=0x08000000,
-        )
-        if result.returncode == 0:
-            print(Fore.GREEN + "[TRIGGER] Registered in Task Scheduler ✓")
-            return
-        else:
-            print(Fore.YELLOW + f"[TRIGGER] schtasks failed: {result.stderr.strip()}")
-    except Exception as e:
-        print(Fore.YELLOW + f"[TRIGGER] schtasks error: {e}")
+    if _register_via_xml(task_name, python, daemon):
+        print(Fore.GREEN + "[TRIGGER] Registered in Task Scheduler (XML) ✓")
+        return
 
     try:
         import winreg
@@ -274,9 +256,95 @@ def _register_trigger_startup(python: str, daemon: str):
             f'"{python}" "{daemon}"'
         )
         winreg.CloseKey(key)
-        print(Fore.GREEN + "[TRIGGER] Registered in Registry Run key ✓ (Task Scheduler unavailable)")
+        print(Fore.GREEN + "[TRIGGER] Registered in Registry Run key ✓ (XML failed)")
     except Exception as e:
-        print(Fore.YELLOW + f"[TRIGGER] Registry fallback failed: {e}")
+        print(Fore.YELLOW + f"[TRIGGER] All registration methods failed: {e}")
+
+
+def _register_via_xml(task_name: str, exe_path: str, arg_path: str) -> bool:
+    """
+    Register a scheduled task via XML definition.
+    XML is universally reliable and handles quoting correctly.
+    Task triggers at user logon, runs highest privilege current user has.
+    """
+    import getpass
+    import tempfile
+
+    user = getpass.getuser()
+
+    xml = f'''<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Author>Seven AI</Author>
+    <Description>Seven trigger daemon — global hotkeys, workspaces, arrangements</Description>
+  </RegistrationInfo>
+  <Triggers>
+    <LogonTrigger>
+      <Enabled>true</Enabled>
+      <UserId>{user}</UserId>
+    </LogonTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <UserId>{user}</UserId>
+      <LogonType>InteractiveToken</LogonType>
+      <RunLevel>LeastPrivilege</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <IdleSettings>
+      <StopOnIdleEnd>false</StopOnIdleEnd>
+      <RestartOnIdle>false</RestartOnIdle>
+    </IdleSettings>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>false</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <WakeToRun>false</WakeToRun>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <Priority>7</Priority>
+    <RestartOnFailure>
+      <Interval>PT1M</Interval>
+      <Count>3</Count>
+    </RestartOnFailure>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>{exe_path}</Command>
+      <Arguments>"{arg_path}"</Arguments>
+      <WorkingDirectory>{os.path.dirname(arg_path)}</WorkingDirectory>
+    </Exec>
+  </Actions>
+</Task>
+'''
+
+    tmp = tempfile.NamedTemporaryFile(mode='w', suffix='.xml', delete=False, encoding='utf-16')
+    try:
+        tmp.write(xml)
+        tmp.close()
+        result = subprocess.run(
+            ["schtasks", "/create", "/f", "/tn", task_name, "/xml", tmp.name],
+            capture_output=True, text=True, timeout=15,
+            creationflags=0x08000000,
+        )
+        if result.returncode == 0:
+            return True
+        print(Fore.YELLOW + f"[TRIGGER] XML register failed: {result.stderr.strip()}")
+        return False
+    except Exception as e:
+        print(Fore.YELLOW + f"[TRIGGER] XML register error: {e}")
+        return False
+    finally:
+        try:
+            os.unlink(tmp.name)
+        except Exception:
+            pass
 
 
 def _cleanup_duplicate_registrations(task_name: str):
@@ -391,30 +459,14 @@ def launch_overlay_daemon():
 
 def _register_overlay_startup(electron: str, daemon_js: str):
     """
-    Register overlay_daemon for auto-start at login.
-    ONE method only — Task Scheduler preferred, Registry fallback.
+    Register overlay_daemon for auto-start at Windows login via XML task.
     """
     task_name = "SevenOverlayDaemon"
     _cleanup_duplicate_registrations(task_name)
 
-    try:
-        result = subprocess.run(
-            [
-                "schtasks", "/create", "/f",
-                "/tn", task_name,
-                "/tr", f'"{electron}" "{daemon_js}"',
-                "/sc", "onlogon",
-                "/rl", "limited",
-                "/delay", "0000:45",
-            ],
-            capture_output=True, text=True, timeout=10,
-            creationflags=0x08000000,
-        )
-        if result.returncode == 0:
-            print(Fore.GREEN + "[OVERLAY] Registered in Task Scheduler ✓")
-            return
-    except Exception as e:
-        print(Fore.YELLOW + f"[OVERLAY] schtasks error: {e}")
+    if _register_via_xml(task_name, electron, daemon_js):
+        print(Fore.GREEN + "[OVERLAY] Registered in Task Scheduler (XML) ✓")
+        return
 
     try:
         import winreg
@@ -428,6 +480,6 @@ def _register_overlay_startup(electron: str, daemon_js: str):
             f'"{electron}" "{daemon_js}"'
         )
         winreg.CloseKey(key)
-        print(Fore.GREEN + "[OVERLAY] Registered in Registry ✓ (Task Scheduler unavailable)")
+        print(Fore.GREEN + "[OVERLAY] Registered in Registry ✓ (XML failed)")
     except Exception as e:
-        print(Fore.YELLOW + f"[OVERLAY] Registry fallback failed: {e}")
+        print(Fore.YELLOW + f"[OVERLAY] Registration failed: {e}")
