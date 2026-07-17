@@ -80,17 +80,11 @@ def arrange_specific_windows(hwnd_list: list, layout: str,
         try:
             hwnd = int(float(hwnd))
             if not win32gui.IsWindow(hwnd):
-                print(f"[LAYOUT] Invalid hwnd: {hwnd}")
                 continue
             title = win32gui.GetWindowText(hwnd) or f"Window {hwnd}"
-            print(f"[LAYOUT] Valid hwnd {hwnd}: '{title}'")
             handles.append((hwnd, title))
-        except Exception as e:
-            print(f"[LAYOUT] hwnd parse error {hwnd}: {e}")
+        except Exception:
             continue
-
-    if not handles:
-        print(f"[LAYOUT] No valid handles from list: {hwnd_list}")
 
     if not handles:
         return False, "No valid windows found"
@@ -167,15 +161,10 @@ def arrange_windows(layout: str, app_names: list) -> tuple:
 # ── Layout implementations ────────────────────────────────────────────────
 
 def _do_maximize(handles):
-    """
-    Maximize all windows.
-    Most reliable layout — uses SW_SHOWMAXIMIZED.
-    Skips SetForegroundWindow (requires foreground rights, fails silently).
-    """
+    """Maximize all windows using SW_SHOWMAXIMIZED."""
     count = 0
     for hwnd, name in handles:
         try:
-            print(Fore.CYAN + f"[LAYOUT] Maximizing hwnd={hwnd} '{name}'")
             placement = win32gui.GetWindowPlacement(hwnd)
             if placement[1] == win32con.SW_SHOWMINIMIZED:
                 win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
