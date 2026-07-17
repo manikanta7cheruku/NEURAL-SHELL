@@ -703,22 +703,61 @@ def _signal_daemon_reload():
 # ── Layout endpoint ───────────────────────────────────────────────────────
 
 class LayoutRequest(BaseModel):
-    layout:    str        # maximize | split | grid | stack
-    app_names: list = []  # app names from the workspace
+    layout:          str         # maximize | split_vertical | split_horizontal | grid | stack
+    hwnd_list:       list = []   # preferred: exact window handles from arrangement card
+    minimize_hwnds:  list = []   # windows user unchecked — minimize these
+    app_names:       list = []   # fallback: app name strings (legacy)
 
 
 @router.post("/api/triggers/layout")
 def apply_layout(body: LayoutRequest):
     """
-    Apply window arrangement layout to restored workspace windows.
-    Called by the arrangement card when user clicks a layout option.
+    Apply window arrangement to selected windows.
+    Prefers hwnd_list (exact handles from arrangement card).
+    Falls back to app_names for legacy callers.
+    Minimizes windows in minimize_hwnds (user unchecked them).
     """
     try:
-        from hands.window_layout import arrange_windows
-        success, message = arrange_windows(body.layout, body.app_names)
+        print(Fore.CYAN + f"[LAYOUT API] layout={body.layout} "
+              f"hwnd_list={body.hwnd_list} "
+              f"minimize={body.minimize_hwnds} "
+              f"app_names={body.app_names}")
+
+        if body.minimize_hwnds:
+            try:
+                import win32gui
+                import win32con
+                for hwnd in body.minimize_hwnds:
+                    try:
+                        win32gui.ShowWindow(int(float(hwnd)), win32con.SW_MINIMIZE)
+                    except Exception as me:
+                        print(Fore.YELLOW + f"[LAYOUT API] minimize {hwnd} failed: {me}")
+            except ImportError:
+                pass
+
+        if body.hwnd_list:
+            from hands.window_layout import arrange_specific_windows
+            print(Fore.CYAN + f"[LAYOUT API] calling arrange_specific_windows "
+                  f"with {len(body.hwnd_list)} handles")
+            success, message = arrange_specific_windows(
+                body.hwnd_list,
+                body.layout,
+            )
+        elif body.app_names:
+            from hands.window_layout import arrange_windows
+            print(Fore.CYAN + f"[LAYOUT API] fallback arrange_windows "
+                  f"with {body.app_names}")
+            success, message = arrange_windows(body.layout, body.app_names)
+        else:
+            return {"success": False, "message": "No windows or app names provided"}
+
+        print(Fore.GREEN + f"[LAYOUT API] result: success={success} msg={message}")
         return {"success": success, "message": message}
+
     except Exception as e:
         print(Fore.RED + f"[TRIGGERS] layout error: {e}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 
