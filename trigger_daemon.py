@@ -357,11 +357,6 @@ def _get_windows_by_workspace_apps(workspace_apps: list) -> tuple:
             })
 
         win32gui.EnumWindows(_cb, None)
-
-        print(f"[TRIGGER DAEMON] Enumerated {len(visible)} windows:")
-        for v in visible:
-            print(f"  hwnd={v['hwnd']} exe={v['exe']} title='{v['title'][:60]}'")
-
         all_titles = visible
 
         triggered = []
@@ -477,11 +472,6 @@ def _get_windows_by_workspace_apps(workspace_apps: list) -> tuple:
                 m.pop("full_exe", None)
                 triggered.append(m)
                 used.add(match["hwnd"])
-                print(f"[TRIGGER DAEMON] Matched '{display_name}' -> "
-                      f"'{match['title']}' ({match['exe']})")
-            else:
-                print(f"[TRIGGER DAEMON] No window found for '{display_name}' "
-                      f"(exe={exe_basename or 'none'}, type={app_type})")
 
         other = []
         for w in visible:
