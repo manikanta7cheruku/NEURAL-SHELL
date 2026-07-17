@@ -89,3 +89,7 @@ test_recording.wav
 test_soundcard.wav
 test_soundcard.py
 test_record_and_save.py
+
+#mictesting
+check_*.py
+test_*.py
