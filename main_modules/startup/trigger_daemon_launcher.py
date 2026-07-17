@@ -412,7 +412,27 @@ def launch_overlay_daemon():
     Launch overlay_daemon.js as a detached Electron process.
     Pre-warms notification and arrangement windows on TCP port 7891.
     Survives Seven closing.
+    ALWAYS registers Task Scheduler entry even if daemon already running,
+    so auto-start at login works after next reboot.
     """
+    root = _get_project_root()
+
+    electron_check = None
+    for rel in [
+        os.path.join("node_modules", "electron", "dist", "electron.exe"),
+        os.path.join("node_modules", ".bin", "electron.cmd"),
+        os.path.join("frontend", "node_modules", "electron", "dist", "electron.exe"),
+    ]:
+        c = os.path.join(root, rel)
+        if os.path.exists(c):
+            electron_check = c
+            break
+
+    daemon_js_check = os.path.join(root, "electron", "overlay_daemon.js")
+
+    if electron_check and os.path.exists(daemon_js_check):
+        _register_overlay_startup(electron_check, daemon_js_check)
+
     if _is_overlay_alive():
         print(Fore.CYAN + "[OVERLAY] Already running ✓")
         return
@@ -447,14 +467,11 @@ def launch_overlay_daemon():
     print(Fore.CYAN + f"[OVERLAY] Spawned PID {pid}")
 
     # Check once after 1s — don't block Seven startup
-    # Overlay continues warming up in background regardless
     time.sleep(1)
     if _is_overlay_alive():
         print(Fore.GREEN + f"[OVERLAY] Overlay daemon ready ✓ (PID {pid})")
     else:
         print(Fore.CYAN + f"[OVERLAY] Warming up in background (PID {pid})")
-
-    _register_overlay_startup(electron, daemon_js)
 
 
 def _register_overlay_startup(electron: str, daemon_js: str):
