@@ -316,63 +316,53 @@ def _get_windows_by_workspace_apps(workspace_apps: list) -> tuple:
                 return
             title = win32gui.GetWindowText(hwnd)
             title_stripped = title.lower().strip() if title else ""
-            if not title or title_stripped in _SKIP_TITLES_SET:
+            if not title:
+                return
+            if title_stripped in _SKIP_TITLES_SET:
                 return
             if "nvidia" in title_stripped and "overlay" in title_stripped:
                 return
+
+            # Try to get exe — never drop the window if psutil fails
+            exe_name = "unknown"
+            full_exe = ""
             try:
                 _, pid = win32process.GetWindowThreadProcessId(hwnd)
-                proc = psutil.Process(pid)
-                exe_name = proc.name()
-                if exe_name.lower() in _SKIP_EXE_SET:
-                    return
-                if exe_name.lower() == "electron.exe":
-                    return
                 try:
-                    rect = win32gui.GetWindowRect(hwnd)
-                    w = rect[2] - rect[0]
-                    h = rect[3] - rect[1]
-                    if w < 100 or h < 100:
-                        return
+                    proc = psutil.Process(pid)
+                    try:
+                        exe_name = proc.name()
+                    except Exception:
+                        pass
+                    try:
+                        full_exe = (proc.exe() or "").lower()
+                    except Exception:
+                        pass
                 except Exception:
                     pass
-                try:
-                    full_exe = proc.exe() or ""
-                except Exception:
-                    full_exe = ""
-                visible.append({
-                    "hwnd":     hwnd,
-                    "title":    title,
-                    "exe":      exe_name,
-                    "full_exe": full_exe.lower(),
-                    "triggered": False,
-                })
             except Exception:
-                pass
+                return
+
+            if exe_name.lower() in _SKIP_EXE_SET:
+                return
+            if exe_name.lower() == "electron.exe":
+                return
+
+            visible.append({
+                "hwnd":     hwnd,
+                "title":    title,
+                "exe":      exe_name,
+                "full_exe": full_exe,
+                "triggered": False,
+            })
 
         win32gui.EnumWindows(_cb, None)
 
-        # Also enumerate ALL top-level windows including elevated ones
-        # For elevated processes psutil can't read exe, so match by title
-        all_titles = []
+        print(f"[TRIGGER DAEMON] Enumerated {len(visible)} windows:")
+        for v in visible:
+            print(f"  hwnd={v['hwnd']} exe={v['exe']} title='{v['title'][:60]}'")
 
-        def _cb_titles(hwnd, _):
-            if not win32gui.IsWindowVisible(hwnd):
-                return
-            title = win32gui.GetWindowText(hwnd)
-            if not title:
-                return
-            try:
-                rect = win32gui.GetWindowRect(hwnd)
-                w = rect[2] - rect[0]
-                h = rect[3] - rect[1]
-                if w < 100 or h < 100:
-                    return
-            except Exception:
-                return
-            all_titles.append({"hwnd": hwnd, "title": title})
-
-        win32gui.EnumWindows(_cb_titles, None)
+        all_titles = visible
 
         triggered = []
         used = set()
@@ -402,6 +392,25 @@ def _get_windows_by_workspace_apps(workspace_apps: list) -> tuple:
                     if w["hwnd"] in used:
                         continue
                     if w["exe"].lower() == exe_basename:
+                        match = w
+                        break
+
+            # Priority 2a: expected title exact match (for elevated where exe=unknown)
+            if not match and expected_title:
+                for w in visible:
+                    if w["hwnd"] in used:
+                        continue
+                    if w["title"].lower() == expected_title:
+                        match = w
+                        break
+
+            # Priority 2b: expected title substring match
+            if not match and expected_title:
+                for w in visible:
+                    if w["hwnd"] in used:
+                        continue
+                    if expected_title in w["title"].lower() or \
+                       w["title"].lower() in expected_title:
                         match = w
                         break
 
@@ -520,9 +529,13 @@ def _get_windows_for_arrange(app_names: list) -> tuple:
         }
 
         visible = []
+        _debug_counts = {"total": 0, "invisible": 0, "no_title": 0, "skipped_title": 0,
+                         "too_small": 0, "skipped_exe": 0, "kept": 0, "electron": 0}
 
         def _cb(hwnd, _):
+            _debug_counts["total"] += 1
             if not win32gui.IsWindowVisible(hwnd):
+                _debug_counts["invisible"] += 1
                 return
             title = win32gui.GetWindowText(hwnd)
             title_stripped = title.lower().strip() if title else ""
