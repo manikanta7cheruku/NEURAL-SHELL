@@ -255,18 +255,8 @@ ipcMain.on('overlay-close', (event) => {
   }
 });
 
-// Apply layout — called from arrangement.html
 ipcMain.on('apply-layout', (event, payload) => {
-  console.log('[OVERLAY DAEMON] apply-layout IPC received:',
-              JSON.stringify(payload).slice(0, 200));
-  applyLayoutDirect(payload)
-    .then((result) => {
-      console.log('[OVERLAY DAEMON] apply-layout done:',
-                  JSON.stringify(result).slice(0, 300));
-    })
-    .catch((err) => {
-      console.error('[OVERLAY DAEMON] apply-layout failed:', err.message);
-    });
+  applyLayoutDirect(payload).catch(() => {});
 });
 
 // Auto-hide safety: force-hide notification after 8s no matter what
@@ -343,14 +333,11 @@ function handleMessage(msg, socket) {
       break;
 
     case 'apply_layout':
-      console.log('[OVERLAY DAEMON] apply_layout received:', JSON.stringify(data).slice(0, 200));
       applyLayoutDirect(data)
         .then((result) => {
-          console.log('[OVERLAY DAEMON] apply_layout done:', JSON.stringify(result).slice(0, 300));
           socket.write(JSON.stringify({ ok: true, result }) + '\n');
         })
         .catch((err) => {
-          console.error('[OVERLAY DAEMON] apply_layout failed:', err.message);
           socket.write(JSON.stringify({ ok: false, error: err.message }) + '\n');
         });
       break;
@@ -370,7 +357,6 @@ async function applyLayoutDirect(data) {
   const payload = JSON.stringify(data);
 
   return new Promise((resolve, reject) => {
-    console.log('[OVERLAY DAEMON] Trying backend at 127.0.0.1:7777...');
     const req = http.request({
       hostname: '127.0.0.1',
       port: 7777,
@@ -384,18 +370,13 @@ async function applyLayoutDirect(data) {
     }, (res) => {
       let body = '';
       res.on('data', c => body += c);
-      res.on('end', () => {
-        console.log('[OVERLAY DAEMON] Backend responded:', res.statusCode);
-        resolve({ via: 'backend', status: res.statusCode, body });
-      });
+      res.on('end', () => resolve({ via: 'backend', status: res.statusCode, body }));
     });
 
-    req.on('error', (e) => {
-      console.log('[OVERLAY DAEMON] Backend unreachable:', e.code, '— using Python fallback');
+    req.on('error', () => {
       spawnPythonLayout(data).then(resolve).catch(reject);
     });
     req.on('timeout', () => {
-      console.log('[OVERLAY DAEMON] Backend timeout — using Python fallback');
       req.destroy();
       spawnPythonLayout(data).then(resolve).catch(reject);
     });
@@ -418,54 +399,48 @@ function spawnPythonLayout(data) {
     // Use python.exe not pythonw so we can see stderr
     const python = fs.existsSync(py) ? py : pyw;
 
-    console.log('[OVERLAY DAEMON] spawnPythonLayout:');
-    console.log('  projectRoot:', projectRoot);
-    console.log('  python:', python);
-    console.log('  python exists:', fs.existsSync(python));
-    console.log('  payload:', JSON.stringify(data).slice(0, 300));
-
     if (!fs.existsSync(python)) {
-      const err = 'Python not found at ' + python;
-      console.error('[OVERLAY DAEMON]', err);
-      return reject(new Error(err));
+      return reject(new Error('Python not found at ' + python));
     }
 
     const scriptPath = path.join(projectRoot, 'seven_overlay', '_layout_runner.py');
 
     // Write the runner script to disk instead of -c to avoid quoting hell
-    const script = `import sys, json, os
-sys.path.insert(0, r"${projectRoot.replace(/\\/g, '\\\\')}")
-os.chdir(r"${projectRoot.replace(/\\/g, '\\\\')}")
+    const script = `import sys, json, os, importlib.util
 
-print("[LAYOUT RUNNER] started", flush=True)
+# Load hands/window_layout.py DIRECTLY without triggering hands/__init__.py
+# This skips 500ms of unrelated module loading (config, mood, scheduler, etc.)
+_root = r"${projectRoot.replace(/\\/g, '\\\\')}"
+os.chdir(_root)
+
+_layout_path = os.path.join(_root, "hands", "window_layout.py")
+_spec = importlib.util.spec_from_file_location("window_layout_direct", _layout_path)
+_mod = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_mod)
+arrange_specific_windows = _mod.arrange_specific_windows
+
 try:
     raw = sys.stdin.read()
-    print("[LAYOUT RUNNER] stdin bytes:", len(raw), flush=True)
     data = json.loads(raw)
     layout = data.get("layout", "maximize")
     hwnd_list = data.get("hwnd_list", [])
     minimize_hwnds = data.get("minimize_hwnds", [])
-    print(f"[LAYOUT RUNNER] layout={layout} hwnds={len(hwnd_list)} minimize={len(minimize_hwnds)}", flush=True)
 
     try:
         import win32gui, win32con
         for h in minimize_hwnds:
             try:
                 win32gui.ShowWindow(int(float(h)), win32con.SW_MINIMIZE)
-            except Exception as me:
-                print(f"[LAYOUT RUNNER] minimize {h} failed: {me}", flush=True)
-    except Exception as we:
-        print(f"[LAYOUT RUNNER] pywin32 error: {we}", flush=True)
+            except Exception:
+                pass
+    except Exception:
+        pass
 
-    from hands.window_layout import arrange_specific_windows
     ok, msg = arrange_specific_windows(hwnd_list, layout)
-    print(f"[LAYOUT RUNNER] result: ok={ok} msg={msg}", flush=True)
-    print("RESULT:" + json.dumps({"success": ok, "message": msg}), flush=True)
+    print("RESULT:" + json.dumps({"success": ok, "message": msg}))
 except Exception as e:
-    import traceback
-    print("[LAYOUT RUNNER] EXCEPTION:", e, flush=True)
-    traceback.print_exc()
-    print("RESULT:" + json.dumps({"success": False, "message": str(e)}), flush=True)
+    import traceback; traceback.print_exc()
+    print("RESULT:" + json.dumps({"success": False, "message": str(e)}))
 `;
 
     try {
@@ -482,27 +457,15 @@ except Exception as e:
 
     let stdout = '';
     let stderr = '';
-    child.stdout.on('data', c => {
-      const s = c.toString();
-      stdout += s;
-      console.log('[LAYOUT STDOUT]', s.trim());
-    });
-    child.stderr.on('data', c => {
-      const s = c.toString();
-      stderr += s;
-      console.log('[LAYOUT STDERR]', s.trim());
-    });
+    child.stdout.on('data', c => { stdout += c.toString(); });
+    child.stderr.on('data', c => { stderr += c.toString(); });
     child.stdin.write(JSON.stringify(data));
     child.stdin.end();
 
     child.on('close', (code) => {
-      console.log('[OVERLAY DAEMON] Python exit code:', code);
       resolve({ via: 'python-direct', exitCode: code, stdout: stdout.trim(), stderr: stderr.trim() });
     });
-    child.on('error', (e) => {
-      console.error('[OVERLAY DAEMON] Python spawn error:', e.message);
-      reject(e);
-    });
+    child.on('error', reject);
   });
 }
 
