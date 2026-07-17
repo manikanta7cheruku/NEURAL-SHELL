@@ -12,6 +12,19 @@ import time
 import subprocess
 from datetime import datetime
 
+# Hide console window immediately — must happen before any print()
+# pythonw.exe has no console so this is a no-op there
+# python.exe will flash briefly without this
+if sys.platform == "win32":
+    try:
+        import ctypes
+        _hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+        if _hwnd:
+            ctypes.windll.user32.ShowWindow(_hwnd, 0)
+            ctypes.windll.kernel32.FreeConsole()
+    except Exception:
+        pass
+
 # CRITICAL FIX: Force all underlying winotify/PowerShell subprocesses to spawn entirely hidden.
 # This completely eliminates the black terminal flashing bug during daemon alerts.
 _orig_popen = subprocess.Popen
@@ -390,16 +403,6 @@ def main():
 
 
 if __name__ == "__main__":
-    # Hide console window immediately
-    if sys.platform == "win32":
-        try:
-            import ctypes
-            ctypes.windll.user32.ShowWindow(
-                ctypes.windll.kernel32.GetConsoleWindow(), 0
-            )
-        except Exception:
-            pass
-
     try:
         main()
     finally:
