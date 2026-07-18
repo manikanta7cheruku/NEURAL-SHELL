@@ -233,8 +233,8 @@ def launch_trigger_daemon():
 def _register_trigger_startup(python: str, daemon: str):
     """
     Register trigger_daemon for auto-start at Windows login.
-    Uses XML-based task definition — most reliable across all Windows versions.
-    Cleans up all duplicate registrations first.
+    Uses XML Task Scheduler ONLY — never Registry Run (creates duplicates).
+    Cleans up ALL alternate registrations first to prevent ghost daemons.
     """
     task_name = "SevenTriggerDaemon"
 
@@ -244,21 +244,8 @@ def _register_trigger_startup(python: str, daemon: str):
         print(Fore.GREEN + "[TRIGGER] Registered in Task Scheduler (XML) ✓")
         return
 
-    try:
-        import winreg
-        key = winreg.OpenKey(
-            winreg.HKEY_CURRENT_USER,
-            r"Software\Microsoft\Windows\CurrentVersion\Run",
-            0, winreg.KEY_SET_VALUE
-        )
-        winreg.SetValueEx(
-            key, "SevenTriggerDaemon", 0, winreg.REG_SZ,
-            f'"{python}" "{daemon}"'
-        )
-        winreg.CloseKey(key)
-        print(Fore.GREEN + "[TRIGGER] Registered in Registry Run key ✓ (XML failed)")
-    except Exception as e:
-        print(Fore.YELLOW + f"[TRIGGER] All registration methods failed: {e}")
+    print(Fore.RED + "[TRIGGER] CRITICAL: Task Scheduler registration failed. "
+          "Daemon will not auto-start at login. Reinstall Seven or check admin rights.")
 
 
 def _register_via_xml(task_name: str, exe_path: str, arg_path: str) -> bool:
@@ -352,35 +339,49 @@ def _cleanup_duplicate_registrations(task_name: str):
     Remove ALL alternate registrations for the daemon.
     Prevents multiple daemon instances at login.
     Called before registering the primary method.
+
+    Purges:
+      - HKCU Run key entry
+      - HKLM Run key entry (in case someone ran installer as admin)
+      - Startup folder .bat file
+      - Startup folder .lnk shortcut
     """
-    try:
-        import winreg
-        key = winreg.OpenKey(
-            winreg.HKEY_CURRENT_USER,
-            r"Software\Microsoft\Windows\CurrentVersion\Run",
-            0, winreg.KEY_SET_VALUE
-        )
+    import winreg
+
+    for hive_name, hive in [
+        ("HKCU", winreg.HKEY_CURRENT_USER),
+        ("HKLM", winreg.HKEY_LOCAL_MACHINE),
+    ]:
         try:
-            winreg.DeleteValue(key, task_name)
-            print(Fore.CYAN + f"[TRIGGER] Removed duplicate Registry entry: {task_name}")
-        except FileNotFoundError:
+            key = winreg.OpenKey(
+                hive,
+                r"Software\Microsoft\Windows\CurrentVersion\Run",
+                0, winreg.KEY_SET_VALUE
+            )
+            try:
+                winreg.DeleteValue(key, task_name)
+                print(Fore.CYAN + f"[TRIGGER] Removed {hive_name} Run entry: {task_name}")
+            except FileNotFoundError:
+                pass
+            winreg.CloseKey(key)
+        except Exception:
             pass
-        winreg.CloseKey(key)
-    except Exception:
-        pass
 
     try:
-        import winreg
         key = winreg.OpenKey(
             winreg.HKEY_CURRENT_USER,
             r"Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders",
         )
         startup = winreg.QueryValueEx(key, "Startup")[0]
         winreg.CloseKey(key)
-        bat = os.path.join(startup, f"{task_name}.bat")
-        if os.path.exists(bat):
-            os.remove(bat)
-            print(Fore.CYAN + f"[TRIGGER] Removed duplicate Startup .bat: {bat}")
+        for ext in (".bat", ".lnk", ".cmd"):
+            f = os.path.join(startup, f"{task_name}{ext}")
+            if os.path.exists(f):
+                try:
+                    os.remove(f)
+                    print(Fore.CYAN + f"[TRIGGER] Removed Startup file: {f}")
+                except Exception:
+                    pass
     except Exception:
         pass
 
@@ -476,7 +477,8 @@ def launch_overlay_daemon():
 
 def _register_overlay_startup(electron: str, daemon_js: str):
     """
-    Register overlay_daemon for auto-start at Windows login via XML task.
+    Register overlay_daemon for auto-start at login via XML Task Scheduler.
+    Never uses Registry Run (creates duplicates).
     """
     task_name = "SevenOverlayDaemon"
     _cleanup_duplicate_registrations(task_name)
@@ -485,18 +487,5 @@ def _register_overlay_startup(electron: str, daemon_js: str):
         print(Fore.GREEN + "[OVERLAY] Registered in Task Scheduler (XML) ✓")
         return
 
-    try:
-        import winreg
-        key = winreg.OpenKey(
-            winreg.HKEY_CURRENT_USER,
-            r"Software\Microsoft\Windows\CurrentVersion\Run",
-            0, winreg.KEY_SET_VALUE
-        )
-        winreg.SetValueEx(
-            key, "SevenOverlayDaemon", 0, winreg.REG_SZ,
-            f'"{electron}" "{daemon_js}"'
-        )
-        winreg.CloseKey(key)
-        print(Fore.GREEN + "[OVERLAY] Registered in Registry ✓ (XML failed)")
-    except Exception as e:
-        print(Fore.YELLOW + f"[OVERLAY] Registration failed: {e}")
+    print(Fore.RED + "[OVERLAY] CRITICAL: Task Scheduler registration failed. "
+          "Overlay will not auto-start at login. Reinstall Seven or check admin rights.")
