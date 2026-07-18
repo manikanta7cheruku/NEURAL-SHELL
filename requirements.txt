@@ -9,6 +9,8 @@ colorama
 setuptools
 psutil
 
+numpy>=1.26.0,<2.0.0
+
 # --- Voice ---
 pyttsx3
 faster-whisper
