@@ -62,6 +62,64 @@ if sys.platform == "win32":
     except Exception:
         pass
 
+# Production logging — write all stdout/stderr to rotating log file
+# so we can diagnose user issues even in silent pythonw.exe mode.
+_LOG_DIR = os.path.join(os.environ.get('APPDATA', os.path.expanduser('~')),
+                        'SEVEN', 'logs')
+try:
+    os.makedirs(_LOG_DIR, exist_ok=True)
+    _LOG_FILE = os.path.join(_LOG_DIR, 'trigger_daemon.log')
+
+    # Rotate if log exceeds 2MB — keep 3 backups
+    if os.path.exists(_LOG_FILE) and os.path.getsize(_LOG_FILE) > 2 * 1024 * 1024:
+        for i in range(2, 0, -1):
+            _old = os.path.join(_LOG_DIR, f'trigger_daemon.log.{i}')
+            _new = os.path.join(_LOG_DIR, f'trigger_daemon.log.{i+1}')
+            if os.path.exists(_old):
+                try:
+                    if os.path.exists(_new):
+                        os.remove(_new)
+                    os.rename(_old, _new)
+                except Exception:
+                    pass
+        try:
+            os.rename(_LOG_FILE, os.path.join(_LOG_DIR, 'trigger_daemon.log.1'))
+        except Exception:
+            pass
+
+    class _TeeStream:
+        """Write to both original stream and log file with timestamp."""
+        def __init__(self, original, log_path):
+            self._orig = original
+            self._log_path = log_path
+
+        def write(self, data):
+            try:
+                if self._orig:
+                    self._orig.write(data)
+            except Exception:
+                pass
+            try:
+                if data.strip():
+                    with open(self._log_path, 'a', encoding='utf-8') as f:
+                        ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                        for line in data.rstrip('\n').split('\n'):
+                            f.write(f"[{ts}] {line}\n")
+            except Exception:
+                pass
+
+        def flush(self):
+            try:
+                if self._orig:
+                    self._orig.flush()
+            except Exception:
+                pass
+
+    sys.stdout = _TeeStream(sys.stdout, _LOG_FILE)
+    sys.stderr = _TeeStream(sys.stderr, _LOG_FILE)
+except Exception:
+    pass
+
 # Ensure project root is in path
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 if PROJECT_ROOT not in sys.path:
@@ -1600,16 +1658,39 @@ def main():
 
     print("[TRIGGER DAEMON] All listeners active. Waiting for triggers...")
 
+    _last_health_log = time.time()
     try:
         while True:
             time.sleep(30)
-            # Health check — respawn overlay if it died
+
+            # Overlay health check
             if not _is_overlay_alive():
                 print("[TRIGGER DAEMON] Overlay daemon down — respawning...")
                 threading.Thread(
                     target=_ensure_overlay_alive_safe,
                     daemon=True
                 ).start()
+
+            # Self health check — verify hotkey listener alive
+            if hotkey_listener._listener is None or not hotkey_listener._listener.running:
+                print("[TRIGGER DAEMON] Hotkey listener dead — restarting listener")
+                try:
+                    hotkey_listener.stop()
+                    time.sleep(0.5)
+                    hotkey_listener.start()
+                    hotkey_listener.reload(triggers)
+                except Exception as _re:
+                    print(f"[TRIGGER DAEMON] Listener restart failed: {_re}")
+                    print("[TRIGGER DAEMON] Exiting for Task Scheduler restart")
+                    sys.exit(1)
+
+            # Heartbeat log every 30 minutes so users know daemon is alive
+            if time.time() - _last_health_log > 1800:
+                print(f"[TRIGGER DAEMON] Heartbeat OK. "
+                      f"Hotkeys: {len(hotkey_listener._hotkey_map)}, "
+                      f"Overlay: {'up' if _is_overlay_alive() else 'down'}")
+                _last_health_log = time.time()
+
     except KeyboardInterrupt:
         print("[TRIGGER DAEMON] Stopping...")
         hotkey_listener.stop()
@@ -1626,5 +1707,17 @@ def main():
 if __name__ == "__main__":
     try:
         main()
+    except KeyboardInterrupt:
+        print("[TRIGGER DAEMON] Interrupted by user")
+    except Exception as _crash:
+        # Log crash and exit with error code so Task Scheduler restarts us
+        import traceback
+        print(f"[TRIGGER DAEMON] FATAL CRASH: {_crash}")
+        traceback.print_exc()
+        try:
+            release_lock()
+        except Exception:
+            pass
+        sys.exit(1)
     finally:
         release_lock()
