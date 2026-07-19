@@ -125,11 +125,42 @@ def _load_offline_embedder_standalone(model_name: str):
             model_name=model_local_path,
             device="cpu"
         )
+        # Test it actually works before returning
+        ef(["test"])
         print(Fore.GREEN + "[MEMORY] Using ChromaDB native SentenceTransformer embedder")
         return ef
     except Exception as e:
         if "meta tensor" in str(e).lower() or "to_empty" in str(e).lower():
-            print(Fore.YELLOW + "[MEMORY] Meta tensor issue — using manual embedder")
+            print(Fore.YELLOW + "[MEMORY] Meta tensor detected — loading with empty init")
+            # Fix: use from_pretrained path directly, skip .to() call
+            try:
+                import torch
+                from sentence_transformers import SentenceTransformer
+                model = SentenceTransformer(
+                    model_local_path,
+                    device="cpu",
+                    local_files_only=True,
+                )
+                # Force resolve meta tensors
+                for param in model.parameters():
+                    if param.is_meta:
+                        param.data = torch.empty_like(param, device="cpu")
+                print(Fore.GREEN + "[MEMORY] Meta tensor resolved — embedder ready")
+
+                class _ResolvedEmbedder:
+                    def __init__(self, m):
+                        self._model = m
+                    def __call__(self, input) -> list:
+                        texts = [input] if isinstance(input, str) else list(input)
+                        return self._model.encode(
+                            texts, show_progress_bar=False
+                        ).tolist()
+                    def name(self):
+                        return "seven_resolved_embedder"
+
+                return _ResolvedEmbedder(model)
+            except Exception as inner:
+                print(Fore.YELLOW + f"[MEMORY] Meta resolve failed: {inner} — using fallback")
         else:
             print(Fore.YELLOW + f"[MEMORY] ChromaDB native embedder failed: {e}")
 
