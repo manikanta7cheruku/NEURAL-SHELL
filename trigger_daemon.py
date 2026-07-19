@@ -195,22 +195,50 @@ RELOAD_SIGNAL = os.path.join(SEVEN_DATA, 'trigger_reload.signal')
 # ─────────────────────────────────────────────────────────────────────────
 
 def acquire_lock():
-    """Prevent multiple daemon instances using Windows mutex."""
+    """
+    Prevent multiple daemon instances using Windows mutex.
+    
+    Two-stage check:
+    1. OpenMutexW — detects inherited handles (child process bypass)
+    2. CreateMutexW + ERROR_ALREADY_EXISTS — race condition fallback
+    
+    Also marks the mutex non-inheritable so child processes spawned
+    by this daemon (AppOpener indexer etc.) cannot bypass the check.
+    """
     try:
         import ctypes
         _mutex_name = "Global\\SevenTriggerDaemon_SingleInstance"
         _kernel32   = ctypes.windll.kernel32
-        _mutex      = _kernel32.CreateMutexW(None, True, _mutex_name)
-        _last_err   = _kernel32.GetLastError()
+
+        # Stage 1: Try to OPEN existing mutex before creating
+        # If it opens successfully, another instance already holds it.
+        # This catches the inherited-handle case that CreateMutexW misses.
+        _existing = _kernel32.OpenMutexW(0x1F0001, False, _mutex_name)
+        if _existing:
+            _kernel32.CloseHandle(_existing)
+            print(f"[TRIGGER DAEMON] Already running (OpenMutex). "
+                  f"PID {os.getpid()} exiting.")
+            return False
+
+        # Stage 2: Create and own the mutex
+        _mutex    = _kernel32.CreateMutexW(None, True, _mutex_name)
+        _last_err = _kernel32.GetLastError()
 
         if _last_err == 183:  # ERROR_ALREADY_EXISTS
-            print("[TRIGGER DAEMON] Already running. Exiting.")
+            print("[TRIGGER DAEMON] Already running (CreateMutex). Exiting.")
             if _mutex:
                 _kernel32.CloseHandle(_mutex)
             return False
 
         if not _mutex:
+            # CreateMutexW failed entirely — allow startup anyway
+            # Better to have two daemons than zero
+            print("[TRIGGER DAEMON] Mutex creation failed — starting anyway")
             return True
+
+        # Mark mutex non-inheritable — child processes (AppOpener, etc.)
+        # will not receive this handle and cannot bypass the check
+        _kernel32.SetHandleInformation(_mutex, 1, 0)
 
         acquire_lock._mutex_handle = _mutex
         print(f"[TRIGGER DAEMON] Mutex acquired. PID: {os.getpid()}")
