@@ -47,7 +47,7 @@ export default function TriggerCard({ trigger, onFire, onToggle, onDelete, onEdi
     return parts;
   })();
 
-  // Compact mode: show only name + hotkey in a single row
+  // Compact mode: show only name + hotkey + edit button
   if (compact) {
     return (
       <div className="flex items-center justify-between px-4 py-2.5
@@ -80,6 +80,15 @@ export default function TriggerCard({ trigger, onFire, onToggle, onDelete, onEdi
           {!trigger.enabled && (
             <span className="text-[7px] text-white/20 uppercase tracking-wider">off</span>
           )}
+          <button onClick={() => onEdit(trigger)}
+                  className={`p-1 rounded-md transition-all duration-150
+                    ${isEditing
+                      ? 'text-s-accent bg-s-accent/10'
+                      : 'text-white/20 hover:text-white/50 hover:bg-white/[0.04]'}
+                    ${hovered || isEditing ? 'opacity-100' : 'opacity-0'}`}
+                  title="Edit">
+            <Pencil size={10} />
+          </button>
         </div>
       </div>
     );

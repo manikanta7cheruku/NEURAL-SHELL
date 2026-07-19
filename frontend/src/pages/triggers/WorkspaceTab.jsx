@@ -3,7 +3,7 @@ import { Scan, X, Save, Layout } from 'lucide-react';
 import ChromeTabSyncCard from './ChromeTabSyncCard';
 import WorkspaceCard from './WorkspaceCard';
 
-export default function WorkspaceTab({ workspaces, onScan, onSave, onRestore, onDelete }) {
+export default function WorkspaceTab({ workspaces, onScan, onSave, onRestore, onDelete, reveal }) {
   const [scanning, setScanning] = useState(false);
   const [scanned,  setScanned]  = useState(null);
   const [wsName,   setWsName]   = useState('');
@@ -90,8 +90,15 @@ export default function WorkspaceTab({ workspaces, onScan, onSave, onRestore, on
         </div>
       ) : (
         <div className="grid grid-cols-2 gap-3">
-          {workspaces.map(w => (
-            <WorkspaceCard key={w.id} workspace={w} onRestore={onRestore} onDelete={onDelete} />
+          {workspaces.map((w, i) => (
+            <div key={w.id}
+                 style={{
+                   animationDelay: `${i * 50}ms`,
+                   animationFillMode: 'both',
+                 }}
+                 className={reveal ? 'animate-[cardReveal_350ms_ease-out]' : 'opacity-0'}>
+              <WorkspaceCard workspace={w} onRestore={onRestore} onDelete={onDelete} />
+            </div>
           ))}
         </div>
       )}
