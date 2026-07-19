@@ -11,7 +11,7 @@ import {
 
 const ICON_MAP = { Zap, Globe, FileText, FolderOpen, Layout, Terminal: TermIcon, Settings2 };
 
-export default function TriggerCard({ trigger, onFire, onToggle, onDelete, onEdit, isEditing }) {
+export default function TriggerCard({ trigger, onFire, onToggle, onDelete, onEdit, isEditing, compact }) {
   const [firing,  setFiring]  = useState(false);
   const [hovered, setHovered] = useState(false);
 
@@ -47,6 +47,45 @@ export default function TriggerCard({ trigger, onFire, onToggle, onDelete, onEdi
     return parts;
   })();
 
+  // Compact mode: show only name + hotkey in a single row
+  if (compact) {
+    return (
+      <div className="flex items-center justify-between px-4 py-2.5
+                      bg-white/[0.02] border border-white/6 rounded-xl
+                      hover:border-white/10 transition-all duration-200"
+           onMouseEnter={() => setHovered(true)}
+           onMouseLeave={() => setHovered(false)}>
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="w-6 h-6 rounded-md bg-white/[0.04] border border-white/6
+                          flex items-center justify-center flex-shrink-0">
+            <ActionIcon size={11} className="text-white/40" />
+          </div>
+          <span className="text-[11px] text-white/75 font-medium truncate">
+            {trigger.name}
+          </span>
+        </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {methods.map(m => {
+            const Icon = m.icon;
+            return (
+              <div key={m.type}
+                   className="flex items-center gap-1 px-2 py-0.5 rounded-md
+                              bg-white/[0.04] border border-white/8
+                              text-[9px] text-white/55 font-mono">
+                <Icon size={9} className="text-white/35" />
+                <span>{m.label}</span>
+              </div>
+            );
+          })}
+          {!trigger.enabled && (
+            <span className="text-[7px] text-white/20 uppercase tracking-wider">off</span>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // Full card mode
   return (
     <div
       className={`rounded-2xl border overflow-hidden transition-all duration-300
