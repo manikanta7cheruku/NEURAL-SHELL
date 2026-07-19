@@ -141,13 +141,13 @@ export default function TriggerForm({ initial, onSave, onCancel, workspaces }) {
 
   return (
     <div className="col-span-2 bg-white/[0.015] border border-s-accent/20 rounded-2xl
-                    overflow-hidden animate-in slide-in-from-top-2 duration-200">
+                    overflow-hidden transition-all duration-300 ease-out">
       <div className="p-5 space-y-4">
 
         {/* Header */}
         <div className="flex items-center justify-between">
           <h3 className="text-[12px] font-semibold text-white/80">
-            {isEdit ? `Editing — ${initial.name}` : 'New Trigger'}
+            {isEdit ? `Editing: ${initial.name}` : 'New Trigger'}
           </h3>
           <button onClick={onCancel} className="text-white/25 hover:text-white/60 transition-colors">
             <X size={14} />
@@ -202,11 +202,11 @@ export default function TriggerForm({ initial, onSave, onCancel, workspaces }) {
 
           {actionType === 'open_app' && (
             <MultiInput values={apps} onChange={setApps}
-                        placeholder="Type app name and press Enter" />
+                        placeholder="Type app name and press Enter (e.g., Chrome, Spotify)" />
           )}
           {actionType === 'open_url' && (
             <MultiInput values={urls} onChange={setUrls}
-                        placeholder="Type URL and press Enter" />
+                        placeholder="Type URL and press Enter (e.g., https://github.com)" />
           )}
           {(actionType === 'open_file' || actionType === 'open_folder') && (
             <MultiInput values={paths} onChange={setPaths}
@@ -233,7 +233,7 @@ export default function TriggerForm({ initial, onSave, onCancel, workspaces }) {
                                 text-[11px] text-white/80 placeholder-white/20 outline-none
                                 focus:border-white/15 transition-colors font-mono" />
               <div className="flex flex-wrap gap-1">
-                {['git status', 'npm run dev', 'ipconfig', 'cls'].map(ex => (
+                {['git status', 'npm run dev', 'ipconfig', 'cls', 'dir'].map(ex => (
                   <button key={ex} onClick={() => setCommand(ex)}
                           className="text-[8px] text-white/30 bg-[#0a0a0c] border border-white/6
                                      px-2 py-0.5 rounded hover:text-white/60 transition-all font-mono">
@@ -246,12 +246,12 @@ export default function TriggerForm({ initial, onSave, onCancel, workspaces }) {
           {actionType === 'seven_action' && (
             <div className="space-y-1.5">
               <input value={action} onChange={e => setAction(e.target.value)}
-                     placeholder="e.g., volume 50, brightness max, mute"
+                     placeholder="e.g., show my tasks, volume 50, brightness max"
                      className="w-full bg-white/[0.03] border border-white/8 rounded-lg px-3 py-2
                                 text-[11px] text-white/80 placeholder-white/20 outline-none
                                 focus:border-white/15 transition-colors" />
               <div className="flex flex-wrap gap-1">
-                {['volume 50', 'brightness max', 'mute', 'open chrome'].map(ex => (
+                {['show my tasks', 'volume 50', 'brightness max', 'mute', 'open chrome', 'show my schedule'].map(ex => (
                   <button key={ex} onClick={() => setAction(ex)}
                           className="text-[8px] text-white/30 bg-[#0a0a0c] border border-white/6
                                      px-2 py-0.5 rounded hover:text-white/60 transition-all">
@@ -259,15 +259,17 @@ export default function TriggerForm({ initial, onSave, onCancel, workspaces }) {
                   </button>
                 ))}
               </div>
+              <p className="text-[8px] text-white/20 italic">
+                Use natural language. Seven processes it like a voice command.
+              </p>
             </div>
           )}
         </div>
 
         {/* Activation methods */}
         <div>
-          <label className="text-[8px] text-white/35 uppercase tracking-widest font-semibold mb-2 block">
-            How to activate
-          </label>
+          <label className="text-[8px] text-white/35 uppercase tracking-widest font-semibold
+                            mb-2 block">How to activate</label>
           <div className="space-y-2.5">
 
             {/* Hotkey */}
@@ -285,7 +287,7 @@ export default function TriggerForm({ initial, onSave, onCancel, workspaces }) {
                    onKeyDown={handleHotkeyCapture}
                    onBlur={() => setTimeout(() => setRecording(false), 100)}>
                 {recording
-                  ? 'Hold modifiers then press a key...'
+                  ? 'Hold modifiers (Ctrl/Shift/Alt) then press a key...'
                   : hotkey ? formatHotkey(hotkey) : 'Click to set hotkey'}
               </div>
               {hotkey && (
@@ -300,14 +302,15 @@ export default function TriggerForm({ initial, onSave, onCancel, workspaces }) {
             <div className="flex items-center gap-2.5">
               <Mic size={12} className="text-white/25 flex-shrink-0" />
               <span className="text-[10px] text-white/30 flex-shrink-0 font-medium">Seven</span>
-              <input value={voicePhrase} onChange={e => setVoicePhrase(e.target.value)}
+              <input value={voicePhrase}
+                     onChange={e => setVoicePhrase(e.target.value)}
                      placeholder="type a word (e.g., focus, chrome, morning)"
                      className="flex-1 bg-white/[0.03] border border-white/8 rounded-lg px-3 py-2
                                 text-[10px] text-white/70 placeholder-white/20 outline-none
                                 focus:border-white/15 transition-colors" />
             </div>
 
-            {/* Audio */}
+            {/* Audio (snap/clap) */}
             <div>
               <div className="flex items-center gap-2.5 mb-1.5">
                 <Radio size={12} className="text-white/25 flex-shrink-0" />
@@ -317,10 +320,12 @@ export default function TriggerForm({ initial, onSave, onCancel, workspaces }) {
                     return (
                       <button key={p}
                               onClick={() => setAudioPattern(audioPattern === p ? '' : p)}
-                              className={`px-2.5 py-1 rounded-md text-[9px] font-medium transition-all
+                              className={`px-2.5 py-1 rounded-md text-[9px] font-medium
+                                          transition-all duration-150
                                 ${audioPattern === p
                                   ? 'bg-s-accent/8 text-s-accent border border-s-accent/15'
-                                  : 'text-white/25 border border-white/6 hover:text-white/50'}`}>
+                                  : 'text-white/25 border border-white/6 hover:text-white/50'
+                                }`}>
                         {n} {n === '1' ? 'snap' : 'snaps'}
                       </button>
                     );
@@ -330,10 +335,22 @@ export default function TriggerForm({ initial, onSave, onCancel, workspaces }) {
               <div className="flex items-start gap-2 ml-[22px] px-3 py-2 rounded-lg
                               bg-[#0a0a0c] border border-white/5">
                 <Headphones size={11} className="text-white/25 flex-shrink-0 mt-0.5" />
-                <p className="text-[8.5px] text-white/35 leading-relaxed">
-                  Snap or clap near mic to trigger. Works with USB mics, wired headsets,
-                  wireless earbuds. Built-in laptop mic support coming soon.
-                </p>
+                <div>
+                  <p className="text-[9px] text-white/40 leading-relaxed">
+                    <span className="text-white/60 font-medium">Snap or clap</span> to trigger actions.
+                    Works with <span className="text-white/60 font-medium">USB microphones, wired headsets,
+                    or wireless earbuds</span>.
+                  </p>
+                  <p className="text-[8.5px] text-white/35 mt-1.5">
+                    <span className="text-white/50 font-medium">Audio</span> = physical sound detection (snap/clap near mic)
+                  </p>
+                  <p className="text-[8.5px] text-white/35 mt-0.5">
+                    <span className="text-white/50 font-medium">Voice</span> = spoken command ("Seven Focus")
+                  </p>
+                  <p className="text-[8px] text-white/20 mt-1.5 italic">
+                    Built-in laptop mic support coming soon. For now, plug in any headset.
+                  </p>
+                </div>
               </div>
             </div>
           </div>
