@@ -188,10 +188,14 @@ function waitForBackend() {
     // const timeout   = 120_000; // 2 minutes — model loading is slow
     const timeout = isDev ? 120000 : 120000; // 30s in packaged, 2min in dev
 
+    let _backendLogged = false;
     const check = () => {
       const req = http.get('http://127.0.0.1:7777/api/status', (res) => {
         if (res.statusCode === 200) {
-          console.log('[BACKEND] Ready!');
+          if (!_backendLogged) {
+            console.log('[BACKEND] Ready!');
+            _backendLogged = true;
+          }
           resolve(true);
         } else {
           retry();
