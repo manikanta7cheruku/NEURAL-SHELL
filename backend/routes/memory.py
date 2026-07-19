@@ -82,7 +82,7 @@ def delete_fact(fact_id: str):
 
 
 @router.get("/api/memory/conversations")
-def get_conversations(limit: int = 50, offset: int = 0):
+def get_conversations(limit: int = 500, offset: int = 0):
     """Get stored conversations (paginated)."""
     try:
         from memory import seven_memory
