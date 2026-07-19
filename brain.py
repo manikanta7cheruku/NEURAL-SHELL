@@ -225,6 +225,27 @@ def think(prompt_text, speaker_id="default"):
     if ctx.new_user_name:
         USER_NAME = ctx.new_user_name
 
+    # Save conversation to memory
+    # Only save real responses — skip empty, stream tuples, and error strings
+    try:
+        if (
+            result
+            and isinstance(result, str)
+            and len(result.strip()) > 0
+            and not result.startswith("Processing error")
+        ):
+            # Extract facts from user input first
+            seven_memory.extract_and_store_facts(prompt_text, user_id=speaker_id)
+            # Save the full conversation turn
+            seven_memory.store_conversation(
+                user_input=prompt_text,
+                seven_response=result,
+                user_id=speaker_id,
+            )
+    except Exception as _mem_err:
+        # Memory save failure must never break the response
+        print(Fore.YELLOW + f"[BRAIN] Memory save failed: {_mem_err}")
+
     return result
 
 
