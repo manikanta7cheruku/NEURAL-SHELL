@@ -269,6 +269,7 @@ def _register_via_xml(task_name: str, exe_path: str, arg_path: str) -> bool:
     <LogonTrigger>
       <Enabled>true</Enabled>
       <UserId>{user}</UserId>
+      <Delay>PT1M</Delay>
     </LogonTrigger>
   </Triggers>
   <Principals>
