@@ -96,7 +96,7 @@ export default function WorkspaceTab({ workspaces, onScan, onSave, onRestore, on
                    animationDelay: `${i * 50}ms`,
                    animationFillMode: 'both',
                  }}
-                 className={reveal ? 'animate-[cardReveal_350ms_ease-out]' : 'opacity-0'}>
+                 className={reveal ? 'animate-[cardReveal_350ms_ease-out]' : 'opacity-0 transition-opacity duration-200'}>
               <WorkspaceCard workspace={w} onRestore={onRestore} onDelete={onDelete} />
             </div>
           ))}
