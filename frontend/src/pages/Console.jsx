@@ -90,10 +90,18 @@ function MessageBubble({ msg }) {
                          ${msg.error
                            ? 'bg-red-500/[0.06] border border-red-500/15'
                            : 'bg-white/[0.03] border border-white/[0.06]'}`}>
-          <p className={`text-[12.5px] leading-relaxed whitespace-pre-wrap
-                         ${msg.error ? 'text-red-300' : 'text-white/70'}`}>
-            {displayText}
-          </p>
+          {msg.isCommand ? (
+            <pre className={`text-[11px] leading-relaxed whitespace-pre-wrap font-mono
+                             overflow-x-auto
+                             ${msg.error ? 'text-red-300' : 'text-white/60'}`}>
+              {msg.text}
+            </pre>
+          ) : (
+            <p className={`text-[12.5px] leading-relaxed whitespace-pre-wrap
+                           ${msg.error ? 'text-red-300' : 'text-white/70'}`}>
+              {displayText}
+            </p>
+          )}
 
           {/* File results */}
           {msg.fileResults?.count > 0 && (
@@ -357,16 +365,34 @@ export default function Console() {
         {/* Input row */}
         <div className="flex items-end gap-2">
           {/* File attach button */}
-          <button
-            onClick={() => fileRef.current?.click()}
-            disabled={sending || uploading}
-            title="Attach file to knowledge"
-            className="p-2.5 rounded-xl border border-white/6 bg-white/[0.02]
-                       text-white/30 hover:text-white/60 hover:bg-white/[0.04]
-                       hover:border-white/10 disabled:opacity-30
-                       transition-all duration-150 flex-shrink-0 mb-px">
-            <Paperclip size={15} />
-          </button>
+          <div className="relative group flex-shrink-0">
+            <button
+              onClick={() => fileRef.current?.click()}
+              disabled={sending || uploading}
+              className="p-2.5 rounded-xl border border-white/6 bg-white/[0.02]
+                         text-white/30 hover:text-white/60 hover:bg-white/[0.04]
+                         hover:border-white/10 disabled:opacity-30
+                         transition-all duration-150 mb-px block">
+              <Paperclip size={15} />
+            </button>
+            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2.5
+                            px-3 py-1.5 bg-[#18181c] border border-white/10
+                            rounded-lg pointer-events-none z-50
+                            opacity-0 group-hover:opacity-100
+                            transition-opacity duration-150
+                            shadow-[0_4px_24px_rgba(0,0,0,0.4)]">
+              <p className="text-[9px] text-white/60 whitespace-nowrap font-medium">
+                Attach document
+              </p>
+              <p className="text-[7.5px] text-white/25 whitespace-nowrap mt-0.5">
+                PDF, DOCX, PPTX, XLSX, TXT, MD
+              </p>
+              <div className="absolute top-full left-1/2 -translate-x-1/2 w-0 h-0
+                              border-l-4 border-r-4 border-t-4
+                              border-l-transparent border-r-transparent
+                              border-t-[#18181c]" />
+            </div>
+          </div>
           <input ref={fileRef} type="file"
                  accept={SUPPORTED_EXTENSIONS.join(',')}
                  className="hidden"
