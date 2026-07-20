@@ -236,9 +236,7 @@ app.include_router(updates_routes.router)
 app.include_router(voice_gates_routes.router)
 app.include_router(tasks_routes.router)  
 
-# Register knowledge upload (needs special handling for optional multipart)
-from backend.routes.knowledge import _register_upload_endpoint
-_register_upload_endpoint(app)
+# Knowledge upload is now a standard FastAPI route — no special registration needed
 
 
 # =========================================================================
