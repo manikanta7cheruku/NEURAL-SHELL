@@ -21,7 +21,7 @@ const useChat = create((set, get) => ({
       // Check if it's a local command (starts with /)
       if (text.startsWith('/')) {
         const response = await get().handleCommand(text);
-        const botMsg = { role: 'assistant', text: response, time: new Date() };
+        const botMsg = { role: 'assistant', text: response, time: new Date(), isCommand: true };
         set((s) => ({ messages: [...s.messages, botMsg], sending: false }));
         return;
       }
