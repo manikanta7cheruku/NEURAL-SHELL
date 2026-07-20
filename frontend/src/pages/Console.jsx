@@ -179,6 +179,8 @@ export default function Console() {
   const [uploading,   setUploading]     = useState(false);
   const [uploadErr,   setUploadErr]     = useState('');
   const [dragOver,    setDragOver]      = useState(false);
+  const [showTooltip, setShowTooltip]   = useState(false);
+  const [tooltipPos,  setTooltipPos]    = useState({ x: 0, y: 0 });
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -187,6 +189,19 @@ export default function Console() {
   useEffect(() => {
     if (!sending) inputRef.current?.focus();
   }, [sending]);
+
+  // Track tooltip position from button rect when shown
+  useEffect(() => {
+    if (!showTooltip) return;
+    const btn = fileRef.current?.parentElement?.parentElement?.querySelector('button');
+    if (btn) {
+      const rect = btn.getBoundingClientRect();
+      setTooltipPos({
+        x: rect.left + rect.width / 2,
+        y: rect.top,
+      });
+    }
+  }, [showTooltip]);
 
   const submit = async () => {
     if ((!draft.trim() && !pendingFile) || sending) return;
@@ -363,9 +378,11 @@ export default function Console() {
         )}
 
         {/* Input row */}
-        <div className="flex items-end gap-2">
+        <div className="flex items-end gap-2 overflow-visible">
           {/* File attach button */}
-          <div className="relative group flex-shrink-0">
+          <div className="relative flex-shrink-0"
+               onMouseEnter={() => setShowTooltip(true)}
+               onMouseLeave={() => setShowTooltip(false)}>
             <button
               onClick={() => fileRef.current?.click()}
               disabled={sending || uploading}
@@ -375,23 +392,27 @@ export default function Console() {
                          transition-all duration-150 mb-px block">
               <Paperclip size={15} />
             </button>
-            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2.5
-                            px-3 py-1.5 bg-[#18181c] border border-white/10
-                            rounded-lg pointer-events-none z-50
-                            opacity-0 group-hover:opacity-100
-                            transition-opacity duration-150
-                            shadow-[0_4px_24px_rgba(0,0,0,0.4)]">
-              <p className="text-[9px] text-white/60 whitespace-nowrap font-medium">
-                Attach document
-              </p>
-              <p className="text-[7.5px] text-white/25 whitespace-nowrap mt-0.5">
-                PDF, DOCX, PPTX, XLSX, TXT, MD
-              </p>
-              <div className="absolute top-full left-1/2 -translate-x-1/2 w-0 h-0
-                              border-l-4 border-r-4 border-t-4
-                              border-l-transparent border-r-transparent
-                              border-t-[#18181c]" />
-            </div>
+            {showTooltip && (
+              <div className="fixed z-[9999] pointer-events-none
+                              animate-[cardReveal_150ms_ease-out]"
+                   style={{
+                     left: tooltipPos.x,
+                     top: tooltipPos.y,
+                     transform: 'translate(-50%, -100%)',
+                   }}>
+                <div className="px-3 py-2 bg-[#18181c]/95 backdrop-blur-xl
+                                border border-white/10 rounded-xl
+                                shadow-[0_8px_32px_rgba(0,0,0,0.6)]
+                                mb-2">
+                  <p className="text-[9.5px] text-white/75 whitespace-nowrap font-medium">
+                    Attach document
+                  </p>
+                  <p className="text-[8px] text-white/30 whitespace-nowrap mt-0.5 font-mono">
+                    PDF · DOCX · PPTX · XLSX · TXT · MD
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
           <input ref={fileRef} type="file"
                  accept={SUPPORTED_EXTENSIONS.join(',')}
