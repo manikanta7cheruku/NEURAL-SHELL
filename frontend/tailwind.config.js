@@ -10,11 +10,17 @@ export default {
         cardReveal: {
           '0%': {
             opacity: '0',
-            transform: 'translateY(8px) scale(0.98)',
+            transform: 'translateY(12px) scale(0.97)',
+            filter: 'blur(2px)',
+          },
+          '60%': {
+            opacity: '1',
+            filter: 'blur(0px)',
           },
           '100%': {
             opacity: '1',
             transform: 'translateY(0) scale(1)',
+            filter: 'blur(0px)',
           },
         },
         formReveal: {
