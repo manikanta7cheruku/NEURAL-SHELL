@@ -10,10 +10,10 @@ const useChat = create((set, get) => ({
 
   clear: () => set({ messages: [], draft: '' }),
 
-  send: async (text) => {
+  send: async (text, attachedFile = null) => {
     if (!text.trim()) return;
 
-    const userMsg = { role: 'user', text, time: new Date() };
+    const userMsg = { role: 'user', text, time: new Date(), attachedFile };
     set((s) => ({ messages: [...s.messages, userMsg], sending: true }));
     get().setDraft('');
 
