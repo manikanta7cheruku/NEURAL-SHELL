@@ -37,12 +37,32 @@ from colorama import Fore
 # =============================================================================
 
 def _get_memory_dir():
+    """
+    Resolve memory directory.
+    Priority:
+    1. Local seven_data/memory if it exists and has data (dev mode)
+    2. APPDATA/SEVEN/seven_data/memory (production + fallback)
+    
+    This ensures dev mode reads the same DB that brain.py writes to.
+    """
+    # Dev mode: local seven_data/memory has the real data
+    local_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        'seven_data', 'memory'
+    )
+    if os.path.exists(local_path):
+        chroma_db = os.path.join(local_path, 'chroma.sqlite3')
+        if os.path.exists(chroma_db):
+            return local_path
+
+    # Production: APPDATA
     appdata = os.environ.get('APPDATA', '')
     if appdata:
         path = os.path.join(appdata, 'SEVEN', 'seven_data', 'memory')
         os.makedirs(path, exist_ok=True)
         return path
-    return "./seven_data/memory"
+
+    return local_path
 
 MEMORY_DIR      = _get_memory_dir()
 TOP_K_RESULTS   = 5
