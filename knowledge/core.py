@@ -35,9 +35,30 @@ os.makedirs(KNOWLEDGE_DIR, exist_ok=True)
 os.makedirs(CHROMA_DIR, exist_ok=True)
 
 # Use same embedding model as memory — already loaded, zero extra cost
-_embedding_fn = embedding_functions.SentenceTransformerEmbeddingFunction(
-    model_name="all-MiniLM-L6-v2"
-)
+try:
+    _embedding_fn = embedding_functions.SentenceTransformerEmbeddingFunction(
+        model_name="all-MiniLM-L6-v2"
+    )
+except Exception as _emb_err:
+    print(Fore.YELLOW + f"[KNOWLEDGE] Native embedder failed ({_emb_err}) — using manual fallback")
+    from sentence_transformers import SentenceTransformer as _ST
+    import torch as _torch
+
+    _model_name = "all-MiniLM-L6-v2"
+    _st_model   = _ST(_model_name, device="cpu", local_files_only=True)
+
+    # Resolve meta tensors if present
+    for _p in _st_model.parameters():
+        if _p.is_meta:
+            _p.data = _torch.empty_like(_p, device="cpu")
+
+    class _FallbackEmbedder:
+        def __call__(self, input):
+            texts = [input] if isinstance(input, str) else list(input)
+            return _st_model.encode(texts, show_progress_bar=False).tolist()
+
+    _embedding_fn = _FallbackEmbedder()
+    print(Fore.GREEN + "[KNOWLEDGE] Fallback embedder ready")
 
 _client = chromadb.PersistentClient(path=CHROMA_DIR)
 
