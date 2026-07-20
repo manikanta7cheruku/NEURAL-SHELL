@@ -235,12 +235,14 @@ def think(prompt_text, speaker_id="default"):
             and not result.startswith("Processing error")
         ):
             # Extract facts from user input first
-            seven_memory.extract_and_store_facts(prompt_text, user_id=speaker_id)
-            # Save the full conversation turn
+            # Normalize user_id — always save as "mani" in dev
+            # speaker_id="default" means unknown speaker, use configured name
+            _save_user_id = speaker_id if speaker_id != "default" else "mani"
+            seven_memory.extract_and_store_facts(prompt_text, user_id=_save_user_id)
             seven_memory.store_conversation(
                 user_input=prompt_text,
                 seven_response=result,
-                user_id=speaker_id,
+                user_id=_save_user_id,
             )
     except Exception as _mem_err:
         # Memory save failure must never break the response
