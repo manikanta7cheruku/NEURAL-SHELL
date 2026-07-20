@@ -39,11 +39,19 @@ export default function Triggers() {
     fetchStats();
   }, []);
 
-  // Trigger reveal animation on filter/tab change
+  // Two-phase transition: exit old cards → enter new cards
+  const [visible, setVisible] = useState(true);
+
   useEffect(() => {
-    setReveal(false);
-    const t = requestAnimationFrame(() => setReveal(true));
-    return () => cancelAnimationFrame(t);
+    setVisible(false); // phase 1: fade out current cards
+    const t = setTimeout(() => {
+      setReveal(false);
+      requestAnimationFrame(() => {
+        setReveal(true);
+        setVisible(true); // phase 2: fade in new cards
+      });
+    }, 200); // exit duration
+    return () => clearTimeout(t);
   }, [filter, tab]);
 
   // Scroll inline form into view
@@ -220,9 +228,7 @@ export default function Triggers() {
                 <div className="w-4 h-4 border-2 border-white/10 border-t-white/50 rounded-full animate-spin" />
               </div>
             ) : filtered.length === 0 && !showNew ? (
-              <div className={`flex flex-col items-center justify-center py-20 gap-3
-                               transition-all duration-500 ease-out
-                               ${reveal ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2'}`}>
+              <div className="flex flex-col items-center justify-center py-20 gap-3">
                 <div className="w-11 h-11 rounded-xl bg-white/[0.02] border border-white/6
                                 flex items-center justify-center">
                   <Zap size={20} className="text-white/12" />
@@ -242,16 +248,20 @@ export default function Triggers() {
               </div>
             ) : compact ? (
               /* Compact list mode */
-              <div className={`space-y-1.5 transition-all duration-400 ease-out
-                               ${reveal ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-3'}`}>
+              <div className="space-y-1.5">
                 {filtered.map((t, i) => (
                   <div key={t.id}
-                       style={{ transitionDelay: `${i * 30}ms` }}
-                       className={`transition-all duration-300 ease-out
-                                   ${reveal ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2'}`}>
+                       style={{
+                         animationDelay: `${i * 35}ms`,
+                         animationFillMode: 'both',
+                       }}
+                       className={`transition-opacity duration-200 ease-out
+                                   ${visible ? '' : 'opacity-0'}
+                                   ${reveal && visible ? 'animate-[cardReveal_300ms_ease-out]' : ''}`}>
                     <TriggerCard
                       trigger={t}
                       compact
+                      isEditing={t.id === editingId}
                       onFire={fireTrigger}
                       onToggle={(id, en) => updateTrigger(id, { enabled: en })}
                       onDelete={removeTrigger}
@@ -270,10 +280,13 @@ export default function Triggers() {
                       <div key={`row-${rowIdx}`} className="grid grid-cols-2 gap-3">
                         {row.items.map((t, i) => (
                           <div key={t.id}
-                               style={{ transitionDelay: `${(row.startIdx + i) * 40}ms` }}
-                               className={`transition-all duration-300 ease-out
-                                           ${reveal ? 'opacity-100 translate-y-0 scale-100'
-                                                    : 'opacity-0 translate-y-3 scale-[0.97]'}`}>
+                               style={{
+                                 animationDelay: `${(row.startIdx + i) * 50}ms`,
+                                 animationFillMode: 'both',
+                               }}
+                               className={`transition-opacity duration-200 ease-out
+                                   ${visible ? '' : 'opacity-0'}
+                                   ${reveal && visible ? 'animate-[cardReveal_350ms_ease-out]' : ''}`}>
                             <TriggerCard
                               trigger={t}
                               isEditing={t.id === editingId}
@@ -292,7 +305,7 @@ export default function Triggers() {
                   if (row.type === 'form') {
                     return (
                       <div key={`form-${rowIdx}`} ref={formRef}
-                           className="grid grid-cols-2 gap-3 transition-all duration-300 ease-out">
+                           className="grid grid-cols-2 gap-3 animate-[formReveal_250ms_ease-out_forwards]">
                         <TriggerForm
                           initial={row.trigger}
                           onSave={handleSave}
@@ -312,16 +325,14 @@ export default function Triggers() {
 
         {/* WORKSPACES TAB */}
         {tab === 'workspaces' && (
-          <div className={`transition-all duration-400 ease-out
-                           ${reveal ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-3'}`}>
-            <WorkspaceTab
-              workspaces={workspaces}
-              onScan={scanWorkspace}
-              onSave={saveWorkspace}
-              onRestore={restoreWorkspace}
-              onDelete={removeWorkspace}
-            />
-          </div>
+          <WorkspaceTab
+            workspaces={workspaces}
+            onScan={scanWorkspace}
+            onSave={saveWorkspace}
+            onRestore={restoreWorkspace}
+            onDelete={removeWorkspace}
+            reveal={reveal}
+          />
         )}
       </div>
     </div>
