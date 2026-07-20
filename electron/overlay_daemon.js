@@ -49,8 +49,8 @@ let arrangeAppNames = [];
 
 function createNotifWindow() {
   const { width: sw } = screen.getPrimaryDisplay().workArea;
-  const W = 340;
-  const H = 88;
+  const W = 380;
+  const H = 96;
 
   notifWindow = new BrowserWindow({
     width:              W,
@@ -58,10 +58,8 @@ function createNotifWindow() {
     x:                  Math.round((sw - W) / 2),
     y:                  0,
     frame:              false,
-    transparent:        false,
-    backgroundColor:    '#00000001',
-    backgroundMaterial: 'acrylic',
-    vibrancy:           'under-window',
+    transparent:        true,
+    backgroundColor:    '#00000000',
     alwaysOnTop:        true,
     skipTaskbar:        true,
     resizable:          false,
@@ -70,7 +68,7 @@ function createNotifWindow() {
     maximizable:        false,
     closable:           false,
     focusable:          false,
-    hasShadow:          true,
+    hasShadow:          false,
     show:               false,
     roundedCorners:     true,
     webPreferences: {
@@ -108,10 +106,8 @@ function createArrangeWindow() {
     x:                  Math.round((sw - W) / 2),
     y:                  0,
     frame:              false,
-    transparent:        false,
-    backgroundColor:    '#00000001',
-    backgroundMaterial: 'acrylic',
-    vibrancy:           'under-window',
+    transparent:        true,
+    backgroundColor:    '#00000000',
     alwaysOnTop:        true,
     skipTaskbar:        true,
     resizable:          false,
@@ -120,7 +116,7 @@ function createArrangeWindow() {
     maximizable:        false,
     closable:           false,
     focusable:          true,
-    hasShadow:          true,
+    hasShadow:          false,
     show:               false,
     roundedCorners:     true,
     webPreferences: {
@@ -173,7 +169,7 @@ function showNotification(data) {
   try {
     notifWindow.hide();
     const { width: sw } = screen.getPrimaryDisplay().workArea;
-    const W = 340;
+    const W = 380;
     notifWindow.setPosition(Math.round((sw - W) / 2), 0);
   } catch (e) {}
 
@@ -201,7 +197,8 @@ function showNotification(data) {
 
   notifWindow.showInactive();
   notifWindow.moveTop();
-  scheduleAutoHide(notifWindow, (data.holdMs || 3500) + 2000);
+  // Give card enough time: hold duration + animations (600ms in + 500ms out) + buffer
+  scheduleAutoHide(notifWindow, (data.holdMs || 4500) + 1500);
 }
 
 function showArrangement(data) {
