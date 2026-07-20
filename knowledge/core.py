@@ -105,10 +105,11 @@ def search_knowledge(query, top_k=None):
         distances = results['distances'][0] if results.get('distances') else [0] * len(docs)
         metadatas = results['metadatas'][0] if results.get('metadatas') else [{}] * len(docs)
         
-        # Filter by relevance — cosine distance < 0.8 means reasonably relevant
+        # Filter by relevance — cosine distance < 1.2 (generous for document Q&A)
+        # Lower threshold was rejecting valid chunks from uploaded docs
         relevant = []
         for doc, dist, meta in zip(docs, distances, metadatas):
-            if dist < 0.8:
+            if dist < 1.2:
                 source = meta.get("source", "unknown")
                 relevant.append((doc, dist, source))
         
@@ -116,11 +117,20 @@ def search_knowledge(query, top_k=None):
             return ""
         
         # Format for LLM context injection
-        context = "=== OFFLINE KNOWLEDGE BASE RESULTS ===\n"
+        context = (
+            "=== DOCUMENT KNOWLEDGE ===\n"
+            "The following is extracted from documents the user has uploaded. "
+            "Use this information to answer their question accurately, thoroughly, "
+            "and intelligently. Summarize key points, highlight what matters for "
+            "their specific question, and structure your answer clearly.\n\n"
+        )
         for doc, dist, source in relevant:
-            context += f"[Source: {source}]\n{doc}\n\n"
-        context += "=== END KNOWLEDGE ===\n"
-        context += "Use this information to answer accurately. Cite it naturally."
+            context += f"[From: {source}]\n{doc}\n\n"
+        context += (
+            "=== END DOCUMENT KNOWLEDGE ===\n"
+            "Answer based on the above document content. Be specific, thorough, "
+            "and helpful. If the document contains data or findings, reference them directly."
+        )
         
         print(Fore.GREEN + f"[KNOWLEDGE] Found {len(relevant)} relevant chunks (best distance: {relevant[0][1]:.3f})")
         
