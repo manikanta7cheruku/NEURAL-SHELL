@@ -1,107 +1,122 @@
 """
 backend/routes/knowledge.py
-Handles: /api/knowledge/*
 """
-
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, UploadFile
+from fastapi import File as FastAPIFile
 import os
+import shutil
+import tempfile
 
 router = APIRouter()
+
+SUPPORTED_EXTENSIONS = {".txt", ".md", ".pdf", ".docx", ".pptx", ".xlsx"}
+SUPPORTED_DISPLAY    = ".txt, .md, .pdf, .docx, .pptx, .xlsx"
+MAX_FILE_MB          = 50
 
 
 @router.get("/api/knowledge/stats")
 def get_knowledge_stats():
-    """Get knowledge base statistics."""
     try:
         from knowledge import get_knowledge_stats as _get_stats
-        return _get_stats()
-    except ImportError:
-        return {"total_chunks": 0, "sources": [], "storage_mb": 0}
+        from knowledge.indexer import get_index_manifest
+        stats    = _get_stats()
+        manifest = get_index_manifest()
+        # Enrich sources with manifest metadata
+        enriched = []
+        for src in stats.get("sources", []):
+            entry = manifest.get(src, {})
+            enriched.append({
+                "name":     src,
+                "ext":      entry.get("ext", ""),
+                "size_kb":  entry.get("size_kb", 0),
+                "chunks":   entry.get("chunks", 0),
+            })
+        stats["source_details"] = enriched
+        return stats
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/api/knowledge/search")
-def search_knowledge(q: str):
-    """Search the knowledge base."""
+def search_knowledge_endpoint(q: str):
     try:
-        from knowledge import search_knowledge as _search
-        results = _search(q)
-        return {"query": q, "results": results if results else "No results found."}
+        from knowledge import search_knowledge
+        results = search_knowledge(q, top_k=5)
+        return {"results": results or "No results found.", "query": q}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.delete("/api/knowledge/clear")
-def clear_knowledge():
-    """Clear the knowledge base."""
+def clear_knowledge_endpoint():
     try:
-        from knowledge import clear_knowledge as _clear
-        success = _clear()
-        return {"success": success}
+        from knowledge import clear_knowledge
+        clear_knowledge()
+        # Also clear manifest
+        from knowledge.indexer import MANIFEST_FILE
+        if os.path.exists(MANIFEST_FILE):
+            os.remove(MANIFEST_FILE)
+        return {"success": True}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-def _register_upload_endpoint(app):
-    """
-    Register /api/knowledge/upload only if python-multipart is installed.
-    Called from api_server.py after app creation.
-    Avoids import-time crash when multipart is not installed.
-    """
+@router.delete("/api/knowledge/file/{filename}")
+def delete_knowledge_file(filename: str):
     try:
-        import multipart  # noqa: F401
-        _multipart_ok = True
-    except ImportError:
-        _multipart_ok = False
+        from knowledge.indexer import remove_file
+        success, msg = remove_file(filename)
+        if not success:
+            raise HTTPException(status_code=404, detail=msg)
+        return {"success": True, "message": msg}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-    if _multipart_ok:
-        from fastapi import UploadFile, File as FastAPIFile
-        from backend.api_server import check_limit, plan_limit_error
 
-        @app.post("/api/knowledge/upload")
-        async def upload_knowledge(file: UploadFile = FastAPIFile(...)):
-            """Upload a file to the knowledge base. Enforces plan limit."""
-            try:
-                _appdata  = os.environ.get("APPDATA", os.path.expanduser("~"))
-                _know_dir = os.path.join(_appdata, "SEVEN", "seven_data", "knowledge")
-                if os.path.exists(_know_dir):
-                    file_count = len([
-                        f for f in os.listdir(_know_dir)
-                        if os.path.isfile(os.path.join(_know_dir, f))
-                    ])
-                else:
-                    file_count = 0
+@router.post("/api/knowledge/upload")
+async def upload_knowledge(file: UploadFile = FastAPIFile(...)):
+    filename = file.filename or "upload"
+    ext      = os.path.splitext(filename)[1].lower()
 
-                limit_check = check_limit("knowledge_files", file_count)
-                if not limit_check["allowed"]:
-                    raise plan_limit_error("knowledge_files", limit_check)
+    if ext not in SUPPORTED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type: {ext}. Supported: {SUPPORTED_DISPLAY}"
+        )
 
-                from knowledge.indexer import index_file
-                os.makedirs(_know_dir, exist_ok=True)
-                file_path = os.path.join(_know_dir, file.filename)
-                content   = await file.read()
-                with open(file_path, "wb") as f:
-                    f.write(content)
-                chunks = index_file(file_path)
-                return {
-                    "success":        True,
-                    "filename":       file.filename,
-                    "chunks_indexed": chunks,
-                    "usage": {
-                        "current": file_count + 1,
-                        "limit":   limit_check["limit"],
-                        "tier":    limit_check["tier"]
-                    }
-                }
-            except HTTPException:
-                raise
-            except Exception as e:
-                raise HTTPException(status_code=500, detail=str(e))
-    else:
-        @app.post("/api/knowledge/upload")
-        async def upload_knowledge_unavailable(request: Request):
-            """Fallback when python-multipart not installed."""
-            return {
-                "success": False,
-                "error":   "python-multipart not installed. Run setup wizard."
-            }
-        print("[API] python-multipart not installed — upload endpoint in fallback mode")
+    # Size check
+    content = await file.read()
+    size_mb = len(content) / (1024 * 1024)
+    if size_mb > MAX_FILE_MB:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File too large: {size_mb:.1f}MB. Max: {MAX_FILE_MB}MB"
+        )
+
+    # Save to custom dir
+    from knowledge.indexer import CUSTOM_DIR
+    os.makedirs(CUSTOM_DIR, exist_ok=True)
+    dest = os.path.join(CUSTOM_DIR, filename)
+
+    with open(dest, 'wb') as f:
+        f.write(content)
+
+    # Index it
+    try:
+        from knowledge.indexer import index_file
+        success, chunks, msg = index_file(dest)
+        if not success:
+            raise HTTPException(status_code=422, detail=msg)
+        return {
+            "success":  True,
+            "filename": filename,
+            "chunks":   chunks,
+            "message":  msg,
+            "size_mb":  round(size_mb, 2),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
