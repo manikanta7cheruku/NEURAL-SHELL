@@ -1055,7 +1055,8 @@ def _fire_notification(name, action_type, app_count, tab_count, app_names):
     if tab_count > 0:
         parts.append(f"{tab_count} tab{'s' if tab_count != 1 else ''}")
     detail  = "  ·  ".join(parts) if parts else ""
-    hold_ms = 2000 if action_type == "open_workspace" else 3200
+    # Give users time to actually read the notification
+    hold_ms = 3500 if action_type == "open_workspace" else 4500
 
     _send_overlay({
         "type": "notif",
