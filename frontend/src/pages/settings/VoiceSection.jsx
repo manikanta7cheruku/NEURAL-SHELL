@@ -25,23 +25,22 @@ export default function VoiceSection({
   return (
     <>
       {/* Voice Engine Picker */}
-      <div className="bg-s-card border border-s-border rounded p-4">
-        <div className="flex items-center justify-between mb-4">
+      <div className="bg-white/[0.02] border border-white/8 rounded-2xl overflow-hidden">
+        <div className="px-5 py-4 border-b border-white/[0.05] flex items-center justify-between">
           <div>
-            <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium">
-              Voice Engine
-            </div>
-            <div className="text-[10px] text-s-text-3 mt-0.5">
+            <h2 className="text-[12px] font-semibold text-white/85">Voice Engine</h2>
+            <p className="text-[9px] text-white/40 mt-0.5">
               {selectedVoiceId
                 ? voices.find(v => v.voice_id === selectedVoiceId)?.name || 'Select a voice'
                 : 'Loading...'}
-            </div>
+            </p>
           </div>
-          <div className="flex items-center gap-1.5">
-            <div className="w-1.5 h-1.5 rounded-full bg-s-green animate-pulse" />
-            <span className="text-[8px] text-s-text-4 font-medium">Offline</span>
+          <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-white/[0.03] border border-white/6">
+            <div className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+            <span className="text-[8.5px] text-white/60 font-medium">Offline</span>
           </div>
         </div>
+        <div className="p-5">
 
         {!voiceConfigLoaded || voices.length === 0 ? (
           <div className="flex items-center gap-2 py-4 text-s-text-4">
@@ -199,38 +198,17 @@ export default function VoiceSection({
 
           </div>
         )}
+        </div>
       </div>
 
-      {/* Hardware info — shown alongside voice since it affects model/voice choice */}
-      {hw && (
-        <div className="bg-s-card border border-s-border rounded p-4">
-          <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium mb-2">
-            Hardware
-          </div>
-          <div className="space-y-1.5">
-            {[
-              ['GPU',    hw.gpu?.name || 'None'],
-              ['VRAM',   `${hw.gpu?.vram_gb || 0} GB`],
-              ['RAM',    `${hw.ram_gb} GB`],
-              ['CPU',    `${hw.cpu?.cores} cores`],
-              ['Models', hw.installed_models?.join(', ') || 'None'],
-            ].map(([k, v]) => (
-              <div key={k} className="flex justify-between text-[11px]">
-                <span className="text-s-text-3">{k}</span>
-                <span className="text-s-text-2 font-mono text-[10px] truncate max-w-[120px]">{v}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+
 
       {/* Voice Control Words — wake/pause/resume/shutdown word editor */}
-      <div className={`bg-s-card border rounded p-4 ${
-        canEditVoice ? 'border-s-border' : 'border-s-border/50'
-      }`}>
+      <div className="bg-white/[0.02] border border-white/8 rounded-2xl overflow-hidden">
+        <div className="p-5">
         <div className="flex items-center justify-between mb-3">
           <div>
-            <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium">
+            <div className="text-[9px] text-white/30 uppercase tracking-widest font-semibold">
               Voice Control Commands
             </div>
             <div className="text-[9px] text-s-text-4 mt-0.5">
@@ -333,6 +311,7 @@ export default function VoiceSection({
             ))}
           </div>
         )}
+        </div>
       </div>
       {/* Voice Security Gates */}
       <VoiceGatesPanel />
@@ -457,12 +436,12 @@ function VoiceGatesPanel() {
   const sv  = gates.speaker_verify || { enabled: false };
 
   return (
-    <div className="bg-s-card border border-s-border rounded p-4 space-y-4">
+    <div className="bg-white/[0.02] border border-white/8 rounded-2xl p-5 space-y-4">
 
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium">
+          <div className="text-[9px] text-white/30 uppercase tracking-widest font-semibold">
             Voice Security
           </div>
           <div className="text-[9px] text-s-text-4 mt-0.5">
