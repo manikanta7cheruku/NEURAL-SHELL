@@ -44,14 +44,23 @@ function getAppSourcePath() {
  */
 function getPythonExecutable() {
   if (isDev) {
+    // Use venv pythonw.exe explicitly — no PATH lookup, no console flash
+    const venvPythonw = path.join(__dirname, '..', 'venv', 'Scripts', 'pythonw.exe');
+    const venvPython  = path.join(__dirname, '..', 'venv', 'Scripts', 'python.exe');
+    if (fs.existsSync(venvPythonw)) return venvPythonw;
+    if (fs.existsSync(venvPython))  return venvPython;
     return 'python';
   }
-  const embedded = path.join(getAppSourcePath(), 'python', 'python.exe');
+  const embeddedW = path.join(getAppSourcePath(), 'python', 'pythonw.exe');
+  const embedded  = path.join(getAppSourcePath(), 'python', 'python.exe');
+  if (fs.existsSync(embeddedW)) {
+    console.log('[PYTHON] Using embedded pythonw (windowless):', embeddedW);
+    return embeddedW;
+  }
   if (fs.existsSync(embedded)) {
-    console.log('[PYTHON] Using embedded Python:', embedded);
+    console.log('[PYTHON] Using embedded python:', embedded);
     return embedded;
   }
-  // Fallback — should not happen in a correct build
   console.warn('[PYTHON] Embedded Python not found, falling back to system python');
   return 'python';
 }
@@ -103,6 +112,9 @@ function startPython() {
     cwd: appSource,
     windowsHide: true,
     stdio: ['pipe', 'pipe', 'pipe'],
+    // Windows: 0x08000000 = CREATE_NO_WINDOW — prevents console flash
+    detached: false,
+    ...(process.platform === 'win32' ? { creationflags: 0x08000000 } : {}),
     env: {
       ...process.env,
       // Tell Windows audio subsystem Python is a standalone audio app
@@ -175,7 +187,10 @@ function stopPython() {
   if (!pythonProcess) return;
   console.log('[PYTHON] Stopping...');
   if (process.platform === 'win32') {
-    spawn('taskkill', ['/pid', pythonProcess.pid.toString(), '/f', '/t']);
+    spawn('taskkill', ['/pid', pythonProcess.pid.toString(), '/f', '/t'], {
+      windowsHide: true,
+      stdio: 'ignore'
+    });
   } else {
     pythonProcess.kill('SIGTERM');
   }
@@ -328,6 +343,10 @@ function createStatusWindow() {
   statusWindow.setIgnoreMouseEvents(true, { forward: true });
   statusWindow.setAlwaysOnTop(true, 'screen-saver', 1);
   statusWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  // Hide orb from screenshots (Windows only)
+  if (process.platform === 'win32') {
+    statusWindow.setContentProtection(true);
+  }
   statusWindow.on('closed', () => { statusWindow = null; });
 
   console.log('[ORB] Created');
@@ -538,6 +557,7 @@ ipcMain.on('run-installer', (_, { path: installerPath, silent }) => {
         detached: true,
         stdio:    'ignore',
         shell:    false,
+        windowsHide: true,
       }
     );
     child.unref();
@@ -581,7 +601,9 @@ function launchPanelHost() {
   // Kill any existing panel_host processes from previous session
   if (process.platform === 'win32') {
     try {
-      exec('wmic process where "commandline like \'%panel_host.js%\'" get processid /format:value', (err, stdout) => {
+      exec('wmic process where "commandline like \'%panel_host.js%\'" get processid /format:value',
+        { windowsHide: true },
+        (err, stdout) => {
         if (err) return;
         const pids = stdout.match(/ProcessId=(\d+)/g);
         if (pids) {
@@ -589,7 +611,7 @@ function launchPanelHost() {
             const pid = match.replace('ProcessId=', '');
             if (pid && parseInt(pid) !== process.pid) {
               try {
-                exec(`taskkill /pid ${pid} /f /t`);
+                exec(`taskkill /pid ${pid} /f /t`, { windowsHide: true });
                 console.log('[PANEL] Killed old panel_host PID:', pid);
               } catch (e) {}
             }
@@ -742,14 +764,16 @@ function launchPanelHost() {
     // Kill panel host process on Seven quit
     if (process.platform === 'win32') {
       try {
-        exec('wmic process where "commandline like \'%panel_host.js%\'" get processid /format:value', (err, stdout) => {
+        exec('wmic process where "commandline like \'%panel_host.js%\'" get processid /format:value',
+        { windowsHide: true },
+        (err, stdout) => {
           if (err) return;
           const pids = stdout.match(/ProcessId=(\d+)/g);
           if (pids) {
             pids.forEach(match => {
               const pid = match.replace('ProcessId=', '');
               if (pid && parseInt(pid) !== process.pid) {
-                try { exec(`taskkill /pid ${pid} /f /t`); } catch (e) {}
+                try { exec(`taskkill /pid ${pid} /f /t`, { windowsHide: true }); } catch (e) {}
               }
             });
           }
