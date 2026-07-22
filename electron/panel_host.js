@@ -77,16 +77,20 @@ app.on('window-all-closed', (e) => {
 // ── Python panel server ──────────────────────────────────────────────────────
 
 function findPython() {
-  // Check if Seven's embedded Python exists
+  // Prefer pythonw.exe (windowless) to prevent terminal flash on Windows
+  const embeddedW = path.join(PROJECT_ROOT, 'python', 'pythonw.exe');
+  if (fs.existsSync(embeddedW)) return embeddedW;
+
   const embedded = path.join(PROJECT_ROOT, 'python', 'python.exe');
   if (fs.existsSync(embedded)) return embedded;
 
-  // Check venv
+  const venvW = path.join(PROJECT_ROOT, 'venv', 'Scripts', 'pythonw.exe');
+  if (fs.existsSync(venvW)) return venvW;
+
   const venv = path.join(PROJECT_ROOT, 'venv', 'Scripts', 'python.exe');
   if (fs.existsSync(venv)) return venv;
 
-  // System python
-  return 'python';
+  return 'pythonw';
 }
 
 function startPanelServer() {
@@ -144,7 +148,10 @@ function stopPanelServer() {
   if (!panelServer) return;
   try {
     if (process.platform === 'win32') {
-      spawn('taskkill', ['/pid', panelServer.pid.toString(), '/f', '/t']);
+      spawn('taskkill', ['/pid', panelServer.pid.toString(), '/f', '/t'], {
+        windowsHide: true,
+        stdio: 'ignore'
+      });
     } else {
       panelServer.kill('SIGTERM');
     }
