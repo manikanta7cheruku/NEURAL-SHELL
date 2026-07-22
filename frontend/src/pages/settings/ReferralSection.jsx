@@ -1,133 +1,175 @@
-/**
- * frontend/src/pages/settings/ReferralSection.jsx
- *
- * Shows: referral code, share buttons (WhatsApp, X, native),
- *        stats (completed/pending), progress bars for pending referrals.
- *
- * No API calls here — all data comes from index.jsx via props.
- * Share functions are also defined in index.jsx and passed as props.
- *
- * PROPS:
- *   referralStats  object from /api/referral/stats
- *   copied         bool — copy button feedback
- *   copyMessage    function
- *   shareWhatsApp  function
- *   shareX         function
- *   shareNative    function
- *   fmt            function(hours) — formats hours to "2 hr 30 min"
- */
+import { Copy, Check, Share2 } from 'lucide-react';
 
 export default function ReferralSection({
   referralStats, copied,
-  copyMessage, shareWhatsApp, shareX, shareNative,
-  fmt
+  copyMessage, shareWhatsApp, shareX, shareNative, fmt
 }) {
   return (
-    <div className="bg-gradient-to-br from-s-accent/5 to-s-accent/10 border border-s-accent/20 rounded p-4 space-y-4">
-      <div className="text-[9px] text-s-accent uppercase tracking-wider font-medium">
-        Refer Friends - Get Premium Free
+    <div className="bg-white/[0.02] border border-white/8 rounded-2xl overflow-hidden">
+
+      <div className="px-5 py-4 border-b border-white/[0.05]">
+        <h2 className="text-[12px] font-semibold text-white/85">Refer & Earn</h2>
+        <p className="text-[9px] text-white/35 mt-0.5">
+          Share Seven with a friend and both get free premium
+        </p>
       </div>
 
-      <p className="text-[11px] text-s-text-3 leading-relaxed">
-        Share Seven with friends. When they use it for{' '}
-        <strong className="text-s-accent">7 hours</strong>, you get{' '}
-        <strong className="text-s-accent">Ultimate free for 1 month</strong> and
-        they get <strong className="text-s-green">Pro free for 1 month</strong>.
-      </p>
+      <div className="p-5 space-y-5">
 
-      {referralStats?.referral_code ? (
-        <div className="space-y-3">
-
-          {/* Referral code display + copy button */}
-          <div>
-            <div className="text-[10px] text-s-text-4 mb-1">Your Referral Code</div>
-            <div className="flex gap-2">
-              <div className="flex-1 bg-s-bg border border-s-border rounded px-3 py-2 font-mono text-sm text-s-text tracking-widest">
-                {referralStats.referral_code}
+        {/* How it works */}
+        <div className="space-y-2">
+          <div className="text-[9px] text-white/30 uppercase tracking-widest font-semibold">
+            How it works
+          </div>
+          <div className="space-y-1.5">
+            {[
+              'Share your code with a friend',
+              'They install Seven and enter your code during setup',
+              'When they use Seven for 7 hours, both rewards unlock',
+            ].map((step, i) => (
+              <div key={i} className="flex items-start gap-2.5 text-[10.5px] text-white/60">
+                <span className="w-4 h-4 rounded-md bg-white/[0.04] border border-white/8
+                                 flex items-center justify-center text-[9px] text-white/40
+                                 font-mono flex-shrink-0 mt-0.5">
+                  {i + 1}
+                </span>
+                <span className="leading-relaxed pt-0.5">{step}</span>
               </div>
-              <button
-                onClick={copyMessage}
-                className="px-3 py-2 border border-s-accent/30 bg-s-accent/10 text-s-accent rounded text-[11px] font-medium hover:bg-s-accent/20 transition-colors"
-              >
-                {copied ? 'Copied' : 'Copy Message'}
-              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Rewards */}
+        <div className="grid grid-cols-2 gap-2">
+          <div className="bg-white/[0.02] border border-white/6 rounded-xl p-3">
+            <div className="text-[8px] text-white/30 uppercase tracking-widest font-semibold mb-1">
+              You Get
             </div>
-            <p className="text-[10px] text-s-text-4 mt-1">
-              Tell friend: Install Seven, Setup wizard Step 2, Enter code
+            <p className="text-[12px] text-white/85 font-medium">Ultimate</p>
+            <p className="text-[9.5px] text-white/40 mt-0.5">Free for 1 month</p>
+          </div>
+          <div className="bg-white/[0.02] border border-white/6 rounded-xl p-3">
+            <div className="text-[8px] text-white/30 uppercase tracking-widest font-semibold mb-1">
+              Friend Gets
+            </div>
+            <p className="text-[12px] text-white/85 font-medium">Pro</p>
+            <p className="text-[9.5px] text-white/40 mt-0.5">Free for 1 month</p>
+          </div>
+        </div>
+
+        {referralStats?.referral_code ? (
+          <>
+            {/* Referral code */}
+            <div>
+              <div className="text-[8px] text-white/30 uppercase tracking-widest font-semibold mb-2">
+                Your Code
+              </div>
+              <div className="flex gap-2">
+                <div className="flex-1 bg-white/[0.03] border border-white/10 rounded-xl
+                                px-4 py-3 font-mono text-[13px] text-white/90
+                                tracking-[0.2em] font-semibold text-center">
+                  {referralStats.referral_code}
+                </div>
+                <button onClick={copyMessage}
+                  className="flex items-center gap-1.5 px-4 py-3 border border-white/10
+                             bg-white/[0.03] text-white/70 rounded-xl text-[10px] font-medium
+                             hover:bg-white/[0.06] hover:text-white/90 transition-all">
+                  {copied ? <Check size={11} /> : <Copy size={11} />}
+                  {copied ? 'Copied' : 'Copy'}
+                </button>
+              </div>
+              <p className="text-[9px] text-white/30 mt-2">
+                Copy includes a pre-written message and the download link
+              </p>
+            </div>
+
+            {/* Share options */}
+            <div>
+              <div className="text-[8px] text-white/30 uppercase tracking-widest font-semibold mb-2">
+                Share
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                <button onClick={shareWhatsApp}
+                  className="py-2.5 rounded-xl bg-white/[0.02] border border-white/8
+                             text-white/65 text-[10px] font-medium
+                             hover:bg-white/[0.05] hover:text-white/85 transition-all">
+                  WhatsApp
+                </button>
+                <button onClick={shareX}
+                  className="py-2.5 rounded-xl bg-white/[0.02] border border-white/8
+                             text-white/65 text-[10px] font-medium
+                             hover:bg-white/[0.05] hover:text-white/85 transition-all">
+                  X / Twitter
+                </button>
+                <button onClick={shareNative}
+                  className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl
+                             bg-white/[0.02] border border-white/8 text-white/65
+                             text-[10px] font-medium hover:bg-white/[0.05] hover:text-white/85
+                             transition-all">
+                  <Share2 size={11} />
+                  More
+                </button>
+              </div>
+            </div>
+
+            {/* Stats */}
+            <div className="pt-4 border-t border-white/[0.05]">
+              <div className="text-[8px] text-white/30 uppercase tracking-widest font-semibold mb-3">
+                Your Progress
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="bg-white/[0.02] border border-white/6 rounded-xl p-3">
+                  <div className="text-[22px] font-mono font-bold text-white/85">
+                    {referralStats.completed_referrals ?? 0}
+                  </div>
+                  <div className="text-[9px] text-white/45 mt-1">Completed referrals</div>
+                </div>
+                <div className="bg-white/[0.02] border border-white/6 rounded-xl p-3">
+                  <div className="text-[22px] font-mono font-bold text-white/85">
+                    {referralStats.pending_referrals ?? 0}
+                  </div>
+                  <div className="text-[9px] text-white/45 mt-1">Friends in progress</div>
+                </div>
+              </div>
+            </div>
+
+            {/* Per-friend progress */}
+            {referralStats.pending_details?.length > 0 && (
+              <div className="pt-4 border-t border-white/[0.05] space-y-2">
+                <div className="text-[8px] text-white/30 uppercase tracking-widest font-semibold">
+                  Friends In Progress
+                </div>
+                {referralStats.pending_details.map((ref, i) => (
+                  <div key={i} className="bg-white/[0.02] border border-white/6 rounded-xl p-3">
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="text-[10px] text-white/70 font-mono truncate">
+                        {ref.email}
+                      </span>
+                      <span className="text-[9px] text-white/50 font-mono">
+                        {ref.progress_percent}%
+                      </span>
+                    </div>
+                    <div className="w-full bg-white/[0.04] rounded-full h-1 overflow-hidden">
+                      <div className="bg-white/40 h-full rounded-full transition-all duration-500"
+                           style={{ width: `${ref.progress_percent}%` }} />
+                    </div>
+                    <div className="flex justify-between mt-1.5 text-[8.5px] text-white/35">
+                      <span>{fmt(ref.usage_hours)} used</span>
+                      <span>{fmt(ref.hours_left)} remaining</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        ) : (
+          <div className="bg-white/[0.02] border border-white/6 rounded-xl p-4 text-center">
+            <p className="text-[10.5px] text-white/50">
+              Add your email in Profile to unlock referrals
             </p>
           </div>
-
-          {/* Share buttons */}
-          <div className="flex gap-2">
-            <button
-              onClick={shareWhatsApp}
-              className="flex-1 py-2 bg-[#25D366]/10 border border-[#25D366]/30 text-[#25D366] rounded text-[10px] font-medium hover:bg-[#25D366]/20 transition-colors"
-            >
-              WhatsApp
-            </button>
-            <button
-              onClick={shareX}
-              className="flex-1 py-2 bg-zinc-800/50 border border-zinc-700/50 text-s-text-2 rounded text-[10px] font-medium hover:bg-zinc-800 transition-colors"
-            >
-              X Post
-            </button>
-            <button
-              onClick={shareNative}
-              className="flex-1 py-2 bg-s-accent/10 border border-s-accent/30 text-s-accent rounded text-[10px] font-medium hover:bg-s-accent/20 transition-colors"
-            >
-              Share
-            </button>
-          </div>
-
-          {/* Referral stats counters */}
-          <div className="grid grid-cols-2 gap-2">
-            <div className="bg-s-bg border border-s-border rounded px-3 py-2 text-center">
-              <div className="text-[18px] font-mono font-bold text-s-green">
-                {referralStats.completed_referrals ?? 0}
-              </div>
-              <div className="text-[9px] text-s-text-4">Friends Completed</div>
-              <div className="text-[9px] text-s-accent">You got Ultimate</div>
-            </div>
-            <div className="bg-s-bg border border-s-border rounded px-3 py-2 text-center">
-              <div className="text-[18px] font-mono font-bold text-yellow-400">
-                {referralStats.pending_referrals ?? 0}
-              </div>
-              <div className="text-[9px] text-s-text-4">In Progress</div>
-              <div className="text-[9px] text-s-text-4">Using Seven now</div>
-            </div>
-          </div>
-
-          {/* Per-friend progress bars for pending referrals */}
-          {referralStats.pending_details?.length > 0 && (
-            <div className="space-y-2">
-              <div className="text-[10px] text-s-text-3">Friends In Progress</div>
-              {referralStats.pending_details.map((ref, i) => (
-                <div key={i} className="bg-s-bg border border-s-border rounded p-2">
-                  <div className="flex justify-between mb-1">
-                    <span className="text-[10px] text-s-text-2 font-mono">{ref.email}</span>
-                    <span className="text-[9px] text-s-text-4">{ref.progress_percent}%</span>
-                  </div>
-                  <div className="w-full bg-s-border rounded-full h-1">
-                    <div
-                      className="bg-s-accent h-1 rounded-full transition-all"
-                      style={{ width: `${ref.progress_percent}%` }}
-                    />
-                  </div>
-                  <div className="flex justify-between mt-1 text-[8px] text-s-text-4">
-                    <span>{fmt(ref.usage_hours)} used</span>
-                    <span>{fmt(ref.hours_left)} remaining</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-        </div>
-      ) : (
-        <div className="bg-s-bg border border-s-border rounded px-3 py-2 text-[11px] text-s-text-4">
-          Complete setup with your email to get a referral code
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }
