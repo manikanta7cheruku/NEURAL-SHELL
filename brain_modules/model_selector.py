@@ -64,12 +64,17 @@ def _get_hardware() -> dict:
     except Exception:
         ram_gb = 8  # safe default
 
-    # GPU VRAM
+    # Windows: CREATE_NO_WINDOW flag hides console window on subprocess spawn
+    import sys as _sys_hw
+    _hw_flags = 0x08000000 if _sys_hw.platform == "win32" else 0
+
+    # GPU VRAM (NVIDIA)
     try:
         import subprocess
         result = subprocess.run(
             ["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
-            capture_output=True, text=True, timeout=5
+            capture_output=True, text=True, timeout=5,
+            creationflags=_hw_flags
         )
         if result.returncode == 0:
             lines = result.stdout.strip().split('\n')
@@ -85,7 +90,8 @@ def _get_hardware() -> dict:
             import subprocess
             result = subprocess.run(
                 ["rocm-smi", "--showmeminfo", "vram", "--json"],
-                capture_output=True, text=True, timeout=5
+                capture_output=True, text=True, timeout=5,
+                creationflags=_hw_flags
             )
             if result.returncode == 0:
                 import json
@@ -213,7 +219,7 @@ def get_recommended_model() -> str:
     if vram_gb > 0:
         for min_vram, models in VRAM_MODEL_MATRIX:
             if vram_gb >= min_vram:
-                result = _find_best_available(models, installed)
+                result = _find_best_available(models, installed)    
                 if result:
                     return result
                 # Return preferred even if not installed
