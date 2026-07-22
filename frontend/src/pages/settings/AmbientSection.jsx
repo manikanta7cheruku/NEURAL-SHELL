@@ -1,21 +1,8 @@
-/**
- * frontend/src/pages/settings/AmbientSection.jsx
- *
- * Controls the opacity of the conversation overlay panel near the orb.
- * Saves immediately to server on click (no Save Changes needed).
- * Also updates local state so the save button does not overwrite it.
- *
- * PROPS:
- *   local    full config clone
- *   setLocal setter for local config
- */
-
 import api from '../../api';
+import { Layers } from 'lucide-react';
 
 export default function AmbientSection({ local, setLocal }) {
-
   const saveOpacity = async (value) => {
-    // Update local state immediately for responsive feel
     setLocal(prev => {
       if (!prev) return prev;
       return {
@@ -23,64 +10,71 @@ export default function AmbientSection({ local, setLocal }) {
         ambient_panel: { ...(prev.ambient_panel || {}), opacity: value }
       };
     });
-    // Persist to server immediately
     try {
       await api.put('/config', {
         updates: { ambient_panel: { opacity: value } }
       });
-    } catch (e) {
-      console.error('[AMBIENT] Save failed:', e);
-    }
+    } catch (e) { console.error('[AMBIENT] Save failed:', e); }
   };
 
+  const current = local?.ambient_panel?.opacity ?? 0.65;
+
   return (
-    <div className="bg-s-card border border-s-border rounded p-4">
-      <div className="flex items-center justify-between mb-3">
+    <div className="bg-white/[0.02] border border-white/8 rounded-2xl overflow-hidden">
+      <div className="px-5 py-4 border-b border-white/[0.05] flex items-center gap-2.5">
+        <div className="w-7 h-7 rounded-lg bg-white/[0.04] border border-white/8
+                        flex items-center justify-center">
+          <Layers size={13} className="text-white/45" />
+        </div>
         <div>
-          <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium">
-            Ambient Panel
-          </div>
-          <div className="text-[9px] text-s-text-4 mt-0.5">
-            The conversation overlay near the orb
-          </div>
+          <h2 className="text-[12px] font-semibold text-white/85">Ambient Panel</h2>
+          <p className="text-[9px] text-white/35 mt-0.5">The overlay panel near the orb</p>
         </div>
       </div>
 
-      <div className="flex items-center justify-between">
+      <div className="p-5 space-y-4">
         <div>
-          <div className="text-[11px] text-s-text-2">Background Opacity</div>
-          <div className="text-[9px] text-s-text-4 mt-0.5">
-            How transparent the panel appears
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <div className="text-[11px] text-white/80 font-medium">Background Opacity</div>
+              <div className="text-[9px] text-white/35 mt-0.5">How transparent the panel appears</div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-2">
+            {[
+              { label: 'Ghost', value: 0.4,  desc: 'Barely visible' },
+              { label: 'Dim',   value: 0.65, desc: 'Balanced' },
+              { label: 'Solid', value: 0.85, desc: 'Fully readable' },
+            ].map(({ label, value, desc }) => {
+              const isActive = Math.abs(current - value) < 0.13;
+              return (
+                <button
+                  key={label}
+                  onClick={() => saveOpacity(value)}
+                  className={`p-3 rounded-xl border transition-all duration-200 text-left
+                    ${isActive
+                      ? 'bg-s-accent/8 border-s-accent/25'
+                      : 'bg-white/[0.02] border-white/8 hover:border-white/15 hover:bg-white/[0.04]'}`}
+                >
+                  <div className={`text-[11px] font-semibold
+                    ${isActive ? 'text-s-accent' : 'text-white/70'}`}>
+                    {label}
+                  </div>
+                  <div className="text-[8.5px] text-white/35 mt-0.5">{desc}</div>
+                  <div className="text-[8px] text-white/25 mt-1 font-mono">
+                    {Math.round(value * 100)}%
+                  </div>
+                </button>
+              );
+            })}
           </div>
         </div>
-        <div className="flex rounded-md border border-s-border overflow-hidden">
-          {[
-            { label: 'Ghost', value: 0.4  },
-            { label: 'Dim',   value: 0.65 },
-            { label: 'Solid', value: 0.85 },
-          ].map(({ label, value }) => {
-            const current  = local?.ambient_panel?.opacity ?? 0.65;
-            const isActive = Math.abs(current - value) < 0.13;
-            return (
-              <button
-                key={label}
-                onClick={() => saveOpacity(value)}
-                className={`px-3 py-1.5 text-[9px] font-medium transition-all border-r border-s-border/50 last:border-r-0 ${
-                  isActive
-                    ? 'bg-s-accent text-white'
-                    : 'bg-s-bg text-s-text-4 hover:bg-s-card-h hover:text-s-text-3'
-                }`}
-              >
-                {label}
-              </button>
-            );
-          })}
-        </div>
-      </div>
 
-      <p className="text-[9px] text-s-text-4 mt-2">
-        Changes apply immediately.
-      </p>
+        <p className="text-[9px] text-white/30 italic border-t border-white/[0.04] pt-3">
+          Changes apply immediately.
+        </p>
+      </div>
     </div>
   );
 }
