@@ -193,7 +193,11 @@ def get_device_fingerprint() -> str:
     try:
         # Get CPU serial (Windows)
         if platform.system() == "Windows":
-            cpu = subprocess.check_output("wmic cpu get processorid", shell=True).decode().split("\n")[1].strip()
+            cpu = subprocess.check_output(
+                ["wmic", "cpu", "get", "processorid"],
+                creationflags=0x08000000,
+                stdin=subprocess.DEVNULL,
+            ).decode().split("\n")[1].strip()
         else:
             cpu = "unknown"
         
