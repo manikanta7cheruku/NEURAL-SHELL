@@ -299,11 +299,18 @@ def execute_trigger_action(trigger):
             if not paths_list:
                 return False, "No file specified"
 
+            opened = []
+            missing = []
             for path in paths_list:
                 if os.path.exists(path):
                     os.startfile(path)
+                    opened.append(path)
+                else:
+                    missing.append(path)
 
-            return True, f"Opened {len(paths_list)} file{'s' if len(paths_list) > 1 else ''}"
+            if not opened:
+                return False, f"File not found: {missing[0]}"
+            return True, f"Opened {len(opened)} file{'s' if len(opened) > 1 else ''}"
 
         elif action_type == "open_folder":
             paths_list = action_data.get("paths", [])
@@ -314,11 +321,18 @@ def execute_trigger_action(trigger):
             if not paths_list:
                 return False, "No folder specified"
 
+            opened = []
+            missing = []
             for path in paths_list:
                 if os.path.exists(path):
                     subprocess.Popen(['explorer', path])
+                    opened.append(path)
+                else:
+                    missing.append(path)
 
-            return True, f"Opened {len(paths_list)} folder{'s' if len(paths_list) > 1 else ''}"
+            if not opened:
+                return False, f"Folder not found: {missing[0]}"
+            return True, f"Opened {len(opened)} folder{'s' if len(opened) > 1 else ''}"
 
         elif action_type == "open_workspace":
             workspace_id   = action_data.get("workspace_id")
@@ -357,7 +371,14 @@ def execute_trigger_action(trigger):
             cmd = action_data.get("command", "")
             if not cmd:
                 return False, "No command specified"
-            subprocess.Popen(cmd, shell=True)
+            CREATE_NO_WINDOW = 0x08000000
+            subprocess.Popen(
+                cmd,
+                shell=True,
+                creationflags=CREATE_NO_WINDOW,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
             return True, f"Executed: {cmd[:50]}"
 
         elif action_type == "seven_action":
