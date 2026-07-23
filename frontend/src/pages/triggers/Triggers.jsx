@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { Plus, Keyboard, Mic, Zap, List, X } from 'lucide-react';
+import { createPortal } from 'react-dom';
 import useTriggers from '../../stores/useTriggers';
 import TriggerCard from './TriggerCard';
 import TriggerForm from './TriggerForm';
@@ -28,10 +29,12 @@ export default function Triggers() {
   const [tab,        setTab]        = useState('triggers');
   const [filter,     setFilter]     = useState('all');
   const [showNew,    setShowNew]    = useState(false);
+  const [closingNew, setClosingNew] = useState(false);
   const [editingId,  setEditingId]  = useState(null);
   const [compact,    setCompact]    = useState(false);
   const [reveal,     setReveal]     = useState(false);
-  const formRef = useRef(null);
+  const formRef    = useRef(null);
+  const newFormRef = useRef(null);
 
   useEffect(() => {
     fetchTriggers();
@@ -61,7 +64,7 @@ export default function Triggers() {
     };
   }, [filter, tab]);
 
-  // Scroll inline form into view
+  // Scroll inline edit form into view
   useEffect(() => {
     if (editingId && formRef.current) {
       setTimeout(() => {
@@ -69,6 +72,15 @@ export default function Triggers() {
       }, 50);
     }
   }, [editingId]);
+
+  // Scroll new trigger form into view
+  useEffect(() => {
+    if (showNew && newFormRef.current) {
+      setTimeout(() => {
+        newFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 50);
+    }
+  }, [showNew]);
 
   // Only show compact toggle in hotkey filter
   const showCompactToggle = filter === 'hotkey';
@@ -105,7 +117,14 @@ export default function Triggers() {
   };
 
   const handleCancelEdit = () => setEditingId(null);
-  const handleCancelNew  = () => setShowNew(false);
+
+  const handleCancelNew = () => {
+    setClosingNew(true);
+    setTimeout(() => {
+      setShowNew(false);
+      setClosingNew(false);
+    }, 220);
+  };
 
   // Build rows of 2 with inline form injection
   const buildRows = () => {
@@ -143,8 +162,8 @@ export default function Triggers() {
           </div>
         </div>
 
-        {tab === 'triggers' && !showNew && !editingId && (
-          <button onClick={() => setShowNew(true)}
+        {tab === 'triggers' && !showNew && (
+          <button onClick={() => { setEditingId(null); setShowNew(true); }}
                   className="flex items-center gap-1.5 px-3.5 py-1.5
                              bg-s-accent/8 border border-s-accent/15
                              text-[10px] text-s-accent font-medium rounded-lg
@@ -188,8 +207,12 @@ export default function Triggers() {
         {tab === 'triggers' && (
           <>
             {/* New trigger form */}
-            {showNew && (
-              <div className="mb-4">
+            {(showNew || closingNew) && (
+              <div ref={newFormRef}
+                   className={`mb-4 transition-all duration-220 ease-out origin-top
+                               ${closingNew
+                                 ? 'opacity-0 scale-y-95 pointer-events-none'
+                                 : 'opacity-100 scale-y-100'}`}>
                 <div className="grid grid-cols-2 gap-3">
                   <TriggerForm
                     initial={null}
