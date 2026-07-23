@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
-import { Plus, Keyboard, Mic, Zap, List } from 'lucide-react';
+import { Plus, Keyboard, Mic, Zap, List, X } from 'lucide-react';
 import useTriggers from '../../stores/useTriggers';
 import TriggerCard from './TriggerCard';
 import TriggerForm from './TriggerForm';
@@ -41,17 +41,24 @@ export default function Triggers() {
 
   // Two-phase transition: exit old cards → enter new cards
   const [visible, setVisible] = useState(true);
+  const transitionRef = useRef(false);
 
   useEffect(() => {
-    setVisible(false); // phase 1: fade out current cards
+    if (transitionRef.current) return;
+    transitionRef.current = true;
+    setVisible(false);
     const t = setTimeout(() => {
       setReveal(false);
       requestAnimationFrame(() => {
         setReveal(true);
-        setVisible(true); // phase 2: fade in new cards
+        setVisible(true);
+        transitionRef.current = false;
       });
-    }, 200); // exit duration
-    return () => clearTimeout(t);
+    }, 200);
+    return () => {
+      clearTimeout(t);
+      transitionRef.current = false;
+    };
   }, [filter, tab]);
 
   // Scroll inline form into view
@@ -72,6 +79,14 @@ export default function Triggers() {
     if (filter === 'audio')  return !!t.audio_pattern;
     return true;
   });
+
+  const [deleteError, setDeleteError] = useState('');
+
+  const handleDelete = async (id) => {
+    setDeleteError('');
+    const r = await removeTrigger(id);
+    if (!r.ok) setDeleteError(r.msg || 'Failed to delete trigger. Please try again.');
+  };
 
   const handleEdit = (trigger) => {
     setShowNew(false);
@@ -97,10 +112,10 @@ export default function Triggers() {
     const rows = [];
     for (let i = 0; i < filtered.length; i += 2) {
       const pair = filtered.slice(i, i + 2);
-      rows.push({ type: 'cards', items: pair, startIdx: i });
+      rows.push({ type: 'cards', items: pair, startIdx: i, key: pair.map(t => t.id).join('-') });
       const editedInRow = pair.find(t => t.id === editingId);
       if (editedInRow) {
-        rows.push({ type: 'form', trigger: editedInRow });
+        rows.push({ type: 'form', trigger: editedInRow, key: `form-${editedInRow.id}` });
       }
     }
     return rows;
@@ -186,6 +201,18 @@ export default function Triggers() {
               </div>
             )}
 
+            {/* Delete error banner */}
+            {deleteError && (
+              <div className="mb-3 flex items-center justify-between px-3 py-2 rounded-lg
+                              bg-white/[0.03] border border-white/8">
+                <span className="text-[9px] text-white/50">{deleteError}</span>
+                <button onClick={() => setDeleteError('')}
+                        className="text-white/25 hover:text-white/50 transition-colors ml-3">
+                  <X size={10} />
+                </button>
+              </div>
+            )}
+
             {/* Filters + compact toggle */}
             {!showNew && (
               <div className="flex items-center justify-between mb-4">
@@ -195,7 +222,7 @@ export default function Triggers() {
                                f.key==='voice' ? stats.voice : stats.audio;
                     return (
                       <button key={f.key}
-                              onClick={() => { setFilter(f.key); setCompact(false); }}
+                              onClick={() => { setFilter(f.key); if (f.key !== 'hotkey') setCompact(false); }}
                               className={`px-2.5 py-1 rounded-md text-[9px] font-medium transition-all duration-150
                                 ${filter === f.key
                                   ? 'bg-white/6 text-white/70 border border-white/10'
@@ -263,8 +290,9 @@ export default function Triggers() {
                       compact
                       isEditing={t.id === editingId}
                       onFire={fireTrigger}
+                      onRefresh={fetchTriggers}
                       onToggle={(id, en) => updateTrigger(id, { enabled: en })}
-                      onDelete={removeTrigger}
+                      onDelete={handleDelete}
                       onEdit={handleEdit}
                     />
                   </div>
@@ -274,10 +302,10 @@ export default function Triggers() {
               /* Full card grid with inline edit */
               <div className={`space-y-3 transition-all duration-400 ease-out
                                ${reveal ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-3'}`}>
-                {buildRows().map((row, rowIdx) => {
+                {buildRows().map((row) => {
                   if (row.type === 'cards') {
                     return (
-                      <div key={`row-${rowIdx}`} className="grid grid-cols-2 gap-3">
+                      <div key={row.key} className="grid grid-cols-2 gap-3">
                         {row.items.map((t, i) => (
                           <div key={t.id}
                                style={{
@@ -291,8 +319,9 @@ export default function Triggers() {
                               trigger={t}
                               isEditing={t.id === editingId}
                               onFire={fireTrigger}
+                              onRefresh={fetchTriggers}
                               onToggle={(id, en) => updateTrigger(id, { enabled: en })}
-                              onDelete={removeTrigger}
+                              onDelete={handleDelete}
                               onEdit={handleEdit}
                             />
                           </div>
@@ -304,7 +333,7 @@ export default function Triggers() {
 
                   if (row.type === 'form') {
                     return (
-                      <div key={`form-${rowIdx}`} ref={formRef}
+                      <div key={row.key} ref={formRef}
                            className="grid grid-cols-2 gap-3 animate-[formReveal_250ms_ease-out_forwards]">
                         <TriggerForm
                           initial={row.trigger}
