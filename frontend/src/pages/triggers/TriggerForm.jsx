@@ -159,11 +159,15 @@ export default function TriggerForm({ initial, onSave, onCancel, workspaces }) {
           <label className="text-[8px] text-white/35 uppercase tracking-widest font-semibold mb-1 block">
             Name
           </label>
-          <input value={name} onChange={e => setName(e.target.value)}
+          <input value={name} onChange={e => setName(e.target.value.slice(0, 60))}
                  placeholder="Focus Mode, Morning Setup, Quick Chrome..."
+                 maxLength={60}
                  className="w-full bg-white/[0.03] border border-white/8 rounded-lg px-3 py-2
                             text-[11px] text-white/80 placeholder-white/20 outline-none
                             focus:border-white/15 transition-colors" />
+          {name.length >= 50 && (
+            <p className="text-[8px] text-white/25 mt-1 text-right">{name.length}/60</p>
+          )}
         </div>
 
         {/* Action type */}
@@ -175,7 +179,22 @@ export default function TriggerForm({ initial, onSave, onCancel, workspaces }) {
             {Object.entries(ACTION_CONFIG).map(([key, cfg]) => {
               const Icon = ICON_MAP[cfg.icon] || Zap;
               return (
-                <button key={key} onClick={() => setActionType(key)}
+                <button key={key} onClick={() => {
+                  if (key === actionType) return;
+                  const hasData =
+                    (actionType === 'open_app'    && apps.length > 0)    ||
+                    (actionType === 'open_url'    && urls.length > 0)    ||
+                    ((actionType === 'open_file' || actionType === 'open_folder') && paths.length > 0) ||
+                    (actionType === 'run_command' && command.trim())      ||
+                    (actionType === 'seven_action' && action.trim());
+                  if (hasData) {
+                    const ok = window.confirm(
+                      'Switching action type will clear your current action data. Continue?'
+                    );
+                    if (!ok) return;
+                  }
+                  setActionType(key);
+                }}
                         className={`flex flex-col items-center gap-1.5 py-2.5 px-2 rounded-lg
                                     text-[8px] transition-all duration-150
                           ${actionType === key
@@ -304,10 +323,15 @@ export default function TriggerForm({ initial, onSave, onCancel, workspaces }) {
               <span className="text-[10px] text-white/30 flex-shrink-0 font-medium">Seven</span>
               <input value={voicePhrase}
                      onChange={e => setVoicePhrase(e.target.value)}
-                     placeholder="type a word (e.g., focus, chrome, morning)"
+                     placeholder="focus, open chrome, morning setup..."
                      className="flex-1 bg-white/[0.03] border border-white/8 rounded-lg px-3 py-2
                                 text-[10px] text-white/70 placeholder-white/20 outline-none
                                 focus:border-white/15 transition-colors" />
+              {voicePhrase.trim() && (
+                <span className="text-[8px] text-white/20 flex-shrink-0 font-mono whitespace-nowrap">
+                  = "Seven {voicePhrase.trim()}"
+                </span>
+              )}
             </div>
 
             {/* Audio (snap/clap) */}
