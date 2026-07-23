@@ -156,18 +156,46 @@ def _speak_piper(text, voice_id, speed=165):
         length_scale = round(1.0 - (speed - 165) / 275, 2)
         length_scale = max(0.5, min(2.0, length_scale))
 
-        result = subprocess.run(
+        # Use Popen with DETACHED_PROCESS | CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP
+        # This combination fully suppresses conhost.exe for console-subsystem binaries
+        _si = None
+        _cflags = 0
+        if sys.platform == 'win32':
+            _si = subprocess.STARTUPINFO()
+            _si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            _si.wShowWindow = 0
+            # DETACHED_PROCESS (0x8) + CREATE_NO_WINDOW (0x8000000) + CREATE_NEW_PROCESS_GROUP (0x200)
+            _cflags = 0x08000000 | 0x00000008 | 0x00000200
+
+        proc = subprocess.Popen(
             [
                 piper_exe,
                 "--model",        model_path,
                 "--output_file",  tmp_path,
                 "--length_scale", str(length_scale),
             ],
-            input=text.encode("utf-8"),
-            capture_output=True,
-            timeout=30,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             cwd=piper_dir,
+            startupinfo=_si,
+            creationflags=_cflags,
+            close_fds=True,
         )
+        try:
+            stdout_data, stderr_data = proc.communicate(
+                input=text.encode("utf-8"), timeout=30
+            )
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            stdout_data, stderr_data = proc.communicate()
+
+        class _R:
+            pass
+        result = _R()
+        result.returncode = proc.returncode
+        result.stdout = stdout_data
+        result.stderr = stderr_data
 
         if result.returncode != 0:
             err = result.stderr.decode("utf-8", errors="replace")
@@ -214,10 +242,19 @@ def _play_wav(wav_path):
             f"$player = New-Object System.Media.SoundPlayer('{wav_path}'); "
             f"$player.PlaySync();"
         )
+        _si2 = None
+        _cflags2 = 0
+        if sys.platform == 'win32':
+            _si2 = subprocess.STARTUPINFO()
+            _si2.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            _si2.wShowWindow = 0
+            _cflags2 = 0x08000000
         subprocess.run(
             ["powershell", "-NoProfile", "-Command", ps_script],
             capture_output=True,
             timeout=60,
+            startupinfo=_si2,
+            creationflags=_cflags2,
         )
     except Exception as e:
         print(f"[SPEAKER] PowerShell fallback error: {e}", file=sys.stderr)
