@@ -97,8 +97,17 @@ export default function ChromeTabSyncCard() {
 
   useEffect(() => {
     checkStatus();
-    const id = setInterval(checkStatus, 5000);
-    return () => clearInterval(id);
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') checkStatus();
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    const id = setInterval(() => {
+      if (document.visibilityState === 'visible') checkStatus();
+    }, 5000);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
   }, []);
 
   const checkStatus = async () => {
@@ -119,23 +128,32 @@ export default function ChromeTabSyncCard() {
     } catch {}
   };
 
+  const [setupError, setSetupError] = useState('');
+
   const handleEnable = async () => {
     setLoading(true);
+    setSetupError('');
     try {
       const r = await fetch('http://127.0.0.1:7777/api/chrome/setup/prepare', { method: 'POST' });
       const data = await r.json();
       if (data.success) { setExtPath(data.path); setStep(1); }
-    } catch {}
+      else setSetupError(data.message || 'Setup failed. Try again.');
+    } catch {
+      setSetupError('Could not reach Seven backend. Is it running?');
+    }
     setLoading(false);
   };
 
   const handleDisable = async () => {
+    setSetupError('');
     try {
       await fetch('http://127.0.0.1:7777/api/chrome/setup/uninstall', { method: 'POST' });
       try { await fetch('http://127.0.0.1:7777/api/chrome/tabs/clear', { method: 'POST' }); } catch {}
       setStatus(null); setStep(0);
       setTimeout(checkStatus, 2000);
-    } catch {}
+    } catch {
+      setSetupError('Failed to remove tab sync. Try again.');
+    }
   };
 
   const copyPath = () => { if (extPath) navigator.clipboard.writeText(extPath); };
@@ -290,6 +308,9 @@ export default function ChromeTabSyncCard() {
           {loading ? 'Preparing...' : 'Setup'}
         </button>
       </div>
+      {setupError && (
+        <p className="mt-2 text-[8px] text-white/40 px-1">{setupError}</p>
+      )}
     </div>
   );
 }
