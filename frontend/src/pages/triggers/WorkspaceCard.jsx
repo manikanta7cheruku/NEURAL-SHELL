@@ -1,9 +1,11 @@
 import { useState } from 'react';
 import { RotateCcw, Trash2, Layout } from 'lucide-react';
+import ConfirmDialog from '../../components/ConfirmDialog';
 
 export default function WorkspaceCard({ workspace, onRestore, onDelete }) {
   const [restoring, setRestoring] = useState(false);
   const [hovered,   setHovered]   = useState(false);
+  const [confirm,   setConfirm]   = useState(false);
   const apps = workspace.apps || [];
 
   const handleRestore = async () => {
@@ -58,11 +60,7 @@ export default function WorkspaceCard({ workspace, onRestore, onDelete }) {
               <RotateCcw size={9} />
               {restoring ? 'Opening...' : 'Restore'}
             </button>
-            <button onClick={() => {
-                      if (window.confirm(`Delete workspace "${workspace.name}"? This cannot be undone.`)) {
-                        onDelete(workspace.id);
-                      }
-                    }}
+            <button onClick={() => setConfirm(true)}
                     className="p-1.5 rounded-lg text-white/25 hover:text-white/60
                                hover:bg-white/[0.04] transition-all">
               <Trash2 size={10} />
@@ -70,6 +68,14 @@ export default function WorkspaceCard({ workspace, onRestore, onDelete }) {
           </div>
         </div>
       </div>
+      <ConfirmDialog
+        open={confirm}
+        title="Delete Workspace"
+        message={`"${workspace.name}" and all its saved app configurations will be permanently removed.`}
+        confirmLabel="Delete"
+        onConfirm={() => { setConfirm(false); onDelete(workspace.id); }}
+        onCancel={() => setConfirm(false)}
+      />
     </div>
   );
 }
