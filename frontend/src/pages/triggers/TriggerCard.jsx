@@ -2,16 +2,14 @@ import { useState } from 'react';
 import {
   Keyboard, Mic, Radio, Play, Trash2, Pencil,
   ToggleLeft, ToggleRight, Clock,
-} from 'lucide-react';
-import { ACTION_CONFIG, formatHotkey, timeAgo } from './helpers';
-import {
   Zap, Globe, FileText, FolderOpen, Layout,
   Terminal as TermIcon, Settings2,
 } from 'lucide-react';
+import { ACTION_CONFIG, formatHotkey, timeAgo } from './helpers';
 
 const ICON_MAP = { Zap, Globe, FileText, FolderOpen, Layout, Terminal: TermIcon, Settings2 };
 
-export default function TriggerCard({ trigger, onFire, onToggle, onDelete, onEdit, isEditing, compact }) {
+export default function TriggerCard({ trigger, onFire, onToggle, onDelete, onEdit, onRefresh, isEditing, compact }) {
   const [firing,  setFiring]  = useState(false);
   const [hovered, setHovered] = useState(false);
 
@@ -29,6 +27,7 @@ export default function TriggerCard({ trigger, onFire, onToggle, onDelete, onEdi
   const handleFire = async () => {
     setFiring(true);
     await onFire(trigger.id);
+    if (onRefresh) await onRefresh();
     setTimeout(() => setFiring(false), 2000);
   };
 
@@ -191,7 +190,11 @@ export default function TriggerCard({ trigger, onFire, onToggle, onDelete, onEdi
                     title="Edit">
               <Pencil size={11} />
             </button>
-            <button onClick={() => onDelete(trigger.id)}
+            <button onClick={() => {
+                      if (window.confirm(`Delete "${trigger.name}"? This cannot be undone.`)) {
+                        onDelete(trigger.id);
+                      }
+                    }}
                     className="p-1.5 rounded-lg text-white/30 hover:text-white/70
                                hover:bg-white/[0.04] transition-all"
                     title="Delete">
