@@ -248,14 +248,51 @@ def _register_trigger_startup(python: str, daemon: str):
           "Daemon will not auto-start at login. Reinstall Seven or check admin rights.")
 
 
+def _task_already_registered(task_name: str, exe_path: str) -> bool:
+    """
+    Check if Task Scheduler already has this task pointing to the correct exe.
+    Returns True if task exists and exe matches — skip re-registration.
+    """
+    try:
+        si = subprocess.STARTUPINFO()
+        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        si.wShowWindow = 0  # SW_HIDE
+
+        result = subprocess.run(
+            ["schtasks", "/query", "/tn", task_name, "/fo", "LIST"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            stdin=subprocess.DEVNULL,
+            startupinfo=si,
+            creationflags=0x08000000,
+        )
+        if result.returncode != 0:
+            return False  # task does not exist
+
+        # Task exists — check if exe path matches
+        exe_lower = exe_path.lower()
+        output_lower = result.stdout.lower()
+        if exe_lower in output_lower:
+            return True  # correct task already registered
+
+        return False  # task exists but points to wrong exe
+    except Exception:
+        return False
+
+
 def _register_via_xml(task_name: str, exe_path: str, arg_path: str) -> bool:
     """
     Register a scheduled task via XML definition.
-    XML is universally reliable and handles quoting correctly.
-    Task triggers at user logon, runs highest privilege current user has.
+    Skips registration if task already exists with correct exe.
+    Uses STARTUPINFO to suppress schtasks console window.
     """
     import getpass
     import tempfile
+
+    # Skip if already correctly registered — avoids schtasks flash on every startup
+    if _task_already_registered(task_name, exe_path):
+        return True
 
     user = getpass.getuser()
 
@@ -312,13 +349,24 @@ def _register_via_xml(task_name: str, exe_path: str, arg_path: str) -> bool:
 </Task>
 '''
 
-    tmp = tempfile.NamedTemporaryFile(mode='w', suffix='.xml', delete=False, encoding='utf-16')
+    tmp = tempfile.NamedTemporaryFile(
+        mode='w', suffix='.xml', delete=False, encoding='utf-16'
+    )
     try:
         tmp.write(xml)
         tmp.close()
+
+        si = subprocess.STARTUPINFO()
+        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        si.wShowWindow = 0  # SW_HIDE
+
         result = subprocess.run(
             ["schtasks", "/create", "/f", "/tn", task_name, "/xml", tmp.name],
-            capture_output=True, text=True, timeout=15,
+            capture_output=True,
+            text=True,
+            timeout=15,
+            stdin=subprocess.DEVNULL,
+            startupinfo=si,
             creationflags=0x08000000,
         )
         if result.returncode == 0:
