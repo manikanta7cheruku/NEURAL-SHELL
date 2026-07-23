@@ -1102,12 +1102,12 @@ def _exec_open_app(data):
         except Exception as e:
             print(f"[TRIGGER DAEMON] AppOpener failed for {app_name}: {e}")
 
-        # Method 3: shell start
+        # Method 3: os.startfile (no shell, no cmd, no window)
         try:
-            subprocess.Popen(f'start {app_name}', shell=True)
-            print(f"[TRIGGER DAEMON] Opened via start: {app_name}")
+            os.startfile(app_name)
+            print(f"[TRIGGER DAEMON] Opened via os.startfile: {app_name}")
         except Exception as e:
-            print(f"[TRIGGER DAEMON] start command failed for {app_name}: {e}")
+            print(f"[TRIGGER DAEMON] os.startfile failed for {app_name}: {e}")
 
 
 def _exec_open_url(data):
@@ -1223,7 +1223,16 @@ def _exec_run_command(data):
     """Execute a shell command."""
     cmd = data.get("command", "")
     if cmd:
-        subprocess.Popen(cmd, shell=True)
+        import sys as _sys
+        _cflags = 0x08000000 if _sys.platform == 'win32' else 0
+        subprocess.Popen(
+            cmd,
+            shell=True,
+            creationflags=_cflags,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
 
 def _set_brightness_direct(level: int):
     """Set screen brightness on laptop via WMI."""
