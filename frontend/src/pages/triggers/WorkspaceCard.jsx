@@ -58,7 +58,11 @@ export default function WorkspaceCard({ workspace, onRestore, onDelete }) {
               <RotateCcw size={9} />
               {restoring ? 'Opening...' : 'Restore'}
             </button>
-            <button onClick={() => onDelete(workspace.id)}
+            <button onClick={() => {
+                      if (window.confirm(`Delete workspace "${workspace.name}"? This cannot be undone.`)) {
+                        onDelete(workspace.id);
+                      }
+                    }}
                     className="p-1.5 rounded-lg text-white/25 hover:text-white/60
                                hover:bg-white/[0.04] transition-all">
               <Trash2 size={10} />
