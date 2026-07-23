@@ -73,12 +73,24 @@ def _spawn_speaker(text):
         f"speak_text(_text)"
     )
 
+    # Use pythonw.exe instead of python.exe to prevent console window flash
+    # sys.executable may be pythonw.exe already, but if not we force it
+    _python_exe = sys.executable
+    if sys.platform == 'win32':
+        import os as _os
+        _pythonw = _python_exe.replace('python.exe', 'pythonw.exe')
+        if _os.path.exists(_pythonw):
+            _python_exe = _pythonw
+
+    _cflags = 0x08000000 if sys.platform == 'win32' else 0
     proc = subprocess.Popen(
-        [sys.executable, "-c", run_cmd],
+        [_python_exe, "-c", run_cmd],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
+        stdin=subprocess.DEVNULL,
         cwd=app_path,
-        env=env
+        env=env,
+        creationflags=_cflags
     )
     return proc, app_path
 
