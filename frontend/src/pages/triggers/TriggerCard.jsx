@@ -6,12 +6,14 @@ import {
   Terminal as TermIcon, Settings2,
 } from 'lucide-react';
 import { ACTION_CONFIG, formatHotkey, timeAgo } from './helpers';
+import ConfirmDialog from '../../components/ConfirmDialog';
 
 const ICON_MAP = { Zap, Globe, FileText, FolderOpen, Layout, Terminal: TermIcon, Settings2 };
 
 export default function TriggerCard({ trigger, onFire, onToggle, onDelete, onEdit, onRefresh, isEditing, compact }) {
-  const [firing,  setFiring]  = useState(false);
-  const [hovered, setHovered] = useState(false);
+  const [firing,   setFiring]   = useState(false);
+  const [hovered,  setHovered]  = useState(false);
+  const [confirm,  setConfirm]  = useState(false);
 
   const ac = ACTION_CONFIG[trigger.action_type] || ACTION_CONFIG.open_app;
   const ActionIcon = ICON_MAP[ac.icon] || Zap;
@@ -190,11 +192,7 @@ export default function TriggerCard({ trigger, onFire, onToggle, onDelete, onEdi
                     title="Edit">
               <Pencil size={11} />
             </button>
-            <button onClick={() => {
-                      if (window.confirm(`Delete "${trigger.name}"? This cannot be undone.`)) {
-                        onDelete(trigger.id);
-                      }
-                    }}
+            <button onClick={() => setConfirm(true)}
                     className="p-1.5 rounded-lg text-white/30 hover:text-white/70
                                hover:bg-white/[0.04] transition-all"
                     title="Delete">
@@ -203,6 +201,14 @@ export default function TriggerCard({ trigger, onFire, onToggle, onDelete, onEdi
           </div>
         </div>
       </div>
+      <ConfirmDialog
+        open={confirm}
+        title="Delete Trigger"
+        message={`"${trigger.name}" will be permanently removed and its hotkey or voice phrase will be freed.`}
+        confirmLabel="Delete"
+        onConfirm={() => { setConfirm(false); onDelete(trigger.id); }}
+        onCancel={() => setConfirm(false)}
+      />
     </div>
   );
 }
