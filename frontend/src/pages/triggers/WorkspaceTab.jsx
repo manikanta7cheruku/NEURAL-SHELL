@@ -96,8 +96,12 @@ export default function WorkspaceTab({ workspaces, onScan, onSave, onRestore, on
                    animationDelay: `${i * 50}ms`,
                    animationFillMode: 'both',
                  }}
-                 className={reveal ? 'animate-[cardReveal_350ms_ease-out]' : 'opacity-0 transition-opacity duration-200'}>
-              <WorkspaceCard workspace={w} onRestore={onRestore} onDelete={onDelete} />
+                 className={`transition-opacity duration-200 ease-out ${reveal ? 'animate-[cardReveal_350ms_ease-out] opacity-100' : 'opacity-0'}`}>
+              <WorkspaceCard workspace={w} onRestore={onRestore} onDelete={(id) => {
+                if (window.confirm(`Delete workspace "${w.name}"? This cannot be undone.`)) {
+                  onDelete(id);
+                }
+              }} />
             </div>
           ))}
         </div>
