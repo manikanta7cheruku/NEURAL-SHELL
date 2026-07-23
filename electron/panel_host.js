@@ -108,6 +108,7 @@ function startPanelServer() {
     cwd:         PROJECT_ROOT,
     windowsHide: true,
     stdio:       ['pipe', 'pipe', 'pipe'],
+    ...(process.platform === 'win32' ? { creationflags: 0x08000000 } : {}),
     env: {
       ...process.env,
       PYTHONUNBUFFERED:  '1',
@@ -148,9 +149,9 @@ function stopPanelServer() {
   if (!panelServer) return;
   try {
     if (process.platform === 'win32') {
-      spawn('taskkill', ['/pid', panelServer.pid.toString(), '/f', '/t'], {
+      const { execFile: _tk } = require('child_process');
+      _tk('taskkill', ['/pid', panelServer.pid.toString(), '/f', '/t'], {
         windowsHide: true,
-        stdio: 'ignore'
       });
     } else {
       panelServer.kill('SIGTERM');
