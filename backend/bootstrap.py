@@ -109,7 +109,8 @@ def _ensure_pip(python_exe):
     # Test if pip already works
     result = subprocess.run(
         [python_exe, '-m', 'pip', '--version'],
-        capture_output=True
+        capture_output=True,
+        creationflags=0x08000000 if platform.system() == 'Windows' else 0
     )
     if result.returncode == 0:
         print("[BOOTSTRAP] pip already available.")
@@ -132,7 +133,8 @@ def _ensure_pip(python_exe):
     result = subprocess.run(
         [python_exe, get_pip_path, '--no-warn-script-location'],
         capture_output=True,
-        text=True
+        text=True,
+        creationflags=0x08000000 if platform.system() == 'Windows' else 0
     )
 
     if result.returncode != 0:
@@ -199,7 +201,8 @@ def check_packages_installed():
     for pkg in critical:
         result = subprocess.run(
             [python, '-c', f'import {pkg.replace("-", "_")}'],
-            capture_output=True
+            capture_output=True,
+            creationflags=0x08000000 if platform.system() == 'Windows' else 0
         )
         if result.returncode != 0:
             print(f"[BOOTSTRAP] Missing: {pkg}")
@@ -234,7 +237,8 @@ def install_packages():
     _set('packages', current='Upgrading pip...', progress=3)
     subprocess.run(
         [python_exe, '-m', 'pip', 'install', '--upgrade', 'pip', '--quiet'],
-        capture_output=True
+        capture_output=True,
+        creationflags=0x08000000 if platform.system() == 'Windows' else 0
     )
 
         # ── Step 3b: Ensure critical runtime dependencies exist ──
@@ -267,7 +271,8 @@ def install_packages():
              "--quiet", "--no-warn-script-location"],
             capture_output=True,
             text=True,
-            timeout=120
+            timeout=120,
+            creationflags=0x08000000 if platform.system() == 'Windows' else 0
         )
 
         if result.returncode != 0:
@@ -304,7 +309,8 @@ def install_packages():
              '--quiet', '--no-warn-script-location'],
             capture_output=True,
             text=True,
-            timeout=300
+            timeout=300,
+            creationflags=0x08000000 if platform.system() == 'Windows' else 0
         )
 
         if result.returncode != 0:
@@ -334,7 +340,8 @@ def is_ollama_installed():
         capture_output=True,
         text=True,
         encoding='utf-8',
-        errors='ignore'
+        errors='ignore',
+        creationflags=0x08000000 if platform.system() == 'Windows' else 0
     )
     if result.returncode == 0 and result.stdout.strip():
         return True
@@ -440,7 +447,8 @@ def install_ollama_silent(installer_path):
         result = subprocess.run(
             [installer_path, '/S'],
             capture_output=True,
-            timeout=180
+            timeout=180,
+            creationflags=0x08000000 if platform.system() == 'Windows' else 0
         )
         if result.returncode == 0:
             _set('ollama_install', status='done', progress=100)
