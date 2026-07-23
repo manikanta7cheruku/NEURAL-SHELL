@@ -16,6 +16,7 @@ export function formatHotkey(hk) {
 export function timeAgo(iso) {
   if (!iso) return 'Never';
   const diff = Date.now() - new Date(iso).getTime();
+  if (diff <= 0) return 'Just now';
   const m = Math.floor(diff / 60000);
   if (m < 1)  return 'Just now';
   if (m < 60) return `${m}m ago`;
