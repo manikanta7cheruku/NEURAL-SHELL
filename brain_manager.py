@@ -54,7 +54,8 @@ def detect_gpu():
              "--format=csv,noheader,nounits"],
             stderr=subprocess.DEVNULL,
             text=True,
-            timeout=5
+            timeout=5,
+            creationflags=0x08000000 if platform.system() == 'Windows' else 0
         ).strip()
         
         if output:
@@ -193,8 +194,9 @@ def download_model(model_name):
             ["ollama", "pull", model_name],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            text=True
-        )
+            text=True,
+            creationflags=0x08000000 if platform.system() == 'Windows' else 0
+        )   
         
         for line in process.stdout:
             line = line.strip()
