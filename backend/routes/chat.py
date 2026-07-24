@@ -146,26 +146,16 @@ def chat(req: ChatRequest):
             except Exception:
                 clean_response = "."
 
-        # Store conversation in memory (enforce plan limit)
+        # Conversation memory is saved by brain.py after run_pipeline returns.
+        # chat.py does NOT save here to prevent double saves.
+        # Plan limit check for conversation history happens in brain.py.
         try:
             from memory import seven_memory
-            if len(req.text.strip()) > 3 and not full_response.strip().startswith("###"):
-                clean_for_memory = re.sub(r'###\w+:\s*\S+', '', full_response).strip()
-                if clean_for_memory:
-                    try:
-                        all_convos = seven_memory.conversations.get()
-                        convo_count = len(all_convos["documents"]) if all_convos and all_convos.get("documents") else 0
-                    except Exception:
-                        convo_count = 0
-
-                    limit_check = check_limit("conversation_history", convo_count)
-                    if limit_check["allowed"]:
-                        seven_memory.store_conversation(
-                            req.text.strip(), clean_for_memory,
-                            user_id=req.speaker_id
-                        )
-                    else:
-                        print(f"[API] Conversation memory full ({convo_count}/{limit_check['limit']}) — tier: {limit_check['tier']}")
+            all_convos = seven_memory.conversations.get()
+            convo_count = len(all_convos["documents"]) if all_convos and all_convos.get("documents") else 0
+            limit_check = check_limit("conversation_history", convo_count)
+            if not limit_check["allowed"]:
+                print(f"[API] Conversation memory full ({convo_count}/{limit_check['limit']}) — tier: {limit_check['tier']}")
         except Exception:
             pass
 
