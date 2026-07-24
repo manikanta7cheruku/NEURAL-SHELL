@@ -801,7 +801,15 @@ def _execute_trigger_complete(trigger, name, action_type, action_data,
         elif action_type == "open_workspace":
             result = _exec_open_workspace(action_data)
         elif action_type == "run_command":
-            _exec_run_command(action_data)
+            _run_data = dict(action_data)
+            hk = trigger.get("hotkey", "")
+            if hk:
+                _mods = {"ctrl", "shift", "alt", "win"}
+                _parts = [p.strip().lower() for p in hk.split("+")]
+                _keys = [p for p in _parts if p not in _mods]
+                if _keys:
+                    _run_data["hotkey_key"] = _keys[-1]
+            _exec_run_command(_run_data)
         elif action_type == "seven_action":
             _exec_seven_action(action_data)
         else:
@@ -1250,40 +1258,54 @@ def _exec_run_command(data):
         print(f"[TRIGGER DAEMON] Run command (background): {cmd[:60]}")
         return
 
-    # target=terminal — type into focused window
-    # Small delay to let the hotkey keys finish being processed
-    # so they don't appear as text before the command
-    time.sleep(0.15)
+    # target=terminal: paste command text into whatever terminal has focus.
+    # User clicks terminal first, fires hotkey, Seven pastes the command.
+    # User presses Enter themselves when ready.
+    time.sleep(0.18)
 
     try:
         import pyautogui
-        pyautogui.PAUSE = 0.02
-
-        # Type the command character by character using pyautogui
-        # typewrite() does not handle special chars well — use write() with interval
-        # For commands with special chars like && \ / use pyperclip + paste
         import subprocess as _sp
 
-        # Use clipboard paste — handles all special characters safely
-        # (&&, \, /, spaces, quotes all work correctly)
+        # Release ALL keys that were part of the hotkey combo.
+        # Both modifiers and the trigger key itself must be released
+        # before pasting. Otherwise the trigger key repeats into the
+        # terminal before the paste lands.
+        _all_keys = ['alt', 'ctrl', 'shift', 'win', 'super']
+
+        # Also release the non-modifier key from the hotkey
+        # Extract it from the action_data if available, else release
+        # common single-letter keys that could be stuck
+        _cmd_key = data.get("hotkey_key", "")
+        if _cmd_key:
+            _all_keys.append(_cmd_key)
+
+        for _mod in _all_keys:
+            try:
+                pyautogui.keyUp(_mod)
+            except Exception:
+                pass
+
+        # Wait for OS to fully process key releases before pasting
+        time.sleep(0.22)
+
+        # Copy command to clipboard using clip.exe
+        # Handles all special chars: &&, \, /, spaces, quotes
         _sp.run(
             ['clip'],
             input=cmd.encode('utf-8'),
             creationflags=0x08000000,
             check=False,
         )
-        time.sleep(0.08)
-
-        # Paste and execute
-        pyautogui.hotkey('ctrl', 'v')
         time.sleep(0.1)
-        pyautogui.press('enter')
 
-        print(f"[TRIGGER DAEMON] Run command (typed into terminal): {cmd[:60]}")
+        # Paste only. User presses Enter themselves.
+        pyautogui.hotkey('ctrl', 'v')
+
+        print(f"[TRIGGER DAEMON] Typed into terminal: {cmd[:60]}")
 
     except Exception as e:
-        print(f"[TRIGGER DAEMON] Run command type error: {e}")
-        # Fallback to background execution
+        print(f"[TRIGGER DAEMON] Terminal type error: {e}")
         import sys as _sys
         _cflags = 0x08000000 if _sys.platform == 'win32' else 0
         subprocess.Popen(
@@ -1375,12 +1397,41 @@ def _exec_seven_action(data):
                 continue
 
             # ── OPEN APP ──
-            # Patterns: "open camera", "open whatsapp", "launch chrome", "camera"
+            # Patterns: "open camera", "launch chrome", "whatsapp", "camera"
+            # Also handles bare app names with no open/launch prefix
+            # Also handles URLs: "https://..." or "youtube.com"
             open_match = re.match(
                 r'^(?:open|launch|start|run)\s+(.+)$', part
             )
-            if open_match:
-                app_name = open_match.group(1).strip()
+            app_name = open_match.group(1).strip() if open_match else None
+
+            # URL detection -- open in browser directly
+            _is_url = bool(
+                re.match(r'^https?://', part) or
+                re.match(r'^[\w\-]+\.(com|org|net|io|dev|app|co|in|gov|edu)', part)
+            )
+            if _is_url:
+                try:
+                    import webbrowser as _wb
+                    url = part if part.startswith('http') else f'https://{part}'
+                    _wb.open(url)
+                    _handled.append(f"open {url}")
+                except Exception as _ue:
+                    _unhandled.append(part)
+                continue
+
+            # Known system/volume/brightness keywords -- do not treat as app name
+            _sys_keywords = {
+                'brightness', 'volume', 'mute', 'unmute', 'media',
+                'play', 'pause', 'next', 'previous', 'stop', 'dim',
+                'show', 'tasks', 'schedule', 'screen',
+            }
+            _is_sys = any(kw in part for kw in _sys_keywords)
+
+            if open_match or (not _is_sys and app_name is None):
+                # Bare word or "open X" -- treat as app name
+                if app_name is None:
+                    app_name = part.strip()
                 try:
                     import threading as _t
                     _t.Thread(
