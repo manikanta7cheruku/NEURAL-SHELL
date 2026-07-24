@@ -352,7 +352,10 @@ class SevenMemory:
     # STORE
     # =========================================================================
 
-    def store_conversation(self, user_input, seven_response, user_id="mani"):
+    def store_conversation(self, user_input, seven_response, user_id="mani", source="chat"):
+        """
+        source: "chat" (typed in Console) or "voice" (spoken via microphone)
+        """
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         memory_id = f"conv_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
         combined_text = f"User said: {user_input} | Seven replied: {seven_response}"
@@ -363,11 +366,12 @@ class SevenMemory:
                 "seven_response":  seven_response,
                 "timestamp":       timestamp,
                 "user_id":         user_id,
-                "type":            "conversation"
+                "type":            "conversation",
+                "source":          source,
             }],
             ids=[memory_id]
         )
-        print(Fore.CYAN + f"[MEMORY] Stored conversation: '{user_input[:50]}...'")
+        print(Fore.CYAN + f"[MEMORY] Stored conversation ({source}): '{user_input[:50]}...'")
 
     def store_fact(self, fact_text, category="general", user_id="mani"):
         # ── Plan limit check ──
