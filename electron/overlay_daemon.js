@@ -41,6 +41,7 @@ app.on('window-all-closed', () => {});
 
 let notifWindow    = null;
 let arrangeWindow  = null;
+let schedWindow    = null;
 let arrangeAppNames = [];
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -153,6 +154,94 @@ function createArrangeWindow() {
   });
 
   console.log('[OVERLAY DAEMON] Arrangement window pre-loaded (400x220)');
+}
+
+function createSchedWindow() {
+  const display = screen.getPrimaryDisplay();
+  const { width: sw, height: sh } = display.workArea;
+  const W = 372;
+  const H = 140;
+
+  schedWindow = new BrowserWindow({
+    width:              W,
+    height:             H,
+    x:                  sw - W - 16,
+    y:                  sh - H - 16,
+    frame:              false,
+    transparent:        true,
+    backgroundColor:    '#00000000',
+    alwaysOnTop:        true,
+    skipTaskbar:        true,
+    resizable:          false,
+    movable:            false,
+    minimizable:        false,
+    maximizable:        false,
+    closable:           false,
+    focusable:          false,
+    hasShadow:          false,
+    show:               false,
+    roundedCorners:     true,
+    webPreferences: {
+      nodeIntegration:  false,
+      contextIsolation: true,
+      preload: path.join(__dirname, 'notif_preload.js'),
+      backgroundThrottling: false,
+    },
+  });
+
+  schedWindow.setAlwaysOnTop(true, 'pop-up-menu', 999);
+  schedWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  schedWindow.setIgnoreMouseEvents(false);
+
+  const htmlPath = path.join(__dirname, '..', 'seven_overlay', 'schedule_notification.html');
+  schedWindow.loadFile(htmlPath);
+
+  schedWindow.on('closed', () => {
+    schedWindow = null;
+    setTimeout(createSchedWindow, 500);
+  });
+
+  console.log('[OVERLAY DAEMON] Schedule notification window pre-loaded');
+}
+
+function showScheduleNotification(data) {
+  if (!schedWindow || schedWindow.isDestroyed()) {
+    console.warn('[OVERLAY DAEMON] Sched window not ready - recreating');
+    createSchedWindow();
+    setTimeout(() => showScheduleNotification(data), 400);
+    return;
+  }
+
+  try {
+    schedWindow.hide();
+    const display = screen.getPrimaryDisplay();
+    const { width: sw, height: sh } = display.workArea;
+    const W = 372;
+    const H = 140;
+    schedWindow.setPosition(sw - W - 16, sh - H - 16);
+  } catch (e) {}
+
+  const script = `
+    (function() {
+      window.__SCHED_DATA__ = ${JSON.stringify(data)};
+      const card = document.getElementById('card');
+      if (card) {
+        card.classList.remove('show', 'hiding');
+        void card.offsetWidth;
+      }
+      if (typeof window.__applyScheduleData === 'function') {
+        window.__applyScheduleData(window.__SCHED_DATA__);
+      }
+    })();
+  `;
+
+  schedWindow.webContents.executeJavaScript(script).catch((e) => {
+    console.error('[OVERLAY DAEMON] Sched inject failed:', e.message);
+  });
+
+  schedWindow.showInactive();
+  schedWindow.moveTop();
+  scheduleAutoHide(schedWindow, (data.holdMs || 8000) + 1500);
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -341,6 +430,11 @@ function handleMessage(msg, socket) {
         });
       break;
 
+    case 'sched_notif':
+      showScheduleNotification(data);
+      socket.write(JSON.stringify({ ok: true }) + '\n');
+      break;
+
     case 'ping':
       socket.write(JSON.stringify({ ok: true, pong: true }) + '\n');
       break;
@@ -476,6 +570,7 @@ app.whenReady().then(() => {
   console.log('[OVERLAY DAEMON] Starting…');
   createNotifWindow();
   createArrangeWindow();
+  createSchedWindow();
   startTCPServer();
   console.log('[OVERLAY DAEMON] Ready — overlays pre-warmed');
 });
