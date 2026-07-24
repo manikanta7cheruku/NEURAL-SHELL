@@ -5,6 +5,7 @@ import {
   Terminal as TermIcon, Settings2,
 } from 'lucide-react';
 import { ACTION_CONFIG, formatHotkey } from './helpers';
+import ConfirmDialog from '../../components/ConfirmDialog';
 
 const ICON_MAP = { Zap, Globe, FileText, FolderOpen, Layout, Terminal: TermIcon, Settings2 };
 
@@ -59,17 +60,20 @@ export default function TriggerForm({ initial, onSave, onCancel, workspaces }) {
   const [voicePhrase,  setVoicePhrase]  = useState(initial?.voice_phrase || '');
   const [audioPattern, setAudioPattern] = useState(initial?.audio_pattern || '');
   const [workspaceId,  setWorkspaceId]  = useState(initial?.action_data?.workspace_id || '');
-  const [saving,       setSaving]       = useState(false);
-  const [error,        setError]        = useState('');
-  const [recording,    setRecording]    = useState(false);
+  const [saving,          setSaving]          = useState(false);
+  const [error,           setError]           = useState('');
+  const [recording,       setRecording]       = useState(false);
+  const [switchConfirm,   setSwitchConfirm]   = useState(false);
+  const [pendingType,     setPendingType]      = useState(null);
   const hotkeyRef = useRef(null);
 
   const initData = initial?.action_data || {};
   const [apps,    setApps]    = useState(initData.apps || (initData.app ? [initData.app] : []));
   const [urls,    setUrls]    = useState(initData.urls || (initData.url ? [initData.url] : []));
   const [paths,   setPaths]   = useState(initData.paths || (initData.path ? [initData.path] : []));
-  const [command, setCommand] = useState(initData.command || '');
-  const [action,  setAction]  = useState(initData.action || '');
+  const [command,    setCommand]    = useState(initData.command || '');
+  const [cmdTarget,  setCmdTarget]  = useState(initData.target || 'terminal');
+  const [action,     setAction]     = useState(initData.action || '');
 
   const handleHotkeyCapture = (e) => {
     if (!recording) return;
@@ -119,6 +123,7 @@ export default function TriggerForm({ initial, onSave, onCancel, workspaces }) {
       case 'run_command':
         if (!command.trim()) { setError('Enter a command.'); return; }
         actionData.command = command.trim();
+        actionData.target  = cmdTarget;
         break;
       case 'seven_action':
         if (!action.trim()) { setError('Enter a Seven action.'); return; }
@@ -188,10 +193,9 @@ export default function TriggerForm({ initial, onSave, onCancel, workspaces }) {
                     (actionType === 'run_command' && command.trim())      ||
                     (actionType === 'seven_action' && action.trim());
                   if (hasData) {
-                    const ok = window.confirm(
-                      'Switching action type will clear your current action data. Continue?'
-                    );
-                    if (!ok) return;
+                    setPendingType(key);
+                    setSwitchConfirm(true);
+                    return;
                   }
                   setActionType(key);
                 }}
@@ -245,42 +249,111 @@ export default function TriggerForm({ initial, onSave, onCancel, workspaces }) {
             </select>
           )}
           {actionType === 'run_command' && (
-            <div className="space-y-1.5">
+            <div className="space-y-2">
+
+              {/* Target selector */}
+              <div className="flex items-center gap-1.5">
+                {[
+                  { key: 'terminal', label: 'Background (silent)' },
+                  { key: 'vscode',   label: 'VS Code terminal' },
+                ].map(t => (
+                  <button key={t.key}
+                          onClick={() => setCmdTarget(t.key)}
+                          className={`px-3 py-1.5 rounded-lg text-[9px] font-medium
+                                      transition-all duration-150
+                            ${cmdTarget === t.key
+                              ? 'bg-s-accent/8 text-s-accent border border-s-accent/15'
+                              : 'text-white/30 border border-white/6 hover:text-white/55 hover:bg-white/[0.03]'}`}>
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+
               <input value={command} onChange={e => setCommand(e.target.value)}
-                     placeholder="e.g., git status, npm run dev, shutdown /s /t 0"
+                     placeholder={cmdTarget === 'vscode' ? 'e.g. npm run dev, python main.py' : 'e.g. cd M:\\project && npm run dev'}
                      className="w-full bg-white/[0.03] border border-white/8 rounded-lg px-3 py-2
                                 text-[11px] text-white/80 placeholder-white/20 outline-none
                                 focus:border-white/15 transition-colors font-mono" />
-              <div className="flex flex-wrap gap-1">
-                {['git status', 'npm run dev', 'ipconfig', 'cls', 'dir'].map(ex => (
-                  <button key={ex} onClick={() => setCommand(ex)}
-                          className="text-[8px] text-white/30 bg-[#0a0a0c] border border-white/6
-                                     px-2 py-0.5 rounded hover:text-white/60 transition-all font-mono">
-                    {ex}
-                  </button>
-                ))}
+
+              <div className="px-3 py-2.5 rounded-lg bg-[#0a0a0c] border border-white/5 space-y-1.5">
+                {cmdTarget === 'vscode' ? (
+                  <>
+                    <p className="text-[8px] text-white/40 font-medium">VS Code terminal mode</p>
+                    <p className="text-[8px] text-white/30 leading-relaxed">
+                      Seven will focus your open VS Code window, open the integrated terminal if needed,
+                      and type the command for you. VS Code must already be open.
+                    </p>
+                    <p className="text-[8px] text-white/30 leading-relaxed">
+                      Example: keep VS Code open with your project, set command to
+                      <span className="text-white/55 font-mono"> npm run dev</span> and fire the trigger.
+                      Seven types it and hits Enter.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-[8px] text-white/40 font-medium">Background (silent) mode</p>
+                    <p className="text-[8px] text-white/30 leading-relaxed">
+                      Runs the command silently with no terminal window. Use for scripts, git operations,
+                      or anything that does not need you to see the output.
+                    </p>
+                    <p className="text-[8px] text-white/30 leading-relaxed">
+                      To run in a specific folder use:
+                      <span className="text-white/55 font-mono"> cd M:\your-project {"&&"} npm run build</span>
+                    </p>
+                  </>
+                )}
+                <div className="flex flex-wrap gap-1 pt-0.5">
+                  <p className="text-[7.5px] text-white/20 w-full">Quick insert:</p>
+                  {(cmdTarget === 'vscode'
+                    ? ['npm run dev', 'npm run build', 'python main.py', 'git pull', 'git status', 'npm install']
+                    : ['npm run dev', 'git pull', 'git status', 'ipconfig', 'shutdown /s /t 60', 'shutdown /a']
+                  ).map(ex => (
+                    <button key={ex} onClick={() => setCommand(ex)}
+                            className="text-[8px] text-white/30 bg-white/[0.03] border border-white/6
+                                       px-2 py-0.5 rounded hover:text-white/60 hover:bg-white/[0.05]
+                                       transition-all font-mono">
+                      {ex}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
           )}
           {actionType === 'seven_action' && (
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               <input value={action} onChange={e => setAction(e.target.value)}
-                     placeholder="e.g., show my tasks, volume 50, brightness max"
+                     placeholder="e.g., volume 50, brightness max, mute, show my tasks"
                      className="w-full bg-white/[0.03] border border-white/8 rounded-lg px-3 py-2
                                 text-[11px] text-white/80 placeholder-white/20 outline-none
                                 focus:border-white/15 transition-colors" />
-              <div className="flex flex-wrap gap-1">
-                {['show my tasks', 'volume 50', 'brightness max', 'mute', 'open chrome', 'show my schedule'].map(ex => (
-                  <button key={ex} onClick={() => setAction(ex)}
-                          className="text-[8px] text-white/30 bg-[#0a0a0c] border border-white/6
-                                     px-2 py-0.5 rounded hover:text-white/60 transition-all">
-                    {ex}
-                  </button>
-                ))}
+              <div className="px-3 py-2.5 rounded-lg bg-[#0a0a0c] border border-white/5 space-y-1.5">
+                <p className="text-[8px] text-white/40 font-medium">How to use</p>
+                <p className="text-[8px] text-white/30 leading-relaxed">
+                  Use a single direct command. Seven executes it instantly without the LLM.
+                  Use <span className="text-white/55 font-mono">Open App</span> or <span className="text-white/55 font-mono">Run Command</span> action types for launching apps or running scripts.
+                </p>
+                <p className="text-[8px] text-white/30 leading-relaxed">
+                  Best for: volume, brightness, mute, system controls, and showing Seven panels.
+                </p>
+                <div className="flex flex-wrap gap-1 pt-0.5">
+                  <p className="text-[7.5px] text-white/20 w-full">Quick insert:</p>
+                  {[
+                    'volume 50',
+                    'brightness max',
+                    'brightness 40',
+                    'mute',
+                    'show my tasks',
+                    'show my schedule',
+                  ].map(ex => (
+                    <button key={ex} onClick={() => setAction(ex)}
+                            className="text-[8px] text-white/30 bg-white/[0.03] border border-white/6
+                                       px-2 py-0.5 rounded hover:text-white/60 hover:bg-white/[0.05]
+                                       transition-all">
+                      {ex}
+                    </button>
+                  ))}
+                </div>
               </div>
-              <p className="text-[8px] text-white/20 italic">
-                Use natural language. Seven processes it like a voice command.
-              </p>
             </div>
           )}
         </div>
@@ -404,6 +477,24 @@ export default function TriggerForm({ initial, onSave, onCancel, workspaces }) {
           </button>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={switchConfirm}
+        title="Switch Action Type"
+        message="Your current action data will be cleared. This cannot be undone."
+        confirmLabel="Switch"
+        onConfirm={() => {
+          setActionType(pendingType);
+          setApps([]); setUrls([]); setPaths([]);
+          setCommand(''); setAction(''); setWorkspaceId('');
+          setSwitchConfirm(false);
+          setPendingType(null);
+        }}
+        onCancel={() => {
+          setSwitchConfirm(false);
+          setPendingType(null);
+        }}
+      />
     </div>
   );
 }
