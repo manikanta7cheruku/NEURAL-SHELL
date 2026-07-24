@@ -70,14 +70,15 @@ const useTriggers = create((set, get) => ({
   },
 
   removeTrigger: async (id) => {
+    const previous = get().triggers;
     try {
       set(s => ({ triggers: s.triggers.filter(t => t.id !== id) }));
       await api.delete(`/triggers/${id}`);
       await get().fetchStats();
       return { ok: true };
     } catch {
-      await get().fetchTriggers();
-      return { ok: false };
+      set({ triggers: previous });
+      return { ok: false, msg: 'Failed to delete trigger. Please try again.' };
     }
   },
 
