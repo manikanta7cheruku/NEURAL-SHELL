@@ -74,6 +74,7 @@ export default function TriggerForm({ initial, onSave, onCancel, workspaces }) {
   const [command,    setCommand]    = useState(initData.command || '');
   const [cmdTarget,  setCmdTarget]  = useState(initData.target || 'terminal');
   const [action,     setAction]     = useState(initData.action || '');
+  const [cmdHotkeyWarn, setCmdHotkeyWarn] = useState(false);
 
   const handleHotkeyCapture = (e) => {
     if (!recording) return;
@@ -254,8 +255,8 @@ export default function TriggerForm({ initial, onSave, onCancel, workspaces }) {
               {/* Target selector */}
               <div className="flex items-center gap-1.5">
                 {[
-                  { key: 'terminal', label: 'Background (silent)' },
-                  { key: 'vscode',   label: 'VS Code terminal' },
+                  { key: 'terminal', label: 'Type into terminal' },
+                  { key: 'background', label: 'Background (silent)' },
                 ].map(t => (
                   <button key={t.key}
                           onClick={() => setCmdTarget(t.key)}
@@ -270,24 +271,27 @@ export default function TriggerForm({ initial, onSave, onCancel, workspaces }) {
               </div>
 
               <input value={command} onChange={e => setCommand(e.target.value)}
-                     placeholder={cmdTarget === 'vscode' ? 'e.g. npm run dev, python main.py' : 'e.g. cd M:\\project && npm run dev'}
+                     placeholder={cmdTarget === 'terminal' ? 'e.g. npm run dev, python main.py, git pull' : 'e.g. cd M:\\project && npm run dev'}
                      className="w-full bg-white/[0.03] border border-white/8 rounded-lg px-3 py-2
                                 text-[11px] text-white/80 placeholder-white/20 outline-none
                                 focus:border-white/15 transition-colors font-mono" />
 
               <div className="px-3 py-2.5 rounded-lg bg-[#0a0a0c] border border-white/5 space-y-1.5">
-                {cmdTarget === 'vscode' ? (
+                {cmdTarget === 'terminal' ? (
                   <>
-                    <p className="text-[8px] text-white/40 font-medium">VS Code terminal mode</p>
+                    <p className="text-[8px] text-white/40 font-medium">Type into terminal mode</p>
                     <p className="text-[8px] text-white/30 leading-relaxed">
-                      Seven will focus your open VS Code window, open the integrated terminal if needed,
-                      and type the command for you. VS Code must already be open.
+                      Click inside any terminal first (VS Code, PowerShell, cmd, Windows Terminal),
+                      then fire the hotkey. Seven types the command and hits Enter automatically.
+                      Works in any terminal, anywhere.
                     </p>
-                    <p className="text-[8px] text-white/30 leading-relaxed">
-                      Example: keep VS Code open with your project, set command to
-                      <span className="text-white/55 font-mono"> npm run dev</span> and fire the trigger.
-                      Seven types it and hits Enter.
-                    </p>
+                    <div className="flex items-start gap-1.5 mt-1 px-2 py-1.5 rounded-lg
+                                    bg-white/[0.02] border border-white/[0.06]">
+                      <span className="text-[8px] text-white/50 leading-relaxed">
+                        Use a safe hotkey combo like <span className="font-mono text-white/70">Ctrl+F5</span> or <span className="font-mono text-white/70">Alt+F2</span>.
+                        Avoid single keys or <span className="font-mono text-white/70">Shift+letter</span> — they will fire while typing normally.
+                      </span>
+                    </div>
                   </>
                 ) : (
                   <>
@@ -297,14 +301,14 @@ export default function TriggerForm({ initial, onSave, onCancel, workspaces }) {
                       or anything that does not need you to see the output.
                     </p>
                     <p className="text-[8px] text-white/30 leading-relaxed">
-                      To run in a specific folder use:
+                      To run in a specific folder:
                       <span className="text-white/55 font-mono"> cd M:\your-project {"&&"} npm run build</span>
                     </p>
                   </>
                 )}
                 <div className="flex flex-wrap gap-1 pt-0.5">
                   <p className="text-[7.5px] text-white/20 w-full">Quick insert:</p>
-                  {(cmdTarget === 'vscode'
+                  {(cmdTarget === 'terminal'
                     ? ['npm run dev', 'npm run build', 'python main.py', 'git pull', 'git status', 'npm install']
                     : ['npm run dev', 'git pull', 'git status', 'ipconfig', 'shutdown /s /t 60', 'shutdown /a']
                   ).map(ex => (
