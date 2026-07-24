@@ -270,6 +270,42 @@ function TaskCard({ task, onComplete, onDelete, onUpdate }) {
               <Check size={10} className="text-white/50" />
             </div>
           </div>
+          {subTotal > 0 && (
+            <div className="mt-2 mb-2">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-[8px] text-white/20 uppercase tracking-widest font-semibold">
+                  Subtasks
+                </span>
+                <span className="text-[8px] text-white/20 font-mono">
+                  {subDone}/{subTotal}
+                </span>
+              </div>
+              <div className="space-y-0.5 max-h-[100px] overflow-y-auto
+                              scrollbar-thin scrollbar-thumb-white/8 scrollbar-track-transparent">
+                {subs.map(sub => (
+                  <div key={sub.id} className="flex items-center gap-2 py-1 px-1">
+                    {sub.completed
+                      ? <CheckCircle2 size={11} className="text-white/30 flex-shrink-0" />
+                      : <Circle       size={11} className="text-white/12 flex-shrink-0" />}
+                    <span className={`flex-1 text-[10px] leading-snug
+                      ${sub.completed
+                        ? 'line-through text-white/20 decoration-white/10'
+                        : 'text-white/35'}`}>
+                      {sub.text}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <div className="flex items-center gap-2 mt-1.5">
+                <div className="flex-1 h-[2px] bg-white/[0.04] rounded-full overflow-hidden">
+                  <div className="h-full rounded-full bg-white/20 transition-all duration-500"
+                       style={{ width: `${pct}%` }} />
+                </div>
+                <span className="text-[7px] font-mono text-white/20">{pct}%</span>
+              </div>
+            </div>
+          )}
+
           <div className="flex items-center justify-between pt-2 border-t border-white/5">
             <span className="text-[9px] text-white/25">
               {task.completed_at
@@ -395,19 +431,23 @@ function TaskCard({ task, onComplete, onDelete, onUpdate }) {
             </div>
 
             {/* Date picker dropdown */}
-            {showDate && (
-              <DatePicker
-                value={dateVal}
-                onChange={(v) => {
-                  setDateVal(v);
-                  saveDate(v);
-                }}
-                onClose={() => setShowDate(false)}
-              />
-            )}
+            <div className={`transition-all duration-250 ease-out overflow-hidden
+                             ${showDate ? 'max-h-[220px] opacity-100' : 'max-h-0 opacity-0'}`}>
+              {showDate && (
+                <DatePicker
+                  value={dateVal}
+                  onChange={(v) => {
+                    setDateVal(v);
+                    saveDate(v);
+                  }}
+                  onClose={() => setShowDate(false)}
+                />
+              )}
+            </div>
 
             {/* Description */}
-            {editDesc ? (
+            <div className={`transition-all duration-250 ease-out overflow-hidden
+                             ${editDesc ? 'max-h-[200px] opacity-100' : 'max-h-0 opacity-0 pointer-events-none'}`}>
               <textarea ref={descRef} value={descVal}
                         onChange={e => setDescVal(e.target.value)}
                         onBlur={saveDesc}
@@ -423,7 +463,8 @@ function TaskCard({ task, onComplete, onDelete, onUpdate }) {
                                    text-[11px] text-white/80 outline-none px-3 py-2.5
                                    resize-none focus:border-white/20 transition-colors
                                    leading-relaxed placeholder-white/20" />
-            ) : task.description ? (
+            </div>
+            {!editDesc && task.description && (
               <div onClick={() => setEditDesc(true)}
                    className="bg-white/[0.015] rounded-xl px-3 py-2.5 cursor-pointer
                               hover:bg-white/[0.03] transition-all duration-200
@@ -435,7 +476,8 @@ function TaskCard({ task, onComplete, onDelete, onUpdate }) {
                   {task.description}
                 </p>
               </div>
-            ) : (
+            )}
+            {!editDesc && !task.description && (
               <button onClick={() => setEditDesc(true)}
                       className="w-full text-left rounded-xl px-3 py-2.5 cursor-pointer
                                  hover:bg-white/[0.02] transition-all duration-200
@@ -445,6 +487,8 @@ function TaskCard({ task, onComplete, onDelete, onUpdate }) {
             )}
 
             {/* Subtasks */}
+            <div className={`transition-all duration-250 ease-out overflow-hidden
+                             ${subTotal > 0 ? 'max-h-[220px] opacity-100' : 'max-h-0 opacity-0'}`}>
             {subTotal > 0 && (
               <div>
                 <div className="flex items-center justify-between mb-1.5">
@@ -497,9 +541,11 @@ function TaskCard({ task, onComplete, onDelete, onUpdate }) {
                 </div>
               </div>
             )}
+            </div>
 
             {/* Add subtask */}
-            {addingSub ? (
+            <div className={`transition-all duration-200 ease-out overflow-hidden
+                             ${addingSub ? 'max-h-[48px] opacity-100' : 'max-h-0 opacity-0 pointer-events-none'}`}>
               <div className="flex items-center gap-2">
                 <Circle size={11} className="text-white/15 flex-shrink-0" />
                 <input ref={subRef} value={newSub}
@@ -521,7 +567,8 @@ function TaskCard({ task, onComplete, onDelete, onUpdate }) {
                   <X size={10} />
                 </button>
               </div>
-            ) : (
+            </div>
+            {!addingSub && (
               <button onClick={() => setAddingSub(true)}
                       className="text-[9px] text-white/25 hover:text-white/55
                                  transition-colors flex items-center gap-1 self-start">
