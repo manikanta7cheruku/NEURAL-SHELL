@@ -750,6 +750,25 @@ function launchPanelHost() {
     // Stays alive even after Seven quits
     launchPanelHost();
 
+    // Poll nav_trigger.json — Python writes this to navigate Seven UI
+    setInterval(() => {
+      try {
+        const APPDATA_DIR = process.env.APPDATA || require('os').homedir();
+        const navFile = path.join(APPDATA_DIR, 'SEVEN', 'nav_trigger.json');
+        if (fs.existsSync(navFile)) {
+          const raw = fs.readFileSync(navFile, 'utf8');
+          fs.unlinkSync(navFile);
+          const nav = JSON.parse(raw);
+          if (nav.route && mainWindow) {
+            mainWindow.show();
+            mainWindow.focus();
+            performNavigation(nav.route);
+            console.log('[NAV] Navigated to:', nav.route);
+          }
+        }
+      } catch (e) {}
+    }, 1000);
+
     console.log('[APP] SEVEN Desktop ready!');
   });
 
