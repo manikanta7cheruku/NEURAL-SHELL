@@ -103,7 +103,46 @@ def chat(req: ChatRequest):
                     else:
                         clean_response = "Done."
                 else:
-                    clean_response = "."
+                    # Check if a schedule was just created
+                    # The scheduler returns speech text through the action execution
+                    # Extract it from the SCHED tag execution results
+                    _sched_cmds = re.findall(r"###SCHED:\s*(.*?)(?=###|$)", full_response, re.DOTALL)
+                    if _sched_cmds:
+                        # Schedule was processed. The manage_schedule function
+                        # already returned a speech string. Re-execute to get it.
+                        try:
+                            import hands.scheduler as _sched_mod
+                            for _sc in _sched_cmds:
+                                _sp = {}
+                                for pair in _sc.strip().split():
+                                    if "=" in pair:
+                                        k, v = pair.split("=", 1)
+                                        _sp[k.strip()] = v.strip()
+                                _sp["speaker_id"] = req.speaker_id
+                                _action = _sp.get("action", "")
+                                if _action in ("reminder", "alarm", "timer", "event"):
+                                    # Schedule already created by _execute_actions
+                                    # Just build a confirmation message
+                                    _msg = _sp.get("message", "").replace("_", " ").replace("|||", " ")
+                                    _time = _sp.get("time", "").replace("_", " ")
+                                    if _msg and _time:
+                                        clean_response = f"Reminder set: {_msg}, {_time}."
+                                    elif _msg:
+                                        clean_response = f"Reminder set: {_msg}."
+                                    else:
+                                        clean_response = "Reminder set."
+                                    break
+                                elif _action == "list":
+                                    _, _speech = _sched_mod.list_schedules(speaker_id=req.speaker_id)
+                                    clean_response = _speech
+                                    break
+                                elif _action == "cancel":
+                                    clean_response = "Schedule cancelled."
+                                    break
+                        except Exception:
+                            clean_response = "Schedule set."
+                    else:
+                        clean_response = "."
             except Exception:
                 clean_response = "."
 
