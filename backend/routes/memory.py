@@ -98,7 +98,8 @@ def get_conversations(limit: int = 500, offset: int = 0):
                 "timestamp":      all_convos['metadatas'][i].get("timestamp", ""),
                 "user_input":     all_convos['metadatas'][i].get("user_input", ""),
                 "seven_response": all_convos['metadatas'][i].get("seven_response", ""),
-                "speaker":        all_convos['metadatas'][i].get("user_id", "default")
+                "speaker":        all_convos['metadatas'][i].get("user_id", "default"),
+                "source":         all_convos['metadatas'][i].get("source", "chat"),
             })
 
         convos.sort(key=lambda x: x["timestamp"], reverse=True)
