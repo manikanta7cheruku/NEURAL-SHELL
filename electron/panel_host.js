@@ -336,6 +336,48 @@ ipcMain.on('panel-open-seven-tasks', () => {
   closePanelWindow();
 });
 
+// ── HTTP command server ───────────────────────────────────────────────────────
+
+let commandServer = null;
+
+function startCommandServer() {
+  commandServer = http.createServer((req, res) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Content-Type', 'application/json');
+
+    if (req.method === 'POST' && req.url === '/panel/open') {
+      createPanelWindow();
+      res.writeHead(200);
+      res.end(JSON.stringify({ ok: true }));
+      return;
+    }
+
+    if (req.method === 'POST' && req.url === '/panel/close') {
+      closePanelWindow();
+      res.writeHead(200);
+      res.end(JSON.stringify({ ok: true }));
+      return;
+    }
+
+    if (req.method === 'GET' && req.url === '/panel/health') {
+      res.writeHead(200);
+      res.end(JSON.stringify({ ok: true, pid: process.pid }));
+      return;
+    }
+
+    res.writeHead(404);
+    res.end(JSON.stringify({ ok: false }));
+  });
+
+  commandServer.listen(7779, '127.0.0.1', () => {
+    console.log('[PANEL HOST] Command server on port 7779');
+  });
+
+  commandServer.on('error', (e) => {
+    console.error('[PANEL HOST] Command server error:', e.message);
+  });
+}
+
 // ── Trigger file polling ─────────────────────────────────────────────────────
 
 function startTriggerPolling() {
@@ -431,6 +473,9 @@ app.whenReady().then(async () => {
   // Start panel server
   startPanelServer();
   await waitForPanelServer();
+
+  // Start command server so Python can open panel
+  startCommandServer();
 
   // Register shortcut
   const shortcut = 'Alt+Shift+T';
