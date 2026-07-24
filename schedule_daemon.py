@@ -12,6 +12,19 @@ import time
 import subprocess
 from datetime import datetime
 
+# Immediate startup log - before anything else
+# This fires even if the rest of the script crashes at import time
+try:
+    _EARLY_LOG = os.path.join(
+        os.environ.get('APPDATA', os.path.expanduser('~')),
+        'SEVEN', 'schedule_daemon_debug.log'
+    )
+    os.makedirs(os.path.dirname(_EARLY_LOG), exist_ok=True)
+    with open(_EARLY_LOG, 'a', encoding='utf-8') as _ef:
+        _ef.write(f"\n[{datetime.now()}] STARTUP pid={os.getpid()} exe={sys.executable}\n")
+except Exception:
+    pass
+
 # Hide console window immediately — must happen before any print()
 # pythonw.exe has no console so this is a no-op there
 # python.exe will flash briefly without this
@@ -36,6 +49,17 @@ subprocess.Popen = _hidden_popen
 
 APPDATA       = os.environ.get('APPDATA', os.path.expanduser('~'))
 SEVEN_ROOT    = os.path.dirname(os.path.abspath(__file__))
+
+# Debug log — writes every startup attempt with timestamp
+# Check this file to see why daemon is not working
+_DEBUG_LOG = os.path.join(APPDATA, 'SEVEN', 'schedule_daemon_debug.log')
+def _dbg(msg):
+    try:
+        os.makedirs(os.path.join(APPDATA, 'SEVEN'), exist_ok=True)
+        with open(_DEBUG_LOG, 'a', encoding='utf-8') as _f:
+            _f.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {msg}\n")
+    except Exception:
+        pass
 # Schedules are stored in APPDATA so daemon and Seven share the same file
 SCHEDULE_FILE = os.path.join(APPDATA, 'SEVEN', 'schedules.json')
 ALERT_FILE    = os.path.join(APPDATA, 'SEVEN', 'schedule_alert.json')
@@ -206,34 +230,57 @@ def call_seven_speak(msg):
         pass
 
 
-def fire_notification(message, stype):
-    """Show Windows notification, speak if Seven is closed, write alert file."""
-
-    # Windows notification
+def _send_overlay(msg: dict, timeout: float = 0.5) -> bool:
+    """Send TCP message to overlay_daemon on port 7891."""
     try:
-        from winotify import Notification, audio
-        icons = {
-            "alarm":    "Alarm",
-            "reminder": "Reminder",
-            "timer":    "Timer",
-            "event":    "Event",
-        }
-        toast = Notification(
-            app_id="Seven AI",
-            title=f"Seven - {icons.get(stype, 'Reminder')}",
-            msg=message,
-            duration="long"
-        )
-        toast.set_audio(audio.Default, loop=False)
-        toast.show()
-        print(f"[DAEMON] Notification: {message}")
-    except Exception as e:
-        print(f"[DAEMON] Notification failed: {e}")
+        import socket as _sock
+        s = _sock.create_connection(("127.0.0.1", 7891), timeout=timeout)
+        s.settimeout(timeout)
+        s.sendall((json.dumps(msg) + "\n").encode("utf-8"))
+        data = b""
+        while b"\n" not in data:
+            chunk = s.recv(1024)
+            if not chunk:
+                break
+            data += chunk
+        s.close()
+        if data:
+            resp = json.loads(data.decode("utf-8").strip())
+            return resp.get("ok", False)
+        return False
+    except Exception:
+        return False
 
-    # Speak: if Seven running use API, else use direct voice
-    if is_seven_running():
-        call_seven_speak(message)
+
+def fire_notification(message, stype):
+    """
+    Show Seven custom notification via overlay daemon.
+    Works whether Seven is open or closed.
+    Falls back to speaking if overlay daemon is not running.
+    """
+    _dbg(f"fire_notification called: stype={stype} message={message[:50]}")
+
+    # Send to overlay daemon for custom notification
+    _notif_success = _send_overlay({
+        "type": "sched_notif",
+        "data": {
+            "type":    stype,
+            "message": message,
+            "holdMs":  8000,
+        },
+    }, timeout=1.0)
+
+    if _notif_success:
+        print(f"[DAEMON] Overlay notification shown: {message}")
+        _dbg("Overlay notification SUCCESS")
     else:
+        print(f"[DAEMON] Overlay daemon not available")
+        _dbg("Overlay daemon not available")
+
+    # Only speak when Seven is closed.
+    # When Seven is running, hands/scheduler.py background thread
+    # handles speaking via its own _fire_schedule callback.
+    if not is_seven_running():
         daemon_speak(message)
 
     # Write alert file so Seven shows panel when reopened
@@ -297,89 +344,92 @@ def check_battery_alert():
 # ── Main loop ─────────────────────────────────────────────────────────────────
 
 def main():
+    _dbg(f"main() called. PID={os.getpid()}")
     if not acquire_lock():
+        _dbg("Lock NOT acquired - another instance running. Exiting.")
         return
 
+    _dbg("Lock acquired. Starting main loop.")
     print("[DAEMON] Seven schedule daemon started")
     fired = load_fired()
     _last_overdue_notif = 0  # unix timestamp — 30 min cooldown
 
     while True:
         try:
-            if not is_seven_running():
-                check_battery_alert()
-                schedules = load_schedules()
-                now = datetime.now()
+            seven_running = is_seven_running()
 
-                for schedule in schedules:
-                    if schedule.get("status") != "active":
-                        continue
+            # Always check battery regardless of Seven state
+            check_battery_alert()
 
-                    sid = str(schedule.get("id", ""))
-                    if sid in fired:
-                        continue
+            # Always fire schedule notifications regardless of Seven state
+            schedules = load_schedules()
+            now = datetime.now()
 
-                    try:
-                        fire_time = datetime.fromisoformat(schedule["time"])
-                    except Exception:
-                        continue
+            for schedule in schedules:
+                if schedule.get("status") != "active":
+                    continue
+
+                sid = str(schedule.get("id", ""))
+                if sid in fired:
+                    continue
+
+                try:
+                    fire_time = datetime.fromisoformat(schedule["time"])
+                except Exception:
+                    continue
 
                     if now >= fire_time:
                         message = schedule.get("message", "Reminder")
                         stype   = schedule.get("type", "reminder")
+                        _dbg(f"Schedule firing: id={sid} message={message[:50]}")
                         fire_notification(message, stype)
-                        fired.add(sid)
-                        save_fired(fired)
+                    fired.add(sid)
+                    save_fired(fired)
 
-                        # Mark as fired in schedules.json so Seven does not
-                        # fire it again when it reopens
-                        try:
-                            with open(SCHEDULE_FILE, 'r') as _sf:
-                                _all = json.load(_sf)
-                            for _s in _all:
-                                if str(_s.get("id", "")) == sid:
-                                    _recur = _s.get("recur", "none")
-                                    if _recur == "none":
-                                        _s["status"] = "fired"
-                                    # Recurring: leave active, scheduler advances time
-                            with open(SCHEDULE_FILE, 'w') as _sf:
-                                json.dump(_all, _sf, indent=2)
-                            print(f"[DAEMON] Marked schedule {sid} as fired in schedules.json")
-                        except Exception as _me:
-                            print(f"[DAEMON] Could not mark fired in schedules.json: {_me}")
+                    # Mark as fired in schedules.json
+                    try:
+                        with open(SCHEDULE_FILE, 'r') as _sf:
+                            _all = json.load(_sf)
+                        for _s in _all:
+                            if str(_s.get("id", "")) == sid:
+                                _recur = _s.get("recur", "none")
+                                if _recur == "none":
+                                    _s["status"] = "fired"
+                        with open(SCHEDULE_FILE, 'w') as _sf:
+                            json.dump(_all, _sf, indent=2)
+                        print(f"[DAEMON] Marked schedule {sid} as fired")
+                    except Exception as _me:
+                        print(f"[DAEMON] Could not mark fired: {_me}")
 
+            # Check overdue tasks — only notify when Seven is closed
+            # When Seven is open it handles task display itself
+            if not seven_running:
+                try:
+                    import sqlite3
+                    _seven_data = os.path.join(APPDATA, 'SEVEN', 'seven_data')
+                    _tasks_db   = os.path.join(_seven_data, 'tasks.db')
 
-            # Check overdue tasks for notification
-            try:
-                import sqlite3
-                _seven_data = os.path.join(APPDATA, 'SEVEN', 'seven_data')
-                _tasks_db   = os.path.join(_seven_data, 'tasks.db')
+                    if os.path.exists(_tasks_db):
+                        _tconn = sqlite3.connect(_tasks_db, timeout=5)
+                        _tconn.row_factory = sqlite3.Row
+                        _tconn.execute("PRAGMA journal_mode=WAL")
 
-                if os.path.exists(_tasks_db):
-                    _tconn = sqlite3.connect(_tasks_db, timeout=5)
-                    _tconn.row_factory = sqlite3.Row
-                    _tconn.execute("PRAGMA journal_mode=WAL")
+                        from datetime import date as _date_cls
+                        _today = _date_cls.today().isoformat()
 
-                    from datetime import date as _date_cls
-                    _today = _date_cls.today().isoformat()
+                        _overdue = _tconn.execute(
+                            "SELECT COUNT(*) FROM tasks WHERE due_date < ? AND completed = 0",
+                            (_today,)
+                        ).fetchone()[0]
 
-                    # Overdue tasks
-                    _overdue = _tconn.execute(
-                        "SELECT COUNT(*) FROM tasks WHERE due_date < ? AND completed = 0",
-                        (_today,)
-                    ).fetchone()[0]
+                        _due_today = _tconn.execute(
+                            "SELECT COUNT(*) FROM tasks WHERE due_date = ? AND completed = 0",
+                            (_today,)
+                        ).fetchone()[0]
 
-                    # Due today tasks
-                    _due_today = _tconn.execute(
-                        "SELECT COUNT(*) FROM tasks WHERE due_date = ? AND completed = 0",
-                        (_today,)
-                    ).fetchone()[0]
+                        _tconn.close()
 
-                    _tconn.close()
-
-                    # Notify if overdue — max once per 30 minutes
-                    if _overdue > 0 and not is_seven_running():
-                        if time.time() - _last_overdue_notif > 1800:
+                        if _overdue > 0 and time.time() - _last_overdue_notif > 1800:
                             _task_msg = (
                                 f"You have {_overdue} overdue task"
                                 f"{'s' if _overdue != 1 else ''}."
@@ -389,8 +439,8 @@ def main():
                             fire_notification(_task_msg, "reminder")
                             _last_overdue_notif = time.time()
 
-            except Exception as _te:
-                print(f"[DAEMON] Task check error: {_te}")
+                except Exception as _te:
+                    print(f"[DAEMON] Task check error: {_te}")
 
         except KeyboardInterrupt:
             print("[DAEMON] Stopped")
