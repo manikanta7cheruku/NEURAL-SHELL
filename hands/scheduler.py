@@ -1054,20 +1054,45 @@ def _fire_schedule(schedule):
     except Exception as _ae:
         print(Fore.YELLOW + f"[SCHEDULER] Alert file write failed: {_ae}")
 
-    # Windows desktop notification (shows even when Seven is not focused)
+    # Custom notification via overlay daemon
     try:
-        from winotify import Notification, audio
-        toast = Notification(
-            app_id="Seven AI",
-            title=f"Seven - {stype.capitalize()}",
-            msg=fire_msg,
-            duration="long"
-        )
-        toast.set_audio(audio.Default, loop=False)
-        toast.show()
-        print(Fore.CYAN + "[SCHEDULER] Windows notification sent")
-    except Exception as _toast_err:
-        print(Fore.YELLOW + f"[SCHEDULER] Windows notification failed: {_toast_err}")
+        import socket as _sock
+        import json as _json_notif
+        _msg_payload = _json_notif.dumps({
+            "type": "sched_notif",
+            "data": {
+                "type":    stype,
+                "message": fire_msg,
+                "holdMs":  8000,
+            },
+        }) + "\n"
+        print(Fore.CYAN + "[SCHEDULER] Sending to overlay daemon...")
+        _s = _sock.create_connection(("127.0.0.1", 7891), timeout=2.0)
+        _s.settimeout(2.0)
+        _s.sendall(_msg_payload.encode("utf-8"))
+        _resp = b""
+        try:
+            while b"\n" not in _resp:
+                _chunk = _s.recv(1024)
+                if not _chunk:
+                    break
+                _resp += _chunk
+        except Exception:
+            pass
+        _s.close()
+        if _resp:
+            _parsed = _json_notif.loads(_resp.decode("utf-8").strip())
+            if _parsed.get("ok"):
+                print(Fore.GREEN + "[SCHEDULER] Overlay notification sent successfully")
+            else:
+                print(Fore.YELLOW + f"[SCHEDULER] Overlay responded with error: {_parsed}")
+        else:
+            print(Fore.YELLOW + "[SCHEDULER] Overlay no response")
+    except ConnectionRefusedError:
+        print(Fore.YELLOW + "[SCHEDULER] Overlay daemon not running (connection refused)")
+    except Exception as _overlay_err:
+        print(Fore.YELLOW + f"[SCHEDULER] Overlay notification failed: {_overlay_err}")
+        import traceback; traceback.print_exc()
 
     # Speak the reminder once - no follow-up question
     if _speak_callback:
