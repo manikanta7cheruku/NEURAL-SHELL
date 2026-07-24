@@ -297,13 +297,17 @@ def _execute_actions(action_list, full_response, speaker_id):
                     from backend.routes.tasks import _get_conn, _row_to_dict
                     from datetime import datetime as _dt
 
+                    _pri = params.get("priority", "medium").lower()
+                    if _pri not in ("low", "medium", "high"):
+                        _pri = "medium"
+
                     with _get_conn() as conn:
                         cursor = conn.execute(
                             "INSERT INTO tasks (text, due_date, due_time, priority,"
                             " completed, created_at, completed_at, tags,"
                             " description, subtasks)"
                             " VALUES (?, ?, NULL, ?, 0, ?, NULL, NULL, NULL, '[]')",
-                            (text, due_date, priority, _dt.now().isoformat())
+                            (text, due_date, _pri, _dt.now().isoformat())
                         )
                         conn.commit()
                         new_id = cursor.lastrowid
