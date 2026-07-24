@@ -226,26 +226,38 @@ def think(prompt_text, speaker_id="default"):
         USER_NAME = ctx.new_user_name
 
     # Save conversation to memory
-    # Only save real responses — skip empty, stream tuples, and error strings
+    # Handles both plain string responses and streaming tuples
     try:
-        if (
-            result
-            and isinstance(result, str)
-            and len(result.strip()) > 0
-            and not result.startswith("Processing error")
-        ):
-            # Extract facts from user input first
-            # Normalize user_id — always save as "mani" in dev
-            # speaker_id="default" means unknown speaker, use configured name
-            _save_user_id = speaker_id if speaker_id != "default" else "mani"
+        _save_user_id = speaker_id if speaker_id != "default" else "mani"
+
+        # Resolve the actual response text regardless of return type
+        if isinstance(result, tuple) and len(result) == 2 and result[0] == "__STREAM__":
+            # Streaming response — the text was already spoken/sent
+            # We save the prompt but cannot reconstruct the full response here
+            # Mark source as "voice" since streaming is only used for voice
+            _response_to_save = "[Voice response]"
+            _source = "voice"
+        elif isinstance(result, str) and len(result.strip()) > 0:
+            _response_to_save = result
+            # Determine source: if speaker_id is not default it came from voice ID
+            # chat.py always passes speaker_id as req.speaker_id which is "default" for API
+            # voice loop in main.py passes the actual speaker_id
+            _source = "voice" if speaker_id not in ("default",) else "chat"
+        else:
+            _response_to_save = None
+
+        if _response_to_save and not _response_to_save.startswith("Processing error"):
             seven_memory.extract_and_store_facts(prompt_text, user_id=_save_user_id)
+            # Only brain.py saves — chat.py no longer calls store_conversation
+            # to prevent double saves
             seven_memory.store_conversation(
                 user_input=prompt_text,
-                seven_response=result,
+                seven_response=_response_to_save,
                 user_id=_save_user_id,
+                source=_source,
             )
+
     except Exception as _mem_err:
-        # Memory save failure must never break the response
         print(Fore.YELLOW + f"[BRAIN] Memory save failed: {_mem_err}")
 
     return result
