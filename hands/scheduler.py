@@ -264,31 +264,43 @@ def _parse_recurrence(recur_str):
     """
     Parse recurrence pattern.
     Returns: "daily", "weekly_N" (N=weekday 0-6), "weekdays", or None.
+
+    Handles formats from command_router.py:
+      recur=daily
+      recur=weekdays
+      recur=every_monday  (underscore-encoded "every monday")
+      recur=weekly
+      recur=weekly_0 through weekly_6
     """
     if not recur_str:
         return None
-    
-    clean = recur_str.lower().strip()
-    
-    if clean in ["daily", "every day", "everyday"]:
+
+    # Decode underscores back to spaces for matching
+    clean = recur_str.lower().strip().replace("_", " ")
+
+    if clean in ["daily", "every day", "everyday", "every morning", "every night"]:
         return "daily"
-    
+
     if clean in ["weekdays", "every weekday", "weekday"]:
         return "weekdays"
-    
+
     days = {
-        "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
-        "friday": 4, "saturday": 5, "sunday": 6
+        "monday":    0,
+        "tuesday":   1,
+        "wednesday": 2,
+        "thursday":  3,
+        "friday":    4,
+        "saturday":  5,
+        "sunday":    6,
     }
-    
+
     for day_name, day_num in days.items():
         if day_name in clean:
             return f"weekly_{day_num}"
-    
+
     if clean in ["weekly", "every week"]:
-        # Default to current weekday
         return f"weekly_{datetime.now().weekday()}"
-    
+
     return None
 
 
