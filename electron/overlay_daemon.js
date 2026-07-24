@@ -177,7 +177,7 @@ function createSchedWindow() {
     minimizable:        false,
     maximizable:        false,
     closable:           false,
-    focusable:          false,
+    focusable:          true,
     hasShadow:          false,
     show:               false,
     roundedCorners:     true,
