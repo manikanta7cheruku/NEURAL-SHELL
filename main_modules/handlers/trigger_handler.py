@@ -227,6 +227,131 @@ class WorkspaceHandler(BaseHandler):
 # STANDALONE EXECUTION FUNCTION
 # Used by trigger_daemon.py and fire endpoint
 # ─────────────────────────────────────────────────────────────────────────
+def _inject_into_vscode_terminal(cmd):
+    """
+    Inject a command into VS Code's active integrated terminal.
+
+    Strategy:
+      1. Find running VS Code process to get its working directory
+      2. Focus VS Code window
+      3. Use pyautogui to open terminal if not visible (Ctrl+`) 
+      4. Send the command text + Enter via clipboard paste
+         (clipboard paste is safer than keystroke simulation for special chars)
+
+    Returns (success, message).
+    """
+    import time
+    import ctypes
+
+    try:
+        import psutil
+        import pyautogui
+        import win32gui
+        import win32con
+
+        # Step 1: Find VS Code window
+        vscode_hwnd = None
+
+        def _find_vscode(hwnd, _):
+            nonlocal vscode_hwnd
+            if not win32gui.IsWindowVisible(hwnd):
+                return True
+            title = win32gui.GetWindowText(hwnd)
+            if title and ('visual studio code' in title.lower() or
+                          title.lower().startswith('● ') or
+                          '.js' in title or '.py' in title or
+                          'vscode' in title.lower()):
+                # More reliable: check if exe is code.exe
+                try:
+                    import win32process
+                    _, pid = win32process.GetWindowThreadProcessId(hwnd)
+                    proc = psutil.Process(pid)
+                    if 'code' in proc.name().lower():
+                        vscode_hwnd = hwnd
+                        return False
+                except Exception:
+                    pass
+            return True
+
+        win32gui.EnumWindows(_find_vscode, None)
+
+        # Fallback: find by process name
+        if not vscode_hwnd:
+            for proc in psutil.process_iter(['pid', 'name']):
+                try:
+                    if 'code' in proc.info['name'].lower():
+                        # Find its window
+                        def _by_pid(hwnd, pid):
+                            nonlocal vscode_hwnd
+                            try:
+                                import win32process
+                                _, wpid = win32process.GetWindowThreadProcessId(hwnd)
+                                if wpid == pid and win32gui.IsWindowVisible(hwnd):
+                                    if win32gui.GetWindowTextLength(hwnd) > 0:
+                                        vscode_hwnd = hwnd
+                                        return False
+                            except Exception:
+                                pass
+                            return True
+                        win32gui.EnumWindows(_by_pid, proc.info['pid'])
+                        if vscode_hwnd:
+                            break
+                except Exception:
+                    continue
+
+        if not vscode_hwnd:
+            return False, "VS Code is not open. Open VS Code first."
+
+        # Step 2: Focus VS Code
+        win32gui.ShowWindow(vscode_hwnd, win32con.SW_RESTORE)
+        win32gui.SetForegroundWindow(vscode_hwnd)
+        time.sleep(0.4)
+
+        # Step 3: Open terminal panel if needed (Ctrl+`)
+        # Send Ctrl+` to toggle terminal — if already open it stays open
+        pyautogui.hotkey('ctrl', '`')
+        time.sleep(0.5)
+
+        # Step 4: Click terminal area to ensure focus
+        # Get window rect and click bottom third (where terminal lives)
+        rect = win32gui.GetWindowRect(vscode_hwnd)
+        win_x = rect[0]
+        win_y = rect[1]
+        win_w = rect[2] - rect[0]
+        win_h = rect[3] - rect[1]
+
+        # Click in the terminal area (bottom 25% of window, centered)
+        click_x = win_x + win_w // 2
+        click_y = win_y + int(win_h * 0.82)
+        pyautogui.click(click_x, click_y)
+        time.sleep(0.3)
+
+        # Step 5: Paste command via clipboard (handles special chars safely)
+        import subprocess as _sp
+        # Set clipboard
+        _sp.run(
+            ['clip'],
+            input=cmd.encode('utf-8'),
+            creationflags=0x08000000,
+            check=False
+        )
+        time.sleep(0.1)
+
+        # Paste and execute
+        pyautogui.hotkey('ctrl', 'v')
+        time.sleep(0.15)
+        pyautogui.press('enter')
+
+        print(f"[TRIGGER] Injected into VS Code terminal: {cmd}")
+        return True, f"Sent to VS Code terminal: {cmd[:50]}"
+
+    except ImportError as ie:
+        missing = str(ie).split("'")[1] if "'" in str(ie) else str(ie)
+        return False, f"Missing dependency: {missing}"
+    except Exception as e:
+        print(f"[TRIGGER] VS Code inject error: {e}")
+        return False, f"Could not inject into VS Code: {e}"
+
 
 def execute_trigger_action(trigger):
     """
@@ -371,6 +496,14 @@ def execute_trigger_action(trigger):
             cmd = action_data.get("command", "")
             if not cmd:
                 return False, "No command specified"
+
+            target = action_data.get("target", "terminal")
+
+            if target == "vscode":
+                success, message = _inject_into_vscode_terminal(cmd)
+                return success, message
+
+            # Default: run silently in background
             CREATE_NO_WINDOW = 0x08000000
             subprocess.Popen(
                 cmd,
@@ -386,17 +519,21 @@ def execute_trigger_action(trigger):
             if not action:
                 return False, "No action specified"
 
-            try:
-                import requests
-                requests.post(
-                    "http://127.0.0.1:7777/api/chat",
-                    json={"text": action, "speaker_id": "default"},
-                    timeout=5
-                )
-            except Exception:
-                return False, "Seven not running"
-
-            return True, f"Seven action: {action}"
+            # Send to Seven's brain in a background thread
+            # Brain handles all intelligence: app opening, system control, etc.
+            import threading as _t
+            def _send_to_brain():
+                try:
+                    import requests as _req
+                    _req.post(
+                        "http://127.0.0.1:7777/api/chat",
+                        json={"text": action, "speaker_id": "default"},
+                        timeout=60,
+                    )
+                except Exception as _e:
+                    print(f"[TRIGGER] seven_action brain error: {_e}")
+            _t.Thread(target=_send_to_brain, daemon=True).start()
+            return True, f"Seven processing: {action}"
 
         else:
             return False, f"Unknown action type: {action_type}"
