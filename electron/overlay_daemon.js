@@ -241,7 +241,7 @@ function showScheduleNotification(data) {
 
   schedWindow.showInactive();
   schedWindow.moveTop();
-  scheduleAutoHide(schedWindow, (data.holdMs || 8000) + 1500);
+  // No auto-hide. User must click dismiss.
 }
 
 // ─────────────────────────────────────────────────────────────────────────
