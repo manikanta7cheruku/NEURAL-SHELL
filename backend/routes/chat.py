@@ -64,11 +64,11 @@ def chat(req: ChatRequest):
             full_response = response if response else "Processing error."
 
         # Extract action tags
-        actions = re.findall(r"###(\w+):\s*(.*?)(?=###|$)", full_response)
+        actions = re.findall(r"###(\w+):\s*(.*?)(?=###|$)", full_response, re.DOTALL)
         action_list = [f"{cmd}:{arg.strip()}" for cmd, arg in actions]
 
         # Clean response (remove tags for display)
-        clean_response = re.sub(r"###\w+:\s*[^\n]*", "", full_response).strip()
+        clean_response = re.sub(r"###\w+:\s*.*?(?=###|$)", "", full_response, flags=re.DOTALL).strip()
 
         # Execute commands first so task_results state is populated
         _execute_actions(action_list, full_response, req.speaker_id)
@@ -174,7 +174,7 @@ def _execute_actions(action_list, full_response, speaker_id):
         _telemetry = None
 
     # Window commands
-    window_cmds = re.findall(r"###WINDOW:\s*(.*?)(?=###|$)", full_response)
+    window_cmds = re.findall(r"###WINDOW:\s*(.*?)(?=###|$)", full_response, re.DOTALL)
     for param_str in window_cmds:
         params = {}
         for pair in param_str.strip().split():
@@ -189,7 +189,7 @@ def _execute_actions(action_list, full_response, speaker_id):
                 pass
 
     # System commands
-    sys_cmds = re.findall(r"###SYS:\s*(.*?)(?=###|$)", full_response)
+    sys_cmds = re.findall(r"###SYS:\s*(.*?)(?=###|$)", full_response, re.DOTALL)
     for param_str in sys_cmds:
         params = {}
         for pair in param_str.strip().split():
@@ -200,7 +200,7 @@ def _execute_actions(action_list, full_response, speaker_id):
             system_mod.manage_system(params)
 
     # Scheduler commands
-    sched_cmds = re.findall(r"###SCHED:\s*(.*?)(?=###|$)", full_response)
+    sched_cmds = re.findall(r"###SCHED:\s*(.*?)(?=###|$)", full_response, re.DOTALL)
     for param_str in sched_cmds:
         params = {}
         for pair in param_str.strip().split():
@@ -217,7 +217,7 @@ def _execute_actions(action_list, full_response, speaker_id):
                 print(f"[API] Scheduler error: {e}")
     
     # Task commands
-    task_cmds = re.findall(r"###TASK:\s*(.*?)(?=###|$)", full_response)
+    task_cmds = re.findall(r"###TASK:\s*(.*?)(?=###|$)", full_response, re.DOTALL)
     for param_str in task_cmds:
         params = {}
         for pair in param_str.strip().split():
@@ -325,7 +325,7 @@ def _execute_actions(action_list, full_response, speaker_id):
             import traceback; traceback.print_exc()
 
     # App commands
-    app_cmds = re.findall(r"###(OPEN|CLOSE):\s*(.*?)(?=###|$)", full_response)
+    app_cmds = re.findall(r"###(OPEN|CLOSE):\s*(.*?)(?=###|$)", full_response, re.DOTALL)
     for cmd_type, arg in app_cmds:
         clean_arg = arg.replace('"', '').replace("'", "").replace(",", "").replace(".", "").strip()
         if not clean_arg:
