@@ -114,9 +114,18 @@ function ScheduleCard({ schedule, onEdit, onCancel, index }) {
                     {formatTime(schedule.time)}
                   </span>
                   {schedule.recur && schedule.recur !== 'none' && (
-                    <span className="text-[8px] text-purple-400 bg-purple-400/8
-                                     border border-purple-400/15 px-1.5 py-0.5 rounded-md">
-                      repeats
+                    <span className="text-[8px] text-white/40 bg-white/[0.04]
+                                     border border-white/8 px-1.5 py-0.5 rounded-md">
+                      {schedule.recur === 'daily'    ? 'daily'
+                     : schedule.recur === 'weekdays' ? 'weekdays'
+                     : schedule.recur === 'weekly_0' ? 'every Mon'
+                     : schedule.recur === 'weekly_1' ? 'every Tue'
+                     : schedule.recur === 'weekly_2' ? 'every Wed'
+                     : schedule.recur === 'weekly_3' ? 'every Thu'
+                     : schedule.recur === 'weekly_4' ? 'every Fri'
+                     : schedule.recur === 'weekly_5' ? 'every Sat'
+                     : schedule.recur === 'weekly_6' ? 'every Sun'
+                     : 'repeats'}
                     </span>
                   )}
                   {overdue && (
@@ -182,6 +191,7 @@ function ScheduleForm({ initial, onSave, onCancel, workspaces }) {
   const [message,  setMessage]  = useState(initial?.message || '');
   const [time,     setTime]     = useState(initial?.time?.slice(0, 16) || '');
   const [duration, setDuration] = useState('');
+  const [recur,    setRecur]    = useState(initial?.recur || 'none');
   const [saving,   setSaving]   = useState(false);
   const [error,    setError]    = useState('');
 
@@ -195,6 +205,7 @@ function ScheduleForm({ initial, onSave, onCancel, workspaces }) {
     const d = { type, message: message.trim() };
     if (type === 'timer') d.duration = parseInt(duration) * 60;
     else d.time = time.trim();
+    if (recur && recur !== 'none') d.recur = recur;
 
     const r = await onSave(d);
     setSaving(false);
@@ -285,6 +296,38 @@ function ScheduleForm({ initial, onSave, onCancel, workspaces }) {
               </div>
             )}
         </div>
+
+        {/* Recurrence — only for non-timer types */}
+        {type !== 'timer' && (
+          <div>
+            <label className="text-[8px] text-white/35 uppercase tracking-widest
+                               font-semibold mb-2 block">Repeat</label>
+            <div className="flex flex-wrap gap-1.5">
+              {[
+                { key: 'none',      label: 'Once' },
+                { key: 'daily',     label: 'Every day' },
+                { key: 'weekdays',  label: 'Weekdays' },
+                { key: 'weekly_0',  label: 'Mon' },
+                { key: 'weekly_1',  label: 'Tue' },
+                { key: 'weekly_2',  label: 'Wed' },
+                { key: 'weekly_3',  label: 'Thu' },
+                { key: 'weekly_4',  label: 'Fri' },
+                { key: 'weekly_5',  label: 'Sat' },
+                { key: 'weekly_6',  label: 'Sun' },
+              ].map(r => (
+                <button key={r.key}
+                        onClick={() => setRecur(r.key)}
+                        className={`px-2.5 py-1 rounded-lg text-[9px] font-medium
+                                    transition-all duration-150
+                          ${recur === r.key
+                            ? 'bg-s-accent/8 text-s-accent border border-s-accent/15'
+                            : 'text-white/30 border border-white/6 hover:text-white/55 hover:bg-white/[0.03]'}`}>
+                  {r.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Error */}
         {error && (
