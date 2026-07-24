@@ -58,6 +58,9 @@ input:focus, select:focus, textarea:focus {
   100% { width: 0%;   margin-left: 100%; }
 }
 
+/* Custom duration not in Tailwind default scale */
+.duration-250 { transition-duration: 250ms; }
+
 @keyframes cardReveal {
   from { opacity: 0; transform: translateY(6px); }
   to   { opacity: 1; transform: translateY(0); }
