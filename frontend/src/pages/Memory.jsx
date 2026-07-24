@@ -243,26 +243,33 @@ function DayGroup({ dateStr, messages, defaultOpen, onDelete, searchQuery }) {
 // ── Conversations Tab ──────────────────────────────────────────────────────
 
 function ConversationsTab({ conversations, onDelete, searchQuery }) {
-  const [range, setRange] = useState('all');
+  const [range,  setRange]  = useState('all');
+  const [source, setSource] = useState('all');
 
   const RANGES = [
-    { key: 'today', label: 'Today' },
-    { key: 'week',  label: 'This Week' },
+    { key: 'today', label: 'Today'      },
+    { key: 'week',  label: 'This Week'  },
     { key: 'month', label: 'This Month' },
-    { key: 'all',   label: 'All' },
+    { key: 'all',   label: 'All'        },
   ];
 
-  const filtered = searchQuery
-    ? conversations.filter(c =>
-        (c.user_input + c.seven_response).toLowerCase()
-          .includes(searchQuery.toLowerCase())
-      )
-    : conversations;
+  const SOURCES = [
+    { key: 'all',   label: 'All'   },
+    { key: 'chat',  label: 'Chat'  },
+    { key: 'voice', label: 'Voice' },
+  ];
 
-  const allGroups      = groupByDay(filtered);
-  const visibleGroups  = filterByRange(allGroups, range);
+  const filtered = conversations.filter(c => {
+    const matchesSearch = searchQuery
+      ? (c.user_input + c.seven_response).toLowerCase().includes(searchQuery.toLowerCase())
+      : true;
+    const matchesSource = source === 'all' || (c.source || 'chat') === source;
+    return matchesSearch && matchesSource;
+  });
 
-  const totalVisible = visibleGroups.reduce((sum, [, msgs]) => sum + msgs.length, 0);
+  const allGroups     = groupByDay(filtered);
+  const visibleGroups = filterByRange(allGroups, range);
+  const totalVisible  = visibleGroups.reduce((sum, [, msgs]) => sum + msgs.length, 0);
 
   if (conversations.length === 0) {
     return (
@@ -282,18 +289,39 @@ function ConversationsTab({ conversations, onDelete, searchQuery }) {
   return (
     <div className="space-y-3">
 
-      {/* Range filter */}
-      <div className="flex items-center gap-1">
-        {RANGES.map(r => (
-          <button key={r.key} onClick={() => setRange(r.key)}
-                  className={`px-3 py-1.5 rounded-lg text-[9px] font-medium
-                              transition-all duration-150
-                    ${range === r.key
-                      ? 'bg-white/[0.06] text-white/70 border border-white/10'
-                      : 'text-white/30 hover:text-white/55 border border-transparent'}`}>
-            {r.label}
-          </button>
-        ))}
+      {/* Filters row */}
+      <div className="flex items-center gap-3 flex-wrap">
+        {/* Time range */}
+        <div className="flex items-center gap-1">
+          {RANGES.map(r => (
+            <button key={r.key} onClick={() => setRange(r.key)}
+                    className={`px-3 py-1.5 rounded-lg text-[9px] font-medium
+                                transition-all duration-150
+                      ${range === r.key
+                        ? 'bg-white/[0.06] text-white/70 border border-white/10'
+                        : 'text-white/30 hover:text-white/55 border border-transparent'}`}>
+              {r.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Divider */}
+        <div className="w-px h-4 bg-white/[0.06]" />
+
+        {/* Source filter */}
+        <div className="flex items-center gap-1">
+          {SOURCES.map(s => (
+            <button key={s.key} onClick={() => setSource(s.key)}
+                    className={`px-2.5 py-1 rounded-lg text-[8.5px] font-medium
+                                transition-all duration-150
+                      ${source === s.key
+                        ? 'bg-s-accent/8 text-s-accent border border-s-accent/12'
+                        : 'text-white/25 hover:text-white/50 border border-transparent'}`}>
+              {s.label}
+            </button>
+          ))}
+        </div>
+
         {totalVisible > 0 && (
           <span className="ml-auto text-[8px] text-white/20 font-mono">
             {totalVisible} message{totalVisible !== 1 ? 's' : ''}
