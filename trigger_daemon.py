@@ -1220,9 +1220,70 @@ def _exec_open_workspace(data):
 
 
 def _exec_run_command(data):
-    """Execute a shell command."""
-    cmd = data.get("command", "")
-    if cmd:
+    """
+    Execute a shell command.
+
+    target=terminal (default): types command into currently focused window.
+      User clicks inside any terminal (VS Code, cmd, PowerShell, Windows
+      Terminal) then fires the hotkey. Seven types the command + Enter.
+
+    target=background: runs silently, no window, no output visible.
+      Use for fire-and-forget commands like git pull, shutdown, etc.
+    """
+    cmd    = data.get("command", "")
+    target = data.get("target", "terminal")
+
+    if not cmd:
+        return
+
+    if target == "background":
+        import sys as _sys
+        _cflags = 0x08000000 if _sys.platform == 'win32' else 0
+        subprocess.Popen(
+            cmd,
+            shell=True,
+            creationflags=_cflags,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        print(f"[TRIGGER DAEMON] Run command (background): {cmd[:60]}")
+        return
+
+    # target=terminal — type into focused window
+    # Small delay to let the hotkey keys finish being processed
+    # so they don't appear as text before the command
+    time.sleep(0.15)
+
+    try:
+        import pyautogui
+        pyautogui.PAUSE = 0.02
+
+        # Type the command character by character using pyautogui
+        # typewrite() does not handle special chars well — use write() with interval
+        # For commands with special chars like && \ / use pyperclip + paste
+        import subprocess as _sp
+
+        # Use clipboard paste — handles all special characters safely
+        # (&&, \, /, spaces, quotes all work correctly)
+        _sp.run(
+            ['clip'],
+            input=cmd.encode('utf-8'),
+            creationflags=0x08000000,
+            check=False,
+        )
+        time.sleep(0.08)
+
+        # Paste and execute
+        pyautogui.hotkey('ctrl', 'v')
+        time.sleep(0.1)
+        pyautogui.press('enter')
+
+        print(f"[TRIGGER DAEMON] Run command (typed into terminal): {cmd[:60]}")
+
+    except Exception as e:
+        print(f"[TRIGGER DAEMON] Run command type error: {e}")
+        # Fallback to background execution
         import sys as _sys
         _cflags = 0x08000000 if _sys.platform == 'win32' else 0
         subprocess.Popen(
@@ -1247,81 +1308,157 @@ def _exec_seven_action(data):
     """
     Execute internal Seven action.
 
-    Priority:
-      1. Direct deterministic system actions first
-         (brightness, volume, mute)
-      2. API/chat fallback only for unknown actions
+    Parses the full action string and dispatches ALL commands found in it.
+    Handles: app opens, brightness, volume, mute — all in one string.
+    Falls back to chat API for anything not recognized.
     """
     action = data.get("action", "")
     if not action:
         return
 
+    import re
     action_lower = action.lower().strip()
 
+    # Split on common separators: comma, "and", "also", "&"
+    # This lets user write "open camera and whatsapp and brightness 80"
+    # and each part gets processed independently
+    _parts = re.split(r'\s*(?:,|and|also|&|\+)\s*', action_lower)
+    _parts = [p.strip() for p in _parts if p.strip()]
+
+    _handled    = []
+    _unhandled  = []
+
     try:
-        import re
         from hands.system import manage_system
+        from hands.core   import open_app
 
-        # ── DIRECT SYSTEM ACTIONS FIRST ───────────────────────────────
+        for part in _parts:
 
-        # Mute / unmute
-        if "mute" in action_lower and "unmute" not in action_lower:
-            result = manage_system({"action": "volume_mute"})
-            print(f"[TRIGGER DAEMON] Mute direct: {result}")
-            return
+            # ── MUTE / UNMUTE ──
+            if re.search(r'\bunmute\b', part):
+                manage_system({"action": "volume_unmute"})
+                _handled.append("unmute")
+                continue
 
-        # Volume set
-        if "volume" in action_lower:
-            nums = re.findall(r'\d+', action_lower)
-            if nums:
-                result = manage_system({"action": "volume_set", "value": nums[0]})
-                print(f"[TRIGGER DAEMON] Volume {nums[0]}% direct: {result}")
-                return
-            if "max" in action_lower or "full" in action_lower:
-                result = manage_system({"action": "volume_set", "value": "100"})
-                print(f"[TRIGGER DAEMON] Volume 100% direct: {result}")
-                return
-            if "min" in action_lower or "low" in action_lower:
-                result = manage_system({"action": "volume_set", "value": "10"})
-                print(f"[TRIGGER DAEMON] Volume 10% direct: {result}")
-                return
+            if re.search(r'\bmute\b', part):
+                manage_system({"action": "volume_mute"})
+                _handled.append("mute")
+                continue
 
-        # Brightness set
-        if "brightness" in action_lower or "bright" in action_lower or "dim" in action_lower:
-            nums = re.findall(r'\d+', action_lower)
-            if nums:
-                val = nums[0]
-            elif "max" in action_lower or "full" in action_lower or "high" in action_lower:
-                val = "100"
-            elif "min" in action_lower or "low" in action_lower or "dim" in action_lower:
-                val = "10"
-            else:
-                val = "100"
+            # ── VOLUME ──
+            if re.search(r'\bvolume\b', part):
+                nums = re.findall(r'\d+', part)
+                if nums:
+                    manage_system({"action": "volume_set", "value": nums[0]})
+                    _handled.append(f"volume {nums[0]}%")
+                elif re.search(r'\b(max|full|maximum)\b', part):
+                    manage_system({"action": "volume_set", "value": "100"})
+                    _handled.append("volume max")
+                elif re.search(r'\b(min|low|minimum)\b', part):
+                    manage_system({"action": "volume_set", "value": "10"})
+                    _handled.append("volume min")
+                continue
 
-            result = manage_system({"action": "brightness_set", "value": val})
-            print(f"[TRIGGER DAEMON] Brightness {val}% direct: {result}")
-            return
+            # ── BRIGHTNESS ──
+            if re.search(r'\b(brightness|bright|dim|screen)\b', part):
+                nums = re.findall(r'\d+', part)
+                if nums:
+                    val = nums[0]
+                elif re.search(r'\b(max|full|maximum|high)\b', part):
+                    val = "100"
+                elif re.search(r'\b(min|low|minimum|dim)\b', part):
+                    val = "10"
+                else:
+                    val = "80"
+                manage_system({"action": "brightness_set", "value": val})
+                _handled.append(f"brightness {val}%")
+                continue
+
+            # ── OPEN APP ──
+            # Patterns: "open camera", "open whatsapp", "launch chrome", "camera"
+            open_match = re.match(
+                r'^(?:open|launch|start|run)\s+(.+)$', part
+            )
+            if open_match:
+                app_name = open_match.group(1).strip()
+                try:
+                    import threading as _t
+                    _t.Thread(
+                        target=open_app,
+                        args=(app_name,),
+                        daemon=True,
+                    ).start()
+                    _handled.append(f"open {app_name}")
+                except Exception as _ae:
+                    print(f"[TRIGGER DAEMON] App open failed for '{app_name}': {_ae}")
+                    _unhandled.append(part)
+                continue
+
+            # ── MEDIA ──
+            if re.search(r'\b(play|pause|next|previous|prev|stop)\b', part):
+                if re.search(r'\bnext\b', part):
+                    manage_system({"action": "media_next"})
+                    _handled.append("media next")
+                elif re.search(r'\b(previous|prev)\b', part):
+                    manage_system({"action": "media_prev"})
+                    _handled.append("media prev")
+                elif re.search(r'\bstop\b', part):
+                    manage_system({"action": "media_stop"})
+                    _handled.append("media stop")
+                else:
+                    manage_system({"action": "media_play_pause"})
+                    _handled.append("media play/pause")
+                continue
+
+            # ── SHOW TASKS PANEL ──
+            if re.search(r'\b(show|open)\s+(my\s+)?tasks?\b', part):
+                try:
+                    import requests as _req
+                    _req.post("http://127.0.0.1:7779/panel/open", timeout=3)
+                    _handled.append("tasks panel")
+                except Exception:
+                    pass
+                continue
+
+            # ── SHOW SCHEDULE ──
+            if re.search(r'\b(show|open)\s+(my\s+)?schedule\b', part):
+                try:
+                    import json as _json
+                    _appdata = os.environ.get('APPDATA', '')
+                    _nav = os.path.join(_appdata, 'SEVEN', 'nav_trigger.json')
+                    with open(_nav, 'w') as _f:
+                        _json.dump({"route": "/schedules"}, _f)
+                    _handled.append("schedule page")
+                except Exception:
+                    pass
+                continue
+
+            # ── UNRECOGNIZED — collect for API fallback ──
+            _unhandled.append(part)
 
     except Exception as e:
-        print(f"[TRIGGER DAEMON] Direct system action failed: {e}")
+        print(f"[TRIGGER DAEMON] Seven action parse error: {e}")
         import traceback
         traceback.print_exc()
+        _unhandled = _parts
 
-    # ── FALLBACK: SEND TO SEVEN CHAT API ─────────────────────────────
-    if is_seven_running():
+    print(f"[TRIGGER DAEMON] Seven action handled: {_handled}")
+
+    # Send unrecognized parts to chat API as one message
+    if _unhandled and is_seven_running():
+        fallback_text = " and ".join(_unhandled)
         try:
             import requests
             requests.post(
                 "http://127.0.0.1:7777/api/chat",
-                json={"text": action, "speaker_id": "default"},
-                timeout=10
+                json={"text": fallback_text, "speaker_id": "default"},
+                timeout=60,
             )
-            print(f"[TRIGGER DAEMON] Seven action via API fallback: {action}")
-            return
+            print(f"[TRIGGER DAEMON] Seven action API fallback: {fallback_text}")
         except Exception as e:
             print(f"[TRIGGER DAEMON] API fallback failed: {e}")
-
-    print(f"[TRIGGER DAEMON] No direct handler and Seven not running: {action}")
+    elif _unhandled:
+        print(f"[TRIGGER DAEMON] Seven not running, unhandled: {_unhandled}")
 
 
 # ─────────────────────────────────────────────────────────────────────────
