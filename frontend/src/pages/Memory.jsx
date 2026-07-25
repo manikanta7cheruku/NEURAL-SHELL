@@ -83,16 +83,18 @@ function groupIntoSessions(messages, gapMinutes = 5) {
 }
 
 function filterByRange(groups, range) {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  if (range === 'all') return groups;
+  const now = new Date();
+  const todayStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+  const today = new Date(todayStr + 'T00:00:00');
   const cutoffs = {
     today: 0,
     week:  6,
     month: 29,
   };
-  if (range === 'all') return groups;
   const cutoffDays = cutoffs[range];
   return groups.filter(([dateStr]) => {
+    if (range === 'today') return dateStr === todayStr;
     const d = new Date(dateStr + 'T00:00:00');
     const diffDays = Math.floor((today - d) / 86400000);
     return diffDays <= cutoffDays;
