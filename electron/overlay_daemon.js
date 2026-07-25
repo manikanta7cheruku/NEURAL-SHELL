@@ -50,8 +50,8 @@ let arrangeAppNames = [];
 
 function createNotifWindow() {
   const { width: sw } = screen.getPrimaryDisplay().workArea;
-  const W = 360;
-  const H = 76;
+  const W = 380;
+  const H = 82;
 
   notifWindow = new BrowserWindow({
     width:              W,
@@ -59,9 +59,8 @@ function createNotifWindow() {
     x:                  Math.round((sw - W) / 2),
     y:                  0,
     frame:              false,
-    transparent:        false,
+    transparent:        true,
     backgroundColor:    '#00000000',
-    backgroundMaterial: 'acrylic',
     alwaysOnTop:        true,
     skipTaskbar:        true,
     resizable:          false,
@@ -83,7 +82,7 @@ function createNotifWindow() {
 
   notifWindow.setAlwaysOnTop(true, 'pop-up-menu', 999);
   notifWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-  notifWindow.setIgnoreMouseEvents(true, { forward: true });
+  notifWindow.setIgnoreMouseEvents(false);
 
   const htmlPath = path.join(__dirname, '..', 'seven_overlay', 'notification.html');
   notifWindow.loadFile(htmlPath);
