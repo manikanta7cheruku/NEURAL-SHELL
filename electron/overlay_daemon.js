@@ -82,7 +82,7 @@ function createNotifWindow() {
 
   notifWindow.setAlwaysOnTop(true, 'pop-up-menu', 999);
   notifWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-  notifWindow.setIgnoreMouseEvents(false);
+  notifWindow.setIgnoreMouseEvents(true, { forward: true });
 
   const htmlPath = path.join(__dirname, '..', 'seven_overlay', 'notification.html');
   notifWindow.loadFile(htmlPath);
