@@ -4,1070 +4,124 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Seven Tasks</title>
-<script src="https://cdn.tailwindcss.com"></script>
-<style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-
-  :root {
-    --bg:       #09090b;
-    --surface:  #0f0f10;
-    --card:     #161618;
-    --card-h:   #1c1c1f;
-    --border:   rgba(255,255,255,0.06);
-    --border-h: rgba(255,255,255,0.12);
-    --text:     rgba(255,255,255,0.95);
-    --text-2:   rgba(255,255,255,0.75);
-    --text-3:   rgba(255,255,255,0.55);
-    --text-4:   rgba(255,255,255,0.30);
-    --accent:   #7c8cff;
-  }
-
-  html, body {
-    width: 380px;
-    height: 100vh;
-    overflow: hidden;
-    background: transparent;
-    font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
-  }
-
-  ::-webkit-scrollbar { width: 4px; height: 4px; }
-  ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 2px; }
-  ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.15); }
-
-  #panel {
-    width: 380px;
-    height: 100vh;
-    background: var(--bg);
-    border-left: 1px solid var(--border);
-    display: flex;
-    flex-direction: column;
-    transform: translateX(100%);
-    transition: transform 400ms cubic-bezier(0.16, 1, 0.3, 1);
-    position: relative;
-    overflow: hidden;
-    box-shadow: -20px 0 40px rgba(0,0,0,0.4);
-  }
-
-  #panel.open { transform: translateX(0); }
-
-  #panel::before {
-    content: '';
-    position: absolute;
-    top: 0; left: 0; right: 0;
-    height: 1px;
-    background: linear-gradient(90deg,
-      transparent 0%,
-      rgba(124,140,255,0.4) 50%,
-      transparent 100%);
-  }
-
-  /* Header */
-  #header {
-    padding: 18px 20px 14px;
-    border-bottom: 1px solid var(--border);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-shrink: 0;
-    background: var(--surface);
-  }
-
-  #brand {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-
-  #title-block h1 {
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--text);
-    letter-spacing: -0.01em;
-    line-height: 1.2;
-  }
-
-  #title-sub {
-    font-size: 9px;
-    color: var(--text-4);
-    margin-top: 2px;
-    font-family: 'JetBrains Mono', 'SF Mono', monospace;
-    letter-spacing: 0.02em;
-  }
-
-  #close-btn {
-    width: 26px;
-    height: 26px;
-    border-radius: 8px;
-    background: transparent;
-    color: var(--text-4);
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 200ms ease;
-    border: 1px solid transparent;
-  }
-
-  #close-btn:hover {
-    background: rgba(255,255,255,0.04);
-    color: var(--text-2);
-    border-color: var(--border);
-  }
-
-  /* Stats */
-  #stats {
-    display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
-    gap: 8px;
-    padding: 12px 20px;
-    border-bottom: 1px solid var(--border);
-    background: var(--surface);
-    flex-shrink: 0;
-  }
-
-  .stat {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    padding: 8px 10px;
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-  }
-
-  .stat-label {
-    font-size: 7.5px;
-    color: var(--text-4);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    font-weight: 600;
-  }
-
-  .stat-value {
-    font-size: 16px;
-    font-weight: 700;
-    font-family: 'JetBrains Mono', 'SF Mono', monospace;
-    color: var(--text);
-    line-height: 1;
-    margin-top: 2px;
-  }
-
-  .stat-value.dim { color: var(--text-3); }
-
-  /* Timer */
-  #timer-bar {
-    height: 2px;
-    background: rgba(255,255,255,0.04);
-    flex-shrink: 0;
-  }
-
-  #timer-fill {
-    height: 100%;
-    background: linear-gradient(90deg, rgba(124,140,255,0.5), rgba(124,140,255,0.2));
-    width: 100%;
-    transition: width 1s linear;
-  }
-
-  /* List */
-
-    /* Filter tabs */
-  #filters {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    padding: 10px 16px;
-    border-bottom: 1px solid var(--border);
-    background: var(--surface);
-    flex-shrink: 0;
-  }
-
-  .filter-chip {
-    padding: 5px 10px;
-    border-radius: 7px;
-    background: transparent;
-    border: 1px solid transparent;
-    color: var(--text-4);
-    font-size: 9.5px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 200ms ease;
-    letter-spacing: 0.02em;
-    display: flex;
-    align-items: center;
-    gap: 5px;
-  }
-
-  .filter-chip:hover {
-    color: var(--text-2);
-    background: rgba(255,255,255,0.03);
-  }
-
-  .filter-chip.active {
-    background: rgba(124,140,255,0.1);
-    color: var(--accent);
-    border-color: rgba(124,140,255,0.2);
-  }
-
-  .filter-count {
-    font-size: 8px;
-    background: rgba(255,255,255,0.06);
-    padding: 1px 5px;
-    border-radius: 8px;
-    font-family: 'JetBrains Mono', monospace;
-    font-weight: 700;
-  }
-
-  .filter-chip.active .filter-count {
-    background: rgba(124,140,255,0.2);
-  }
-
-  #task-list {
-    flex: 1;
-    overflow-y: auto;
-    padding: 14px;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-  }
-
-  /* Card */
-  .task-card {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 14px;
-    overflow: hidden;
-    transition: all 300ms cubic-bezier(0.16, 1, 0.3, 1);
-    position: relative;
-  }
-
-  .task-card:hover {
-    border-color: var(--border-h);
-    background: var(--card-h);
-  }
-
-  .task-card.done {
-    opacity: 0;
-    transform: scale(0.96) translateX(8px);
-    max-height: 0 !important;
-    margin: 0 !important;
-    padding: 0 !important;
-    border-width: 0 !important;
-    pointer-events: none;
-  }
-
-  .card-body { padding: 14px; }
-
-  .card-top {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 12px;
-    margin-bottom: 8px;
-  }
-
-  .card-title {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--text);
-    line-height: 1.4;
-    letter-spacing: -0.005em;
-    flex: 1;
-    transition: all 400ms ease;
-  }
-
-  .card-title.struck {
-    text-decoration: line-through;
-    color: var(--text-4);
-    text-decoration-color: rgba(255,255,255,0.15);
-  }
-
-  /* Done button */
-  .done-btn {
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
-    border: 1.5px solid rgba(255,255,255,0.15);
-    background: transparent;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 250ms cubic-bezier(0.34, 1.56, 0.64, 1);
-    flex-shrink: 0;
-    margin-top: -2px;
-  }
-
-  .done-btn:hover {
-    border-color: var(--accent);
-    background: rgba(124,140,255,0.08);
-    transform: scale(1.08);
-  }
-
-  .done-btn.checked {
-    border-color: var(--accent);
-    background: rgba(124,140,255,0.15);
-  }
-
-  .done-btn svg {
-    opacity: 0;
-    transform: scale(0);
-    transition: all 250ms cubic-bezier(0.34, 1.56, 0.64, 1);
-  }
-
-  .done-btn.checked svg {
-    opacity: 1;
-    transform: scale(1);
-  }
-
-  /* Description */
-  .card-desc {
-    font-size: 10.5px;
-    color: var(--text-3);
-    line-height: 1.55;
-    margin-top: 8px;
-    padding: 10px 12px;
-    background: rgba(255,255,255,0.02);
-    border-radius: 10px;
-    border: 1px solid var(--border);
-    max-height: 80px;
-    overflow-y: auto;
-    word-break: break-word;
-  }
-
-  /* Countdown */
-  .countdown-bar {
-    margin-top: 10px;
-    background: rgba(124,140,255,0.05);
-    border: 1px solid rgba(124,140,255,0.15);
-    border-radius: 10px;
-    padding: 9px 12px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-  }
-
-  .cd-info {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-
-  .cd-ring {
-    position: relative;
-    width: 28px;
-    height: 28px;
-  }
-
-  .cd-ring svg {
-    transform: rotate(-90deg);
-  }
-
-  .cd-num {
-    position: absolute;
-    inset: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 10px;
-    font-weight: 700;
-    font-family: 'JetBrains Mono', monospace;
-    color: var(--accent);
-  }
-
-  .cd-text {
-    font-size: 9.5px;
-    color: var(--text-3);
-  }
-
-  .undo-btn {
-    font-size: 8.5px;
-    color: var(--text-3);
-    background: transparent;
-    border: 1px solid var(--border);
-    padding: 5px 12px;
-    border-radius: 7px;
-    cursor: pointer;
-    font-weight: 600;
-    transition: all 200ms ease;
-    letter-spacing: 0.02em;
-  }
-
-  .undo-btn:hover {
-    background: rgba(255,255,255,0.04);
-    color: var(--text-2);
-    border-color: var(--border-h);
-  }
-
-  /* Meta row */
-  .meta-row {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin-top: 10px;
-    flex-wrap: wrap;
-  }
-
-  .badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    font-size: 8px;
-    font-weight: 600;
-    padding: 3px 7px;
-    border-radius: 6px;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    border: 1px solid transparent;
-  }
-
-  .pri-dot {
-    width: 5px;
-    height: 5px;
-    border-radius: 50%;
-    flex-shrink: 0;
-  }
-
-  /* Footer */
-  #footer {
-    padding: 12px 16px;
-    border-top: 1px solid var(--border);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-shrink: 0;
-    background: var(--surface);
-  }
-
-  #open-btn {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 10px;
-    font-weight: 600;
-    color: var(--accent);
-    background: rgba(124,140,255,0.06);
-    border: 1px solid rgba(124,140,255,0.15);
-    padding: 7px 14px;
-    border-radius: 9px;
-    cursor: pointer;
-    transition: all 200ms ease;
-    letter-spacing: 0.02em;
-  }
-
-  #open-btn:hover {
-    background: rgba(124,140,255,0.12);
-    border-color: rgba(124,140,255,0.28);
-    transform: translateY(-1px);
-  }
-
-  #hint {
-    font-size: 8.5px;
-    color: var(--text-4);
-    font-family: 'JetBrains Mono', monospace;
-    letter-spacing: 0.02em;
-  }
-
-  /* Empty */
-  #empty {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 14px;
-    padding: 40px 20px;
-  }
-
-  #empty-icon {
-    width: 52px;
-    height: 52px;
-    border-radius: 14px;
-    background: var(--card);
-    border: 1px solid var(--border);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  .empty-title {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--text-2);
-    letter-spacing: -0.005em;
-  }
-
-  .empty-sub {
-    font-size: 10px;
-    color: var(--text-4);
-    text-align: center;
-    line-height: 1.6;
-  }
-
-  /* Loading */
-  #loading {
-    flex: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  .spinner {
-    width: 22px;
-    height: 22px;
-    border: 2px solid var(--border);
-    border-top-color: var(--accent);
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-  }
-
-  @keyframes spin { to { transform: rotate(360deg); } }
-
-  /* Fade in */
-  @keyframes fadeSlideIn {
-    from { opacity: 0; transform: translateY(-4px); }
-    to   { opacity: 1; transform: translateY(0); }
-  }
-
-  .task-card {
-    animation: fadeSlideIn 350ms cubic-bezier(0.16, 1, 0.3, 1) both;
-  }
-</style>
+<link rel="stylesheet" href="styles/panel.css" />
 </head>
 <body>
 
 <div id="panel">
 
   <!-- Header -->
-  <div id="header">
-    <div id="brand">
-      <div id="title-block">
-        <h1>Tasks</h1>
-        <div id="title-sub">loading...</div>
+  <div class="panel-header">
+    <div class="header-left">
+      <div style="display:flex;align-items:center;gap:8px">
+        <div class="seven-dot dead" id="seven-dot" title="Seven status"></div>
+        <span class="header-title">Tasks</span>
       </div>
+      <span class="header-sub" id="header-sub">loading...</span>
     </div>
-    <button id="close-btn" onclick="closePanel()" title="Close (Esc)">
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-        <path d="M18 6L6 18M6 6l12 12"/>
-      </svg>
-    </button>
+    <div class="header-actions">
+      <button class="icon-btn" onclick="toggleSearch()" title="Search">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
+        </svg>
+      </button>
+      <button class="icon-btn" onclick="closePanel()" title="Close (Esc)">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <path d="M18 6L6 18M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
   </div>
 
   <!-- Stats -->
-  <div id="stats">
-    <div class="stat">
+  <div class="stats-strip">
+    <div class="stat-box">
       <span class="stat-label">Pending</span>
-      <span class="stat-value" id="stat-pending">—</span>
+      <span class="stat-val" id="stat-pending">0</span>
     </div>
-    <div class="stat">
+    <div class="stat-box">
       <span class="stat-label">Today</span>
-      <span class="stat-value dim" id="stat-today">—</span>
+      <span class="stat-val dim" id="stat-today">0</span>
     </div>
-    <div class="stat">
+    <div class="stat-box">
       <span class="stat-label">Overdue</span>
-      <span class="stat-value dim" id="stat-overdue">—</span>
+      <span class="stat-val dim" id="stat-overdue">0</span>
     </div>
   </div>
 
-  <!-- Timer -->
-  <div id="timer-bar"><div id="timer-fill"></div></div>
+  <!-- Quick Add -->
+  <div class="quick-add">
+    <input class="quick-add-input" id="quick-input"
+           placeholder="Quick add task... (Enter to save)"
+           autocomplete="off" spellcheck="false" />
+  </div>
+
+  <!-- Search -->
+  <div class="search-wrap" id="search-wrap">
+    <input class="search-input" id="search-input"
+           placeholder="Search tasks..." autocomplete="off" />
+  </div>
 
   <!-- Filters -->
-  <div id="filters">
-    <button class="filter-chip active" data-filter="all" onclick="setFilter('all')">
+  <div class="filter-bar">
+    <button class="filter-tab active" data-filter="all" onclick="setFilter('all')">
       All <span class="filter-count" id="cnt-all">0</span>
     </button>
-    <button class="filter-chip" data-filter="today" onclick="setFilter('today')">
+    <button class="filter-tab" data-filter="today" onclick="setFilter('today')">
       Today <span class="filter-count" id="cnt-today">0</span>
     </button>
-    <button class="filter-chip" data-filter="overdue" onclick="setFilter('overdue')">
+    <button class="filter-tab" data-filter="overdue" onclick="setFilter('overdue')">
       Overdue <span class="filter-count" id="cnt-overdue">0</span>
     </button>
   </div>
 
   <!-- Loading -->
-  <div id="loading"><div class="spinner"></div></div>
+  <div class="loading" id="loading"><div class="spinner"></div></div>
 
   <!-- Task list -->
-  <div id="task-list" style="display:none"></div>
+  <div class="task-list" id="task-list" style="display:none"></div>
 
-  <!-- Empty -->
-  <div id="empty" style="display:none">
-    <div id="empty-icon">
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.3)" stroke-width="1.5">
-        <circle cx="12" cy="12" r="10"/>
-        <path d="M9 12l2 2 4-4"/>
+  <!-- Empty state -->
+  <div class="empty-state" id="empty" style="display:none">
+    <div class="empty-icon">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="1.5">
+        <circle cx="12" cy="12" r="10"/><path d="M9 12l2 2 4-4"/>
       </svg>
     </div>
-    <div>
-      <div class="empty-title" style="text-align:center">All clear</div>
-      <div class="empty-sub" style="margin-top:6px">No pending tasks.<br>Say "add task" to Seven to create one.</div>
+    <span class="empty-title">All clear</span>
+    <span class="empty-sub">No pending tasks. Type above to add one.</span>
+  </div>
+
+  <!-- Schedules section -->
+  <div id="sched-section" style="display:none">
+    <div class="section-divider">
+      <span class="section-title">Upcoming Schedules</span>
     </div>
+    <div class="sched-list" id="sched-list"></div>
   </div>
 
   <!-- Footer -->
-  <div id="footer">
-    <button id="open-btn" onclick="openSevenTasks()">
-      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+  <div class="panel-footer">
+    <button class="footer-btn" onclick="openSevenTasks()">
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
         <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/>
-        <path d="M15 3h6v6"/>
-        <path d="M10 14L21 3"/>
+        <path d="M15 3h6v6"/><path d="M10 14L21 3"/>
       </svg>
-      Open in Seven
+      Open Seven
     </button>
-    <span id="hint">Alt+Shift+T</span>
+    <button class="footer-btn danger" id="close-all-btn" onclick="closeAllWindows_click()">
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <path d="M18 6L6 18M6 6l12 12"/>
+      </svg>
+      Close All
+    </button>
+    <span class="footer-hint">Alt+Shift+T</span>
   </div>
+
 </div>
 
-<script>
-const PANEL_PORT = 7778;
-const AUTO_CLOSE = 15;
-
-let tasks = [], allTasks = [], timerLeft = AUTO_CLOSE, timerInterval = null, countdowns = {};
-let currentFilter = 'all';
-
-function setFilter(f) {
-  currentFilter = f;
-  document.querySelectorAll('.filter-chip').forEach(c => {
-    c.classList.toggle('active', c.dataset.filter === f);
-  });
-  applyFilter();
-  resetTimer();
-}
-
-function applyFilter() {
-  const today = new Date(); today.setHours(0,0,0,0);
-  const now = new Date();
-
-  if (currentFilter === 'today') {
-    tasks = allTasks.filter(t => {
-      if (!t.due_date) return false;
-      const due = new Date(t.due_date + 'T00:00:00');
-      return due <= today;
-    });
-  } else if (currentFilter === 'overdue') {
-    tasks = allTasks.filter(t => {
-      if (!t.due_date) return false;
-      const due = new Date(t.due_date + 'T00:00:00');
-      return due < today;
-    });
-  } else {
-    tasks = allTasks;
-  }
-  renderTasks();
-}
-
-function updateFilterCounts() {
-  const today = new Date(); today.setHours(0,0,0,0);
-  const todayCount = allTasks.filter(t => {
-    if (!t.due_date) return false;
-    return new Date(t.due_date + 'T00:00:00') <= today;
-  }).length;
-  const overdueCount = allTasks.filter(t => {
-    if (!t.due_date) return false;
-    return new Date(t.due_date + 'T00:00:00') < today;
-  }).length;
-
-  document.getElementById('cnt-all').textContent = allTasks.length;
-  document.getElementById('cnt-today').textContent = todayCount;
-  document.getElementById('cnt-overdue').textContent = overdueCount;
-}
-
-window.addEventListener('DOMContentLoaded', () => {
-  requestAnimationFrame(() => {
-    setTimeout(() => document.getElementById('panel').classList.add('open'), 20);
-  });
-
-  loadTasks();
-  loadStats();
-  startAutoClose();
-
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') closePanel();
-    const n = parseInt(e.key);
-    if (n >= 1 && n <= 9 && tasks[n - 1]) startComplete(tasks[n - 1].id);
-  });
-
-  document.addEventListener('mousemove', resetTimer);
-  document.addEventListener('click',     resetTimer);
-});
-
-async function api(path, method = 'GET', body = null) {
-  const opts = { method, headers: { 'Content-Type': 'application/json' } };
-  if (body) opts.body = JSON.stringify(body);
-  const r = await fetch(`http://127.0.0.1:${PANEL_PORT}${path}`, opts);
-  return r.json();
-}
-
-async function loadTasks() {
-  try {
-    allTasks = await api('/panel/tasks');
-    updateFilterCounts();
-    applyFilter();
-  } catch (e) {
-    console.error('Failed:', e);
-    showEmpty();
-  }
-}
-
-async function loadStats() {
-  try {
-    const s = await api('/panel/stats');
-    document.getElementById('stat-pending').textContent = s.pending ?? 0;
-    document.getElementById('stat-today').textContent   = s.due_today ?? 0;
-    document.getElementById('stat-overdue').textContent = s.overdue ?? 0;
-
-    document.getElementById('title-sub').textContent =
-      `${s.pending} pending · ${s.due_today} today`;
-
-    if (s.overdue > 0) {
-      document.getElementById('stat-overdue').style.color = 'rgba(255,255,255,0.9)';
-    }
-  } catch (e) { console.error(e); }
-}
-
-function renderTasks() {
-  document.getElementById('loading').style.display = 'none';
-  if (!tasks || tasks.length === 0) return showEmpty();
-
-  document.getElementById('empty').style.display = 'none';
-  const list = document.getElementById('task-list');
-  list.style.display = 'flex';
-  list.innerHTML = '';
-  tasks.forEach((t, i) => list.appendChild(makeCard(t, i)));
-}
-
-function makeCard(task, index) {
-  const card = document.createElement('div');
-  card.className = 'task-card';
-  card.id = `card-${task.id}`;
-
-  const pri = task.priority || 'medium';
-  const priConfig = {
-    high:   { dot: 'rgba(255,255,255,0.7)',  txt: 'rgba(255,255,255,0.85)', bg: 'rgba(255,255,255,0.05)' },
-    medium: { dot: 'rgba(255,255,255,0.4)',  txt: 'rgba(255,255,255,0.55)', bg: 'rgba(255,255,255,0.03)' },
-    low:    { dot: 'rgba(255,255,255,0.2)',  txt: 'rgba(255,255,255,0.35)', bg: 'rgba(255,255,255,0.02)' },
-  };
-  const pc = priConfig[pri];
-  const badge = getDueBadge(task);
-  const dl = getDeadline(task);
-  const subs = task.subtasks || [];
-  const subDone = subs.filter(s => s.completed).length;
-  const subPct = subs.length > 0 ? Math.round((subDone / subs.length) * 100) : null;
-
-  card.innerHTML = `
-    <div class="card-body">
-      <div class="card-top">
-        <div>
-          <div class="card-title" id="title-${task.id}">${escHtml(task.text)}</div>
-          ${index < 9 ? `<div style="font-size:8px;color:rgba(255,255,255,0.25);margin-top:3px;font-family:JetBrains Mono,monospace;letter-spacing:0.02em">Press ${index + 1}</div>` : ''}
-        </div>
-        <button class="done-btn" id="btn-${task.id}" onclick="startComplete(${task.id})" title="Mark done">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(124,140,255,0.95)" stroke-width="2.5" stroke-linecap="round">
-            <path d="M20 6L9 17l-5-5"/>
-          </svg>
-        </button>
-      </div>
-
-      ${task.description ? `
-        <div style="margin-top:10px">
-          <div style="font-size:8px;color:rgba(255,255,255,0.35);text-transform:uppercase;letter-spacing:0.12em;font-weight:600;margin-bottom:5px">
-            Description
-          </div>
-          <div class="card-desc">${escHtml(task.description)}</div>
-        </div>
-      ` : ''}
-
-      <div id="countdown-${task.id}" style="display:none"></div>
-
-      ${subs.length > 0 ? `
-        <div style="margin-top:12px">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-            <div style="font-size:8px;color:rgba(255,255,255,0.35);text-transform:uppercase;letter-spacing:0.12em;font-weight:600">
-              Subtasks
-            </div>
-            <div id="sub-count-${task.id}" style="font-size:8px;color:rgba(255,255,255,0.3);font-family:JetBrains Mono,monospace;font-weight:600">
-              ${subDone}/${subs.length}
-            </div>
-          </div>
-          <div style="max-height:100px;overflow-y:auto">
-            ${subs.map(sub => `
-              <div id="sub-${task.id}-${sub.id}"
-                   onclick="toggleSubtask(${task.id}, '${sub.id}')"
-                   style="display:flex;align-items:center;gap:8px;padding:5px 6px;border-radius:5px;cursor:pointer;transition:background 150ms ease"
-                   onmouseover="this.style.background='rgba(255,255,255,0.04)'"
-                   onmouseout="this.style.background='transparent'">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="${sub.completed ? 'rgba(124,140,255,0.7)' : 'rgba(255,255,255,0.2)'}" stroke-width="2" style="flex-shrink:0;transition:stroke 250ms ease">
-                  ${sub.completed 
-                    ? '<circle cx="12" cy="12" r="10"/><path d="M9 12l2 2 4-4"/>'
-                    : '<circle cx="12" cy="12" r="10"/>'}
-                </svg>
-                <span style="font-size:10px;color:${sub.completed ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.75)'};text-decoration:${sub.completed ? 'line-through' : 'none'};text-decoration-color:rgba(255,255,255,0.2);line-height:1.3;flex:1;user-select:none;transition:color 250ms ease">
-                  ${escHtml(sub.text)}
-                </span>
-              </div>
-            `).join('')}
-          </div>
-          <div style="margin-top:8px;display:flex;align-items:center;gap:8px">
-            <div style="flex:1;height:3px;background:rgba(255,255,255,0.06);border-radius:3px;overflow:hidden">
-              <div id="progress-${task.id}"
-                   style="height:100%;width:${subPct}%;background:${subPct === 100 ? 'rgba(255,255,255,0.5)' : 'rgba(124,140,255,0.6)'};border-radius:3px;transition:width 600ms cubic-bezier(0.16,1,0.3,1),background 400ms ease"></div>
-            </div>
-            <span id="progress-text-${task.id}" style="font-size:8px;color:rgba(255,255,255,0.4);font-family:JetBrains Mono,monospace;font-weight:600">${subPct}%</span>
-          </div>
-        </div>
-      ` : ''}
-
-      <div class="meta-row">
-        <div style="display:flex;align-items:center;gap:5px">
-          <div class="pri-dot" style="background:${pc.dot}"></div>
-          <span style="font-size:8px;font-weight:600;color:${pc.txt};text-transform:uppercase;letter-spacing:0.08em">${pri}</span>
-        </div>
-
-        ${badge ? `
-          <span class="badge" style="color:${badge.color};background:${badge.bg};border-color:${badge.border}">
-            ${badge.label}
-          </span>
-        ` : ''}
-
-        ${dl ? `
-          <span style="font-size:8px;color:${dl.urgent ? 'rgba(255,255,255,0.75)' : 'rgba(255,255,255,0.35)'};font-family:JetBrains Mono,monospace;font-weight:600;margin-left:auto">
-            ${dl.text}
-          </span>
-        ` : ''}
-      </div>
-    </div>
-  `;
-
-  return card;
-}
-
-function showEmpty() {
-  document.getElementById('loading').style.display = 'none';
-  document.getElementById('task-list').style.display = 'none';
-  document.getElementById('empty').style.display = 'flex';
-}
-
-function startComplete(taskId) {
-  const card  = document.getElementById(`card-${taskId}`);
-  const btn   = document.getElementById(`btn-${taskId}`);
-  const title = document.getElementById(`title-${taskId}`);
-  if (!card || card.classList.contains('completing')) return;
-
-  title.classList.add('struck');
-  card.classList.add('completing');
-  btn.classList.add('checked');
-  resetTimer();
-
-  let secs = 3;
-  const cdEl = document.getElementById(`countdown-${taskId}`);
-  cdEl.style.display = 'block';
-  cdEl.innerHTML = renderCountdown(secs, taskId);
-
-  countdowns[taskId] = setInterval(() => {
-    secs--;
-    if (secs <= 0) {
-      clearInterval(countdowns[taskId]);
-      delete countdowns[taskId];
-      doComplete(taskId);
-    } else {
-      cdEl.innerHTML = renderCountdown(secs, taskId);
-    }
-  }, 1000);
-}
-
-function renderCountdown(secs, taskId) {
-  const pct = secs / 3;
-  const r = 11;
-  const circ = 2 * Math.PI * r;
-  const dash = circ * pct;
-  return `
-    <div class="countdown-bar">
-      <div class="cd-info">
-        <div class="cd-ring">
-          <svg width="28" height="28" viewBox="0 0 28 28">
-            <circle cx="14" cy="14" r="${r}" fill="none" stroke="rgba(124,140,255,0.15)" stroke-width="2"/>
-            <circle cx="14" cy="14" r="${r}" fill="none" stroke="rgba(124,140,255,0.9)" stroke-width="2"
-                    stroke-dasharray="${dash} ${circ}" stroke-linecap="round"
-                    style="transition:stroke-dasharray 1s linear"/>
-          </svg>
-          <div class="cd-num">${secs}</div>
-        </div>
-        <div>
-          <div class="cd-text" style="font-weight:600;color:rgba(255,255,255,0.75)">Completed</div>
-          <div class="cd-text">Moving in ${secs}s</div>
-        </div>
-      </div>
-      <button class="undo-btn" onclick="undoComplete(${taskId})">Undo</button>
-    </div>
-  `;
-}
-
-function undoComplete(taskId) {
-  if (countdowns[taskId]) {
-    clearInterval(countdowns[taskId]);
-    delete countdowns[taskId];
-  }
-  document.getElementById(`card-${taskId}`).classList.remove('completing');
-  document.getElementById(`btn-${taskId}`).classList.remove('checked');
-  document.getElementById(`title-${taskId}`).classList.remove('struck');
-  const cdEl = document.getElementById(`countdown-${taskId}`);
-  cdEl.style.display = 'none';
-  cdEl.innerHTML = '';
-}
-
-async function toggleSubtask(taskId, subId) {
-  const task = allTasks.find(t => t.id === taskId);
-  if (!task || !task.subtasks) return;
-
-  const updated = task.subtasks.map(s =>
-    s.id === subId ? { ...s, completed: !s.completed } : s
-  );
-
-  task.subtasks = updated;
-  const taskInFiltered = tasks.find(t => t.id === taskId);
-  if (taskInFiltered) taskInFiltered.subtasks = updated;
-
-  const subDone = updated.filter(s => s.completed).length;
-  const subPct  = Math.round((subDone / updated.length) * 100);
-
-  // Update ONLY the specific subtask row (checkbox + text style)
-  const subRow = document.getElementById(`sub-${taskId}-${subId}`);
-  if (subRow) {
-    const sub = updated.find(s => s.id === subId);
-    const svg = subRow.querySelector('svg');
-    const span = subRow.querySelector('span');
-    if (sub.completed) {
-      svg.setAttribute('stroke', 'rgba(124,140,255,0.7)');
-      svg.innerHTML = '<circle cx="12" cy="12" r="10"/><path d="M9 12l2 2 4-4"/>';
-      span.style.color = 'rgba(255,255,255,0.3)';
-      span.style.textDecoration = 'line-through';
-    } else {
-      svg.setAttribute('stroke', 'rgba(255,255,255,0.2)');
-      svg.innerHTML = '<circle cx="12" cy="12" r="10"/>';
-      span.style.color = 'rgba(255,255,255,0.75)';
-      span.style.textDecoration = 'none';
-    }
-  }
-
-  // Update progress bar smoothly
-  const progressBar = document.getElementById(`progress-${taskId}`);
-  const progressText = document.getElementById(`progress-text-${taskId}`);
-  if (progressBar) {
-    progressBar.style.width = subPct + '%';
-    progressBar.style.background = subPct === 100
-      ? 'rgba(255,255,255,0.5)'
-      : 'rgba(124,140,255,0.6)';
-  }
-  if (progressText) {
-    progressText.textContent = subPct + '%';
-  }
-
-  // Update SUBTASKS count in header
-  const subHeader = document.getElementById(`sub-count-${taskId}`);
-  if (subHeader) {
-    subHeader.textContent = `${subDone}/${updated.length}`;
-  }
-
-  resetTimer();
-
-  try {
-    await fetch(`http://127.0.0.1:${PANEL_PORT}/panel/tasks/${taskId}/subtasks`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ subtasks: updated })
-    });
-  } catch (e) {
-    console.error('Subtask update failed:', e);
-  }
-}
-
-async function doComplete(taskId) {
-  try { await api(`/panel/tasks/${taskId}/complete`, 'PUT'); }
-  catch (e) { console.error(e); }
-
-  const card = document.getElementById(`card-${taskId}`);
-  if (card) {
-    card.classList.add('done');
-    setTimeout(() => {
-      card.remove();
-      allTasks = allTasks.filter(t => t.id !== taskId);
-      tasks = tasks.filter(t => t.id !== taskId);
-      updateFilterCounts();
-      if (tasks.length === 0) showEmpty();
-      loadStats();
-    }, 500);
-  }
-}
-
-function getDueBadge(task) {
-  if (!task.due_date || task.completed) return null;
-  const now = new Date(); now.setHours(0,0,0,0);
-  const due = new Date(task.due_date + 'T00:00:00');
-  const d = Math.round((due - now) / 86400000);
-  if (d < 0)   return { label: 'Overdue',  color: 'rgba(255,255,255,0.85)', bg: 'rgba(255,255,255,0.06)', border: 'rgba(255,255,255,0.1)' };
-  if (d === 0) return { label: 'Today',    color: 'rgba(255,255,255,0.8)',  bg: 'rgba(255,255,255,0.05)', border: 'rgba(255,255,255,0.08)' };
-  if (d === 1) return { label: 'Tomorrow', color: 'rgba(255,255,255,0.6)',  bg: 'rgba(255,255,255,0.03)', border: 'rgba(255,255,255,0.06)' };
-  if (d <= 7) return {
-    label: due.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }),
-    color: 'rgba(255,255,255,0.5)', bg: 'rgba(255,255,255,0.02)', border: 'rgba(255,255,255,0.05)'
-  };
-  return {
-    label: due.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
-    color: 'rgba(255,255,255,0.4)', bg: 'rgba(255,255,255,0.02)', border: 'rgba(255,255,255,0.04)'
-  };
-}
-
-function getDeadline(task) {
-  if (!task.due_date || task.completed) return null;
-  const now = new Date();
-  const ds  = task.due_time ? `${task.due_date}T${task.due_time}` : `${task.due_date}T23:59:59`;
-  const due = new Date(ds);
-  const diff = due - now;
-  if (diff <= 0) return { text: 'past', urgent: true };
-  const m = Math.floor(diff/60000), h = Math.floor(m/60), d = Math.floor(h/24);
-  if (d > 0) return { text: `${d}d ${h%24}h`, urgent: d <= 1 };
-  if (h > 0) return { text: `${h}h ${m%60}m`, urgent: h <= 3 };
-  return { text: `${m}m`, urgent: true };
-}
-
-function startAutoClose() {
-  timerLeft = AUTO_CLOSE;
-  const fill = document.getElementById('timer-fill');
-  fill.style.width = '100%';
-  timerInterval = setInterval(() => {
-    timerLeft--;
-    fill.style.width = ((timerLeft / AUTO_CLOSE) * 100) + '%';
-    if (timerLeft <= 0) { clearInterval(timerInterval); closePanel(); }
-  }, 1000);
-}
-
-function resetTimer() {
-  if (timerInterval) clearInterval(timerInterval);
-  startAutoClose();
-}
-
-function closePanel() {
-  Object.values(countdowns).forEach(clearInterval);
-  countdowns = {};
-  document.getElementById('panel').classList.remove('open');
-  setTimeout(() => {
-    if (window.electronAPI?.closePanel) window.electronAPI.closePanel();
-    else window.close();
-  }, 420);
-}
-
-function openSevenTasks() {
-  if (window.electronAPI?.openSevenTasks) window.electronAPI.openSevenTasks();
-  closePanel();
-}
-
-function escHtml(str) {
-  if (!str) return '';
-  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
-</script>
+<script src="scripts/panel_api.js"></script>
+<script src="scripts/panel_tasks.js"></script>
+<script src="scripts/panel_app.js"></script>
 </body>
 </html>
