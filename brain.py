@@ -247,18 +247,22 @@ def think(prompt_text, speaker_id="default"):
             _response_to_save = None
 
         if _response_to_save and not _response_to_save.startswith("Processing error"):
+            print(Fore.CYAN + f"[BRAIN] Saving conversation to memory (source={_source})...")
             seven_memory.extract_and_store_facts(prompt_text, user_id=_save_user_id)
-            # Only brain.py saves — chat.py no longer calls store_conversation
-            # to prevent double saves
             seven_memory.store_conversation(
                 user_input=prompt_text,
                 seven_response=_response_to_save,
                 user_id=_save_user_id,
                 source=_source,
             )
+            print(Fore.GREEN + f"[BRAIN] Memory saved OK")
+        else:
+            print(Fore.YELLOW + f"[BRAIN] Memory save skipped: _response_to_save={repr(_response_to_save)[:50]}")
 
     except Exception as _mem_err:
-        print(Fore.YELLOW + f"[BRAIN] Memory save failed: {_mem_err}")
+        import traceback
+        print(Fore.RED + f"[BRAIN] Memory save failed: {_mem_err}")
+        traceback.print_exc()
 
     return result
 
