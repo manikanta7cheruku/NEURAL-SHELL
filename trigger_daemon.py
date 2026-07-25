@@ -781,18 +781,12 @@ def _execute_trigger_complete(trigger, name, action_type, action_data,
     """
     workspace_apps = workspace_apps or []
 
-    # For run_command terminal mode: show notification AFTER paste
-    # so the notification window does not interfere with focus
-    _is_terminal_run = (
-        action_type == "run_command" and
-        action_data.get("target", "terminal") == "terminal"
-    )
-
     # Step 1: Ensure overlay is ready
     _ensure_overlay_alive_safe()
 
-    # Step 2: Show notification (skip for terminal run commands until after paste)
-    if not trigger.get("silent", False) and not _is_terminal_run:
+    # Step 2: Show notification
+    # Safe for run_command because notif window is non-focusable
+    if not trigger.get("silent", False):
         _fire_notification(name, action_type, app_count, tab_count, app_names)
 
     # Step 3: Execute action
@@ -822,10 +816,6 @@ def _execute_trigger_complete(trigger, name, action_type, action_data,
         import traceback
         traceback.print_exc()
         return
-
-    # Step 4: Show notification for terminal run commands now (after paste completed)
-    if _is_terminal_run and not trigger.get("silent", False):
-        _fire_notification(name, action_type, app_count, tab_count, app_names)
 
     # Sound handled by notification HTML chime
 
@@ -1230,13 +1220,8 @@ def _exec_open_workspace(data):
 def _exec_run_command(data):
     """
     Execute a shell command.
-
-    target=terminal (default): types command into currently focused window.
-      User clicks inside any terminal (VS Code, cmd, PowerShell, Windows
-      Terminal) then fires the hotkey. Seven types the command + Enter.
-
-    target=background: runs silently, no window, no output visible.
-      Use for fire-and-forget commands like git pull, shutdown, etc.
+    target=terminal: types/pastes command into wherever cursor is focused.
+    target=background: runs silently in hidden process.
     """
     cmd    = data.get("command", "")
     target = data.get("target", "terminal")
@@ -1248,39 +1233,24 @@ def _exec_run_command(data):
         import sys as _sys
         _cflags = 0x08000000 if _sys.platform == 'win32' else 0
         subprocess.Popen(
-            cmd,
-            shell=True,
-            creationflags=_cflags,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
+            cmd, shell=True, creationflags=_cflags,
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
         print(f"[TRIGGER DAEMON] Run command (background): {cmd[:60]}")
         return
 
-    # target=terminal: type command directly into a focused terminal/editor terminal.
-    # We do NOT use clipboard. We do NOT auto-press Enter.
-    time.sleep(0.15)
-
     try:
-        import pyautogui
         import ctypes
-        import win32gui
-        import win32process
-        import psutil
+        import subprocess as _sp
+        import pyautogui
 
-        # Step 1: release modifier keys
-        _KEYEVENTF_KEYUP = 0x0002
-        _mod_vks = {
-            'alt':   0x12,  # VK_MENU
-            'ctrl':  0x11,  # VK_CONTROL
-            'shift': 0x10,  # VK_SHIFT
-            'win':   0x5B,  # VK_LWIN
-        }
-        for _vk in _mod_vks.values():
-            ctypes.windll.user32.keybd_event(_vk, 0, _KEYEVENTF_KEYUP, 0)
+        _KEYUP = 0x0002
 
-        # Step 2: release trigger key
+        # Step 1: Release all held keys
+        for _vk in [0x12, 0x11, 0x10, 0x5B]:
+            ctypes.windll.user32.keybd_event(_vk, 0, _KEYUP, 0)
+
         _fired_key = data.get("_fired_key", "")
         if _fired_key:
             _vk_map = {
@@ -1294,59 +1264,120 @@ def _exec_run_command(data):
             elif _vk is None and len(_fired_key) == 1 and _fired_key.isdigit():
                 _vk = ord(_fired_key)
             if _vk:
-                ctypes.windll.user32.keybd_event(_vk, 0, _KEYEVENTF_KEYUP, 0)
+                ctypes.windll.user32.keybd_event(_vk, 0, _KEYUP, 0)
 
-        time.sleep(0.20)
+        time.sleep(0.3)
 
-        # Step 3: detect focused window
-        _hwnd = win32gui.GetForegroundWindow()
-        _title = (win32gui.GetWindowText(_hwnd) or "").lower()
-        _, _pid = win32process.GetWindowThreadProcessId(_hwnd)
-        _proc_name = ""
+        # Step 2: Detect focused app
         try:
-            _proc_name = psutil.Process(_pid).name().lower()
+            import win32gui
+            import win32process
+            import psutil
+            _hwnd = win32gui.GetForegroundWindow()
+            _title = (win32gui.GetWindowText(_hwnd) or "").lower()
+            _, _pid = win32process.GetWindowThreadProcessId(_hwnd)
+            _proc = psutil.Process(_pid).name().lower()
         except Exception:
-            pass
+            _proc = ""
+            _title = ""
 
-        _allowed_proc = {
-            "code.exe",
-            "powershell.exe",
-            "pwsh.exe",
-            "cmd.exe",
-            "windowsterminal.exe",
-            "wt.exe",
-            "conhost.exe",
-        }
-        _allowed_title_parts = [
-            "visual studio code",
-            "powershell",
-            "command prompt",
-            "windows terminal",
-        ]
+        _is_vscode = "code.exe" in _proc
 
-        _is_terminal = (
-            _proc_name in _allowed_proc or
-            any(x in _title for x in _allowed_title_parts)
-        )
+        # Step 3: For VS Code, focus the terminal panel with ctrl+`
+        if _is_vscode:
+            ctypes.windll.user32.keybd_event(0x11, 0, 0, 0)       # ctrl down
+            time.sleep(0.02)
+            ctypes.windll.user32.keybd_event(0xC0, 0, 0, 0)       # ` down
+            time.sleep(0.02)
+            ctypes.windll.user32.keybd_event(0xC0, 0, _KEYUP, 0)  # ` up
+            time.sleep(0.02)
+            ctypes.windll.user32.keybd_event(0x11, 0, _KEYUP, 0)  # ctrl up
+            time.sleep(0.4)
 
-        # Step 4: always remove the stray trigger char once
-        # If the target is not a terminal, this simply undoes the /
-        ctypes.windll.user32.keybd_event(0x08, 0, 0, 0)       # VK_BACK down
-        time.sleep(0.02)
-        ctypes.windll.user32.keybd_event(0x08, 0, _KEYEVENTF_KEYUP, 0)  # VK_BACK up
-        time.sleep(0.05)
+        # Step 4: Erase stray trigger char
+        _printable = set('abcdefghijklmnopqrstuvwxyz0123456789`-=[]\\;\',./\'')
+        if _fired_key and _fired_key in _printable:
+            ctypes.windll.user32.keybd_event(0x08, 0, 0, 0)
+            time.sleep(0.02)
+            ctypes.windll.user32.keybd_event(0x08, 0, _KEYUP, 0)
+            time.sleep(0.06)
 
-        if not _is_terminal:
-            print(f"[TRIGGER DAEMON] Terminal mode aborted - focused window is not terminal (proc={_proc_name}, title={_title[:50]})")
-            return
+        # Step 5: Type the command
+        # Method A: pyautogui.write for typing effect (works in terminals, notepad)
+        # Method B: clipboard paste for apps that block synthetic keys (Chrome)
+        _typed = False
 
-        # Step 5: type command directly
-        pyautogui.write(cmd, interval=0.01)
+        # Try typing effect first
+        try:
+            # Check if command has only typeable ASCII chars
+            _typeable = all(
+                c in 'abcdefghijklmnopqrstuvwxyz0123456789 .-_/\\:;,=+!@#$%^&*()[]{}|<>?~`\'"'
+                for c in cmd.lower()
+            )
+            if _typeable:
+                pyautogui.PAUSE = 0
+                for char in cmd:
+                    pyautogui.press(char) if len(char) == 1 and char == ' ' else None
+                    if char == ' ':
+                        ctypes.windll.user32.keybd_event(0x20, 0, 0, 0)
+                        time.sleep(0.01)
+                        ctypes.windll.user32.keybd_event(0x20, 0, _KEYUP, 0)
+                    else:
+                        pyautogui.write(char, interval=0)
+                    time.sleep(0.015)
+                _typed = True
+        except Exception as _te:
+            print(f"[TRIGGER DAEMON] pyautogui.write failed: {_te}")
 
-        print(f"[TRIGGER DAEMON] Command typed into terminal: {cmd[:60]}")
+        # Fallback: clipboard paste if typing failed
+        if not _typed:
+            # Save old clipboard
+            _old_clip = None
+            try:
+                _cr = _sp.run(
+                    ['powershell', '-NoProfile', '-Command', 'Get-Clipboard'],
+                    capture_output=True, text=True, timeout=3,
+                    creationflags=0x08000000,
+                )
+                if _cr.returncode == 0:
+                    _old_clip = _cr.stdout.rstrip('\r\n')
+            except Exception:
+                pass
+
+            _sp.run(
+                ['clip'],
+                input=cmd.encode('utf-8'),
+                creationflags=0x08000000,
+                check=False,
+            )
+            time.sleep(0.1)
+
+            ctypes.windll.user32.keybd_event(0x11, 0, 0, 0)
+            time.sleep(0.04)
+            ctypes.windll.user32.keybd_event(0x56, 0, 0, 0)
+            time.sleep(0.04)
+            ctypes.windll.user32.keybd_event(0x56, 0, _KEYUP, 0)
+            time.sleep(0.04)
+            ctypes.windll.user32.keybd_event(0x11, 0, _KEYUP, 0)
+
+            # Restore clipboard
+            time.sleep(0.5)
+            if _old_clip is not None and _old_clip:
+                try:
+                    _safe = _old_clip.replace("'", "''")
+                    _sp.run(
+                        ['powershell', '-NoProfile', '-Command',
+                         f"Set-Clipboard -Value '{_safe}'"],
+                        capture_output=True, timeout=3,
+                        creationflags=0x08000000,
+                    )
+                except Exception:
+                    pass
+
+        print(f"[TRIGGER DAEMON] Command sent: {cmd[:60]}")
 
     except Exception as e:
-        print(f"[TRIGGER DAEMON] Terminal type error: {e}")
+        print(f"[TRIGGER DAEMON] Run command error: {e}")
         import traceback
         traceback.print_exc()
 
