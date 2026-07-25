@@ -1267,27 +1267,39 @@ def _exec_run_command(data):
         import pyautogui
         import subprocess as _sp
 
-        # Release ALL keys that were part of the hotkey combo.
-        # Both modifiers and the trigger key itself must be released
-        # before pasting. Otherwise the trigger key repeats into the
-        # terminal before the paste lands.
-        _all_keys = ['alt', 'ctrl', 'shift', 'win', 'super']
-
-        # Also release the non-modifier key from the hotkey
-        # Extract it from the action_data if available, else release
-        # common single-letter keys that could be stuck
-        _cmd_key = data.get("hotkey_key", "")
-        if _cmd_key:
-            _all_keys.append(_cmd_key)
-
-        for _mod in _all_keys:
+        # Release ALL modifier keys first
+        for _mod in ['alt', 'ctrl', 'shift', 'win', 'super']:
             try:
                 pyautogui.keyUp(_mod)
             except Exception:
                 pass
 
-        # Wait for OS to fully process key releases before pasting
-        time.sleep(0.22)
+        # For the trigger key itself, use Windows API directly
+        # pyautogui.keyUp('/') does not work for special chars
+        # SendInput with KEYEVENTF_KEYUP releases any stuck key by VK code
+        _cmd_key = data.get("hotkey_key", "")
+        if _cmd_key:
+            try:
+                import ctypes
+                # Map key name to VK code
+                _vk_map = {
+                    '/': 0xBF, '\\': 0xDC, '.': 0xBE, ',': 0xBC,
+                    ';': 0xBA, "'": 0xDE, '[': 0xDB, ']': 0xDD,
+                    '`': 0xC0, '-': 0xBD, '=': 0xBB,
+                }
+                _vk = _vk_map.get(_cmd_key)
+                if _vk is None and len(_cmd_key) == 1 and _cmd_key.isalpha():
+                    _vk = ord(_cmd_key.upper())
+                elif _vk is None and len(_cmd_key) == 1 and _cmd_key.isdigit():
+                    _vk = ord(_cmd_key)
+                if _vk:
+                    # KEYEVENTF_KEYUP = 0x0002
+                    ctypes.windll.user32.keybd_event(_vk, 0, 0x0002, 0)
+            except Exception:
+                pass
+
+        # Wait for OS to fully process key releases
+        time.sleep(0.25)
 
         # Copy command to clipboard using clip.exe
         # Handles all special chars: &&, \, /, spaces, quotes
@@ -1300,7 +1312,10 @@ def _exec_run_command(data):
         time.sleep(0.1)
 
         # Paste only. User presses Enter themselves.
-        pyautogui.hotkey('ctrl', 'v')
+        # Use shift+insert for universal paste across all terminals
+        # ctrl+v does not work in PowerShell by default
+        # shift+insert works in PowerShell, cmd, VS Code, Windows Terminal
+        pyautogui.hotkey('shift', 'insert')
 
         print(f"[TRIGGER DAEMON] Typed into terminal: {cmd[:60]}")
 
