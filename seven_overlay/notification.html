@@ -4,125 +4,90 @@
 <meta charset="UTF-8">
 <meta name="color-scheme" content="dark">
 <style>
-  *, *::before, *::after {
-    margin: 0;
-    padding: 0;
-    box-sizing: border-box;
-  }
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
   html, body {
-    width: 360px;
-    height: 76px;
+    width: 380px;
+    height: 82px;
     background: transparent;
     overflow: hidden;
-    font-family: -apple-system, 'Segoe UI Variable Display', 'SF Pro Display',
-                 'Inter', 'Segoe UI', system-ui, sans-serif;
+    font-family: 'Segoe UI', 'Inter', system-ui, -apple-system, sans-serif;
     -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
-    text-rendering: optimizeLegibility;
   }
 
-  /*
-     Windows acrylic provides real desktop blur beneath.
-     CSS only adds tint + edge details on top.
-  */
   .card {
     position: relative;
     width: 100%;
     height: 100%;
-
-    /* Subtle dark tint layered on top of Windows acrylic */
-    background:
-      linear-gradient(
-        135deg,
-        rgba(20, 18, 30, 0.35) 0%,
-        rgba(12, 10, 20, 0.55) 100%
-      );
-
-    /* Bottom-only rounded corners */
-    border-radius: 0 0 18px 18px;
-
-    /* Glass edge borders */
-    border-left:   1px solid rgba(255, 255, 255, 0.07);
-    border-right:  1px solid rgba(255, 255, 255, 0.07);
+    background: rgba(14, 14, 18, 0.92);
+    border-radius: 0 0 16px 16px;
+    border-left:   1px solid rgba(255, 255, 255, 0.08);
+    border-right:  1px solid rgba(255, 255, 255, 0.08);
     border-bottom: 1px solid rgba(255, 255, 255, 0.10);
-
-    padding: 14px 18px;
+    padding: 14px 20px;
     display: flex;
     align-items: center;
-
+    backdrop-filter: blur(32px) saturate(120%);
+    -webkit-backdrop-filter: blur(32px) saturate(120%);
     transform: translateY(-100%);
     opacity: 0;
     will-change: transform, opacity;
+    cursor: pointer;
+    user-select: none;
+    box-shadow:
+      0 8px 32px rgba(0, 0, 0, 0.3),
+      0 0 0 1px rgba(255, 255, 255, 0.03);
   }
 
-  /* Top gradient — light catching on glass surface */
   .card::before {
     content: '';
     position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 50%;
-    background: linear-gradient(
-      180deg,
-      rgba(255, 255, 255, 0.06) 0%,
-      transparent 100%
-    );
+    top: 0; left: 0; right: 0;
+    height: 45%;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, transparent 100%);
     pointer-events: none;
+    border-radius: 0 0 16px 16px;
   }
 
-  /* Bottom edge glow */
   .card::after {
     content: '';
     position: absolute;
-    left: 22%;
-    right: 22%;
+    left: 20%; right: 20%;
     bottom: 0;
     height: 1px;
-    background: linear-gradient(
-      90deg,
-      transparent 0%,
-      rgba(255, 255, 255, 0.22) 50%,
-      transparent 100%
-    );
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.18), transparent);
     pointer-events: none;
   }
 
   .card.show {
-    animation: slideDown 0.55s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    animation: slideDown 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
   }
-
   .card.hiding {
-    animation: slideUp 0.4s cubic-bezier(0.55, 0, 0.85, 0.35) forwards;
+    animation: slideUp 0.35s cubic-bezier(0.55, 0, 0.85, 0.35) forwards;
   }
 
   @keyframes slideDown {
-    0% { transform: translateY(-100%); opacity: 0; }
-    100% { transform: translateY(0); opacity: 1; }
+    0%   { transform: translateY(-100%); opacity: 0; }
+    100% { transform: translateY(0);     opacity: 1; }
   }
-
   @keyframes slideUp {
-    0% { transform: translateY(0); opacity: 1; }
+    0%   { transform: translateY(0);     opacity: 1; }
     100% { transform: translateY(-100%); opacity: 0; }
   }
 
   .accent-bar {
     width: 3px;
-    height: 36px;
-    background: linear-gradient(
-      180deg,
-      rgb(220, 195, 255) 0%,
-      rgb(170, 135, 250) 50%,
-      rgb(130, 95, 240) 100%
-    );
+    height: 34px;
+    background: linear-gradient(180deg,
+      rgba(200, 180, 255, 0.9) 0%,
+      rgba(140, 110, 240, 0.8) 50%,
+      rgba(110, 80, 220, 0.7) 100%);
     border-radius: 3px;
     margin-right: 14px;
     flex-shrink: 0;
     box-shadow:
-      0 0 10px rgba(190, 160, 255, 0.85),
-      0 0 24px rgba(180, 150, 255, 0.4),
-      0 0 48px rgba(180, 150, 255, 0.18);
+      0 0 8px rgba(160, 130, 255, 0.6),
+      0 0 20px rgba(150, 120, 255, 0.25);
     position: relative;
     z-index: 2;
   }
@@ -140,15 +105,13 @@
   .title {
     font-size: 13px;
     font-weight: 600;
-    color: rgba(255, 255, 255, 0.98);
-    letter-spacing: -0.012em;
+    color: rgba(255, 255, 255, 0.95);
+    letter-spacing: -0.01em;
     line-height: 1.2;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    text-shadow:
-      0 1px 3px rgba(0, 0, 0, 0.6),
-      0 2px 8px rgba(0, 0, 0, 0.35);
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
   }
 
   .subtitle-row {
@@ -162,37 +125,32 @@
   }
 
   .subtitle {
-    color: rgba(255, 255, 255, 0.72);
+    color: rgba(255, 255, 255, 0.6);
     font-weight: 400;
     letter-spacing: -0.005em;
     overflow: hidden;
     text-overflow: ellipsis;
-    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
   }
 
   .dot {
-    width: 2.5px;
-    height: 2.5px;
+    width: 2px;
+    height: 2px;
     border-radius: 50%;
-    background: rgba(255, 255, 255, 0.45);
+    background: rgba(255, 255, 255, 0.35);
     flex-shrink: 0;
-    box-shadow: 0 0 4px rgba(255, 255, 255, 0.35);
   }
 
   .detail {
-    color: rgb(215, 190, 255);
+    color: rgba(200, 180, 255, 0.8);
     font-weight: 500;
     letter-spacing: -0.005em;
     font-size: 10.5px;
-    text-shadow:
-      0 1px 3px rgba(0, 0, 0, 0.5),
-      0 0 10px rgba(180, 150, 255, 0.4);
   }
 </style>
 </head>
 <body>
 
-<div class="card" id="card">
+<div class="card" id="card" onclick="retract()">
   <div class="accent-bar"></div>
   <div class="text">
     <div class="title" id="titleEl">Seven</div>
@@ -207,14 +165,34 @@
 <script>
   let _timer = null;
 
+  function playChime() {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const now = ctx.currentTime;
+      function tone(freq, start, dur, vol) {
+        const osc  = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(vol, start);
+        gain.gain.exponentialRampToValueAtTime(0.001, start + dur);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(start);
+        osc.stop(start + dur);
+      }
+      tone(523.25, now,        0.22, 0.12);
+      tone(659.25, now + 0.12, 0.28, 0.10);
+    } catch(e) {}
+  }
+
   function applyData(data) {
     const { title = 'Seven', subtitle = '', detail = '', holdMs = 4500 } = data;
 
     if (_timer) { clearTimeout(_timer); _timer = null; }
 
     document.getElementById('titleEl').textContent = title;
-    const subEl = document.getElementById('subtitleEl');
-    subEl.textContent = subtitle;
+    document.getElementById('subtitleEl').textContent = subtitle;
 
     const detEl = document.getElementById('detailEl');
     const dotEl = document.getElementById('dotEl');
@@ -231,6 +209,8 @@
     card.classList.remove('show', 'hiding');
     void card.offsetWidth;
     card.classList.add('show');
+
+    playChime();
 
     _timer = setTimeout(retract, holdMs);
   }
@@ -259,7 +239,7 @@
       if (window.electronAPI && window.electronAPI.close) {
         window.electronAPI.close();
       }
-    }, 400);
+    }, 380);
   }
 </script>
 </body>
