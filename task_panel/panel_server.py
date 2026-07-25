@@ -203,6 +203,53 @@ def check_trigger():
     return {"triggered": False}
 
 
+class QuickTaskCreate(BaseModel):
+    text: str
+
+
+@app.post("/panel/tasks")
+def quick_create_task(body: QuickTaskCreate):
+    """Create a task directly from the panel without Seven running."""
+    if not body.text or not body.text.strip():
+        raise HTTPException(status_code=400, detail="Empty task text")
+
+    try:
+        now = datetime.now().isoformat()
+        with _conn() as conn:
+            cursor = conn.execute(
+                "INSERT INTO tasks (text, due_date, due_time, priority,"
+                " completed, created_at, completed_at, tags,"
+                " description, subtasks)"
+                " VALUES (?, NULL, NULL, 'medium', 0, ?, NULL, NULL, NULL, '[]')",
+                (body.text.strip(), now)
+            )
+            conn.commit()
+            new_id = cursor.lastrowid
+            row = conn.execute("SELECT * FROM tasks WHERE id = ?", (new_id,)).fetchone()
+        return {"success": True, "task": _row(row)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/panel/schedules")
+def get_schedules():
+    """Get active schedules for panel display."""
+    try:
+        sched_file = os.path.join(
+            os.environ.get("APPDATA", os.path.expanduser("~")),
+            "SEVEN", "schedules.json"
+        )
+        if not os.path.exists(sched_file):
+            return []
+        with open(sched_file, "r") as f:
+            scheds = json.load(f)
+        active = [s for s in scheds if s.get("status") == "active"]
+        active.sort(key=lambda s: s.get("time", ""))
+        return active[:5]
+    except Exception:
+        return []
+
+
 if __name__ == "__main__":
     print(f"[PANEL SERVER] Starting on port 7778")
     print(f"[PANEL SERVER] Tasks DB: {TASKS_DB}")
