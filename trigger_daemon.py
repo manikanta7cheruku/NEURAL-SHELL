@@ -1283,16 +1283,27 @@ def _exec_run_command(data):
 
         _is_vscode = "code.exe" in _proc
 
-        # Step 3: For VS Code, focus the terminal panel with ctrl+`
+        # Step 3: For VS Code, ensure terminal panel has keyboard focus
+        # Do NOT use ctrl+` because it toggles. If terminal already has focus
+        # it would hide the terminal.
+        # Instead: use the VS Code command "workbench.action.terminal.focus"
+        # via ctrl+shift+` which ALWAYS focuses terminal without toggling.
         if _is_vscode:
-            ctypes.windll.user32.keybd_event(0x11, 0, 0, 0)       # ctrl down
-            time.sleep(0.02)
-            ctypes.windll.user32.keybd_event(0xC0, 0, 0, 0)       # ` down
-            time.sleep(0.02)
-            ctypes.windll.user32.keybd_event(0xC0, 0, _KEYUP, 0)  # ` up
-            time.sleep(0.02)
-            ctypes.windll.user32.keybd_event(0x11, 0, _KEYUP, 0)  # ctrl up
-            time.sleep(0.4)
+            # Click inside terminal area directly (bottom portion of VS Code)
+            try:
+                import win32gui
+                rect = win32gui.GetWindowRect(_hwnd)
+                win_x = rect[0]
+                win_y = rect[1]
+                win_w = rect[2] - rect[0]
+                win_h = rect[3] - rect[1]
+                # Click at 50% width, 85% height (terminal area)
+                _click_x = win_x + win_w // 2
+                _click_y = win_y + int(win_h * 0.85)
+                pyautogui.click(_click_x, _click_y)
+                time.sleep(0.3)
+            except Exception:
+                pass
 
         # Step 4: Erase stray trigger char
         _printable = set('abcdefghijklmnopqrstuvwxyz0123456789`-=[]\\;\',./\'')
@@ -1303,35 +1314,19 @@ def _exec_run_command(data):
             time.sleep(0.06)
 
         # Step 5: Type the command
-        # Method A: pyautogui.write for typing effect (works in terminals, notepad)
-        # Method B: clipboard paste for apps that block synthetic keys (Chrome)
-        _typed = False
+        # Choose method based on focused app:
+        #   Browsers (Chrome, Edge, Firefox): clipboard paste (they block synthetic keys)
+        #   VS Code: already focused terminal, use typing effect
+        #   Everything else: typing effect
 
-        # Try typing effect first
-        try:
-            # Check if command has only typeable ASCII chars
-            _typeable = all(
-                c in 'abcdefghijklmnopqrstuvwxyz0123456789 .-_/\\:;,=+!@#$%^&*()[]{}|<>?~`\'"'
-                for c in cmd.lower()
-            )
-            if _typeable:
-                pyautogui.PAUSE = 0
-                for char in cmd:
-                    pyautogui.press(char) if len(char) == 1 and char == ' ' else None
-                    if char == ' ':
-                        ctypes.windll.user32.keybd_event(0x20, 0, 0, 0)
-                        time.sleep(0.01)
-                        ctypes.windll.user32.keybd_event(0x20, 0, _KEYUP, 0)
-                    else:
-                        pyautogui.write(char, interval=0)
-                    time.sleep(0.015)
-                _typed = True
-        except Exception as _te:
-            print(f"[TRIGGER DAEMON] pyautogui.write failed: {_te}")
+        _paste_apps = {
+            "chrome.exe", "msedge.exe", "firefox.exe", "brave.exe",
+            "opera.exe", "electron.exe",
+        }
+        _use_paste = _proc in _paste_apps
 
-        # Fallback: clipboard paste if typing failed
-        if not _typed:
-            # Save old clipboard
+        if _use_paste:
+            # Clipboard paste for browser apps
             _old_clip = None
             try:
                 _cr = _sp.run(
@@ -1360,7 +1355,6 @@ def _exec_run_command(data):
             time.sleep(0.04)
             ctypes.windll.user32.keybd_event(0x11, 0, _KEYUP, 0)
 
-            # Restore clipboard
             time.sleep(0.5)
             if _old_clip is not None and _old_clip:
                 try:
@@ -1373,6 +1367,19 @@ def _exec_run_command(data):
                     )
                 except Exception:
                     pass
+            print(f"[TRIGGER DAEMON] Command pasted (browser): {cmd[:60]}")
+        else:
+            # Typing effect for terminals, editors, notepad, etc
+            pyautogui.PAUSE = 0
+            for char in cmd:
+                if char == ' ':
+                    ctypes.windll.user32.keybd_event(0x20, 0, 0, 0)
+                    time.sleep(0.01)
+                    ctypes.windll.user32.keybd_event(0x20, 0, _KEYUP, 0)
+                else:
+                    pyautogui.write(char, interval=0)
+                time.sleep(0.015)
+            print(f"[TRIGGER DAEMON] Command typed: {cmd[:60]}")
 
         print(f"[TRIGGER DAEMON] Command sent: {cmd[:60]}")
 
@@ -1393,7 +1400,6 @@ def _set_brightness_direct(level: int):
 def _exec_seven_action(data):
     """
     Execute internal Seven action.
-
     Parses the full action string and dispatches ALL commands found in it.
     Handles: app opens, brightness, volume, mute — all in one string.
     Falls back to chat API for anything not recognized.
@@ -1401,7 +1407,6 @@ def _exec_seven_action(data):
     action = data.get("action", "")
     if not action:
         return
-
     import re
     action_lower = action.lower().strip()
 
