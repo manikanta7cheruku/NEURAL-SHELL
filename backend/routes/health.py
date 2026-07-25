@@ -17,33 +17,35 @@ router = APIRouter()
 @router.get("/api/health")
 def health_check():
     """
-    Check health of all Seven subsystems.
+    Check health of all Seven subsystems in parallel.
     Returns 200 always - caller reads the individual statuses.
     Response time target: under 200ms.
     """
+    import concurrent.futures
     start = time.time()
+
+    check_fns = {
+        "memory_db":   _check_memory_db,
+        "tasks_db":    _check_tasks_db,
+        "triggers_db": _check_triggers_db,
+        "ollama":      _check_ollama,
+        "disk":        _check_disk,
+        "config":      _check_config,
+        "schedules":   _check_schedules,
+    }
+
     checks = {}
-
-    # 1. Memory DB (ChromaDB SQLite)
-    checks["memory_db"] = _check_memory_db()
-
-    # 2. Tasks DB
-    checks["tasks_db"] = _check_tasks_db()
-
-    # 3. Triggers DB
-    checks["triggers_db"] = _check_triggers_db()
-
-    # 4. Ollama
-    checks["ollama"] = _check_ollama()
-
-    # 5. Disk space
-    checks["disk"] = _check_disk()
-
-    # 6. Config file
-    checks["config"] = _check_config()
-
-    # 7. Schedule file
-    checks["schedules"] = _check_schedules()
+    with concurrent.futures.ThreadPoolExecutor(max_workers=7) as executor:
+        futures = {
+            executor.submit(fn): name
+            for name, fn in check_fns.items()
+        }
+        for future in concurrent.futures.as_completed(futures):
+            name = futures[future]
+            try:
+                checks[name] = future.result(timeout=3)
+            except Exception as e:
+                checks[name] = {"ok": False, "error": str(e)}
 
     elapsed_ms = round((time.time() - start) * 1000, 1)
     all_ok = all(c["ok"] for c in checks.values())
@@ -130,7 +132,7 @@ def _check_triggers_db():
 def _check_ollama():
     try:
         import requests
-        r = requests.get("http://localhost:11434/api/tags", timeout=2)
+        r = requests.get("http://localhost:11434/api/tags", timeout=1)
         if r.status_code == 200:
             models = [m["name"] for m in r.json().get("models", [])]
             return {"ok": True, "models": models, "count": len(models)}
