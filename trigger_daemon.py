@@ -802,13 +802,7 @@ def _execute_trigger_complete(trigger, name, action_type, action_data,
             result = _exec_open_workspace(action_data)
         elif action_type == "run_command":
             _run_data = dict(action_data)
-            hk = trigger.get("hotkey", "")
-            if hk:
-                _mods = {"ctrl", "shift", "alt", "win"}
-                _parts = [p.strip().lower() for p in hk.split("+")]
-                _keys = [p for p in _parts if p not in _mods]
-                if _keys:
-                    _run_data["hotkey_key"] = _keys[-1]
+            _run_data["_fired_key"] = trigger.get("_fired_key", "")
             _exec_run_command(_run_data)
         elif action_type == "seven_action":
             _exec_seven_action(action_data)
@@ -821,13 +815,8 @@ def _execute_trigger_complete(trigger, name, action_type, action_data,
         traceback.print_exc()
         return
 
-    # Step 4: Sound
-    if not trigger.get("silent", False):
-        try:
-            import winsound
-            winsound.MessageBeep(winsound.MB_ICONASTERISK)
-        except Exception:
-            pass
+    # Step 4: Sound handled by notification HTML chime
+    # winsound removed to prevent double sound
 
     # Step 5: Feedback + arrangement card
     if action_type == "open_workspace" and result and not trigger.get("silent", False):
@@ -1282,20 +1271,29 @@ def _exec_run_command(data):
             ctypes.windll.user32.keybd_event(_vk, 0, _KEYEVENTF_KEYUP, 0)
 
         # Step 2: Release the trigger key itself via VK code
-        _cmd_key = data.get("hotkey_key", "")
-        if _cmd_key:
+        _fired_key = data.get("_fired_key", "") or data.get("hotkey_key", "")
+        if _fired_key:
             _vk_map = {
                 '/': 0xBF, '\\': 0xDC, '.': 0xBE, ',': 0xBC,
                 ';': 0xBA, "'": 0xDE, '[': 0xDB, ']': 0xDD,
                 '`': 0xC0, '-': 0xBD, '=': 0xBB, ' ': 0x20,
             }
-            _vk = _vk_map.get(_cmd_key)
-            if _vk is None and len(_cmd_key) == 1 and _cmd_key.isalpha():
-                _vk = ord(_cmd_key.upper())
-            elif _vk is None and len(_cmd_key) == 1 and _cmd_key.isdigit():
-                _vk = ord(_cmd_key)
+            _vk = _vk_map.get(_fired_key)
+            if _vk is None and len(_fired_key) == 1 and _fired_key.isalpha():
+                _vk = ord(_fired_key.upper())
+            elif _vk is None and len(_fired_key) == 1 and _fired_key.isdigit():
+                _vk = ord(_fired_key)
             if _vk:
                 ctypes.windll.user32.keybd_event(_vk, 0, _KEYEVENTF_KEYUP, 0)
+
+        # Step 3a: Erase stray character the trigger key typed into the terminal
+        time.sleep(0.15)
+        _printable = set('abcdefghijklmnopqrstuvwxyz0123456789`-=[]\\;\',./\'')
+        if _fired_key and _fired_key in _printable:
+            ctypes.windll.user32.keybd_event(0x08, 0, 0, 0)       # VK_BACK down
+            time.sleep(0.02)
+            ctypes.windll.user32.keybd_event(0x08, 0, 0x0002, 0)  # VK_BACK up
+            time.sleep(0.05)
 
         # Step 3: Wait for OS to process key releases
         time.sleep(0.25)
@@ -1713,9 +1711,21 @@ class HotkeyListener:
             self._last_fire = now
             self._pressed_keys.clear()
             print(f"[HOTKEY] FIRED: {combo} -> {trigger['name']}")
+
+            # Extract the non-modifier key from the combo
+            # Pass it so run_command terminal mode can erase the stray char
+            _mods_set = {"ctrl", "shift", "alt", "win"}
+            _combo_parts = combo.split("+")
+            _trigger_key = next(
+                (p for p in _combo_parts if p not in _mods_set), ""
+            )
+
+            _trigger_with_key = dict(trigger)
+            _trigger_with_key["_fired_key"] = _trigger_key
+
             threading.Thread(
                 target=execute_trigger,
-                args=(trigger,),
+                args=(_trigger_with_key,),
                 daemon=True,
             ).start()
 
