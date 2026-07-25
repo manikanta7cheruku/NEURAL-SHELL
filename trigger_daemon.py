@@ -1274,48 +1274,93 @@ def _exec_run_command(data):
             except Exception:
                 pass
 
-        # For the trigger key itself, use Windows API directly
-        # pyautogui.keyUp('/') does not work for special chars
-        # SendInput with KEYEVENTF_KEYUP releases any stuck key by VK code
+    # target=terminal: paste command text into whatever terminal has focus.
+    # User clicks terminal first, fires hotkey, Seven pastes the command.
+    # User presses Enter themselves when ready.
+    # Preserves user's previous clipboard content after paste.
+    time.sleep(0.15)
+
+    try:
+        import pyautogui
+        import subprocess as _sp
+        import ctypes
+
+        # Step 1: Release all modifier keys via Windows API
+        # pyautogui.keyUp does not work for all keys on Windows
+        _KEYEVENTF_KEYUP = 0x0002
+        _mod_vks = {
+            'alt':   0x12,  # VK_MENU
+            'ctrl':  0x11,  # VK_CONTROL
+            'shift': 0x10,  # VK_SHIFT
+            'win':   0x5B,  # VK_LWIN
+        }
+        for _vk in _mod_vks.values():
+            ctypes.windll.user32.keybd_event(_vk, 0, _KEYEVENTF_KEYUP, 0)
+
+        # Step 2: Release the trigger key itself via VK code
         _cmd_key = data.get("hotkey_key", "")
         if _cmd_key:
+            _vk_map = {
+                '/': 0xBF, '\\': 0xDC, '.': 0xBE, ',': 0xBC,
+                ';': 0xBA, "'": 0xDE, '[': 0xDB, ']': 0xDD,
+                '`': 0xC0, '-': 0xBD, '=': 0xBB, ' ': 0x20,
+            }
+            _vk = _vk_map.get(_cmd_key)
+            if _vk is None and len(_cmd_key) == 1 and _cmd_key.isalpha():
+                _vk = ord(_cmd_key.upper())
+            elif _vk is None and len(_cmd_key) == 1 and _cmd_key.isdigit():
+                _vk = ord(_cmd_key)
+            if _vk:
+                ctypes.windll.user32.keybd_event(_vk, 0, _KEYEVENTF_KEYUP, 0)
+
+        # Step 3: Wait for OS to process key releases
+        time.sleep(0.25)
+
+        # Step 4: Save user's current clipboard content
+        _old_clipboard = None
+        try:
+            ctypes.windll.user32.OpenClipboard(0)
+            _handle = ctypes.windll.user32.GetClipboardData(13)  # CF_UNICODETEXT
+            if _handle:
+                _old_clipboard = ctypes.wstring_at(_handle)
+            ctypes.windll.user32.CloseClipboard()
+        except Exception:
             try:
-                import ctypes
-                # Map key name to VK code
-                _vk_map = {
-                    '/': 0xBF, '\\': 0xDC, '.': 0xBE, ',': 0xBC,
-                    ';': 0xBA, "'": 0xDE, '[': 0xDB, ']': 0xDD,
-                    '`': 0xC0, '-': 0xBD, '=': 0xBB,
-                }
-                _vk = _vk_map.get(_cmd_key)
-                if _vk is None and len(_cmd_key) == 1 and _cmd_key.isalpha():
-                    _vk = ord(_cmd_key.upper())
-                elif _vk is None and len(_cmd_key) == 1 and _cmd_key.isdigit():
-                    _vk = ord(_cmd_key)
-                if _vk:
-                    # KEYEVENTF_KEYUP = 0x0002
-                    ctypes.windll.user32.keybd_event(_vk, 0, 0x0002, 0)
+                ctypes.windll.user32.CloseClipboard()
             except Exception:
                 pass
 
-        # Wait for OS to fully process key releases
-        time.sleep(0.25)
-
-        # Copy command to clipboard using clip.exe
-        # Handles all special chars: &&, \, /, spaces, quotes
+        # Step 5: Set clipboard to command text
         _sp.run(
             ['clip'],
             input=cmd.encode('utf-8'),
             creationflags=0x08000000,
             check=False,
         )
-        time.sleep(0.1)
+        time.sleep(0.08)
 
-        # Paste only. User presses Enter themselves.
-        # Use shift+insert for universal paste across all terminals
-        # ctrl+v does not work in PowerShell by default
-        # shift+insert works in PowerShell, cmd, VS Code, Windows Terminal
+        # Step 6: Paste using shift+insert (universal, works in PowerShell)
         pyautogui.hotkey('shift', 'insert')
+
+        # Step 7: Restore user's previous clipboard content after brief delay
+        time.sleep(0.3)
+        if _old_clipboard is not None:
+            try:
+                import ctypes.wintypes
+                _text = _old_clipboard
+                _hMem = ctypes.windll.kernel32.GlobalAlloc(0x0042, (len(_text) + 1) * 2)
+                _ptr  = ctypes.windll.kernel32.GlobalLock(_hMem)
+                ctypes.cdll.msvcrt.wcscpy_s(ctypes.c_wchar_p(_ptr), len(_text) + 1, _text)
+                ctypes.windll.kernel32.GlobalUnlock(_hMem)
+                ctypes.windll.user32.OpenClipboard(0)
+                ctypes.windll.user32.EmptyClipboard()
+                ctypes.windll.user32.SetClipboardData(13, _hMem)
+                ctypes.windll.user32.CloseClipboard()
+            except Exception:
+                try:
+                    ctypes.windll.user32.CloseClipboard()
+                except Exception:
+                    pass
 
         print(f"[TRIGGER DAEMON] Typed into terminal: {cmd[:60]}")
 
