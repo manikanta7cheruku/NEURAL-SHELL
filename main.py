@@ -135,6 +135,59 @@ import colorama
 from colorama import Fore
 colorama.init()
 
+import logging
+import logging.handlers
+
+def _setup_logging():
+    """
+    Configure rotating file logger for Seven.
+    All modules that import this will share the same handlers.
+    """
+    _log_dir = os.path.join(
+        os.environ.get('APPDATA', os.path.expanduser('~')),
+        'SEVEN', 'logs'
+    )
+    os.makedirs(_log_dir, exist_ok=True)
+    _log_file = os.path.join(_log_dir, 'seven.log')
+
+    root = logging.getLogger()
+    root.setLevel(logging.DEBUG)
+
+    # Rotating file handler - 5MB per file, keep 3 backups
+    fh = logging.handlers.RotatingFileHandler(
+        _log_file,
+        maxBytes=5 * 1024 * 1024,
+        backupCount=3,
+        encoding='utf-8',
+    )
+    fh.setLevel(logging.DEBUG)
+    fh.setFormatter(logging.Formatter(
+        '%(asctime)s [%(levelname)-8s] %(name)s: %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    ))
+
+    # Console handler - INFO and above only
+    ch = logging.StreamHandler()
+    ch.setLevel(logging.INFO)
+    ch.setFormatter(logging.Formatter(
+        '[%(levelname)s] %(name)s: %(message)s'
+    ))
+
+    # Silence noisy third-party loggers
+    for noisy in ['chromadb', 'sentence_transformers',
+                  'transformers', 'huggingface_hub',
+                  'urllib3', 'httpx', 'uvicorn.access']:
+        logging.getLogger(noisy).setLevel(logging.WARNING)
+
+    if not root.handlers:
+        root.addHandler(fh)
+        root.addHandler(ch)
+
+    return logging.getLogger('seven.main')
+
+logger = _setup_logging()
+logger.info("Seven starting up")
+
 import config
 from backend.api_server import start_api_server, set_state as api_set_state
 from backend.admin_server import start_admin_server
@@ -587,6 +640,7 @@ def seven_logic():
 
         except OSError as e:
             if "Stream closed" in str(e) or "9988" in str(e) or "9999" in str(e):
+                logger.warning(f"Mic device change detected: {e}")
                 print(Fore.YELLOW + f"[EARS] Mic device change detected — recovering")
                 import time as _rec_t
                 _rec_t.sleep(1.5)
@@ -600,6 +654,7 @@ def seven_logic():
                 import traceback; traceback.print_exc()
             app_ui.update_status("LISTENING...", "#00ff00")
         except Exception as e:
+            logger.error(f"Main loop error: {e}", exc_info=True)
             print(Fore.RED + f"[CRITICAL ERROR] Main loop: {e}")
             import traceback; traceback.print_exc()
             app_ui.update_status("ERROR RECOVERED", "#ff0000")
@@ -620,6 +675,7 @@ def start_app():
         print(Fore.YELLOW + "[SYSTEM] Running in STANDALONE mode")
 
     start_api_server(host="127.0.0.1", port=7777)
+    logger.info("API server up on port 7777")
     print(Fore.GREEN + "[SYSTEM] API server up")
 
     try:
@@ -659,6 +715,7 @@ def start_app():
         while True:
             time.sleep(5)
             if not logic_thread.is_alive():
+                logger.critical("Voice loop crashed. Restarting.")
                 print(Fore.RED + "[WATCHDOG] Voice loop crashed. Restarting...")
                 logic_thread = threading.Thread(target=seven_logic, daemon=True)
                 logic_thread.start()
