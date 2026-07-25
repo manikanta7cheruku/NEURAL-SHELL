@@ -52,15 +52,24 @@ function groupByDay(conversations) {
   conversations.forEach(c => {
     const d = parseTimestamp(c.timestamp);
     if (!d) return;
-    const key = d.toISOString().split('T')[0];
+
+    // Use LOCAL date, not UTC ISO date
+    const key = [
+      d.getFullYear(),
+      String(d.getMonth() + 1).padStart(2, '0'),
+      String(d.getDate()).padStart(2, '0'),
+    ].join('-');
+
     if (!groups[key]) groups[key] = [];
     groups[key].push(c);
   });
-  // Sort each day's messages oldest→newest for reading order
+
+  // Sort each day's messages oldest to newest
   Object.values(groups).forEach(arr =>
     arr.sort((a, b) => (a.timestamp || '').localeCompare(b.timestamp || ''))
   );
-  // Return sorted newest day first
+
+  // Newest day first
   return Object.entries(groups).sort((a, b) => b[0].localeCompare(a[0]));
 }
 
