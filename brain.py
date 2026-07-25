@@ -247,21 +247,100 @@ def think(prompt_text, speaker_id="default"):
             _response_to_save = None
 
         if _response_to_save and not _response_to_save.startswith("Processing error"):
-            print(Fore.CYAN + f"[BRAIN] Saving conversation to memory (source={_source})...")
-            seven_memory.extract_and_store_facts(prompt_text, user_id=_save_user_id)
-            seven_memory.store_conversation(
-                user_input=prompt_text,
-                seven_response=_response_to_save,
-                user_id=_save_user_id,
-                source=_source,
-            )
-            print(Fore.GREEN + f"[BRAIN] Memory saved OK")
-        else:
-            print(Fore.YELLOW + f"[BRAIN] Memory save skipped: _response_to_save={repr(_response_to_save)[:50]}")
+            print(Fore.CYAN + f"[BRAIN] Saving conversation (source={_source})...")
+
+            # Try ChromaDB singleton first
+            _saved = False
+            try:
+                seven_memory.extract_and_store_facts(prompt_text, user_id=_save_user_id)
+                seven_memory.store_conversation(
+                    user_input=prompt_text,
+                    seven_response=_response_to_save,
+                    user_id=_save_user_id,
+                    source=_source,
+                )
+                _saved = True
+                print(Fore.GREEN + "[BRAIN] Memory saved via ChromaDB")
+            except Exception as _chroma_err:
+                print(Fore.YELLOW + f"[BRAIN] ChromaDB save failed: {_chroma_err}")
+
+            # Fallback: write directly to SQLite without embedding model
+            if not _saved:
+                try:
+                    import sqlite3 as _sq
+                    import datetime as _dt_mod
+                    from memory.core import MEMORY_DIR as _mdir
+
+                    _db = os.path.join(_mdir, "chroma.sqlite3")
+                    _conn = _sq.connect(_db, timeout=5)
+
+                    # Get conversations segment ID
+                    _conv_col = _conn.execute(
+                        "SELECT id FROM collections WHERE name = 'conversations'"
+                    ).fetchone()
+
+                    if _conv_col:
+                        _col_id = _conv_col[0]
+                        _seg = _conn.execute(
+                            "SELECT id FROM segments WHERE collection = ? AND scope = 'METADATA'",
+                            (_col_id,)
+                        ).fetchone()
+
+                        if _seg:
+                            _seg_id = _seg[0]
+                            _ts = _dt_mod.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            _mem_id = f"conv_{_dt_mod.datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
+                            _combined = f"User said: {prompt_text} | Seven replied: {_response_to_save}"
+
+                            # Insert embedding record
+                            _conn.execute(
+                                "INSERT INTO embeddings (segment_id, embedding_id, seq_id, created_at)"
+                                " VALUES (?, ?, randomblob(8), ?)",
+                                (_seg_id, _mem_id, _ts)
+                            )
+                            _emb_row = _conn.execute(
+                                "SELECT id FROM embeddings WHERE embedding_id = ?",
+                                (_mem_id,)
+                            ).fetchone()
+
+                            if _emb_row:
+                                _emb_id = _emb_row[0]
+                                # Insert metadata
+                                for _key, _val in [
+                                    ("user_input",     prompt_text[:500]),
+                                    ("seven_response", _response_to_save[:500]),
+                                    ("timestamp",      _ts),
+                                    ("user_id",        _save_user_id),
+                                    ("type",           "conversation"),
+                                    ("source",         _source),
+                                ]:
+                                    _conn.execute(
+                                        "INSERT INTO embedding_metadata (id, key, string_value)"
+                                        " VALUES (?, ?, ?)",
+                                        (_emb_id, _key, _val)
+                                    )
+                                # Insert fulltext content
+                                _conn.execute(
+                                    "INSERT INTO embedding_fulltext_search_content (rowid, c0)"
+                                    " VALUES (?, ?)",
+                                    (_emb_id, _combined[:1000])
+                                )
+                                _conn.commit()
+                                _saved = True
+                                print(Fore.GREEN + "[BRAIN] Memory saved via SQLite fallback")
+
+                    _conn.close()
+                except Exception as _sq_err:
+                    print(Fore.RED + f"[BRAIN] SQLite fallback also failed: {_sq_err}")
+                    import traceback
+                    traceback.print_exc()
+
+            if not _saved:
+                print(Fore.RED + "[BRAIN] Memory save failed completely")
 
     except Exception as _mem_err:
         import traceback
-        print(Fore.RED + f"[BRAIN] Memory save failed: {_mem_err}")
+        print(Fore.RED + f"[BRAIN] Memory save outer error: {_mem_err}")
         traceback.print_exc()
 
     return result
