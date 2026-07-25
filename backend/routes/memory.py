@@ -114,7 +114,7 @@ def get_facts():
             meta = {row[0]: row[1] for row in _meta_rows}
 
             _doc_row = _conn.execute(
-                "SELECT c1 FROM embedding_fulltext_search_content WHERE rowid = ?",
+                "SELECT c0 FROM embedding_fulltext_search_content WHERE rowid = ?",
                 (_emb_id,)
             ).fetchone()
             doc_text = _doc_row[0] if _doc_row else ""
@@ -226,7 +226,7 @@ def get_conversations(limit: int = 500, offset: int = 0):
             meta = {row[0]: row[1] for row in _meta_rows}
 
             _doc_row = _conn.execute(
-                "SELECT c1 FROM embedding_fulltext_search_content WHERE rowid = ?",
+                "SELECT c0 FROM embedding_fulltext_search_content WHERE rowid = ?",
                 (_emb_id,)
             ).fetchone()
             doc_text = _doc_row[0] if _doc_row else ""
