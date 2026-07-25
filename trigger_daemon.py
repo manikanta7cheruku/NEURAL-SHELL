@@ -1261,22 +1261,6 @@ def _exec_run_command(data):
     # target=terminal: paste command text into whatever terminal has focus.
     # User clicks terminal first, fires hotkey, Seven pastes the command.
     # User presses Enter themselves when ready.
-    time.sleep(0.18)
-
-    try:
-        import pyautogui
-        import subprocess as _sp
-
-        # Release ALL modifier keys first
-        for _mod in ['alt', 'ctrl', 'shift', 'win', 'super']:
-            try:
-                pyautogui.keyUp(_mod)
-            except Exception:
-                pass
-
-    # target=terminal: paste command text into whatever terminal has focus.
-    # User clicks terminal first, fires hotkey, Seven pastes the command.
-    # User presses Enter themselves when ready.
     # Preserves user's previous clipboard content after paste.
     time.sleep(0.15)
 
