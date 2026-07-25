@@ -780,11 +780,19 @@ def _execute_trigger_complete(trigger, name, action_type, action_data,
     No concurrent threads to prevent double-execution.
     """
     workspace_apps = workspace_apps or []
+
+    # For run_command terminal mode: show notification AFTER paste
+    # so the notification window does not interfere with focus
+    _is_terminal_run = (
+        action_type == "run_command" and
+        action_data.get("target", "terminal") == "terminal"
+    )
+
     # Step 1: Ensure overlay is ready
     _ensure_overlay_alive_safe()
 
-    # Step 2: Show notification
-    if not trigger.get("silent", False):
+    # Step 2: Show notification (skip for terminal run commands until after paste)
+    if not trigger.get("silent", False) and not _is_terminal_run:
         _fire_notification(name, action_type, app_count, tab_count, app_names)
 
     # Step 3: Execute action
@@ -815,8 +823,11 @@ def _execute_trigger_complete(trigger, name, action_type, action_data,
         traceback.print_exc()
         return
 
-    # Step 4: Sound handled by notification HTML chime
-    # winsound removed to prevent double sound
+    # Step 4: Show notification for terminal run commands now (after paste completed)
+    if _is_terminal_run and not trigger.get("silent", False):
+        _fire_notification(name, action_type, app_count, tab_count, app_names)
+
+    # Sound handled by notification HTML chime
 
     # Step 5: Feedback + arrangement card
     if action_type == "open_workspace" and result and not trigger.get("silent", False):
@@ -1247,19 +1258,18 @@ def _exec_run_command(data):
         print(f"[TRIGGER DAEMON] Run command (background): {cmd[:60]}")
         return
 
-    # target=terminal: paste command text into whatever terminal has focus.
-    # User clicks terminal first, fires hotkey, Seven pastes the command.
-    # User presses Enter themselves when ready.
-    # Preserves user's previous clipboard content after paste.
+    # target=terminal: type command directly into a focused terminal/editor terminal.
+    # We do NOT use clipboard. We do NOT auto-press Enter.
     time.sleep(0.15)
 
     try:
         import pyautogui
-        import subprocess as _sp
         import ctypes
+        import win32gui
+        import win32process
+        import psutil
 
-        # Step 1: Release all modifier keys via Windows API
-        # pyautogui.keyUp does not work for all keys on Windows
+        # Step 1: release modifier keys
         _KEYEVENTF_KEYUP = 0x0002
         _mod_vks = {
             'alt':   0x12,  # VK_MENU
@@ -1270,8 +1280,8 @@ def _exec_run_command(data):
         for _vk in _mod_vks.values():
             ctypes.windll.user32.keybd_event(_vk, 0, _KEYEVENTF_KEYUP, 0)
 
-        # Step 2: Release the trigger key itself via VK code
-        _fired_key = data.get("_fired_key", "") or data.get("hotkey_key", "")
+        # Step 2: release trigger key
+        _fired_key = data.get("_fired_key", "")
         if _fired_key:
             _vk_map = {
                 '/': 0xBF, '\\': 0xDC, '.': 0xBE, ',': 0xBC,
@@ -1286,120 +1296,59 @@ def _exec_run_command(data):
             if _vk:
                 ctypes.windll.user32.keybd_event(_vk, 0, _KEYEVENTF_KEYUP, 0)
 
-        # Step 3a: Wait extra time for trigger key to fully release
-        # The stray char appears because the OS processes the keydown
-        # before we can release it. Extra delay ensures it is gone.
-        time.sleep(0.15)
+        time.sleep(0.20)
 
-        # Step 3: Wait for OS to process key releases
-          # Step 3: Wait for OS to process all key releases
-        time.sleep(0.25)
-
-        # Step 4: Erase stray character from trigger key
-        _fired_key = data.get("_fired_key", "")
-        _printable = set('abcdefghijklmnopqrstuvwxyz0123456789`-=[]\\;\',./\'')
-        if _fired_key and _fired_key in _printable:
-            ctypes.windll.user32.keybd_event(0x08, 0, 0, 0)       # VK_BACK down
-            time.sleep(0.02)
-            ctypes.windll.user32.keybd_event(0x08, 0, 0x0002, 0)  # VK_BACK up
-            time.sleep(0.1)
-
-        # Step 5: Save user's current clipboard content
-        _old_clipboard = None
+        # Step 3: detect focused window
+        _hwnd = win32gui.GetForegroundWindow()
+        _title = (win32gui.GetWindowText(_hwnd) or "").lower()
+        _, _pid = win32process.GetWindowThreadProcessId(_hwnd)
+        _proc_name = ""
         try:
-            ctypes.windll.user32.OpenClipboard(0)
-            _handle = ctypes.windll.user32.GetClipboardData(13)
-            if _handle:
-                _old_clipboard = ctypes.wstring_at(_handle)
-            ctypes.windll.user32.CloseClipboard()
+            _proc_name = psutil.Process(_pid).name().lower()
         except Exception:
-            try:
-                ctypes.windll.user32.CloseClipboard()
-            except Exception:
-                pass
+            pass
 
-        # Step 6: Set clipboard to command text
-        _sp.run(
-            ['clip'],
-            input=cmd.encode('utf-8'),
-            creationflags=0x08000000,
-            check=False,
+        _allowed_proc = {
+            "code.exe",
+            "powershell.exe",
+            "pwsh.exe",
+            "cmd.exe",
+            "windowsterminal.exe",
+            "wt.exe",
+            "conhost.exe",
+        }
+        _allowed_title_parts = [
+            "visual studio code",
+            "powershell",
+            "command prompt",
+            "windows terminal",
+        ]
+
+        _is_terminal = (
+            _proc_name in _allowed_proc or
+            any(x in _title for x in _allowed_title_parts)
         )
-        time.sleep(0.1)
 
-        # Step 7: Paste using SendInput ctrl+v
-        # SendInput is more reliable than pyautogui for terminal windows
-        import ctypes.wintypes
+        # Step 4: always remove the stray trigger char once
+        # If the target is not a terminal, this simply undoes the /
+        ctypes.windll.user32.keybd_event(0x08, 0, 0, 0)       # VK_BACK down
+        time.sleep(0.02)
+        ctypes.windll.user32.keybd_event(0x08, 0, _KEYEVENTF_KEYUP, 0)  # VK_BACK up
+        time.sleep(0.05)
 
-        INPUT_KEYBOARD = 1
-        KEYEVENTF_KEYUP_FLAG = 0x0002
+        if not _is_terminal:
+            print(f"[TRIGGER DAEMON] Terminal mode aborted - focused window is not terminal (proc={_proc_name}, title={_title[:50]})")
+            return
 
-        class KEYBDINPUT(ctypes.Structure):
-            _fields_ = [
-                ("wVk",         ctypes.wintypes.WORD),
-                ("wScan",       ctypes.wintypes.WORD),
-                ("dwFlags",     ctypes.wintypes.DWORD),
-                ("time",        ctypes.wintypes.DWORD),
-                ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
-            ]
+        # Step 5: type command directly
+        pyautogui.write(cmd, interval=0.01)
 
-        class INPUT_RECORD(ctypes.Structure):
-            class _U(ctypes.Union):
-                _fields_ = [("ki", KEYBDINPUT)]
-            _fields_ = [
-                ("type",   ctypes.wintypes.DWORD),
-                ("_input", _U),
-            ]
-
-        def _press(vk, up=False):
-            inp = INPUT_RECORD()
-            inp.type = INPUT_KEYBOARD
-            inp._input.ki.wVk = vk
-            inp._input.ki.dwFlags = KEYEVENTF_KEYUP_FLAG if up else 0
-            ctypes.windll.user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(inp))
-
-        # ctrl down, v down, v up, ctrl up
-        _press(0x11)        # VK_CONTROL down
-        time.sleep(0.03)
-        _press(0x56)        # VK_V down
-        time.sleep(0.03)
-        _press(0x56, True)  # VK_V up
-        time.sleep(0.03)
-        _press(0x11, True)  # VK_CONTROL up
-
-        # Step 8: Restore user's previous clipboard
-        time.sleep(0.3)
-        if _old_clipboard is not None:
-            try:
-                _text = _old_clipboard
-                _hMem = ctypes.windll.kernel32.GlobalAlloc(0x0042, (len(_text) + 1) * 2)
-                _ptr  = ctypes.windll.kernel32.GlobalLock(_hMem)
-                ctypes.cdll.msvcrt.wcscpy_s(ctypes.c_wchar_p(_ptr), len(_text) + 1, _text)
-                ctypes.windll.kernel32.GlobalUnlock(_hMem)
-                ctypes.windll.user32.OpenClipboard(0)
-                ctypes.windll.user32.EmptyClipboard()
-                ctypes.windll.user32.SetClipboardData(13, _hMem)
-                ctypes.windll.user32.CloseClipboard()
-            except Exception:
-                try:
-                    ctypes.windll.user32.CloseClipboard()
-                except Exception:
-                    pass
-
-        print(f"[TRIGGER DAEMON] Typed into terminal: {cmd[:60]}")
+        print(f"[TRIGGER DAEMON] Command typed into terminal: {cmd[:60]}")
 
     except Exception as e:
         print(f"[TRIGGER DAEMON] Terminal type error: {e}")
-        import sys as _sys
-        _cflags = 0x08000000 if _sys.platform == 'win32' else 0
-        subprocess.Popen(
-            cmd,
-            shell=True,
-            creationflags=_cflags,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+        import traceback
+        traceback.print_exc()
 
 def _set_brightness_direct(level: int):
     """Set screen brightness on laptop via WMI."""
