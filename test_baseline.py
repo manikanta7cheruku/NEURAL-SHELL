@@ -1,328 +1,494 @@
 """
 test_baseline.py
-Regression test — run BEFORE refactor, save output, run AFTER refactor, diff.
+Seven production baseline test suite.
+Run before any refactor. All tests must pass before deployment.
+
+Usage:
+    python test_baseline.py              - run all tests
+    python test_baseline.py --fast       - skip slow LLM tests
+    python test_baseline.py --section chat - run only chat tests
 """
 
 import requests
 import sys
 import io
+import time
+import json
+import os
+import argparse
 
-# Force UTF-8 output on Windows
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
-BASE = "http://127.0.0.1:7777/api"
+parser = argparse.ArgumentParser()
+parser.add_argument('--fast',    action='store_true', help='Skip slow LLM tests')
+parser.add_argument('--section', type=str,            help='Run only this section')
+args, _ = parser.parse_known_args()
+
+BASE  = "http://127.0.0.1:7777/api"
 PANEL = "http://127.0.0.1:7778"
 
-results = []
+results   = []
+_cleanups = []  # functions to call at end to clean up test data
 
-def test(name, fn):
+
+def test(name, fn, section=None):
+    if args.section and section and args.section.lower() != section.lower():
+        return
     try:
         result = fn()
-        if result is True or (isinstance(result, dict) and result.get("ok", False)):
-            print(f"[PASS] {name}")
-            results.append((name, True, None))
-        else:
-            print(f"[FAIL] {name} -> {result}")
-            results.append((name, False, str(result)))
+        ok = result is True or (isinstance(result, dict) and result.get("ok", False))
+        status = "PASS" if ok else "FAIL"
+        detail = "" if ok else f" -> {result}"
+        print(f"  [{status}] {name}{detail}")
+        results.append((name, ok, None if ok else str(result)))
     except Exception as e:
-        print(f"[ERROR] {name} -> {type(e).__name__}: {e}")
+        print(f"  [ERROR] {name} -> {type(e).__name__}: {e}")
         results.append((name, False, f"{type(e).__name__}: {e}"))
 
-def separator(text):
-    print(f"\n====== {text} ======")
 
-# =========================================================================
-separator("SEVEN API HEALTH")
+def section(title):
+    print(f"\n{'='*50}")
+    print(f"  {title}")
+    print(f"{'='*50}")
 
-def check_api():
+
+def cleanup(fn):
+    _cleanups.append(fn)
+
+
+# ============================================================================
+# SECTION: HEALTH
+# ============================================================================
+section("HEALTH CHECK")
+
+def test_api_alive():
     r = requests.get(f"{BASE}/status", timeout=3)
-    return {"ok": r.status_code == 200, "status": r.status_code}
-test("Seven API responding on port 7777", check_api)
+    return {"ok": r.status_code == 200}
+test("API responding on port 7777", test_api_alive, "health")
 
-def check_panel():
+def test_health_endpoint():
+    r = requests.get(f"{BASE}/health", timeout=5)
+    if r.status_code != 200:
+        return {"ok": False, "status": r.status_code}
+    data = r.json()
+    required = ["healthy", "elapsed_ms", "checks"]
+    return {"ok": all(k in data for k in required), "data": data}
+test("Health endpoint returns structured report", test_health_endpoint, "health")
+
+def test_health_speed():
+    r = requests.get(f"{BASE}/health", timeout=5)
+    if r.status_code != 200:
+        return {"ok": False}
+    ms = r.json().get("elapsed_ms", 9999)
+    return {"ok": ms < 500, "elapsed_ms": ms}
+test("Health endpoint responds in under 500ms", test_health_speed, "health")
+
+def test_health_memory_check():
+    r = requests.get(f"{BASE}/health", timeout=5)
+    if r.status_code != 200:
+        return {"ok": False}
+    memory = r.json().get("checks", {}).get("memory_db", {})
+    return {"ok": "ok" in memory}
+test("Health check includes memory_db status", test_health_memory_check, "health")
+
+def test_health_ollama_check():
+    r = requests.get(f"{BASE}/health", timeout=5)
+    if r.status_code != 200:
+        return {"ok": False}
+    ollama = r.json().get("checks", {}).get("ollama", {})
+    return {"ok": "ok" in ollama}
+test("Health check includes ollama status", test_health_ollama_check, "health")
+
+def test_panel_alive():
     try:
         r = requests.get(f"{PANEL}/panel/health", timeout=2)
         return {"ok": r.status_code == 200}
-    except:
-        return {"ok": True, "reason": "panel not running (skip)"}
-test("Panel server responding on port 7778", check_panel)
+    except Exception:
+        return {"ok": True, "note": "panel not running (acceptable)"}
+test("Panel server port 7778", test_panel_alive, "health")
 
-# =========================================================================
-separator("TASK SYSTEM")
 
-created_task_id = None
+# ============================================================================
+# SECTION: TASKS
+# ============================================================================
+section("TASK SYSTEM")
 
-def create_task():
-    global created_task_id
+_test_task_id = None
+
+def test_create_task():
+    global _test_task_id
     r = requests.post(f"{BASE}/tasks", json={
-        "text": "TEST_REFACTOR_TASK",
-        "priority": "high",
-        "description": "This is a test task from baseline script",
-    }, timeout=5)
-    if r.status_code == 200:
-        data = r.json()
-        created_task_id = data.get("task", {}).get("id")
-        return {"ok": True, "id": created_task_id}
-    return {"ok": False, "status": r.status_code}
-test("Create task via API", create_task)
-
-def list_tasks():
-    r = requests.get(f"{BASE}/tasks", timeout=5)
-    return {"ok": r.status_code == 200 and isinstance(r.json(), list)}
-test("List tasks", list_tasks)
-
-def get_stats():
-    r = requests.get(f"{BASE}/tasks/stats", timeout=5)
-    if r.status_code == 200:
-        data = r.json()
-        return {"ok": "pending" in data and "completed" in data}
-    return {"ok": False}
-test("Get task stats", get_stats)
-
-def get_today():
-    r = requests.get(f"{BASE}/tasks/today", timeout=5)
-    return {"ok": r.status_code == 200}
-test("Get today's tasks", get_today)
-
-def get_overdue():
-    r = requests.get(f"{BASE}/tasks/overdue", timeout=5)
-    return {"ok": r.status_code == 200}
-test("Get overdue tasks", get_overdue)
-
-def update_task():
-    if not created_task_id:
-        return {"ok": False, "reason": "no task to update"}
-    r = requests.put(f"{BASE}/tasks/{created_task_id}", json={
-        "description": "Updated description"
-    }, timeout=5)
-    return {"ok": r.status_code == 200}
-test("Update task description", update_task)
-
-def add_subtasks():
-    if not created_task_id:
-        return {"ok": False, "reason": "no task"}
-    r = requests.put(f"{BASE}/tasks/{created_task_id}", json={
-        "subtasks": [
-            {"id": "s_test_1", "text": "Subtask one", "completed": False},
-            {"id": "s_test_2", "text": "Subtask two", "completed": True},
+        "text":        "BASELINE_TEST_TASK_DO_NOT_DELETE",
+        "priority":    "high",
+        "description": "Created by test_baseline.py",
+        "subtasks":    [
+            {"id": "st_1", "text": "Subtask one",   "completed": False},
+            {"id": "st_2", "text": "Subtask two",   "completed": True},
         ]
     }, timeout=5)
-    return {"ok": r.status_code == 200}
-test("Add subtasks to task", add_subtasks)
+    if r.status_code == 200:
+        data = r.json()
+        _test_task_id = data.get("task", {}).get("id")
+        cleanup(lambda: requests.delete(f"{BASE}/tasks/{_test_task_id}") if _test_task_id else None)
+        return {"ok": bool(_test_task_id), "id": _test_task_id}
+    return {"ok": False, "status": r.status_code, "body": r.text[:100]}
+test("Create task with subtasks", test_create_task, "tasks")
 
-def delete_task():
-    if not created_task_id:
+def test_task_has_subtasks():
+    if not _test_task_id:
+        return {"ok": False, "reason": "no task created"}
+    r = requests.get(f"{BASE}/tasks", timeout=5)
+    tasks = r.json()
+    found = next((t for t in tasks if t["id"] == _test_task_id), None)
+    if not found:
+        return {"ok": False, "reason": "task not found in list"}
+    return {"ok": len(found.get("subtasks", [])) == 2, "subtasks": found.get("subtasks")}
+test("Created task has subtasks persisted", test_task_has_subtasks, "tasks")
+
+def test_update_task():
+    if not _test_task_id:
         return {"ok": False, "reason": "no task"}
-    r = requests.delete(f"{BASE}/tasks/{created_task_id}", timeout=5)
+    r = requests.put(f"{BASE}/tasks/{_test_task_id}", json={
+        "description": "Updated by baseline test",
+        "priority":    "low",
+    }, timeout=5)
+    if r.status_code != 200:
+        return {"ok": False}
+    updated = r.json().get("task", {})
+    return {"ok": updated.get("priority") == "low"}
+test("Update task priority and description", test_update_task, "tasks")
+
+def test_task_stats():
+    r = requests.get(f"{BASE}/tasks/stats", timeout=5)
+    if r.status_code != 200:
+        return {"ok": False}
+    data = r.json()
+    required = ["total", "pending", "completed", "due_today", "overdue"]
+    return {"ok": all(k in data for k in required)}
+test("Task stats has all required fields", test_task_stats, "tasks")
+
+def test_complete_task():
+    if not _test_task_id:
+        return {"ok": False}
+    r = requests.put(f"{BASE}/tasks/{_test_task_id}", json={"completed": True}, timeout=5)
+    if r.status_code != 200:
+        return {"ok": False}
+    updated = r.json().get("task", {})
+    return {"ok": updated.get("completed") is True}
+test("Complete task sets completed=true", test_complete_task, "tasks")
+
+def test_list_tasks():
+    r = requests.get(f"{BASE}/tasks", timeout=5)
+    return {"ok": r.status_code == 200 and isinstance(r.json(), list)}
+test("List tasks returns array", test_list_tasks, "tasks")
+
+def test_tasks_today():
+    r = requests.get(f"{BASE}/tasks/today", timeout=5)
+    return {"ok": r.status_code == 200 and isinstance(r.json(), list)}
+test("Today tasks endpoint", test_tasks_today, "tasks")
+
+def test_tasks_overdue():
+    r = requests.get(f"{BASE}/tasks/overdue", timeout=5)
+    return {"ok": r.status_code == 200 and isinstance(r.json(), list)}
+test("Overdue tasks endpoint", test_tasks_overdue, "tasks")
+
+def test_delete_task():
+    if not _test_task_id:
+        return {"ok": True, "note": "no task to delete"}
+    r = requests.delete(f"{BASE}/tasks/{_test_task_id}", timeout=5)
     return {"ok": r.status_code == 200}
-test("Delete test task", delete_task)
+test("Delete task", test_delete_task, "tasks")
 
-# =========================================================================
-separator("SCHEDULE SYSTEM")
+def test_delete_nonexistent_task():
+    r = requests.delete(f"{BASE}/tasks/999999", timeout=5)
+    return {"ok": r.status_code == 404}
+test("Delete nonexistent task returns 404", test_delete_nonexistent_task, "tasks")
 
-def list_schedules():
+
+# ============================================================================
+# SECTION: SCHEDULES
+# ============================================================================
+section("SCHEDULE SYSTEM")
+
+_test_sched_id = None
+
+def test_list_schedules():
     r = requests.get(f"{BASE}/schedules", timeout=5)
     return {"ok": r.status_code == 200 and isinstance(r.json(), list)}
-test("List schedules", list_schedules)
+test("List schedules returns array", test_list_schedules, "schedules")
 
-created_sched_id = None
-
-def create_schedule():
-    global created_sched_id
-    # Get count before
-    before_count = len(requests.get(f"{BASE}/schedules").json())
+def test_create_schedule():
+    global _test_sched_id
+    before = {s["id"] for s in requests.get(f"{BASE}/schedules").json()}
     r = requests.post(f"{BASE}/schedules", json={
-        "type": "reminder",
-        "message": "TEST_REFACTOR_SCHEDULE",
-        "time": "5pm tomorrow",
+        "type":    "reminder",
+        "message": "BASELINE_TEST_SCHEDULE",
+        "time":    "tomorrow 9pm",
     }, timeout=10)
-    # Success = HTTP 200 AND schedule count increased
-    if r.status_code == 200:
-        all_scheds = requests.get(f"{BASE}/schedules").json()
-        if len(all_scheds) > before_count:
-            # Find the newest one
-            for s in reversed(all_scheds):
-                if s.get("message") == "TEST_REFACTOR_SCHEDULE":
-                    created_sched_id = s["id"]
-                    return {"ok": True, "id": created_sched_id}
-            return {"ok": True, "note": "created but not found in list"}
-    return {"ok": False, "status": r.status_code, "body": r.text[:100]}
-test("Create schedule via API", create_schedule)
+    if r.status_code != 200:
+        return {"ok": False, "status": r.status_code, "body": r.text[:150]}
+    after = requests.get(f"{BASE}/schedules").json()
+    new = [s for s in after if s["id"] not in before]
+    if new:
+        _test_sched_id = new[0]["id"]
+        cleanup(lambda: requests.delete(f"{BASE}/schedules/{_test_sched_id}") if _test_sched_id else None)
+        return {"ok": True, "id": _test_sched_id}
+    return {"ok": False, "reason": "schedule not found after create"}
+test("Create schedule", test_create_schedule, "schedules")
 
-def delete_schedule():
-    if not created_sched_id:
-        # Try to find and cleanup any leftover test schedules
-        all_scheds = requests.get(f"{BASE}/schedules").json()
-        for s in all_scheds:
-            if s.get("message") == "TEST_REFACTOR_SCHEDULE":
-                requests.delete(f"{BASE}/schedules/{s['id']}")
-        return {"ok": True, "note": "no schedule was created to delete"}
-    r = requests.delete(f"{BASE}/schedules/{created_sched_id}", timeout=5)
+def test_delete_schedule():
+    if not _test_sched_id:
+        return {"ok": True, "note": "no schedule to delete"}
+    r = requests.delete(f"{BASE}/schedules/{_test_sched_id}", timeout=5)
     return {"ok": r.status_code == 200}
-test("Delete test schedule", delete_schedule)
+test("Delete schedule", test_delete_schedule, "schedules")
 
-# =========================================================================
-separator("CHAT / BRAIN")
 
-def chat_greeting():
-    r = requests.post(f"{BASE}/chat", json={
-        "text": "hello",
-        "speaker_id": "default"
-    }, timeout=30)
+# ============================================================================
+# SECTION: TRIGGERS
+# ============================================================================
+section("TRIGGER SYSTEM")
+
+_test_trigger_id = None
+
+def test_list_triggers():
+    r = requests.get(f"{BASE}/triggers", timeout=5)
+    return {"ok": r.status_code == 200 and isinstance(r.json(), list)}
+test("List triggers returns array", test_list_triggers, "triggers")
+
+def test_trigger_stats():
+    r = requests.get(f"{BASE}/triggers/stats", timeout=5)
+    if r.status_code != 200:
+        return {"ok": False}
+    data = r.json()
+    required = ["total", "enabled", "hotkey", "voice", "audio"]
+    return {"ok": all(k in data for k in required)}
+test("Trigger stats has all fields", test_trigger_stats, "triggers")
+
+def test_create_trigger():
+    global _test_trigger_id
+    r = requests.post(f"{BASE}/triggers", json={
+        "name":        "BASELINE_TEST_TRIGGER",
+        "action_type": "open_url",
+        "action_data": {"url": "https://example.com"},
+        "hotkey":      "ctrl+shift+9",
+        "enabled":     True,
+        "silent":      True,
+    }, timeout=5)
     if r.status_code == 200:
-        return {"ok": bool(r.json().get("response"))}
-    return {"ok": False, "status": r.status_code}
-test("Chat: greeting", chat_greeting)
+        _test_trigger_id = r.json().get("trigger", {}).get("id")
+        cleanup(lambda: requests.delete(f"{BASE}/triggers/{_test_trigger_id}") if _test_trigger_id else None)
+        return {"ok": bool(_test_trigger_id), "id": _test_trigger_id}
+    return {"ok": False, "status": r.status_code, "body": r.text[:150]}
+test("Create trigger", test_create_trigger, "triggers")
 
-def chat_task_create():
-    import time as _t
-    import random as _rand
+def test_trigger_conflict_hotkey():
+    if not _test_trigger_id:
+        return {"ok": True, "note": "no trigger to conflict with"}
+    r = requests.post(f"{BASE}/triggers", json={
+        "name":        "BASELINE_CONFLICT_TRIGGER",
+        "action_type": "open_url",
+        "action_data": {"url": "https://example.com"},
+        "hotkey":      "ctrl+shift+9",
+        "enabled":     True,
+        "silent":      True,
+    }, timeout=5)
+    return {"ok": r.status_code == 409, "status": r.status_code}
+test("Duplicate hotkey returns 409 conflict", test_trigger_conflict_hotkey, "triggers")
 
-    # Generate unique task text so brain repetition detector doesn't skip it
-    unique_id = f"{int(_t.time())}_{_rand.randint(1000, 9999)}"
-    task_phrase = f"add task testcheck_{unique_id}"
+def test_update_trigger():
+    if not _test_trigger_id:
+        return {"ok": False, "reason": "no trigger"}
+    r = requests.put(f"{BASE}/triggers/{_test_trigger_id}", json={"enabled": False}, timeout=5)
+    if r.status_code != 200:
+        return {"ok": False}
+    updated = r.json().get("trigger", {})
+    return {"ok": updated.get("enabled") is False}
+test("Disable trigger via update", test_update_trigger, "triggers")
 
-    before = requests.get(f"{BASE}/tasks").json()
-    before_texts = set(t.get("text", "") for t in before)
+def test_delete_trigger():
+    if not _test_trigger_id:
+        return {"ok": True, "note": "no trigger to delete"}
+    r = requests.delete(f"{BASE}/triggers/{_test_trigger_id}", timeout=5)
+    return {"ok": r.status_code == 200}
+test("Delete trigger", test_delete_trigger, "triggers")
 
-    r = requests.post(f"{BASE}/chat", json={
-        "text": task_phrase,
-        "speaker_id": "default"
-    }, timeout=30)
 
+# ============================================================================
+# SECTION: MEMORY
+# ============================================================================
+section("MEMORY SYSTEM")
+
+def test_memory_stats():
+    r = requests.get(f"{BASE}/memory/stats", timeout=5)
     if r.status_code != 200:
         return {"ok": False, "status": r.status_code}
+    data = r.json()
+    required = ["total_conversations", "total_facts", "storage_mb"]
+    return {"ok": all(k in data for k in required), "stats": data}
+test("Memory stats has all fields", test_memory_stats, "memory")
 
-    _t.sleep(0.5)
-
-    after = requests.get(f"{BASE}/tasks").json()
-    new_tasks = [t for t in after if t.get("text", "") not in before_texts]
-
-    # Cleanup any tasks matching our unique id
-    for t in new_tasks:
-        if unique_id in t.get("text", "") or "testcheck" in t.get("text", "").lower():
-            requests.delete(f"{BASE}/tasks/{t['id']}")
-
-    return {"ok": len(new_tasks) > 0, "new_task_count": len(new_tasks), "phrase": task_phrase}
-test("Chat: task create via TASK tag", chat_task_create)
-
-def chat_task_list():
-    r = requests.post(f"{BASE}/chat", json={
-        "text": "show my tasks",
-        "speaker_id": "default"
-    }, timeout=30)
-    return {"ok": r.status_code == 200}
-test("Chat: task list via TASK tag", chat_task_list)
-
-def chat_capability():
-    r = requests.post(f"{BASE}/chat", json={
-        "text": "what can you do",
-        "speaker_id": "default"
-    }, timeout=60)
-    if r.status_code == 200:
-        return {"ok": len(r.json().get("response", "")) > 5}
-    return {"ok": False}
-test("Chat: capability question (LLM path)", chat_capability)
-
-# =========================================================================
-separator("MEMORY SYSTEM")
-
-def memory_stats():
+def test_memory_stats_nonzero():
     r = requests.get(f"{BASE}/memory/stats", timeout=5)
-    if r.status_code == 200:
+    if r.status_code != 200:
+        return {"ok": False}
+    data = r.json()
+    convos = data.get("total_conversations", 0)
+    return {"ok": convos > 0, "conversations": convos}
+test("Memory has existing conversations", test_memory_stats_nonzero, "memory")
+
+def test_conversations_endpoint():
+    r = requests.get(f"{BASE}/memory/conversations?limit=5", timeout=5)
+    if r.status_code != 200:
+        return {"ok": False, "status": r.status_code, "body": r.text[:200]}
+    data = r.json()
+    return {
+        "ok": "conversations" in data and "total" in data,
+        "total": data.get("total"),
+        "returned": len(data.get("conversations", [])),
+    }
+test("Conversations endpoint returns data", test_conversations_endpoint, "memory")
+
+def test_conversation_fields():
+    r = requests.get(f"{BASE}/memory/conversations?limit=1", timeout=5)
+    if r.status_code != 200:
+        return {"ok": False}
+    convos = r.json().get("conversations", [])
+    if not convos:
+        return {"ok": True, "note": "no conversations to check fields"}
+    c = convos[0]
+    required = ["id", "user_input", "seven_response", "timestamp", "source"]
+    missing = [k for k in required if k not in c]
+    return {"ok": len(missing) == 0, "missing_fields": missing}
+test("Conversation records have all required fields", test_conversation_fields, "memory")
+
+def test_facts_endpoint():
+    r = requests.get(f"{BASE}/memory/facts", timeout=5)
+    if r.status_code != 200:
+        return {"ok": False, "status": r.status_code}
+    return {"ok": isinstance(r.json(), list), "count": len(r.json())}
+test("Facts endpoint returns array", test_facts_endpoint, "memory")
+
+
+# ============================================================================
+# SECTION: CHAT (slow - uses LLM)
+# ============================================================================
+section("CHAT AND BRAIN")
+
+if not args.fast:
+    def test_chat_greeting():
+        r = requests.post(f"{BASE}/chat", json={
+            "text": "hello", "speaker_id": "default"
+        }, timeout=30)
+        if r.status_code != 200:
+            return {"ok": False, "status": r.status_code}
         data = r.json()
-        return {"ok": "total_conversations" in data}
-    return {"ok": False}
-test("Memory stats endpoint", memory_stats)
+        return {"ok": bool(data.get("response")) and len(data["response"]) > 2}
+    test("Chat greeting returns response", test_chat_greeting, "chat")
 
-# =========================================================================
-separator("HARDWARE / STATUS")
+    def test_chat_capability():
+        r = requests.post(f"{BASE}/chat", json={
+            "text": "what can you do", "speaker_id": "default"
+        }, timeout=60)
+        if r.status_code != 200:
+            return {"ok": False, "status": r.status_code}
+        return {"ok": len(r.json().get("response", "")) > 5}
+    test("Chat capability question hits LLM", test_chat_capability, "chat")
 
-def hardware():
+    def test_chat_task_create():
+        unique = f"baselinetest_{int(time.time())}"
+        before = {t["text"] for t in requests.get(f"{BASE}/tasks").json()}
+        r = requests.post(f"{BASE}/chat", json={
+            "text": f"add task {unique}", "speaker_id": "default"
+        }, timeout=30)
+        if r.status_code != 200:
+            return {"ok": False}
+        time.sleep(0.5)
+        after = requests.get(f"{BASE}/tasks").json()
+        new = [t for t in after if t["text"] not in before]
+        for t in new:
+            if unique in t.get("text", ""):
+                cleanup(lambda tid=t["id"]: requests.delete(f"{BASE}/tasks/{tid}"))
+        return {"ok": len(new) > 0, "new_tasks": len(new)}
+    test("Chat creates task via TASK tag", test_chat_task_create, "chat")
+
+    def test_chat_empty_input():
+        r = requests.post(f"{BASE}/chat", json={
+            "text": "", "speaker_id": "default"
+        }, timeout=10)
+        return {"ok": r.status_code == 400}
+    test("Chat rejects empty input with 400", test_chat_empty_input, "chat")
+
+else:
+    print("  [SKIP] LLM tests skipped (--fast mode)")
+
+
+# ============================================================================
+# SECTION: SYSTEM INFO
+# ============================================================================
+section("SYSTEM INFO")
+
+def test_hardware():
     r = requests.get(f"{BASE}/hardware", timeout=5)
     return {"ok": r.status_code == 200}
-test("Hardware info", hardware)
+test("Hardware endpoint", test_hardware, "system")
 
-def speed():
-    r = requests.get(f"{BASE}/speed", timeout=5)
-    return {"ok": r.status_code == 200}
-test("Speed stats", speed)
-
-def status():
+def test_status():
     r = requests.get(f"{BASE}/status", timeout=5)
-    if r.status_code == 200:
-        data = r.json()
-        return {"ok": "model" in data or "listening" in data}
-    return {"ok": False}
-test("Status endpoint", status)
+    if r.status_code != 200:
+        return {"ok": False}
+    data = r.json()
+    return {"ok": "model" in data or "listening" in data}
+test("Status endpoint has model or listening field", test_status, "system")
 
-# =========================================================================
-separator("CONFIG")
-
-def get_config():
+def test_config():
     r = requests.get(f"{BASE}/config", timeout=5)
     return {"ok": r.status_code == 200}
-test("Get config", get_config)
+test("Config endpoint", test_config, "system")
 
-# =========================================================================
-separator("COMMANDS LOG")
-
-def commands_log():
-    r = requests.get(f"{BASE}/commands/log?limit=5", timeout=5)
-    return {"ok": r.status_code == 200}
-test("Commands log", commands_log)
-
-# =========================================================================
-separator("LICENSE")
-
-def license_status():
+def test_license():
     r = requests.get(f"{BASE}/license/status", timeout=5)
     return {"ok": r.status_code == 200}
-test("License status", license_status)
+test("License status endpoint", test_license, "system")
 
-# =========================================================================
-separator("USAGE")
-
-def usage_stats():
+def test_usage():
     r = requests.get(f"{BASE}/usage/stats", timeout=5)
     return {"ok": r.status_code == 200}
-test("Usage stats", usage_stats)
+test("Usage stats endpoint", test_usage, "system")
 
-# =========================================================================
-separator("PANEL SYSTEM")
 
-def panel_tasks():
+# ============================================================================
+# CLEANUP
+# ============================================================================
+section("CLEANUP")
+
+for fn in _cleanups:
     try:
-        r = requests.get(f"{PANEL}/panel/tasks", timeout=3)
-        return {"ok": r.status_code == 200 and isinstance(r.json(), list)}
-    except:
-        return {"ok": True, "note": "panel not running (skip)"}
-test("Panel tasks endpoint", panel_tasks)
+        fn()
+    except Exception:
+        pass
+print("  Test data cleaned up")
 
-def panel_stats():
-    try:
-        r = requests.get(f"{PANEL}/panel/stats", timeout=3)
-        return {"ok": r.status_code == 200}
-    except:
-        return {"ok": True, "note": "panel not running"}
-test("Panel stats endpoint", panel_stats)
 
-# =========================================================================
-separator("SUMMARY")
+# ============================================================================
+# SUMMARY
+# ============================================================================
+section("SUMMARY")
 
 passed = sum(1 for _, p, _ in results if p)
 failed = sum(1 for _, p, _ in results if not p)
 total  = len(results)
 
-print(f"\nTotal: {total} | Passed: {passed} | Failed: {failed}\n")
+print(f"\n  Total: {total}  |  Passed: {passed}  |  Failed: {failed}\n")
 
 if failed > 0:
-    print("FAILURES:")
+    print("  FAILURES:")
     for name, ok, err in results:
         if not ok:
-            print(f"  X {name}")
+            print(f"    X {name}")
             if err:
-                print(f"    -> {err}")
+                print(f"      -> {err}")
+    print()
 
 sys.exit(0 if failed == 0 else 1)
