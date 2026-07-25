@@ -1286,23 +1286,29 @@ def _exec_run_command(data):
             if _vk:
                 ctypes.windll.user32.keybd_event(_vk, 0, _KEYEVENTF_KEYUP, 0)
 
-        # Step 3a: Erase stray character the trigger key typed into the terminal
+        # Step 3a: Wait extra time for trigger key to fully release
+        # The stray char appears because the OS processes the keydown
+        # before we can release it. Extra delay ensures it is gone.
         time.sleep(0.15)
+
+        # Step 3: Wait for OS to process key releases
+          # Step 3: Wait for OS to process all key releases
+        time.sleep(0.25)
+
+        # Step 4: Erase stray character from trigger key
+        _fired_key = data.get("_fired_key", "")
         _printable = set('abcdefghijklmnopqrstuvwxyz0123456789`-=[]\\;\',./\'')
         if _fired_key and _fired_key in _printable:
             ctypes.windll.user32.keybd_event(0x08, 0, 0, 0)       # VK_BACK down
             time.sleep(0.02)
             ctypes.windll.user32.keybd_event(0x08, 0, 0x0002, 0)  # VK_BACK up
-            time.sleep(0.05)
+            time.sleep(0.1)
 
-        # Step 3: Wait for OS to process key releases
-        time.sleep(0.25)
-
-        # Step 4: Save user's current clipboard content
+        # Step 5: Save user's current clipboard content
         _old_clipboard = None
         try:
             ctypes.windll.user32.OpenClipboard(0)
-            _handle = ctypes.windll.user32.GetClipboardData(13)  # CF_UNICODETEXT
+            _handle = ctypes.windll.user32.GetClipboardData(13)
             if _handle:
                 _old_clipboard = ctypes.wstring_at(_handle)
             ctypes.windll.user32.CloseClipboard()
@@ -1312,23 +1318,59 @@ def _exec_run_command(data):
             except Exception:
                 pass
 
-        # Step 5: Set clipboard to command text
+        # Step 6: Set clipboard to command text
         _sp.run(
             ['clip'],
             input=cmd.encode('utf-8'),
             creationflags=0x08000000,
             check=False,
         )
-        time.sleep(0.08)
+        time.sleep(0.1)
 
-        # Step 6: Paste using shift+insert (universal, works in PowerShell)
-        pyautogui.hotkey('shift', 'insert')
+        # Step 7: Paste using SendInput ctrl+v
+        # SendInput is more reliable than pyautogui for terminal windows
+        import ctypes.wintypes
 
-        # Step 7: Restore user's previous clipboard content after brief delay
+        INPUT_KEYBOARD = 1
+        KEYEVENTF_KEYUP_FLAG = 0x0002
+
+        class KEYBDINPUT(ctypes.Structure):
+            _fields_ = [
+                ("wVk",         ctypes.wintypes.WORD),
+                ("wScan",       ctypes.wintypes.WORD),
+                ("dwFlags",     ctypes.wintypes.DWORD),
+                ("time",        ctypes.wintypes.DWORD),
+                ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
+            ]
+
+        class INPUT_RECORD(ctypes.Structure):
+            class _U(ctypes.Union):
+                _fields_ = [("ki", KEYBDINPUT)]
+            _fields_ = [
+                ("type",   ctypes.wintypes.DWORD),
+                ("_input", _U),
+            ]
+
+        def _press(vk, up=False):
+            inp = INPUT_RECORD()
+            inp.type = INPUT_KEYBOARD
+            inp._input.ki.wVk = vk
+            inp._input.ki.dwFlags = KEYEVENTF_KEYUP_FLAG if up else 0
+            ctypes.windll.user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(inp))
+
+        # ctrl down, v down, v up, ctrl up
+        _press(0x11)        # VK_CONTROL down
+        time.sleep(0.03)
+        _press(0x56)        # VK_V down
+        time.sleep(0.03)
+        _press(0x56, True)  # VK_V up
+        time.sleep(0.03)
+        _press(0x11, True)  # VK_CONTROL up
+
+        # Step 8: Restore user's previous clipboard
         time.sleep(0.3)
         if _old_clipboard is not None:
             try:
-                import ctypes.wintypes
                 _text = _old_clipboard
                 _hMem = ctypes.windll.kernel32.GlobalAlloc(0x0042, (len(_text) + 1) * 2)
                 _ptr  = ctypes.windll.kernel32.GlobalLock(_hMem)
