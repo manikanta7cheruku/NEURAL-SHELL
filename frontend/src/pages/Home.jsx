@@ -531,16 +531,23 @@ export default function Home() {
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-3.5 border-b border-white/8">
         <div className="flex items-center gap-3">
-          <div className="relative w-7 h-7 flex items-center justify-center">
-            <div className={`absolute inset-0 rounded-full opacity-20
-              ${isListening ? 'bg-s-green animate-ping'     :
-                isThinking  ? 'bg-white/60 animate-pulse'   :
-                isSpeaking  ? 'bg-s-accent animate-pulse'   : ''}`} />
-            <div className={`w-2 h-2 rounded-full
-              ${isListening ? 'bg-s-green'  :
-                isThinking  ? 'bg-white/60' :
-                isSpeaking  ? 'bg-s-accent' : 'bg-white/20'}`} />
-          </div>
+          <button onClick={() => navigate('/')}
+                  title="Back to home"
+                  className="flex items-center justify-center w-7 h-7 rounded-lg
+                             border border-white/[0.06] bg-white/[0.02]
+                             hover:border-white/[0.12] hover:bg-white/[0.04]
+                             transition-all duration-200 group flex-shrink-0">
+            <div className="relative w-full h-full flex items-center justify-center">
+              <div className={`absolute inset-0 rounded-lg opacity-20
+                ${isListening ? 'bg-s-green animate-ping'     :
+                  isThinking  ? 'bg-white/60 animate-pulse'   :
+                  isSpeaking  ? 'bg-s-accent animate-pulse'   : ''}`} />
+              <div className={`w-2 h-2 rounded-full transition-colors duration-200
+                ${isListening ? 'bg-s-green'  :
+                  isThinking  ? 'bg-white/60' :
+                  isSpeaking  ? 'bg-s-accent' : 'bg-white/20 group-hover:bg-white/35'}`} />
+            </div>
+          </button>
           <div>
             <h1 className="text-[15px] font-semibold text-white/95 tracking-tight">
               Dashboard
