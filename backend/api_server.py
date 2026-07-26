@@ -174,6 +174,44 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Rate limiting middleware for /api/chat
+# Prevents runaway frontend loops or scripts from freezing the machine
+import time as _time
+import collections as _collections
+import threading as _threading
+
+_rate_lock   = _threading.Lock()
+_chat_calls  = _collections.defaultdict(list)   # ip -> [timestamps]
+RATE_LIMIT   = 30    # max requests
+RATE_WINDOW  = 60    # per 60 seconds
+
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request as StarletteRequest
+from starlette.responses import JSONResponse
+
+class ChatRateLimitMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: StarletteRequest, call_next):
+        if request.url.path == "/api/chat" and request.method == "POST":
+            client_ip = request.client.host or "127.0.0.1"
+            now = _time.time()
+            with _rate_lock:
+                calls = _chat_calls[client_ip]
+                # Remove calls outside the window
+                calls[:] = [t for t in calls if now - t < RATE_WINDOW]
+                if len(calls) >= RATE_LIMIT:
+                    retry_after = int(RATE_WINDOW - (now - calls[0]))
+                    return JSONResponse(
+                        status_code=429,
+                        content={
+                            "detail": f"Rate limit exceeded. Max {RATE_LIMIT} chat requests per {RATE_WINDOW}s. Retry in {retry_after}s."
+                        },
+                        headers={"Retry-After": str(retry_after)},
+                    )
+                calls.append(now)
+        return await call_next(request)
+
+app.add_middleware(ChatRateLimitMiddleware)
+
 
 # =========================================================================
 # ROOT ENDPOINT
