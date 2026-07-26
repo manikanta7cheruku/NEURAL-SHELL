@@ -3,7 +3,7 @@ backend/routes/voice_gates.py
 Handles: /api/voice/gates, /api/voice/enrolled
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 import threading
 import os
@@ -21,7 +21,24 @@ _DEFAULT_GATES = {
 def get_voice_gates():
     """Get current voice gate configuration."""
     import config
-    gates = config.KEY.get("voice_gates", _DEFAULT_GATES.copy())
+    import json as _json
+    import os as _os
+
+    # Always read from disk — guarantees frontend gets the saved value
+    # even if config.KEY in memory is stale from a previous session
+    try:
+        _cfg_path = os.path.join(
+            os.environ.get('APPDATA', os.path.expanduser('~')),
+            'SEVEN', 'config.json'
+        )
+        with open(_cfg_path, 'r') as _f:
+            _disk = _json.load(_f)
+        gates = _disk.get("voice_gates", _DEFAULT_GATES.copy())
+        # Also sync in-memory KEY so rest of session is consistent
+        config.KEY["voice_gates"] = gates
+    except Exception:
+        gates = config.KEY.get("voice_gates", _DEFAULT_GATES.copy())
+
     # Ensure all keys exist
     for k, v in _DEFAULT_GATES.items():
         if k not in gates:
@@ -30,10 +47,14 @@ def get_voice_gates():
 
 
 @router.post("/api/voice/gates")
-def save_voice_gates(body: dict):
+async def save_voice_gates(request: Request):
     """Save voice gate configuration."""
     import config
+    body = await request.json()
     config.update_config({"voice_gates": body})
+    print(f"[GATES] Saved: PTT={body.get('push_to_talk', {}).get('enabled')} "
+          f"WW={body.get('wake_word', {}).get('enabled')} "
+          f"SV={body.get('speaker_verify', {}).get('enabled')}")
     return {"ok": True}
 
 
