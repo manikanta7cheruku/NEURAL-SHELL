@@ -1283,27 +1283,9 @@ def _exec_run_command(data):
 
         _is_vscode = "code.exe" in _proc
 
-        # Step 3: For VS Code, ensure terminal panel has keyboard focus
-        # Do NOT use ctrl+` because it toggles. If terminal already has focus
-        # it would hide the terminal.
-        # Instead: use the VS Code command "workbench.action.terminal.focus"
-        # via ctrl+shift+` which ALWAYS focuses terminal without toggling.
-        if _is_vscode:
-            # Click inside terminal area directly (bottom portion of VS Code)
-            try:
-                import win32gui
-                rect = win32gui.GetWindowRect(_hwnd)
-                win_x = rect[0]
-                win_y = rect[1]
-                win_w = rect[2] - rect[0]
-                win_h = rect[3] - rect[1]
-                # Click at 50% width, 85% height (terminal area)
-                _click_x = win_x + win_w // 2
-                _click_y = win_y + int(win_h * 0.85)
-                pyautogui.click(_click_x, _click_y)
-                time.sleep(0.3)
-            except Exception:
-                pass
+        # Step 3: For VS Code, trust that user already clicked the terminal
+        # Do nothing. The terminal pane the user clicked already has focus.
+        # Any attempt to re-focus (ctrl+`, click) risks moving focus away.
 
         # Step 4: Erase stray trigger char
         _printable = set('abcdefghijklmnopqrstuvwxyz0123456789`-=[]\\;\',./\'')
