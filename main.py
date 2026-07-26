@@ -257,6 +257,17 @@ print("[SYSTEM] Packages ready - starting full Seven...")
 import threading
 import re
 
+# Thread exception hook - catches crashes in background threads
+def _thread_exception_handler(args):
+    if args.exc_type in (SystemExit, KeyboardInterrupt):
+        return
+    logging.getLogger('seven.threads').critical(
+        f"Unhandled exception in thread {args.thread.name if args.thread else 'unknown'}",
+        exc_info=(args.exc_type, args.exc_value, args.exc_traceback)
+    )
+
+threading.excepthook = _thread_exception_handler
+
 import colorama
 from colorama import Fore
 colorama.init()
@@ -320,6 +331,31 @@ def _setup_logging():
 
 logger = _setup_logging()
 logger.info("Seven starting up")
+
+# Global exception hook - catches any unhandled exception anywhere
+# Logs it with full traceback before Python would silently exit
+def _global_exception_handler(exc_type, exc_value, exc_traceback):
+    if issubclass(exc_type, KeyboardInterrupt):
+        # Let KeyboardInterrupt through normally
+        sys.__excepthook__(exc_type, exc_value, exc_traceback)
+        return
+    logger.critical(
+        "Unhandled exception",
+        exc_info=(exc_type, exc_value, exc_traceback)
+    )
+
+sys.excepthook = _global_exception_handler
+
+# Thread exception hook - catches crashes in background threads
+def _thread_exception_handler(args):
+    if args.exc_type == SystemExit:
+        return
+    logger.critical(
+        f"Unhandled exception in thread {args.thread.name}",
+        exc_info=(args.exc_type, args.exc_value, args.exc_traceback)
+    )
+
+threading.excepthook = _thread_exception_handler
 
 # Sentry error tracking — captures crashes automatically
 # Set SEVEN_SENTRY_DSN environment variable or add to config.json
