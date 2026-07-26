@@ -6,6 +6,9 @@ Handles: all /api/memory/* endpoints
 from fastapi import APIRouter, HTTPException, Request
 import os
 import datetime
+import logging
+
+_log = logging.getLogger('seven.memory')
 
 router = APIRouter()
 
@@ -316,8 +319,8 @@ def export_memory():
     try:
         import hands.scheduler as sched
         export["schedules"] = sched.get_all_schedules()
-    except Exception:
-        pass
+    except Exception as _e:
+        _log.debug(f"Memory operation non-critical: {_e}")
 
     # Usage stats
     try:
@@ -336,8 +339,8 @@ def export_memory():
                     "last_seen":     row[1]
                 }
             conn.close()
-    except Exception:
-        pass
+    except Exception as _e:
+        _log.debug(f"Memory operation non-critical: {_e}")
 
     return export
 
@@ -459,7 +462,8 @@ def get_memory_stats():
     try:
         import config as _cfg
         stats["tier"] = _cfg.KEY.get("license", {}).get("tier", "free")
-    except Exception:
+    except Exception as _e:
+        _log.debug(f"Tier read failed, defaulting to free: {_e}")
         stats["tier"] = "free"
 
     return stats
