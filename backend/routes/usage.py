@@ -6,9 +6,11 @@ Handles: /api/usage/stats, /api/usage/history, /api/email/*
 from fastapi import APIRouter, HTTPException
 import os
 import sqlite3
+import logging
 from datetime import datetime, timedelta
 
 router = APIRouter()
+_log = logging.getLogger('seven.usage')
 
 
 @router.get("/api/usage/stats")
@@ -56,8 +58,8 @@ def get_usage_stats():
     try:
         import telemetry as tel
         total_hours += tel.get_active_hours()
-    except Exception:
-        pass
+    except Exception as e:
+        _log.debug(f"Active hours read failed: {e}")
 
     total_minutes = int(total_hours * 60)
     if total_minutes < 1:
