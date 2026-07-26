@@ -777,7 +777,8 @@ def db_get_by_hotkey(hotkey):
                 (hotkey.lower(),)
             ).fetchone()
         return _row_to_dict(row) if row else None
-    except Exception:
+    except Exception as e:
+        print(Fore.YELLOW + f"[TRIGGERS] db_get_by_hotkey failed: {e}")
         return None
 
 
@@ -792,7 +793,8 @@ def db_get_by_voice_phrase(phrase):
                 (phrase.lower().strip(),)
             ).fetchone()
         return _row_to_dict(row) if row else None
-    except Exception:
+    except Exception as e:
+        print(Fore.YELLOW + f"[TRIGGERS] db_get_by_voice_phrase failed: {e}")
         return None
 
 
@@ -807,7 +809,8 @@ def db_get_by_audio_pattern(pattern):
                 (pattern,)
             ).fetchone()
         return _row_to_dict(row) if row else None
-    except Exception:
+    except Exception as e:
+        print(Fore.YELLOW + f"[TRIGGERS] db_get_by_audio_pattern failed: {e}")
         return None
 
 
