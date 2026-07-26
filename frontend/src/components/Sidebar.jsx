@@ -215,7 +215,7 @@ export default function Sidebar() {
 
       {/* ── Brand ───────────────────────────────────────────────── */}
       <div className="px-4 pt-4 pb-3 border-b border-s-border">
-        <NavLink to="/" className="flex items-center gap-2 group cursor-pointer">
+        <NavLink to="/" title="Back to Seven" className="flex items-center gap-2 group cursor-pointer">
           <div className="w-6 h-6 rounded-lg bg-s-accent/10 border border-s-accent/20
                           flex items-center justify-center flex-shrink-0
                           group-hover:bg-s-accent/20 transition-colors">
