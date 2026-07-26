@@ -37,8 +37,10 @@ def is_ptt_active() -> bool:
 
 def set_enabled(enabled: bool):
     global _enabled
+    if _enabled == enabled:
+        return
     _enabled = enabled
-    print(Fore.CYAN + f"[PTT] Push to talk {'enabled — hold Shift to speak' if enabled else 'disabled'}")
+    print(Fore.CYAN + f"[PTT] Push to talk {'enabled -- hold Shift to speak' if enabled else 'disabled'}")
 
 
 def start():
