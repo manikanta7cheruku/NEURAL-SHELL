@@ -215,14 +215,16 @@ export default function Sidebar() {
 
       {/* ── Brand ───────────────────────────────────────────────── */}
       <div className="px-4 pt-4 pb-3 border-b border-s-border">
-        <div className="flex items-center gap-2">
+        <NavLink to="/" className="flex items-center gap-2 group cursor-pointer">
           <div className="w-6 h-6 rounded-lg bg-s-accent/10 border border-s-accent/20
-                          flex items-center justify-center flex-shrink-0">
+                          flex items-center justify-center flex-shrink-0
+                          group-hover:bg-s-accent/20 transition-colors">
             <Cpu size={12} className="text-s-accent" />
           </div>
           <div>
             <div className="text-[11px] font-semibold text-s-text tracking-widest
-                            font-mono leading-none">
+                            font-mono leading-none group-hover:text-s-accent
+                            transition-colors">
               SEVEN
             </div>
             <div className="flex items-center gap-1 mt-0.5">
@@ -234,7 +236,7 @@ export default function Sidebar() {
               </span>
             </div>
           </div>
-        </div>
+        </NavLink>
       </div>
 
       {/* ── Top Rail ────────────────────────────────────────────── */}
