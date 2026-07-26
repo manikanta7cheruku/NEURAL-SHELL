@@ -45,10 +45,13 @@ function MainApp() {
 
   if (isLanding) {
     return (
-      <div className="h-screen bg-s-bg text-white overflow-hidden">
-        <Routes>
-          <Route path="/" element={<Landing />} />
-        </Routes>
+      <div className="h-screen bg-s-bg text-white overflow-hidden flex flex-col">
+        <TitleBar />
+        <div className="flex-1 overflow-hidden">
+          <Routes>
+            <Route path="/" element={<Landing />} />
+          </Routes>
+        </div>
       </div>
     );
   }
