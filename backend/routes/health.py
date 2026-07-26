@@ -196,6 +196,6 @@ def _get_version():
         vf = os.path.join(here, "version.txt")
         if os.path.exists(vf):
             return open(vf).read().strip()
-    except Exception:
-        pass
+    except Exception as _e:
+        _log.debug(f"Health sub-check non-critical: {_e}")
     return "unknown"

@@ -4,6 +4,9 @@ Handles: GET /api/status, GET /api/version, WS /ws/status
 """
 
 from fastapi import APIRouter
+import logging
+
+_log = logging.getLogger('seven.status')
 from fastapi import WebSocket
 import asyncio
 import datetime
@@ -120,5 +123,5 @@ async def status_websocket(websocket: WebSocket):
                 "seven_text": _state.get("seven_text", ""),
             })
             await asyncio.sleep(0.3)
-    except Exception:
-        pass
+    except Exception as _e:
+        _log.debug(f"Status check non-critical: {_e}")
