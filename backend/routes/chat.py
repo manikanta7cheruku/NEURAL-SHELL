@@ -7,6 +7,9 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List
 import re
+import logging
+
+_log = logging.getLogger('seven.chat')
 
 router = APIRouter()
 
@@ -23,6 +26,68 @@ class ChatResponse(BaseModel):
     file_results: Optional[dict] = None
     task_results: Optional[dict] = None
 
+def _build_clean_response(full_response: str, speaker_id: str) -> str:
+    """
+    Build a human-readable response string when the brain response
+    contained only action tags and no conversational text.
+    """
+    try:
+        from backend.api_server import get_state as _gs
+        _tr = _gs().get("task_results")
+        if _tr:
+            _ta = _tr.get("action", "")
+            if _ta == "created":
+                _t = _tr.get("task", {})
+                return f"Task added: {_t.get('text', 'task')}."
+            elif _ta == "list":
+                _tl = _tr.get("tasks", [])
+                if _tl:
+                    _names = ", ".join(t.get("text", "")[:30] for t in _tl[:5])
+                    more = f" And {len(_tl) - 5} more." if len(_tl) > 5 else ""
+                    return (
+                        f"{len(_tl)} pending task{'s' if len(_tl) != 1 else ''}: "
+                        f"{_names}.{more}"
+                    )
+                return "No pending tasks."
+            elif _ta == "completed":
+                return "Task marked complete."
+            elif _ta == "deleted":
+                return "Task removed."
+            return "Done."
+    except Exception as _e:
+        _log.debug(f"Task results read failed: {_e}")
+
+    # Check if a schedule was processed
+    try:
+        import hands.scheduler as _sched_mod
+        _sched_cmds = re.findall(
+            r"###SCHED:\s*(.*?)(?=###|$)", full_response, re.DOTALL
+        )
+        for _sc in _sched_cmds:
+            _sp = {}
+            for pair in _sc.strip().split():
+                if "=" in pair:
+                    k, v = pair.split("=", 1)
+                    _sp[k.strip()] = v.strip()
+            _sp["speaker_id"] = speaker_id
+            _action = _sp.get("action", "")
+            if _action in ("reminder", "alarm", "timer", "event"):
+                _msg = _sp.get("message", "").replace("_", " ").replace("|||", " ")
+                _time_str = _sp.get("time", "").replace("_", " ")
+                if _msg and _time_str:
+                    return f"Reminder set: {_msg}, {_time_str}."
+                elif _msg:
+                    return f"Reminder set: {_msg}."
+                return "Reminder set."
+            elif _action == "list":
+                _, _speech = _sched_mod.list_schedules(speaker_id=speaker_id)
+                return _speech
+            elif _action == "cancel":
+                return "Schedule cancelled."
+    except Exception as _e:
+        _log.debug(f"Schedule response build failed: {_e}")
+
+    return "."
 
 @router.post("/api/chat", response_model=ChatResponse,
              summary="Send message to Seven",
@@ -40,18 +105,18 @@ def chat(req: ChatRequest):
 
     try:
         telemetry.log_activity()
-    except Exception:
-        pass
+    except Exception as _te:
+        _log.debug(f"Telemetry log failed: {_te}")
 
     try:
         response = brain.think(req.text.strip(), speaker_id=req.speaker_id)
 
         try:
             telemetry.log_activity()
-        except Exception:
-            pass
+        except Exception as _te:
+            _log.debug(f"Telemetry log failed: {_te}")
 
-        # Handle streaming response — flatten it for REST API
+        # Handle streaming response
         is_streaming = (
             isinstance(response, tuple)
             and len(response) == 2
@@ -69,99 +134,40 @@ def chat(req: ChatRequest):
         actions = re.findall(r"###(\w+):\s*(.*?)(?=###|$)", full_response, re.DOTALL)
         action_list = [f"{cmd}:{arg.strip()}" for cmd, arg in actions]
 
-        # Clean response (remove tags for display)
-        clean_response = re.sub(r"###\w+:\s*.*?(?=###|$)", "", full_response, flags=re.DOTALL).strip()
+        # Clean response
+        clean_response = re.sub(
+            r"###\w+:\s*.*?(?=###|$)", "", full_response, flags=re.DOTALL
+        ).strip()
 
-        # Execute commands first so task_results state is populated
+        # Execute commands
         _execute_actions(action_list, full_response, req.speaker_id)
 
         # Build human-readable response if empty after tag removal
-        if not clean_response or clean_response == "":
-            try:
-                from backend.api_server import get_state as _gs
-                _tr = _gs().get("task_results")
-                if _tr:
-                    _ta = _tr.get("action", "")
-                    if _ta == "created":
-                        _t = _tr.get("task", {})
-                        clean_response = f"Task added: {_t.get('text', 'task')}."
-                    elif _ta == "list":
-                        _tl = _tr.get("tasks", [])
-                        if _tl:
-                            _names = ", ".join(
-                                t.get("text", "")[:30] for t in _tl[:5]
-                            )
-                            clean_response = (
-                                f"{len(_tl)} pending task{'s' if len(_tl) != 1 else ''}: "
-                                f"{_names}."
-                                + (f" And {len(_tl) - 5} more." if len(_tl) > 5 else "")
-                            )
-                        else:
-                            clean_response = "No pending tasks."
-                    elif _ta == "completed":
-                        clean_response = "Task marked complete."
-                    elif _ta == "deleted":
-                        clean_response = "Task removed."
-                    else:
-                        clean_response = "Done."
-                else:
-                    # Check if a schedule was just created
-                    # The scheduler returns speech text through the action execution
-                    # Extract it from the SCHED tag execution results
-                    _sched_cmds = re.findall(r"###SCHED:\s*(.*?)(?=###|$)", full_response, re.DOTALL)
-                    if _sched_cmds:
-                        # Schedule was processed. The manage_schedule function
-                        # already returned a speech string. Re-execute to get it.
-                        try:
-                            import hands.scheduler as _sched_mod
-                            for _sc in _sched_cmds:
-                                _sp = {}
-                                for pair in _sc.strip().split():
-                                    if "=" in pair:
-                                        k, v = pair.split("=", 1)
-                                        _sp[k.strip()] = v.strip()
-                                _sp["speaker_id"] = req.speaker_id
-                                _action = _sp.get("action", "")
-                                if _action in ("reminder", "alarm", "timer", "event"):
-                                    # Schedule already created by _execute_actions
-                                    # Just build a confirmation message
-                                    _msg = _sp.get("message", "").replace("_", " ").replace("|||", " ")
-                                    _time = _sp.get("time", "").replace("_", " ")
-                                    if _msg and _time:
-                                        clean_response = f"Reminder set: {_msg}, {_time}."
-                                    elif _msg:
-                                        clean_response = f"Reminder set: {_msg}."
-                                    else:
-                                        clean_response = "Reminder set."
-                                    break
-                                elif _action == "list":
-                                    _, _speech = _sched_mod.list_schedules(speaker_id=req.speaker_id)
-                                    clean_response = _speech
-                                    break
-                                elif _action == "cancel":
-                                    clean_response = "Schedule cancelled."
-                                    break
-                        except Exception:
-                            clean_response = "Schedule set."
-                    else:
-                        clean_response = "."
-            except Exception:
-                clean_response = "."
+        if not clean_response:
+            clean_response = _build_clean_response(
+                full_response, req.speaker_id
+            )
 
-        # Conversation memory is saved by brain.py after run_pipeline returns.
-        # chat.py does NOT save here to prevent double saves.
-        # Plan limit check for conversation history happens in brain.py.
+        # Plan limit check for conversation history
         try:
             from memory import seven_memory
             all_convos = seven_memory.conversations.get()
-            convo_count = len(all_convos["documents"]) if all_convos and all_convos.get("documents") else 0
+            convo_count = (
+                len(all_convos["documents"])
+                if all_convos and all_convos.get("documents")
+                else 0
+            )
             limit_check = check_limit("conversation_history", convo_count)
             if not limit_check["allowed"]:
-                print(f"[API] Conversation memory full ({convo_count}/{limit_check['limit']}) — tier: {limit_check['tier']}")
-        except Exception:
-            pass
+                _log.info(
+                    f"Conversation memory full "
+                    f"({convo_count}/{limit_check['limit']}) "
+                    f"tier: {limit_check['tier']}"
+                )
+        except Exception as _e:
+            _log.debug(f"Memory limit check failed: {_e}")
 
-        # Pull file search results from shared state
+        # Pull file/task results from shared state
         file_results = None
         task_results = None
         try:
@@ -173,15 +179,15 @@ def chat(req: ChatRequest):
                 set_state("file_search_results", None)
             if task_results:
                 set_state("task_results", None)
-        except Exception:
-            pass
+        except Exception as _e:
+            _log.debug(f"State read failed: {_e}")
 
         return ChatResponse(
             response=clean_response,
             actions=action_list,
             streaming=is_streaming,
             file_results=file_results,
-            task_results=task_results
+            task_results=task_results,
         )
 
     except Exception as e:
