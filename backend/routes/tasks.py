@@ -137,7 +137,8 @@ def _serialize_subtasks(subtasks):
 # ROUTES - SPECIFIC BEFORE PARAMETERIZED
 # =========================================================================
 
-@router.get("/api/tasks/stats")
+@router.get("/api/tasks/stats", summary="Task statistics",
+            description="Returns count of total, pending, completed, due today, and overdue tasks. Used by sidebar badge and dashboard.")
 def get_task_stats():
     try:
         today_str = date.today().isoformat()
@@ -198,7 +199,8 @@ def get_tasks_overdue():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/api/tasks")
+@router.get("/api/tasks", summary="List all tasks",
+            description="Returns all tasks with optional filters. Tasks include subtasks array, priority, due_date, due_time, description. Ordered by completion status then due date then priority.")
 def list_tasks(
     status:      Optional[str] = Query(None),
     priority:    Optional[str] = Query(None),
@@ -234,7 +236,8 @@ def list_tasks(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/api/tasks")
+@router.post("/api/tasks", summary="Create task",
+             description="Create a new task with optional subtasks, due date, due time, priority, description and tags. Returns the created task object.")
 def create_task(body: TaskCreate):
     if not body.text or not body.text.strip():
         raise HTTPException(status_code=400, detail="Task text cannot be empty.")

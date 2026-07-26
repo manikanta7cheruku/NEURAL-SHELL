@@ -147,7 +147,8 @@ def delete_fact(fact_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/api/memory/conversations")
+@router.get("/api/memory/conversations", summary="Get conversation history",
+            description="Returns paginated conversation history from ChromaDB. Falls back to direct SQLite read if ChromaDB singleton fails (numpy/tensorflow conflict). Each record includes user_input, seven_response, timestamp, source (chat or voice).")
 def get_conversations(limit: int = 500, offset: int = 0):
     """Get stored conversations (paginated)."""
 
@@ -396,7 +397,8 @@ async def import_memory(request: Request):
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.get("/api/memory/stats")
+@router.get("/api/memory/stats", summary="Memory statistics",
+            description="Returns count of stored conversations and facts, storage size in MB, and current license tier. Uses SQLite fallback if ChromaDB unavailable.")
 def get_memory_stats():
     """Get memory statistics including storage size."""
     stats = {"total_conversations": 0, "total_facts": 0, "storage_path": ""}

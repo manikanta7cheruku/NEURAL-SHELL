@@ -14,7 +14,8 @@ from fastapi import APIRouter
 router = APIRouter()
 
 
-@router.get("/api/health")
+@router.get("/api/health", summary="System health check",
+            description="Checks all critical systems in parallel: memory DB, tasks DB, triggers DB, Ollama, disk space, config, schedules. Returns structured JSON. Always returns 200 - check the 'healthy' field and individual check statuses.")
 def health_check():
     """
     Check health of all Seven subsystems in parallel.

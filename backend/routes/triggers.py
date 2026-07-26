@@ -292,7 +292,8 @@ def _check_voice_phrase_conflict(phrase, exclude_id=None):
 # ROUTES — SPECIFIC BEFORE PARAMETERIZED (FastAPI order matters)
 # ─────────────────────────────────────────────────────────────────────────
 
-@router.get("/api/triggers/stats")
+@router.get("/api/triggers/stats", summary="Trigger statistics",
+            description="Returns count of total, enabled, hotkey, voice, and audio triggers. Used by dashboard.")
 def get_stats():
     """Aggregate stats for dashboard badge."""
     try:
@@ -572,7 +573,9 @@ def delete_trigger(trigger_id: int):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/api/triggers/{trigger_id}/fire")
+@router.post("/api/triggers/{trigger_id}/fire",
+             summary="Fire a trigger manually",
+             description="Executes a trigger's action immediately. Shows notification, runs action in background thread, updates fire count. Used by the Test button in the Triggers UI.")
 def fire_trigger(trigger_id: int):
     """
     Manually fire a trigger (from UI test button).

@@ -24,7 +24,9 @@ class ChatResponse(BaseModel):
     task_results: Optional[dict] = None
 
 
-@router.post("/api/chat", response_model=ChatResponse)
+@router.post("/api/chat", response_model=ChatResponse,
+             summary="Send message to Seven",
+             description="Send text to Seven's brain pipeline. Runs through 22 processing layers. First 4 layers handle commands in under 5ms without LLM. Open questions go to Ollama. Returns response text and any action tags executed.")
 def chat(req: ChatRequest):
     """Send a text message to Seven's brain."""
     import brain
