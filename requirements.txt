@@ -50,6 +50,9 @@ python-multipart
 # --- Notifications ---
 winotify
 
+# --- Error tracking ---
+sentry-sdk
+
 # --- Proactive Features ---
 pynput
 
