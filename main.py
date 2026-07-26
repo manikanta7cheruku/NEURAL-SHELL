@@ -184,8 +184,8 @@ def _validate_startup():
             )
         else:
             print("[STARTUP] Port 7777: available")
-    except Exception:
-        pass
+    except Exception as _pe:
+        print(f"[STARTUP] Port check failed: {_pe}")
 
     # Check 4: Disk space (warn if less than 500MB free)
     try:
@@ -205,8 +205,8 @@ def _validate_startup():
             )
         else:
             print(f"[STARTUP] Disk space: {_free_mb:.0f}MB available")
-    except Exception:
-        pass
+    except Exception as _de:
+        print(f"[STARTUP] Disk check failed: {_de}")
 
     # Check 5: Memory directory writable
     try:
