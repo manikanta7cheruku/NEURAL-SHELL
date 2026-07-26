@@ -30,9 +30,9 @@ import useTasks   from '../stores/useTasks';
 // ── Navigation config ─────────────────────────────────────────────────────────
 
 const TOP_RAIL = [
-  { to: '/',         label: 'Dashboard', icon: LayoutDashboard },
-  { to: '/console',  label: 'Console',   icon: Terminal        },
-  { to: '/commands', label: 'Commands',  icon: Zap             },
+  { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { to: '/console',   label: 'Console',   icon: Terminal        },
+  { to: '/commands',  label: 'Commands',  icon: Zap             },
 ];
 
 const SECTIONS = [
