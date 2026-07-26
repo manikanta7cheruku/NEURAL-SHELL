@@ -148,39 +148,6 @@ def _read_current_version():
     except Exception as e:
         print("[UPDATER] Version read error: " + str(e))
         return "1.1.0"
-    try:
-        import sys
-        base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        app_path = os.environ.get("SEVEN_APP_PATH", "")
-        exe_dir = os.path.dirname(os.path.abspath(sys.executable))
-
-        candidates = [
-            # Dev mode
-            os.path.join(base, "package.json"),
-            os.path.join(os.path.dirname(base), "package.json"),
-            # Packaged — SEVEN_APP_PATH
-            os.path.join(app_path, "package.json") if app_path else None,
-            os.path.join(app_path, "..", "package.json") if app_path else None,
-            # Packaged — relative to Python exe
-            os.path.join(exe_dir, "package.json"),
-            os.path.join(exe_dir, "..", "app", "package.json"),
-            os.path.join(exe_dir, "..", "..", "app", "package.json"),
-        ]
-
-        candidates = [os.path.normpath(c) for c in candidates if c]
-
-        for p in candidates:
-            if os.path.exists(p):
-                with open(p, "r", encoding="utf-8") as f:
-                    content = f.read().lstrip("\ufeff")
-                    v = json.loads(content).get("version", "1.1.0")
-                return v
-
-        print("[UPDATER] package.json not found anywhere")
-        return "1.1.0"
-    except Exception as e:
-        print("[UPDATER] Version read error: " + str(e))
-        return "1.1.0"
 
 
 def _get_tier():
@@ -201,7 +168,8 @@ def _check_local_override():
             data = json.load(f)
         print("[UPDATER] Override found: " + str(data.get("version", "")))
         return data
-    except Exception:
+    except Exception as e:
+        print(f"[UPDATER] Override check failed: {e}")
         return None
 
 
