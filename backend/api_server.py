@@ -140,10 +140,30 @@ def plan_limit_error(feature_name: str, limit_check: dict) -> HTTPException:
 # =========================================================================
 
 app = FastAPI(
-    title="Seven API",
-    version="1.0.0",
+    title="Seven AI Assistant API",
+    version="1.2.7",
+    description="""
+## Seven Local AI Voice Assistant
+
+Private, local API for Seven. All data stays on your machine.
+
+### Key endpoints:
+- **POST /api/chat** - Send a message to Seven's brain
+- **GET /api/status** - Check Seven's current state
+- **GET /api/health** - Full system health check
+- **GET /api/tasks** - List all tasks
+- **GET /api/triggers** - List all hotkey/voice triggers
+- **GET /api/memory/conversations** - View conversation history
+- **GET /api/schedules** - List active schedules
+
+### Authentication:
+No authentication required. API is localhost-only (127.0.0.1:7777).
+""",
     docs_url="/api/docs",
-    redoc_url=None
+    redoc_url="/api/redoc",
+    contact={
+        "name": "Manikanta Cheruku",
+    },
 )
 
 app.add_middleware(
