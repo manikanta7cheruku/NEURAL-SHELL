@@ -366,7 +366,7 @@ export default function Settings() {
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-white/8">
-        <div className={`px-6 py-5 max-w-5xl mx-auto space-y-4 transition-all duration-300 ease-out
+        <div className={`px-6 py-5 pr-10 max-w-5xl mx-auto space-y-4 transition-all duration-300 ease-out
                          ${reveal ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2'}`}>
 
           {/* ACCOUNT TAB */}
