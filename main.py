@@ -123,6 +123,132 @@ if not _packages_ready():
 
 
 # ============================================================================
+# STARTUP VALIDATION
+# ============================================================================
+
+def _validate_startup():
+    """
+    Validate all critical dependencies before starting Seven.
+    Returns (ok: bool, errors: list[str], warnings: list[str])
+
+    Critical failures abort startup.
+    Warnings are logged but startup continues.
+    """
+    import socket
+    errors   = []
+    warnings = []
+
+    # Check 1: Ollama running on port 11434
+    try:
+        s = socket.create_connection(("127.0.0.1", 11434), timeout=2)
+        s.close()
+        print("[STARTUP] Ollama: running")
+    except Exception:
+        errors.append(
+            "Ollama is not running.\n"
+            "  Fix: Open the Ollama app or run 'ollama serve' in a terminal.\n"
+            "  Seven cannot generate responses without Ollama."
+        )
+
+    # Check 2: config.json accessible
+    _appdata = os.environ.get('APPDATA', '')
+    _cfg_path = os.path.join(_appdata, 'SEVEN', 'config.json')
+    if not os.path.exists(_cfg_path):
+        warnings.append(
+            f"config.json not found at {_cfg_path}.\n"
+            "  Seven will create a new one with defaults."
+        )
+    else:
+        try:
+            import json as _json
+            with open(_cfg_path, 'r') as _f:
+                _json.load(_f)
+            print("[STARTUP] config.json: valid")
+        except Exception as _ce:
+            errors.append(
+                f"config.json is corrupted: {_ce}\n"
+                f"  Fix: Delete {_cfg_path} and restart Seven."
+            )
+
+    # Check 3: Port 7777 not already in use
+    try:
+        _ps = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        _ps.settimeout(1)
+        _result = _ps.connect_ex(("127.0.0.1", 7777))
+        _ps.close()
+        if _result == 0:
+            errors.append(
+                "Port 7777 is already in use.\n"
+                "  Another Seven instance may be running.\n"
+                "  Fix: Close the other instance or restart your computer."
+            )
+        else:
+            print("[STARTUP] Port 7777: available")
+    except Exception:
+        pass
+
+    # Check 4: Disk space (warn if less than 500MB free)
+    try:
+        import shutil
+        _free = shutil.disk_usage(_appdata or os.getcwd()).free
+        _free_mb = _free / (1024 * 1024)
+        if _free_mb < 100:
+            errors.append(
+                f"Critical: Only {_free_mb:.0f}MB disk space available.\n"
+                "  Seven needs at least 100MB free to operate.\n"
+                "  Free up disk space before starting."
+            )
+        elif _free_mb < 500:
+            warnings.append(
+                f"Low disk space: {_free_mb:.0f}MB available.\n"
+                "  Recommended minimum is 500MB."
+            )
+        else:
+            print(f"[STARTUP] Disk space: {_free_mb:.0f}MB available")
+    except Exception:
+        pass
+
+    # Check 5: Memory directory writable
+    try:
+        _mem_dir = os.path.join(_appdata, 'SEVEN', 'seven_data', 'memory')
+        os.makedirs(_mem_dir, exist_ok=True)
+        _test_file = os.path.join(_mem_dir, '.write_test')
+        with open(_test_file, 'w') as _tf:
+            _tf.write('test')
+        os.remove(_test_file)
+        print("[STARTUP] Memory directory: writable")
+    except Exception as _me:
+        errors.append(
+            f"Memory directory not writable: {_me}\n"
+            "  Seven cannot save conversations or facts."
+        )
+
+    return len(errors) == 0, errors, warnings
+
+
+# Run validation
+print("[STARTUP] Validating dependencies...")
+_startup_ok, _startup_errors, _startup_warnings = _validate_startup()
+
+for _w in _startup_warnings:
+    print(f"[STARTUP] WARNING: {_w}")
+
+if not _startup_ok:
+    print("\n" + "="*60)
+    print("[STARTUP] SEVEN CANNOT START - CRITICAL ERRORS:")
+    print("="*60)
+    for _e in _startup_errors:
+        print(f"\n  ERROR: {_e}")
+    print("\n" + "="*60)
+    print("[STARTUP] Fix the errors above and restart Seven.")
+    print("="*60 + "\n")
+    import time as _t
+    _t.sleep(5)  # Give Electron time to read the output
+    os._exit(1)
+
+print("[STARTUP] All checks passed. Starting Seven...")
+
+# ============================================================================
 # FULL STARTUP
 # ============================================================================
 
@@ -174,9 +300,16 @@ def _setup_logging():
     ))
 
     # Silence noisy third-party loggers
-    for noisy in ['chromadb', 'sentence_transformers',
-                  'transformers', 'huggingface_hub',
-                  'urllib3', 'httpx', 'uvicorn.access']:
+    for noisy in [
+        'chromadb', 'sentence_transformers', 'transformers',
+        'huggingface_hub', 'urllib3', 'httpx', 'uvicorn.access',
+        'matplotlib', 'matplotlib.font_manager', 'matplotlib.pyplot',
+        'comtypes', 'comtypes.client', 'comtypes._post_coinit',
+        'comtypes._comobject', 'comtypes.client._managing',
+        'comtypes.client._generate', 'h5py', 'h5py._conv',
+        'numexpr', 'numexpr.utils', 'asyncio',
+        'PIL', 'pyttsx3', 'speechbrain',
+    ]:
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
     if not root.handlers:
@@ -187,6 +320,79 @@ def _setup_logging():
 
 logger = _setup_logging()
 logger.info("Seven starting up")
+
+# Sentry error tracking — captures crashes automatically
+# Set SEVEN_SENTRY_DSN environment variable or add to config.json
+# Get your DSN at sentry.io (free account)
+def _setup_sentry():
+    try:
+        import sentry_sdk
+        _dsn = None
+
+        # Priority 1: environment variable
+        _dsn = os.environ.get("SEVEN_SENTRY_DSN", "")
+
+        # Priority 2: config.json
+        if not _dsn:
+            try:
+                import json as _j
+                _cfg = os.path.join(
+                    os.environ.get('APPDATA', ''), 'SEVEN', 'config.json'
+                )
+                if os.path.exists(_cfg):
+                    with open(_cfg) as _f:
+                        _dsn = _j.load(_f).get("sentry_dsn", "")
+            except Exception:
+                pass
+
+        if not _dsn:
+            logger.info("Sentry not configured (no DSN). Skipping error tracking.")
+            return
+
+        sentry_sdk.init(
+            dsn=_dsn,
+            traces_sample_rate=0.1,     # 10% of transactions for performance
+            profiles_sample_rate=0.1,
+            environment="production" if not IS_ELECTRON_MODE else "electron",
+            release=open(os.path.join(
+                os.environ.get('SEVEN_APP_PATH', '.'), 'version.txt'
+            )).read().strip() if os.path.exists(
+                os.path.join(os.environ.get('SEVEN_APP_PATH', '.'), 'version.txt')
+            ) else "unknown",
+            before_send=lambda event, hint: _filter_sentry_event(event, hint),
+        )
+        logger.info("Sentry error tracking active")
+    except ImportError:
+        logger.info("Sentry SDK not installed. Run: pip install sentry-sdk")
+    except Exception as _se:
+        logger.warning(f"Sentry init failed: {_se}")
+
+
+def _filter_sentry_event(event, hint):
+    """
+    Filter out known non-critical errors before sending to Sentry.
+    Prevents noise from expected errors like numpy/tensorflow conflict.
+    """
+    _noise_patterns = [
+        "np.complex_",
+        "_ARRAY_API not found",
+        "Stream closed",
+        "9988",
+        "9999",
+        "WinError 995",
+    ]
+    try:
+        exc = hint.get("exc_info")
+        if exc and exc[1]:
+            msg = str(exc[1])
+            if any(p in msg for p in _noise_patterns):
+                return None  # Drop this event
+    except Exception:
+        pass
+    return event
+
+
+_setup_sentry()
 
 import config
 from backend.api_server import start_api_server, set_state as api_set_state
