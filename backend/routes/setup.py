@@ -39,7 +39,8 @@ def get_existing_identity():
             data = r.json()
             return {"found": True, "name": data.get("name"), "email": data.get("email")}
         return {"found": False}
-    except Exception:
+    except Exception as e:
+        print(f"[SETUP] Identity check failed: {e}")
         return {"found": False}
 
 
@@ -78,8 +79,8 @@ def complete_setup(req: SetupCompleteRequest):
     try:
         import telemetry
         telemetry.save_email(email)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[SETUP] Email save warning: {e}")
 
     try:
         import server_sync
@@ -241,8 +242,8 @@ engine.runAndWait()
                                capture_output=True, timeout=30)
                     try:
                         os.unlink(tmp_path)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        print(f"[SETUP] Temp file cleanup failed: {e}")
                 else:
                     _speak_sapi_preview(voice_id)
             else:
