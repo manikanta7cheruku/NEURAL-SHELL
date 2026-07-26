@@ -211,6 +211,18 @@ _SILENCE_HALLUCINATIONS = {
     "subscribe", "like and subscribe",
     "thanks for watching", "thank you for watching",
     "see you next time", "see you in the next video",
+    "see you in my next video", "see you guys in the next video",
+    "see you in the next one", "see you next week",
+    "we'll see you next time", "well see you next time",
+    "ill see you in the next video", "i will see you in the next video",
+    "i'll see you in the next video", "i'll see you next time",
+    "don't forget to like and subscribe", "dont forget to like and subscribe",
+    "like comment and subscribe", "hit the like button",
+    "have a great day", "have a good day", "take care",
+    "peace", "peace out", "later", "later guys",
+    "that's all for today", "thats all for today",
+    "thanks for watching guys", "thank you for watching guys",
+    "welcome back", "welcome back to", "welcome to my channel",
     "bada ba ba ba", "ba ba ba", "da da da", "la la la",
     ".", "..", "...", " ", "",
 }
@@ -225,6 +237,21 @@ _HALLUCINATION_SUBSTRINGS = [
     "ba ba ba ba",
     "da da da da",
     "la la la la",
+    "see you in my next",
+    "see you in the next",
+    "see you guys in the",
+    "thanks for watching",
+    "thank you for watching",
+    "don't forget to like",
+    "dont forget to like",
+    "like and subscribe",
+    "hit the like",
+    "smash that like",
+    "next video",
+    "my channel",
+    "in this video",
+    "in today's video",
+    "in todays video",
 ]
 
 # Filler words — used only for ratio check, not for filtering themselves
@@ -292,6 +319,7 @@ def listen():
         (transcribed_text: str, audio_path: str) on success
         (None, None) on silence, noise, or hallucination
     """
+    print(Fore.WHITE + "[EARS] ── Waiting for audio...")
     recognizer = sr.Recognizer()
 
     try:
@@ -321,12 +349,14 @@ def listen():
                 _phrase_limit   = 15  # raised from 7 — natural speech can be 10-12 seconds
 
             try:
+                print(Fore.WHITE + f"[EARS] ── Listening... (energy_threshold={recognizer.energy_threshold:.0f})")
                 audio    = recognizer.listen(
                     source,
                     timeout=_listen_timeout,
                     phrase_time_limit=_phrase_limit
                 )
                 wav_data = audio.get_wav_data()
+                print(Fore.WHITE + f"[EARS] ── Audio captured ({len(wav_data)} bytes)")
 
             except sr.WaitTimeoutError:
                 return None, None
@@ -339,11 +369,13 @@ def listen():
                 return None, None
 
             # ── Gate 1/2/3: Signal quality before Whisper ─────────────────
+            print(Fore.WHITE + "[EARS] ── Running signal quality gates...")
             passed, rms, reason = _check_signal_quality(wav_data)
             if not passed:
                 _update_noise_floor(rms)
-                print(Fore.YELLOW + f"[EARS] Rejected — {reason}")
+                print(Fore.YELLOW + f"[EARS] ── GATE REJECTED: {reason}")
                 return None, None
+            print(Fore.WHITE + "[EARS] ── Gates passed. Sending to Whisper...")
 
             # ── Write WAV for Whisper ──────────────────────────────────────
             try:
@@ -385,15 +417,21 @@ def listen():
                 return None, None
 
             # ── Confidence Filter ──────────────────────────────────────────
+            print(Fore.WHITE + f"[EARS] ── Whisper returned {len(segments)} segment(s)")
             confident_segments = []
             for seg in segments:
-                if hasattr(seg, 'no_speech_prob') and seg.no_speech_prob > 0.7:
-                    print(Fore.YELLOW + f"[EARS] Low confidence segment (no_speech={seg.no_speech_prob:.2f}): '{seg.text.strip()}'")
+                _nsp = seg.no_speech_prob if hasattr(seg, 'no_speech_prob') else 0.0
+                _txt = seg.text.strip() if hasattr(seg, 'text') else ''
+                print(Fore.WHITE + f"[EARS] ── Segment: '{_txt}' | no_speech_prob={_nsp:.3f}")
+                if _nsp > 0.7:
+                    print(Fore.YELLOW + f"[EARS] ── CONFIDENCE REJECTED (no_speech={_nsp:.2f}): '{_txt}'")
                     continue
                 confident_segments.append(seg)
 
             full_text = "".join([s.text for s in confident_segments]).strip()
+            print(Fore.WHITE + f"[EARS] ── After confidence filter: '{full_text}'")
             if not full_text:
+                print(Fore.YELLOW + "[EARS] ── Empty after confidence filter. Discarding.")
                 return None, None
 
             # ── Clean for filter checks ────────────────────────────────────
@@ -406,10 +444,12 @@ def listen():
                 return None, None
 
             # ── Hallucination Filter ───────────────────────────────────────
+            print(Fore.WHITE + f"[EARS] ── Checking hallucination: '{clean}'")
             is_ghost, ghost_reason = _is_hallucination(clean)
             if is_ghost:
-                print(Fore.YELLOW + f"[EARS] Hallucination filtered — {ghost_reason}")
+                print(Fore.YELLOW + f"[EARS] ── HALLUCINATION REJECTED: {ghost_reason}")
                 return None, None
+            print(Fore.WHITE + "[EARS] ── Hallucination check passed.")
 
             # ── Autocorrect ────────────────────────────────────────────────
             # Corrects common Whisper mishearing of "Seven" and related words
