@@ -73,7 +73,7 @@ def get_facts():
         return facts
 
     except Exception as _chroma_err:
-        print(f"[API] Facts via ChromaDB failed: {_chroma_err}")
+        _log.debug(f"[API] Facts via ChromaDB using fallback: {type(_chroma_err).__name__}")
 
     # Fallback: read directly from SQLite
     try:
@@ -131,11 +131,11 @@ def get_facts():
             })
 
         _conn.close()
-        print(f"[API] Facts via SQLite fallback: {len(facts)} records")
+        _log.debug(f"[API] Facts via SQLite fallback: {len(facts)} records")
         return facts
 
     except Exception as _sq_err:
-        print(f"[API] Facts SQLite fallback failed: {_sq_err}")
+        _log.warning(f"[API] Facts SQLite fallback failed: {_sq_err}")
         raise HTTPException(status_code=500, detail=str(_sq_err))
 
 
@@ -180,7 +180,7 @@ def get_conversations(limit: int = 500, offset: int = 0):
         return {"conversations": paginated, "total": total}
 
     except Exception as _chroma_err:
-        print(f"[API] Conversations via ChromaDB failed: {_chroma_err}")
+        _log.debug(f"[API] Conversations via ChromaDB using fallback: {type(_chroma_err).__name__}")
 
     # Fallback: read directly from SQLite without embedding model
     try:
@@ -249,11 +249,11 @@ def get_conversations(limit: int = 500, offset: int = 0):
         convos.sort(key=lambda x: x["timestamp"], reverse=True)
         total     = len(convos)
         paginated = convos[offset:offset + limit]
-        print(f"[API] Conversations via SQLite fallback: {total} records")
+        _log.debug(f"[API] Conversations via SQLite fallback: {total} records")
         return {"conversations": paginated, "total": total}
 
     except Exception as _sq_err:
-        print(f"[API] Conversations SQLite fallback failed: {_sq_err}")
+        _log.warning(f"[API] Conversations SQLite fallback failed: {_sq_err}")
         raise HTTPException(status_code=500, detail=str(_sq_err))
 
 
@@ -411,8 +411,7 @@ def get_memory_stats():
         from memory import seven_memory
         stats = seven_memory.get_stats()
     except Exception as e:
-        print(f"[API] Memory stats via singleton failed: {e}")
-        # Fallback: read directly from SQLite without loading embedder
+        _log.debug(f"[API] Memory stats via ChromaDB using fallback: {type(e).__name__}")
         try:
             import sqlite3 as _sq
             from memory.core import MEMORY_DIR as _mdir
@@ -443,9 +442,9 @@ def get_memory_stats():
                         stats["total_facts"] = _count
                 _conn.close()
                 stats["storage_path"] = _mdir
-                print(f"[API] Memory stats via SQLite fallback: {stats}")
+                _log.debug(f"[API] Memory stats via SQLite fallback: {stats}")
         except Exception as _sq_err:
-            print(f"[API] Memory stats SQLite fallback failed: {_sq_err}")
+            _log.warning(f"[API] Memory stats SQLite fallback failed: {_sq_err}")
 
     _appdata    = os.environ.get('APPDATA', os.path.expanduser('~'))
     memory_dir  = os.path.join(_appdata, 'SEVEN', 'seven_data', 'memory')
