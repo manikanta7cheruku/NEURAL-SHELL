@@ -1,9 +1,10 @@
-import { HashRouter, Routes, Route, useNavigate } from 'react-router-dom';
+import { HashRouter, Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import Sidebar        from './components/Sidebar';
 import ScheduleAlert  from './components/ScheduleAlert';
 import TitleBar       from './components/TitleBar';
 import UpdateBanner   from './components/UpdateBanner';
+import Landing        from './pages/Landing';
 import Home           from './pages/Home';
 import Console        from './pages/Console';
 import Commands       from './pages/Commands';
@@ -34,10 +35,23 @@ function NavigationHelper() {
 
 function MainApp() {
   const { fetchStatus: fetchUpdateStatus } = useUpdate();
+  const location = useLocation();
   useEffect(() => {
     const timer = setTimeout(fetchUpdateStatus, 15_000);
     return () => clearTimeout(timer);
   }, []);
+
+  const isLanding = location.pathname === '/';
+
+  if (isLanding) {
+    return (
+      <div className="h-screen bg-s-bg text-white overflow-hidden">
+        <Routes>
+          <Route path="/" element={<Landing />} />
+        </Routes>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-screen bg-s-bg text-white overflow-hidden flex-col">
@@ -48,7 +62,7 @@ function MainApp() {
         <Sidebar />
         <main className="flex-1 overflow-y-auto">
           <Routes>
-            <Route path="/"          element={<Home />}     />
+            <Route path="/dashboard" element={<Home />}     />
             <Route path="/console"   element={<Console />}  />
             <Route path="/commands"  element={<Commands />} />
             <Route path="/memory"    element={<Memory />}   />
