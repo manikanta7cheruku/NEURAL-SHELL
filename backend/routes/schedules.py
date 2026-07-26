@@ -8,6 +8,9 @@ from pydantic import BaseModel
 from typing import Optional
 import os
 import json as _json_alert
+import logging
+
+_log = logging.getLogger('seven.schedules')
 
 router = APIRouter()
 
@@ -36,8 +39,8 @@ def _write_alert_file(data: dict):
     try:
         with open(_ALERT_FILE, 'w') as f:
             _json_alert.dump(data, f)
-    except Exception:
-        pass
+    except Exception as _e:
+        _log.debug(f"Schedule alert file operation failed: {_e}")
 
 
 def _read_alert_file() -> dict:
@@ -45,8 +48,8 @@ def _read_alert_file() -> dict:
         if os.path.exists(_ALERT_FILE):
             with open(_ALERT_FILE, 'r') as f:
                 return _json_alert.load(f)
-    except Exception:
-        pass
+    except Exception as _e:
+        _log.debug(f"Schedule alert file operation failed: {_e}")
     return {"active": False, "message": "", "type": "", "id": None}
 
 
