@@ -295,6 +295,22 @@ function ConsolePanel({ tasks, schedules, triggers, mem, speed, hw }) {
   );
 }
 
+function InfoLine({ label, value, dim, right }) {
+  return (
+    <div className={`flex items-baseline gap-2 ${right ? 'flex-row-reverse' : ''}`}
+         style={{ fontFamily: "'JetBrains Mono', 'Fira Code', monospace" }}>
+      <span className="text-[7px] text-s-accent/30 flex-shrink-0 w-8"
+            style={{ textAlign: right ? 'left' : 'right' }}>
+        {label}
+      </span>
+      <span className={`text-[8.5px] leading-5
+                        ${dim ? 'text-white/12' : 'text-white/30'}`}>
+        {value}
+      </span>
+    </div>
+  );
+}
+
 // ── Main Landing page ─────────────────────────────────────────────────────
 
 export default function Landing() {
@@ -364,15 +380,55 @@ export default function Landing() {
              transition: 'background 1s ease',
            }} />
 
-      {/* Main layout: orb left, console right */}
-      <div className="h-full flex items-center">
+      {/* Main layout: orb centered, info scattered */}
+      <div className="h-full relative flex items-center justify-center">
 
-        {/* Left: Orb section */}
-        <div className="flex-1 flex flex-col items-center justify-center gap-6 px-8">
+        {/* Brand - top center */}
+        <div className="absolute top-8 left-1/2 -translate-x-1/2 flex flex-col items-center gap-1">
+          <span className="text-[14px] font-semibold tracking-[0.35em] text-white/80
+                           font-mono uppercase">
+            SEVEN
+          </span>
+          <span className="text-[8px] text-white/15 tracking-[0.2em] uppercase">
+            Private AI Voice Assistant
+          </span>
+        </div>
 
-          {/* Orb */}
-          <div className="relative cursor-pointer"
-               onClick={() => navigate('/console')}>
+        {/* Left info column */}
+        <div className="absolute left-8 top-1/2 -translate-y-1/2
+                        flex flex-col gap-1"
+             style={{ fontFamily: "'JetBrains Mono', 'Fira Code', monospace" }}>
+          <InfoLine label="TASKS" value={`${tasks.filter(t => !t.completed).length} pending`}
+                    dim={tasks.filter(t => !t.completed).length === 0} />
+          <InfoLine label="SCHED" value={`${scheds.filter(s => s.status === 'active').length} active`}
+                    dim={scheds.filter(s => s.status === 'active').length === 0} />
+          <InfoLine label="TRIG"  value={`${triggers} enabled`}
+                    dim={triggers === 0} />
+          <div className="h-2" />
+          {tasks.filter(t => !t.completed).slice(0, 3).map((t, i) => (
+            <InfoLine key={t.id}
+                      label={`T${i + 1}`}
+                      value={t.text.length > 24 ? t.text.slice(0, 24) + '...' : t.text}
+                      dim={false} />
+          ))}
+        </div>
+
+        {/* Right info column */}
+        <div className="absolute right-8 top-1/2 -translate-y-1/2
+                        flex flex-col gap-1 items-end"
+             style={{ fontFamily: "'JetBrains Mono', 'Fira Code', monospace" }}>
+          <InfoLine label="MEM"  value={`${mem?.total_conversations ?? 0} convos`} dim={false} right />
+          <InfoLine label="FACT" value={`${mem?.total_facts ?? 0} facts`} dim={false} right />
+          <InfoLine label="RESP" value={speed?.count > 0 ? `${speed.avg}ms avg` : 'no data'} dim={!speed?.count} right />
+          <div className="h-2" />
+          <InfoLine label="CPU"  value={hw?.cpu_percent != null ? `${Math.round(hw.cpu_percent)}%` : '--'} dim={false} right />
+          <InfoLine label="RAM"  value={hw?.ram_percent != null ? `${Math.round(hw.ram_percent)}%` : '--'} dim={false} right />
+          <InfoLine label="VER"  value={`v${st.version}`} dim={true} right />
+        </div>
+
+        {/* Center: Orb */}
+        <div className="flex flex-col items-center gap-6">
+          <div className="relative">
             <OrbCanvas state={orbState} />
           </div>
 
@@ -386,13 +442,13 @@ export default function Landing() {
                 {stateLabel}
               </span>
             </div>
-            <span className="text-[9px] text-white/20 font-mono tracking-wider">
-              {st.uptime} uptime · v{st.version}
+            <span className="text-[9px] text-white/15 font-mono tracking-wider">
+              {st.uptime} uptime
             </span>
           </div>
 
-          {/* Navigation hints */}
-          <div className="flex items-center gap-3 mt-2">
+          {/* Navigation */}
+          <div className="flex items-center gap-3 mt-1">
             {[
               { label: 'Console',   path: '/console'   },
               { label: 'Tasks',     path: '/tasks'     },
@@ -400,29 +456,14 @@ export default function Landing() {
             ].map(({ label, path }) => (
               <button key={path}
                       onClick={() => navigate(path)}
-                      className="text-[8.5px] text-white/20 hover:text-white/55
-                                 transition-colors duration-150 tracking-wider uppercase
-                                 px-3 py-1.5 rounded-lg border border-white/[0.05]
-                                 hover:border-white/10 hover:bg-white/[0.02]">
+                      className="text-[8px] text-white/15 hover:text-white/50
+                                 transition-colors duration-200 tracking-[0.15em] uppercase
+                                 px-3 py-1.5 rounded-lg
+                                 hover:bg-white/[0.02]">
                 {label}
               </button>
             ))}
           </div>
-        </div>
-
-        {/* Divider */}
-        <div className="w-px h-2/3 bg-white/[0.04]" />
-
-        {/* Right: Console panel */}
-        <div className="w-[280px] h-full flex flex-col py-8 px-6">
-          <ConsolePanel
-            tasks={tasks}
-            schedules={scheds}
-            triggers={triggers}
-            mem={mem}
-            speed={speed}
-            hw={hw}
-          />
         </div>
       </div>
 
