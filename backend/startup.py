@@ -193,8 +193,8 @@ def _start_fastapi_server(host, port):
                 engine.setProperty('rate', 185)
                 engine.say("Hello. I am Seven. Your private AI assistant.")
                 engine.runAndWait()
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[STARTUP] Voice preview failed: {e}")
         threading.Thread(target=_speak, daemon=True).start()
         return {"success": True}
 
@@ -223,8 +223,8 @@ def _start_fastapi_server(host, port):
                 data_dir = _get_data_dir()
                 with open(os.path.join(data_dir, "email.txt"), "w") as f:
                     f.write(data.get("email", ""))
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[STARTUP] Email file write failed: {e}")
 
             return {"success": True, "message": f"Welcome to Seven, {data.get('name', '')}"}
         except Exception as e:
@@ -375,8 +375,8 @@ def _load_config():
         try:
             with open(p) as f:
                 return json.load(f)
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[STARTUP] config.json read failed: {e}")
     return {"setup_complete": False, "version": "1.1.0"}
 
 def _save_config(cfg):
