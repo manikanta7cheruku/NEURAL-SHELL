@@ -36,7 +36,12 @@ def get_config():
 def update_config(req: ConfigUpdate):
     """Partial update of configuration."""
     import config
-    success = config.update_config(req.updates)
+    # Strip keys that are managed by dedicated endpoints.
+    # voice_gates is owned by /api/voice/gates -- never let a
+    # general config save overwrite it with stale React state.
+    protected = {"voice_gates"}
+    updates = {k: v for k, v in req.updates.items() if k not in protected}
+    success = config.update_config(updates)
     if success:
         return {"success": True, "config": config.KEY}
     else:
