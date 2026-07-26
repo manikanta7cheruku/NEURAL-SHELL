@@ -346,14 +346,24 @@ function VoiceGatesPanel() {
   const [saved,           setSaved]           = useState(false);
   const [showEnrollModal, setShowEnrollModal] = useState(false);
 
+  // Ref always holds the latest gates value — eliminates stale closure bugs
+  const gatesRef = useRef(null);
+
   const loadData = useCallback(() => {
     api.get('/voice/gates')
-       .then(r => setGates(r.data))
-       .catch(() => setGates({
-         push_to_talk:   { enabled: false, key: 'shift' },
-         wake_word:      { enabled: false, words: ['hey seven'] },
-         speaker_verify: { enabled: false }
-       }));
+       .then(r => {
+         setGates(r.data);
+         gatesRef.current = r.data;
+       })
+       .catch(() => {
+         const fallback = {
+           push_to_talk:   { enabled: false, key: 'shift' },
+           wake_word:      { enabled: false, words: ['hey seven'] },
+           speaker_verify: { enabled: false },
+         };
+         setGates(fallback);
+         gatesRef.current = fallback;
+       });
     api.get('/voice/enrolled')
        .then(r => setEnrolled(r.data.enrolled || []))
        .catch(() => setEnrolled([]));
@@ -361,10 +371,12 @@ function VoiceGatesPanel() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  const save = async (updated) => {
+  // Save always uses the value passed in — never reads from state
+  const save = useCallback(async (updated) => {
     setSaving(true);
     try {
       await api.post('/voice/gates', updated);
+      gatesRef.current = updated;
       setGates(updated);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
@@ -373,43 +385,58 @@ function VoiceGatesPanel() {
     } finally {
       setSaving(false);
     }
-  };
+  }, []);
 
-  const setPath = (path, value) => {
-    if (!gates) return;
-    const next = JSON.parse(JSON.stringify(gates));
+  // Always reads from ref — never from stale closure state
+  const togglePath = useCallback((path, currentValue) => {
+    const base = gatesRef.current;
+    if (!base) return;
+    const next = JSON.parse(JSON.stringify(base));
     const parts = path.split('.');
     let node = next;
     for (let i = 0; i < parts.length - 1; i++) {
       if (!node[parts[i]]) node[parts[i]] = {};
       node = node[parts[i]];
     }
-    node[parts[parts.length - 1]] = value;
+    // Use the passed currentValue to compute next value
+    // Never derives from state — eliminates stale closure race
+    node[parts[parts.length - 1]] = !currentValue;
     save(next);
-  };
+  }, [save]);
 
-  const addWord = () => {
-    if (!gates) return;
-    const next = JSON.parse(JSON.stringify(gates));
+  const addWord = useCallback(() => {
+    const base = gatesRef.current;
+    if (!base) return;
+    const next = JSON.parse(JSON.stringify(base));
     if (!next.wake_word) next.wake_word = { enabled: false, words: [] };
     if (!next.wake_word.words) next.wake_word.words = [];
     next.wake_word.words.push('new word');
-    setGates(next);   // local only — save on blur
-  };
-
-  const updateWord = (i, val) => {
-    if (!gates) return;
-    const next = JSON.parse(JSON.stringify(gates));
-    next.wake_word.words[i] = val;
+    // Update local state only — saved on blur
+    gatesRef.current = next;
     setGates(next);
-  };
+  }, []);
 
-  const removeWord = (i) => {
-    if (!gates) return;
-    const next = JSON.parse(JSON.stringify(gates));
+  const updateWord = useCallback((i, val) => {
+    const base = gatesRef.current;
+    if (!base) return;
+    const next = JSON.parse(JSON.stringify(base));
+    next.wake_word.words[i] = val;
+    gatesRef.current = next;
+    setGates(next);
+  }, []);
+
+  const saveWords = useCallback(() => {
+    // Reads from ref — guaranteed fresh value
+    if (gatesRef.current) save(gatesRef.current);
+  }, [save]);
+
+  const removeWord = useCallback((i) => {
+    const base = gatesRef.current;
+    if (!base) return;
+    const next = JSON.parse(JSON.stringify(base));
     next.wake_word.words.splice(i, 1);
     save(next);
-  };
+  }, [save]);
 
   const deleteEnrolled = async (name) => {
     try {
@@ -445,7 +472,7 @@ function VoiceGatesPanel() {
             Voice Security
           </div>
           <div className="text-[9px] text-s-text-4 mt-0.5">
-            Three noise gates — enable any combination
+            Three noise gates -- enable any combination
           </div>
         </div>
         {saving && <span className="text-[9px] text-s-text-4">Saving...</span>}
@@ -467,14 +494,14 @@ function VoiceGatesPanel() {
           </div>
           <Toggle
             enabled={ptt.enabled}
-            onToggle={() => setPath('push_to_talk.enabled', !ptt.enabled)}
+            onToggle={() => togglePath('push_to_talk.enabled', ptt.enabled)}
           />
         </div>
         {ptt.enabled && (
           <div className="flex items-center gap-2 px-2 py-1.5 bg-s-accent/5 border border-s-accent/20 rounded">
             <div className="w-1.5 h-1.5 rounded-full bg-s-accent shrink-0 animate-pulse" />
             <span className="text-[9px] text-s-accent">
-              Hold Shift → speak → release. All other audio is ignored.
+              Hold Shift to speak. All other audio is ignored.
             </span>
           </div>
         )}
@@ -491,7 +518,7 @@ function VoiceGatesPanel() {
           </div>
           <Toggle
             enabled={ww.enabled}
-            onToggle={() => setPath('wake_word.enabled', !ww.enabled)}
+            onToggle={() => togglePath('wake_word.enabled', ww.enabled)}
           />
         </div>
 
@@ -507,7 +534,7 @@ function VoiceGatesPanel() {
               + Add
             </button>
           </div>
-          <div className="flex flex-wrap gap-1.5">
+          <div className="flex flex-wrap gap-1.5 relative z-10">
             {(ww.words || []).map((word, i) => (
               <div
                 key={i}
@@ -516,7 +543,7 @@ function VoiceGatesPanel() {
                 <input
                   value={word}
                   onChange={e => updateWord(i, e.target.value)}
-                  onBlur={() => save(gates)}
+                  onBlur={saveWords}
                   className="bg-transparent text-[10px] text-s-accent font-mono w-20 focus:outline-none"
                   placeholder="wake word"
                 />
@@ -525,7 +552,7 @@ function VoiceGatesPanel() {
                     onClick={() => removeWord(i)}
                     className="text-s-red/50 hover:text-s-red text-[10px] leading-none transition-colors"
                   >
-                    ×
+                    x
                   </button>
                 )}
               </div>
@@ -535,7 +562,7 @@ function VoiceGatesPanel() {
             <div className="mt-2 text-[9px] text-s-text-4 leading-relaxed">
               Example:&nbsp;
               <span className="text-s-accent font-mono">"hey seven open chrome"</span>
-              &nbsp;→ Seven hears&nbsp;
+              &nbsp;-- Seven hears&nbsp;
               <span className="text-s-accent font-mono">"open chrome"</span>
             </div>
           )}
@@ -553,16 +580,14 @@ function VoiceGatesPanel() {
           </div>
           <Toggle
             enabled={sv.enabled}
-            onToggle={() => setPath('speaker_verify.enabled', !sv.enabled)}
+            onToggle={() => togglePath('speaker_verify.enabled', sv.enabled)}
           />
         </div>
 
-        {/* Enrolled voices */}
         <div>
           <div className="text-[9px] text-s-text-4 uppercase tracking-wider mb-1.5">
             Enrolled Voices
           </div>
-          {/* Enroll button */}
           <button
             onClick={() => setShowEnrollModal(true)}
             className="w-full flex items-center justify-center gap-2 px-3 py-2 border border-s-accent/30 bg-s-accent/5 hover:bg-s-accent/10 text-s-accent rounded transition-colors text-[10px] font-medium"
@@ -570,9 +595,8 @@ function VoiceGatesPanel() {
             <span>+ Enroll New Voice</span>
           </button>
 
-          {/* Enrolled list */}
           {enrolled.length === 0 ? (
-            <div className="p-2.5 bg-s-bg border border-s-border/40 rounded text-center">
+            <div className="p-2.5 bg-s-bg border border-s-border/40 rounded text-center mt-1.5">
               <div className="text-[10px] text-s-text-4">No voices enrolled.</div>
               <div className="text-[9px] text-s-text-4 mt-0.5">
                 Click Enroll or say&nbsp;
@@ -580,7 +604,7 @@ function VoiceGatesPanel() {
               </div>
             </div>
           ) : (
-            <div className="space-y-1">
+            <div className="space-y-1 mt-1.5">
               {enrolled.map(name => (
                 <div
                   key={name}
@@ -603,12 +627,11 @@ function VoiceGatesPanel() {
 
           {sv.enabled && enrolled.length === 0 && (
             <div className="mt-1.5 flex items-start gap-1.5 text-[9px] text-yellow-400">
-              <span className="shrink-0 mt-0.5">⚠</span>
+              <span className="shrink-0 mt-0.5">!</span>
               <span>Gate enabled but no voice enrolled. Seven will reject all audio.</span>
             </div>
           )}
 
-          {/* Enrollment Modal */}
           {showEnrollModal && (
             <EnrollModal
               onClose={() => { setShowEnrollModal(false); loadData(); }}
@@ -622,90 +645,69 @@ function VoiceGatesPanel() {
 }
 
 function EnrollModal({ onClose }) {
-  const [step,     setStep]     = useState('form');   // form | recording | done | error
+  const [step,     setStep]     = useState('form');
   const [name,     setName]     = useState('');
   const [progress, setProgress] = useState(0);
   const [result,   setResult]   = useState(null);
   const [playing,  setPlaying]  = useState(null);
   const [enrolled, setEnrolled] = useState([]);
-  const pollRef    = useRef(null);
-  const tickRef    = useRef(null);
-  const timeoutRef = useRef(null);
-
+  const pollRef        = useRef(null);
+  const timeoutRef     = useRef(null);
   const welcomeFiredRef = useRef(false);
 
   useEffect(() => {
     api.get('/voice/enrolled')
        .then(r => setEnrolled(r.data.enrolled || []))
        .catch(() => {});
-
-    // Fire welcome only once — StrictMode double-invoke guard
     if (!welcomeFiredRef.current) {
       welcomeFiredRef.current = true;
       api.post('/voice/enrollment-welcome').catch(() => {});
     }
   }, []);
 
-    const startEnroll = async () => {
-      if (!name.trim()) return;
-      setStep('recording');
-      setProgress(0);
-
-      // Stop any welcome speech before starting enrollment
-      try { await api.post('/interrupt'); } catch (e) {}
-
-      // Signal main.py to start enrollment
+  const startEnroll = async () => {
+    if (!name.trim()) return;
+    setStep('recording');
+    setProgress(0);
+    try { await api.post('/interrupt'); } catch {}
+    try {
+      await api.post('/voice/enroll', { name: name.trim() });
+    } catch {
+      setStep('error');
+      setResult({ message: 'Could not reach Seven. Make sure Seven is running.' });
+      return;
+    }
+    pollRef.current = setInterval(async () => {
       try {
-        await api.post('/voice/enroll', { name: name.trim() });
-      } catch (e) {
-        setStep('error');
-        setResult({ message: 'Could not reach Seven. Make sure Seven is running.' });
-        return;
-      }
-
-      // Poll every 2 seconds — progress updates only when clips are captured
-      // No fake timer — progress reflects actual capture state from backend
-      pollRef.current = setInterval(async () => {
-        try {
-          const r = await api.get('/voice/enrollment-status');
-
-          // Update progress based on clips_done from backend
-          if (r.data.clips_done !== undefined) {
-            // 5 clips: 20%, 40%, 60%, 80%, 95%
-            const clipProgress = [0, 20, 40, 60, 80, 95];
-            setProgress(clipProgress[Math.min(r.data.clips_done, 5)]);
-          }
-
-          if (r.data.status === 'done' && r.data.done) {
-            clearInterval(pollRef.current);
-            clearTimeout(timeoutRef.current);
-            setProgress(100);
-            setResult(r.data.done);
-            setStep(r.data.done.success ? 'done' : 'error');
-            api.get('/voice/enrolled')
-               .then(resp => setEnrolled(resp.data.enrolled || []))
-               .catch(() => {});
-          }
-        } catch (e) {
-          // keep polling
+        const r = await api.get('/voice/enrollment-status');
+        if (r.data.clips_done !== undefined) {
+          const clipProgress = [0, 20, 40, 60, 80, 95];
+          setProgress(clipProgress[Math.min(r.data.clips_done, 5)]);
         }
-      }, 2000);
-
-      // Timeout after 120 seconds
-      timeoutRef.current = setTimeout(() => {
-        clearInterval(pollRef.current);
-        setStep('error');
-        setResult({ message: 'Timed out. Make sure Seven is running and microphone is working.' });
-      }, 120000);
-    };
+        if (r.data.status === 'done' && r.data.done) {
+          clearInterval(pollRef.current);
+          clearTimeout(timeoutRef.current);
+          setProgress(100);
+          setResult(r.data.done);
+          setStep(r.data.done.success ? 'done' : 'error');
+          api.get('/voice/enrolled')
+             .then(resp => setEnrolled(resp.data.enrolled || []))
+             .catch(() => {});
+        }
+      } catch {}
+    }, 2000);
+    timeoutRef.current = setTimeout(() => {
+      clearInterval(pollRef.current);
+      setStep('error');
+      setResult({ message: 'Timed out. Make sure Seven is running and microphone is working.' });
+    }, 120000);
+  };
 
   const deleteVoice = async (voiceName) => {
     try {
       await api.delete(`/voice/enrolled/${voiceName}`);
       setEnrolled(e => e.filter(n => n !== voiceName));
-    } catch (e) {
-      console.error(e);
-    }
+    } catch (e) { console.error(e); }
   };
 
   const playVoice = async (voiceName) => {
@@ -713,64 +715,45 @@ function EnrollModal({ onClose }) {
       setPlaying(voiceName);
       await api.post('/voice/play-sample', { name: voiceName });
       setTimeout(() => setPlaying(null), 3000);
-    } catch (e) {
-      setPlaying(null);
-    }
+    } catch { setPlaying(null); }
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
       <div className="bg-s-card border border-s-border rounded-xl w-full max-w-sm shadow-2xl overflow-hidden">
-
-        {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-s-border">
           <div>
             <div className="text-[13px] text-s-text font-semibold">Voice Enrollment</div>
             <div className="text-[9px] text-s-text-4 mt-0.5">Speaker verification profiles</div>
           </div>
-          <button
-            onClick={onClose}
-            className="w-6 h-6 flex items-center justify-center text-s-text-4 hover:text-s-text rounded transition-colors"
-          >
-            ×
+          <button onClick={onClose}
+            className="w-6 h-6 flex items-center justify-center text-s-text-4 hover:text-s-text rounded transition-colors">
+            x
           </button>
         </div>
-
         <div className="p-5 space-y-4">
-
-          {/* Enrolled voices list — always visible */}
           {enrolled.length > 0 && (
             <div>
-              <div className="text-[9px] text-s-text-4 uppercase tracking-wider mb-2">
-                Enrolled Voices
-              </div>
+              <div className="text-[9px] text-s-text-4 uppercase tracking-wider mb-2">Enrolled Voices</div>
               <div className="space-y-1.5">
                 {enrolled.map(vname => (
-                  <div
-                    key={vname}
-                    className="flex items-center justify-between px-3 py-2 bg-s-bg border border-s-border/50 rounded-lg"
-                  >
+                  <div key={vname}
+                    className="flex items-center justify-between px-3 py-2 bg-s-bg border border-s-border/50 rounded-lg">
                     <div className="flex items-center gap-2.5">
                       <div className="w-2 h-2 rounded-full bg-s-green shrink-0" />
-                      <span className="text-[11px] text-s-text-2 font-medium capitalize">
-                        {vname}
-                      </span>
+                      <span className="text-[11px] text-s-text-2 font-medium capitalize">{vname}</span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => playVoice(vname)}
+                      <button onClick={() => playVoice(vname)}
                         className={`text-[9px] px-2 py-0.5 rounded border transition-colors ${
                           playing === vname
                             ? 'border-s-accent/60 text-s-accent bg-s-accent/10'
                             : 'border-s-border/60 text-s-text-4 hover:border-s-accent/40 hover:text-s-accent'
-                        }`}
-                      >
-                        {playing === vname ? '▶ Playing' : '▶ Play'}
+                        }`}>
+                        {playing === vname ? 'Playing' : 'Play'}
                       </button>
-                      <button
-                        onClick={() => deleteVoice(vname)}
-                        className="text-[9px] text-s-red/50 hover:text-s-red transition-colors px-1"
-                      >
+                      <button onClick={() => deleteVoice(vname)}
+                        className="text-[9px] text-s-red/50 hover:text-s-red transition-colors px-1">
                         Remove
                       </button>
                     </div>
@@ -779,8 +762,6 @@ function EnrollModal({ onClose }) {
               </div>
             </div>
           )}
-
-          {/* Divider when list exists */}
           {enrolled.length > 0 && step === 'form' && (
             <div className="flex items-center gap-2">
               <div className="flex-1 h-px bg-s-border/50" />
@@ -788,31 +769,25 @@ function EnrollModal({ onClose }) {
               <div className="flex-1 h-px bg-s-border/50" />
             </div>
           )}
-
-          {/* Step: Form */}
           {step === 'form' && (
             <div className="space-y-3">
               <div>
                 <label className="text-[9px] text-s-text-4 uppercase tracking-wider block mb-1.5">
                   Name for this voice
                 </label>
-                <input
-                  value={name}
-                  onChange={e => setName(e.target.value)}
+                <input value={name} onChange={e => setName(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && name.trim() && startEnroll()}
                   placeholder="e.g. Cheruku"
                   className="w-full bg-s-bg border border-s-border rounded-lg px-3 py-2.5 text-[12px] text-s-text placeholder-s-text-4 focus:outline-none focus:border-s-accent/60 transition-colors"
-                  autoFocus
-                />
+                  autoFocus />
               </div>
-
               <div className="p-3 bg-s-bg border border-s-border/50 rounded-lg">
                 <div className="text-[9px] text-s-text-3 font-medium mb-1.5">How enrollment works</div>
                 <div className="space-y-1">
                   {[
-                    'Click Start — Seven begins listening',
+                    'Click Start -- Seven begins listening',
                     'Speak naturally for 10-15 seconds',
-                    'Any content works — sentences, counting, anything',
+                    'Any content works -- sentences, counting, anything',
                     'Seven records 5 clips and builds your voiceprint',
                   ].map((t, i) => (
                     <div key={i} className="flex items-start gap-2 text-[9px] text-s-text-4">
@@ -822,18 +797,12 @@ function EnrollModal({ onClose }) {
                   ))}
                 </div>
               </div>
-
-              <button
-                onClick={startEnroll}
-                disabled={!name.trim()}
-                className="w-full py-2.5 bg-s-accent hover:bg-s-accent/90 disabled:bg-s-border disabled:text-s-text-4 text-white text-[11px] font-medium rounded-lg transition-colors"
-              >
+              <button onClick={startEnroll} disabled={!name.trim()}
+                className="w-full py-2.5 bg-s-accent hover:bg-s-accent/90 disabled:bg-s-border disabled:text-s-text-4 text-white text-[11px] font-medium rounded-lg transition-colors">
                 Start Enrollment
               </button>
             </div>
           )}
-
-          {/* Step: Recording */}
           {step === 'recording' && (
             <div className="space-y-4">
               <div className="flex flex-col items-center gap-3 py-2">
@@ -841,59 +810,48 @@ function EnrollModal({ onClose }) {
                   <div className="absolute inset-0 rounded-full bg-s-accent/10 animate-ping" />
                   <div className="absolute inset-2 rounded-full bg-s-accent/20 animate-ping" style={{ animationDelay: '0.3s' }} />
                   <div className="relative w-16 h-16 rounded-full bg-s-accent/10 border border-s-accent/30 flex items-center justify-center text-2xl">
-                    🎙
+                    mic
                   </div>
                 </div>
-              <div>
-                <div className="text-[12px] text-s-text-2 font-medium text-center">
-                  Recording {name}...
-                </div>
-                <div className="text-[9px] text-s-text-4 text-center mt-1 leading-relaxed">
-                  Seven will guide you through 5 recordings.<br/>
-                  Speak when prompted. Talk for about 10 seconds each time.<br/>
-                  Counting, reading, or speaking naturally all work.
+                <div>
+                  <div className="text-[12px] text-s-text-2 font-medium text-center">Recording {name}...</div>
+                  <div className="text-[9px] text-s-text-4 text-center mt-1 leading-relaxed">
+                    Seven will guide you through 5 recordings.<br/>
+                    Speak when prompted. Talk for about 10 seconds each time.
+                  </div>
                 </div>
               </div>
-              </div>
-
               <div className="space-y-1.5">
                 <div className="flex justify-between text-[9px] text-s-text-4">
                   <span>
-                    {progress === 0 && 'Waiting for Seven to be ready...'}
-                    {progress === 20 && 'Clip 1 captured ✓'}
-                    {progress === 40 && 'Clip 2 captured ✓'}
-                    {progress === 60 && 'Clip 3 captured ✓'}
-                    {progress === 80 && 'Clip 4 captured ✓'}
-                    {progress === 95 && 'Clip 5 captured ✓ — building voiceprint...'}
+                    {progress === 0  && 'Waiting for Seven to be ready...'}
+                    {progress === 20 && 'Clip 1 captured'}
+                    {progress === 40 && 'Clip 2 captured'}
+                    {progress === 60 && 'Clip 3 captured'}
+                    {progress === 80 && 'Clip 4 captured'}
+                    {progress === 95 && 'Clip 5 captured -- building voiceprint...'}
                     {progress === 100 && 'Done'}
-                    {progress > 0 && ![20,40,60,80,95,100].includes(progress) && 'Capturing...'}
                   </span>
                   <span>{progress}%</span>
                 </div>
                 <div className="h-1.5 bg-s-bg rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-s-accent rounded-full transition-all duration-500"
-                    style={{ width: `${progress}%` }}
-                  />
+                  <div className="h-full bg-s-accent rounded-full transition-all duration-500"
+                    style={{ width: `${progress}%` }} />
                 </div>
                 <div className="text-[8px] text-s-text-4 text-center">
-                  Speak when Seven prompts you · 5 clips required
+                  Speak when Seven prompts you -- 5 clips required
                 </div>
               </div>
             </div>
           )}
-
-          {/* Step: Done */}
           {step === 'done' && (
             <div className="space-y-4">
               <div className="flex flex-col items-center gap-3 py-2">
                 <div className="w-14 h-14 rounded-full bg-s-green/10 border border-s-green/30 flex items-center justify-center">
-                  <span className="text-s-green text-2xl">✓</span>
+                  <span className="text-s-green text-2xl">v</span>
                 </div>
                 <div>
-                  <div className="text-[12px] text-s-text-2 font-medium text-center">
-                    Voice Enrolled
-                  </div>
+                  <div className="text-[12px] text-s-text-2 font-medium text-center">Voice Enrolled</div>
                   <div className="text-[9px] text-s-text-4 text-center mt-1">
                     {result?.message || `${name} is now registered.`}
                   </div>
@@ -902,51 +860,40 @@ function EnrollModal({ onClose }) {
               <div className="p-3 bg-s-accent/5 border border-s-accent/20 rounded-lg">
                 <div className="text-[9px] text-s-accent font-medium mb-1">Next step</div>
                 <div className="text-[9px] text-s-text-4 leading-relaxed">
-                  Turn on <span className="text-s-text-2 font-medium">Speaker Verification</span> above to activate it. Once enabled, only registered voices can give Seven commands.
+                  Turn on <span className="text-s-text-2 font-medium">Speaker Verification</span> above to activate it.
                 </div>
               </div>
-              <button
-                onClick={onClose}
-                className="w-full py-2.5 bg-s-accent hover:bg-s-accent/90 text-white text-[11px] font-medium rounded-lg transition-colors"
-              >
+              <button onClick={onClose}
+                className="w-full py-2.5 bg-s-accent hover:bg-s-accent/90 text-white text-[11px] font-medium rounded-lg transition-colors">
                 Done
               </button>
             </div>
           )}
-
-          {/* Step: Error */}
           {step === 'error' && (
             <div className="space-y-4">
               <div className="flex flex-col items-center gap-3 py-2">
                 <div className="w-14 h-14 rounded-full bg-s-red/10 border border-s-red/30 flex items-center justify-center">
-                  <span className="text-s-red text-2xl">✕</span>
+                  <span className="text-s-red text-2xl">x</span>
                 </div>
                 <div>
-                  <div className="text-[12px] text-s-text-2 font-medium text-center">
-                    Enrollment Failed
-                  </div>
+                  <div className="text-[12px] text-s-text-2 font-medium text-center">Enrollment Failed</div>
                   <div className="text-[9px] text-s-text-4 text-center mt-1">
                     {result?.message || 'Something went wrong.'}
                   </div>
                 </div>
               </div>
               <div className="flex gap-2">
-                <button
-                  onClick={() => { setStep('form'); setProgress(0); setResult(null); }}
-                  className="flex-1 py-2 border border-s-border text-s-text-3 text-[10px] rounded-lg hover:border-s-accent/40 transition-colors"
-                >
+                <button onClick={() => { setStep('form'); setProgress(0); setResult(null); }}
+                  className="flex-1 py-2 border border-s-border text-s-text-3 text-[10px] rounded-lg hover:border-s-accent/40 transition-colors">
                   Try Again
                 </button>
-                <button
-                  onClick={onClose}
-                  className="flex-1 py-2 bg-s-accent text-white text-[10px] rounded-lg hover:bg-s-accent/90 transition-colors"
-                >
+                <button onClick={onClose}
+                  className="flex-1 py-2 bg-s-accent text-white text-[10px] rounded-lg hover:bg-s-accent/90 transition-colors">
                   Close
                 </button>
               </div>
             </div>
           )}
-
         </div>
       </div>
     </div>
