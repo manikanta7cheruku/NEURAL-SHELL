@@ -448,19 +448,42 @@ export default function Landing() {
           </div>
 
           {/* Navigation */}
-          <div className="flex items-center gap-3 mt-1">
+          <div className="flex items-center gap-2 mt-1">
             {[
-              { label: 'Console',   path: '/console'   },
-              { label: 'Tasks',     path: '/tasks'     },
-              { label: 'Dashboard', path: '/dashboard' },
-            ].map(({ label, path }) => (
+              {
+                label: 'Console',
+                path: '/console',
+                desc: 'Live command log',
+                side: 'left',
+              },
+              {
+                label: 'Guide',
+                path: '/blog',
+                desc: 'Docs and tips',
+                side: 'center',
+              },
+              {
+                label: 'Dashboard',
+                path: '/dashboard',
+                desc: 'Overview and tasks',
+                side: 'right',
+              },
+            ].map(({ label, path, desc, side }) => (
               <button key={path}
                       onClick={() => navigate(path)}
-                      className="text-[8px] text-white/15 hover:text-white/50
-                                 transition-colors duration-200 tracking-[0.15em] uppercase
-                                 px-3 py-1.5 rounded-lg
-                                 hover:bg-white/[0.02]">
-                {label}
+                      className="flex flex-col items-center gap-1 px-5 py-2.5 rounded-xl
+                                 border border-white/[0.04] hover:border-white/[0.10]
+                                 bg-white/[0.01] hover:bg-white/[0.03]
+                                 transition-all duration-200 group min-w-[90px]">
+                <span className="text-[9px] text-white/35 hover:text-white/65
+                                 transition-colors duration-200 tracking-[0.18em]
+                                 uppercase font-medium group-hover:text-white/65">
+                  {label}
+                </span>
+                <span className="text-[7px] text-white/12 group-hover:text-white/25
+                                 transition-colors duration-200 tracking-wider">
+                  {desc}
+                </span>
               </button>
             ))}
           </div>
@@ -473,6 +496,32 @@ export default function Landing() {
         sevenText={st.sevenText}
         visible={drawerVisible}
       />
+
+      {/* Footer */}
+      <div className="absolute bottom-0 left-0 right-0 flex items-center justify-center
+                      gap-6 px-8 py-3 border-t border-white/[0.04]">
+        <div className="flex items-center gap-2">
+          <kbd className="text-[7px] font-mono text-white/20 bg-white/[0.04]
+                          border border-white/[0.08] rounded px-1.5 py-0.5 leading-none
+                          tracking-wider">
+            Alt + Shift + T
+          </kbd>
+          <span className="text-[7px] text-white/15 tracking-wider">
+            Toggle task panel
+          </span>
+        </div>
+        <div className="w-px h-3 bg-white/[0.06]" />
+        <span className="text-[7px] text-white/10 tracking-widest font-mono uppercase">
+          All processing local · Zero cloud
+        </span>
+        <div className="w-px h-3 bg-white/[0.06]" />
+        <div className="flex items-center gap-2">
+          <div className="w-1 h-1 rounded-full bg-white/15 animate-pulse" />
+          <span className="text-[7px] text-white/15 tracking-wider font-mono">
+            Seven v{hw?.version || '1.2.7'}
+          </span>
+        </div>
+      </div>
     </div>
   );
 }
