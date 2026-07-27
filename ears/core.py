@@ -265,6 +265,95 @@ _FILLER_WORDS = {
 }
 
 
+def _detect_repetition_loop(clean: str) -> bool:
+    """
+    Detect Whisper's hallucination pattern of repeating phrases.
+
+    When Whisper cannot understand audio clearly, it loops the same
+    phrase. Example: "I don't know what to say I don't know what to say"
+
+    Method: split text into overlapping chunks of 4 words.
+    If any 4-word chunk appears more than once, it is a loop.
+
+    Returns True if repetition loop detected.
+    """
+    words = clean.split()
+    if len(words) < 8:
+        return False
+
+    # Build 4-word chunks
+    chunk_size = 4
+    chunks = []
+    for i in range(len(words) - chunk_size + 1):
+        chunk = " ".join(words[i:i + chunk_size])
+        chunks.append(chunk)
+
+    # If any chunk appears more than once, it is a repetition loop
+    seen = set()
+    for chunk in chunks:
+        if chunk in seen:
+            return True
+        seen.add(chunk)
+
+    return False
+
+
+def _is_incoherent(clean: str) -> bool:
+    """
+    Detect semantically incoherent transcriptions.
+
+    Whisper sometimes produces word salad from background noise.
+    Example: "on a new place of time week"
+
+    Two checks:
+    1. Preposition density — incoherent text has abnormally high
+       preposition density because Whisper fills gaps with connectors.
+    2. No recognizable content word — if there are zero content words
+       from common English vocabulary in a 5+ word phrase, it is noise.
+
+    Only runs on clips 5+ words. Short clips cannot be judged this way.
+
+    Returns True if text appears incoherent.
+    """
+    words = clean.split()
+    if len(words) < 5:
+        return False
+
+    # Common prepositions and connectors — high density = word salad
+    _connectors = {
+        "a", "an", "the", "of", "in", "on", "at", "to", "for",
+        "with", "by", "from", "up", "about", "into", "through",
+        "during", "before", "after", "above", "below", "between",
+        "out", "off", "over", "under", "again", "then", "once",
+        "new", "place", "time", "way", "part", "just", "also",
+    }
+
+    # Minimum vocabulary — words that indicate real human intent
+    # If NONE of these appear in a 5+ word clip, it is noise
+    _real_intent_words = {
+        "open", "close", "play", "stop", "set", "show", "find",
+        "what", "how", "why", "when", "where", "who", "which",
+        "remind", "schedule", "volume", "brightness", "search",
+        "weather", "timer", "alarm", "task", "memory", "tell",
+        "seven", "hey", "hello", "yes", "no", "help", "know",
+        "name", "do", "can", "will", "would", "could", "should",
+        "like", "want", "need", "make", "go", "get", "see", "say",
+        "think", "feel", "have", "had", "work", "day", "today",
+        "good", "bad", "great", "okay", "sure", "well", "right",
+        "chrome", "spotify", "notepad", "browser", "file", "folder",
+    }
+
+    connector_count = sum(1 for w in words if w in _connectors)
+    connector_ratio = connector_count / len(words)
+
+    # More than 70% connectors with no real intent word = incoherent
+    has_intent = any(w in _real_intent_words for w in words)
+    if connector_ratio > 0.70 and not has_intent:
+        return True
+
+    return False
+
+
 def _is_hallucination(clean: str) -> tuple:
     """
     Check if Whisper output is a known hallucination.
@@ -425,7 +514,7 @@ def listen():
                 _nsp = seg.no_speech_prob if hasattr(seg, 'no_speech_prob') else 0.0
                 _txt = seg.text.strip() if hasattr(seg, 'text') else ''
                 print(Fore.WHITE + f"[EARS] ── Segment: '{_txt}' | no_speech_prob={_nsp:.3f}")
-                if _nsp > 0.7:
+                if _nsp > 0.4:
                     print(Fore.YELLOW + f"[EARS] ── CONFIDENCE REJECTED (no_speech={_nsp:.2f}): '{_txt}'")
                     continue
                 confident_segments.append(seg)
@@ -452,6 +541,23 @@ def listen():
                 print(Fore.YELLOW + f"[EARS] ── HALLUCINATION REJECTED: {ghost_reason}")
                 return None, None
             print(Fore.WHITE + "[EARS] ── Hallucination check passed.")
+
+            # ── Repetition Loop Detection ──────────────────────────────────
+            # Whisper hallucinates by repeating phrases when audio is ambiguous.
+            # "I don't know I don't know I don't know" is not real speech.
+            # Detect by splitting into chunks and checking for repeated phrases.
+            _rep_check = _detect_repetition_loop(clean)
+            if _rep_check:
+                print(Fore.YELLOW + f"[EARS] ── REPETITION LOOP REJECTED: '{clean[:60]}'")
+                return None, None
+
+            # ── Semantic Coherence Check ───────────────────────────────────
+            # "on a new place of time week" is incoherent — no human says this.
+            # Check if the transcription has at least minimal semantic structure.
+            _coh_check = _is_incoherent(clean)
+            if _coh_check:
+                print(Fore.YELLOW + f"[EARS] ── INCOHERENT REJECTED: '{clean[:60]}'")
+                return None, None
 
             # ── Autocorrect ────────────────────────────────────────────────
             # Corrects common Whisper mishearing of "Seven" and related words
