@@ -50,20 +50,22 @@ def _load_whisper_model(model_size: str) -> WhisperModel:
     try:
         import torch
         if torch.cuda.is_available():
+            _device_name = torch.cuda.get_device_name(0)
+            print(Fore.CYAN + f"[EARS] GPU detected: {_device_name}")
             model = WhisperModel(model_size, device="cuda", compute_type="float16")
-            print(Fore.GREEN + f"[EARS] Whisper loaded on GPU (CUDA) ✓")
+            print(Fore.GREEN + f"[EARS] Whisper loaded on GPU (CUDA) ✓ — expect <0.3s transcription")
             return model
         else:
-            print(Fore.YELLOW + "[EARS] CUDA not available — using CPU")
+            print(Fore.YELLOW + "[EARS] CUDA not available — falling back to CPU")
     except Exception as e:
-        print(Fore.YELLOW + f"[EARS] GPU check failed ({e}) — using CPU")
+        print(Fore.YELLOW + f"[EARS] GPU load failed ({e}) — falling back to CPU")
 
     try:
         model = WhisperModel(model_size, device="cpu", compute_type="int8")
-        print(Fore.GREEN + f"[EARS] Whisper loaded on CPU ✓")
+        print(Fore.YELLOW + f"[EARS] Whisper loaded on CPU — transcription will be slower")
         return model
     except Exception as e:
-        print(Fore.RED + f"[EARS] CPU load failed: {e}")
+        print(Fore.RED + f"[EARS] CPU load also failed: {e}")
         raise
 
 
