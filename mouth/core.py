@@ -214,7 +214,12 @@ def speak_streamed(sentence_generator):
 def interrupt():
     """
     Kill speech immediately. Called when user interrupts.
-    
+
+    Kills the entire process tree, not just the wrapper process.
+    The wrapper spawns piper.exe as a child. Killing only the wrapper
+    (previous behavior) left piper.exe running as an orphan, which is
+    why interrupt did not always stop audio playback.
+
     Returns:
         bool: True if something was interrupted, False if nothing playing
     """
@@ -224,14 +229,26 @@ def interrupt():
 
     with _lock:
         if _current_process and _current_process.poll() is None:
+            _pid = _current_process.pid
             try:
-                _current_process.kill()
+                if sys.platform == 'win32':
+                    subprocess.run(
+                        ["taskkill", "/F", "/T", "/PID", str(_pid)],
+                        capture_output=True,
+                        timeout=3
+                    )
+                else:
+                    _current_process.kill()
                 _current_process.wait(timeout=2)
-                print("[MOUTH] ⚡ Speech interrupted!")
+                print("[MOUTH] Speech interrupted")
                 _current_process = None
                 return True
             except Exception as e:
                 print(f"[MOUTH] Interrupt error: {e}")
+                try:
+                    _current_process.kill()
+                except Exception:
+                    pass
                 _current_process = None
                 return False
     return False
