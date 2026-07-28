@@ -180,9 +180,14 @@ def handle_name_setting(prompt_text, clean_in, speaker_id, speaker_name,
         )
     else:
         # Default speaker: update global USER_NAME
+        _default_uid = (
+            config.KEY.get("identity", {}).get("user_name", "default").lower()
+            or "default"
+        )
         seven_memory.store_fact(
             f"User's name is {new_name}",
-            category="identity"
+            category="identity",
+            user_id=_default_uid,
         )
         # Sync to config.json so Settings UI shows it and restarts pick it up
         try:
