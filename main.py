@@ -483,6 +483,16 @@ def seven_logic():
                    "enough", "quiet", "shut up", "be quiet"]
     KILL_WORDS  = ["shut down", "shutdown", "kill system", "go to sleep", "terminate"]
 
+    def _word_match(text, phrases):
+        """
+        Word-boundary phrase match. Prevents false positives like
+        'wait' matching inside 'waiting', or 'seven' matching inside 'seventeen'.
+        """
+        for phrase in phrases:
+            if re.search(r'\b' + re.escape(phrase) + r'\b', text):
+                return True
+        return False
+
     # PTT listener
     _is_ptt_active_fn = lambda: True
     try:
@@ -657,7 +667,7 @@ def seven_logic():
             # Interrupt resume
             if interrupt_context["was_interrupted"]:
                 resume_words = ["continue", "resume", "go on", "go ahead", "keep going", "carry on"]
-                if any(w in text_lower for w in resume_words):
+                if _word_match(text_lower, resume_words):
                     old_response = interrupt_context["last_response"]
                     old_input    = interrupt_context["last_input"]
                     interrupt_context.update({"was_interrupted": False, "last_response": None, "last_input": None})
@@ -695,13 +705,13 @@ def seven_logic():
                 continue
 
             # Kill / wake / pause
-            if any(trigger in text_lower for trigger in KILL_WORDS):
+            if _word_match(text_lower, KILL_WORDS):
                 app_ui.update_status("SHUTTING DOWN...", "#ff0000")
                 ctx.mouth.speak("Systems offline. Goodbye.")
                 app_ui.close()
                 os._exit(0)
 
-            if any(trigger in text_lower for trigger in WAKE_WORDS):
+            if _word_match(text_lower, WAKE_WORDS):
                 if not is_active:
                     is_active = True
                     ctx.mouth.speak("Listening.")
@@ -710,7 +720,7 @@ def seven_logic():
                         _silence_watcher.set_paused(False)
                 continue
 
-            if is_active and any(trigger in text_lower for trigger in PAUSE_WORDS):
+            if is_active and _word_match(text_lower, PAUSE_WORDS):
                 is_active = False
                 ctx.mouth.speak("Standing by.")
                 app_ui.update_status("PAUSED", "#555555")
