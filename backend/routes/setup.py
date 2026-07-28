@@ -494,7 +494,7 @@ def set_whisper_model(data: dict):
             return {"success": True, "installed": False,
                     "message": "A download is already in progress."}
         _whisper_download_state.update({
-            "downloading": True, "model": model_id, "progress": 0, "error": None
+            "downloading": True, "model": model_id, "progress": 5, "error": None
         })
 
     def _download():
@@ -504,15 +504,18 @@ def set_whisper_model(data: dict):
 
         def _watch_progress():
             import time as _t
+            last_pct = 5
             while not stop_flag["done"]:
                 try:
                     current_mb = _get_whisper_cache_size(model_id)
                     pct = min(99, int((current_mb / total_mb) * 100))
-                    with _whisper_download_lock:
-                        _whisper_download_state["progress"] = pct
+                    if pct > last_pct:
+                        last_pct = pct
+                        with _whisper_download_lock:
+                            _whisper_download_state["progress"] = pct
                 except Exception:
                     pass
-                _t.sleep(1)
+                _t.sleep(0.6)
 
         watcher = threading.Thread(target=_watch_progress, daemon=True)
         watcher.start()
