@@ -24,6 +24,9 @@ WHAT CHANGED FROM 1.3:
 import speech_recognition as sr
 from faster_whisper import WhisperModel
 import os
+import re
+import io
+import wave
 import threading
 import numpy as np
 import colorama
@@ -124,7 +127,9 @@ def _do_initial_calibration():
             print(Fore.CYAN + "[EARS] Calibrating ambient noise — 1.5 seconds, stay quiet...")
             _audio = _r.record(_src, duration=1.5)
             _wav   = _audio.get_wav_data()
-            _arr   = np.frombuffer(_wav, dtype=np.int16).astype(np.float32)
+            with wave.open(io.BytesIO(_wav), 'rb') as _cwf:
+                _pcm = _cwf.readframes(_cwf.getnframes())
+            _arr   = np.frombuffer(_pcm, dtype=np.int16).astype(np.float32)
             _rms   = float(np.sqrt(np.mean(_arr ** 2)))
             with _floor_lock:
                 _noise_samples = [_rms] * 5
@@ -163,10 +168,13 @@ def _check_signal_quality(wav_data: bytes) -> tuple:
         (passed: bool, rms: float, reason: str)
     """
     try:
-        audio_np  = np.frombuffer(wav_data, dtype=np.int16).astype(np.float32)
+        with wave.open(io.BytesIO(wav_data), 'rb') as _wf:
+            _sample_rate = _wf.getframerate()
+            _pcm_raw     = _wf.readframes(_wf.getnframes())
+        audio_np  = np.frombuffer(_pcm_raw, dtype=np.int16).astype(np.float32)
         rms       = float(np.sqrt(np.mean(audio_np ** 2)))
         peak      = float(np.max(np.abs(audio_np)))
-        dur       = len(audio_np) / 16000.0
+        dur       = len(audio_np) / float(_sample_rate)
         threshold = _get_threshold()
 
         # Gate 1: energy
@@ -212,7 +220,23 @@ _SILENCE_HALLUCINATIONS = {
     "subtitles", "caption", "captions",
     "subscribe", "like and subscribe",
     "thanks for watching", "thank you for watching",
+    "thank you so much for watching", "thank you very much for having me",
+    "thanks so much for watching", "thanks very much for having me",
+    "thank you so much", "thanks so much",
     "see you next time", "see you in the next video",
+    "i'll see you", "see you soon", "see you later",
+    "have a great day", "have a good day", "have a good one",
+    "take care", "take care everyone", "take care guys",
+    "good luck", "good luck everyone",
+    "that's all", "thats all", "that's it", "thats it",
+    "and that's it", "and thats it",
+    "i hope you enjoyed", "hope you enjoyed",
+    "if you have any questions", "feel free to",
+    "don't forget", "dont forget",
+    "please like", "please subscribe",
+    "hit the bell", "notification bell",
+    "peace out", "peace", "later guys", "later",
+    "cheerio", "cheers everyone", "cheers guys",
     "see you in my next video", "see you guys in the next video",
     "see you in the next one", "see you next week",
     "we'll see you next time", "well see you next time",
@@ -231,6 +255,8 @@ _SILENCE_HALLUCINATIONS = {
 
 # Substring patterns that only appear in Whisper hallucinations, never in real voice commands
 _HALLUCINATION_SUBSTRINGS = [
+    # These patterns ONLY appear in Whisper hallucinations
+    # They are never part of real voice assistant commands
     "amara.org",
     "mooji.org",
     "www.",
@@ -239,21 +265,20 @@ _HALLUCINATION_SUBSTRINGS = [
     "ba ba ba ba",
     "da da da da",
     "la la la la",
-    "see you in my next",
-    "see you in the next",
-    "see you guys in the",
-    "thanks for watching",
-    "thank you for watching",
-    "don't forget to like",
-    "dont forget to like",
-    "like and subscribe",
-    "hit the like",
-    "smash that like",
+    # YouTube-specific endings — only reject if the full YouTube phrase is present
     "next video",
     "my channel",
     "in this video",
     "in today's video",
     "in todays video",
+    "like and subscribe",
+    "smash that like",
+    "hit the like button",
+    "notification bell",
+    "hit the bell",
+    "please subscribe",
+    "leave a comment below",
+    "drop a comment below",
 ]
 
 # Filler words — used only for ratio check, not for filtering themselves
@@ -354,9 +379,15 @@ def _is_incoherent(clean: str) -> bool:
     return False
 
 
-def _is_hallucination(clean: str) -> tuple:
+def _is_hallucination(clean: str, raw_lower: str = "") -> tuple:
     """
     Check if Whisper output is a known hallucination.
+
+    Args:
+        clean:     lowercased text with punctuation stripped
+        raw_lower: lowercased text with punctuation intact — needed because
+                   some hallucination patterns (like "www." or ".org") only
+                   match when the period is still present
 
     Returns:
         (is_hallucination: bool, reason: str)
@@ -365,9 +396,20 @@ def _is_hallucination(clean: str) -> tuple:
     if clean in _SILENCE_HALLUCINATIONS:
         return True, f"silence hallucination: '{clean}'"
 
-    # Substring match — only genuine hallucination-only patterns
+    # Outro hallucinations
+    # Whisper often invents these from silence or TV/audio bleed
+    if clean.startswith(("thank you", "thanks")):
+        if any(k in clean for k in (
+            "watching", "having me", "joining", "listening",
+            "for me", "for watching", "for having me"
+        )):
+            return True, f"outro hallucination: '{clean}'"
+
+    # Substring match — checked against punctuation-preserved text so
+    # patterns like "www." and ".org" can actually match
+    _check_text = raw_lower if raw_lower else clean
     for pattern in _HALLUCINATION_SUBSTRINGS:
-        if pattern in clean:
+        if pattern in _check_text:
             return True, f"hallucination pattern: '{pattern}'"
 
     words = clean.split()
@@ -514,7 +556,7 @@ def listen():
                 _nsp = seg.no_speech_prob if hasattr(seg, 'no_speech_prob') else 0.0
                 _txt = seg.text.strip() if hasattr(seg, 'text') else ''
                 print(Fore.WHITE + f"[EARS] ── Segment: '{_txt}' | no_speech_prob={_nsp:.3f}")
-                if _nsp > 0.4:
+                if _nsp > 0.6:
                     print(Fore.YELLOW + f"[EARS] ── CONFIDENCE REJECTED (no_speech={_nsp:.2f}): '{_txt}'")
                     continue
                 confident_segments.append(seg)
@@ -536,7 +578,7 @@ def listen():
 
             # ── Hallucination Filter ───────────────────────────────────────
             print(Fore.WHITE + f"[EARS] ── Checking hallucination: '{clean}'")
-            is_ghost, ghost_reason = _is_hallucination(clean)
+            is_ghost, ghost_reason = _is_hallucination(clean, full_text.lower().strip())
             if is_ghost:
                 print(Fore.YELLOW + f"[EARS] ── HALLUCINATION REJECTED: {ghost_reason}")
                 return None, None
@@ -590,7 +632,6 @@ def listen():
             for wrong, right in corrections.items():
                 if wrong in result_text:
                     result_text = result_text.replace(wrong, right)
-                    break
 
             final = result_text.strip().capitalize()
             if not final:
@@ -675,7 +716,7 @@ def listen_for_interrupt(interrupt_words, on_interrupt_callback, stop_event):
                     continue
 
                 for word in interrupt_words:
-                    if word in clean:
+                    if re.search(r'\b' + re.escape(word) + r'\b', clean):
                         print(Fore.YELLOW + f"[EARS] Interrupt: '{clean}' matched '{word}'")
                         on_interrupt_callback()
                         return
