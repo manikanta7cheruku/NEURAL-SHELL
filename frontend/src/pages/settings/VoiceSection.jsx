@@ -376,8 +376,12 @@ function WhisperModelPanel({ hw }) {
         setDownloading(false);
         setDownloadModel(null);
         setProgress(0);
+        setCurrent(r.data.current || model.id);
+        setModels(prev => prev
+          ? prev.map(x => ({ ...x, active: x.id === model.id }))
+          : prev
+        );
         setPendingRestart(true);
-        load();
         return;
       }
 
