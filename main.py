@@ -822,13 +822,8 @@ def seven_logic():
             )
             completed = True
 
-            should_store = True
-            if isinstance(response, str) and response.strip().startswith("###"):
-                should_store = False
-            if len(user_input.strip()) <= 3:
-                should_store = False
-            if user_input.lower().strip() in ["hi", "hello", "hey"]:
-                should_store = False
+            # Filtering and save logic lives in brain._save_conversation().
+            # main.py only handles the streaming post-speak save via store_voice_turn().
 
             speech_part = response
             if isinstance(response, str) and "###" in response:
@@ -885,27 +880,20 @@ def seven_logic():
             if _silence_watcher:
                 _silence_watcher.on_seven_speaking(False)
 
-            # Store conversation
-            if should_store and isinstance(response, str) and ctx.seven_memory:
+            # Store conversation - handled by brain.think() for non-streaming.
+            # Streaming path: brain.think() skips save (text not available at that point).
+            # We save streaming turns here after the generator is fully consumed.
+            if is_streaming and isinstance(response, str) and ctx.seven_memory:
                 try:
-                    import voice_limits
-                    current_convos = ctx.seven_memory.conversations.count()
-                    allowed, limit_msg = voice_limits.check("conversation_history", current_convos)
-                    if allowed:
-                        clean_response = re.sub(r'###\w+:\s*\S+', '', response).strip()
-                        if not completed and clean_response:
-                            clean_response = f"[INTERRUPTED] {clean_response}"
-                        if clean_response:
-                            _default_uid = config.KEY.get('identity', {}).get('user_name', 'default').lower() or "default"
-                            ctx.seven_memory.store_conversation(
-                                user_input, clean_response,
-                                user_id=speaker_id if speaker_id not in ("default", "unknown") else _default_uid,
-                                source="voice"
-                            )
-                    else:
-                        print(Fore.YELLOW + f"[LIMIT] Conversation memory full ({current_convos})")
-                except Exception as e:
-                    print(Fore.RED + f"[MEMORY ERROR] {e}")
+                    import brain as _brain_mod
+                    _brain_mod.store_voice_turn(
+                        prompt_text=user_input,
+                        response_text=response,
+                        speaker_id=speaker_id,
+                        was_interrupted=not completed,
+                    )
+                except Exception as _sv_err:
+                    print(Fore.RED + f"[MEMORY] Streaming save error: {_sv_err}")
 
             if not isinstance(response, str):
                 continue
