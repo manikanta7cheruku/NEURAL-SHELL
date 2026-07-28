@@ -484,10 +484,6 @@ def _register_windows_task_recurring(schedule):
             schedule_type = "daily"
             extra = ["/mo", "1"]
 
-        pythonw = python.replace("python.exe", "pythonw.exe")
-        if not _os.path.exists(pythonw):
-            pythonw = python
-
         cmd = [
             "schtasks", "/create", "/f",
             "/tn", task_name,
@@ -1107,8 +1103,23 @@ def _fire_schedule(schedule):
         import traceback; traceback.print_exc()
 
     # Speak the reminder once - no follow-up question
+    #
+    # Wait for any in-progress Seven speech to finish first. Without this,
+    # a reminder firing while Seven is mid-response launches a second TTS
+    # subprocess at the same time, and the two audio streams overlap.
+    # This does not solve the case where the reminder fires while the user
+    # is actively speaking into the microphone. That needs ears/core.py's
+    # listen() loop to know a reminder is about to fire, which is a larger
+    # change than a safe find and replace here.
     if _speak_callback:
         try:
+            try:
+                from mouth.core import is_speaking as _mouth_is_speaking
+                _wait_start = time.time()
+                while _mouth_is_speaking() and (time.time() - _wait_start) < 15:
+                    time.sleep(0.3)
+            except Exception:
+                pass
             _speak_callback(fire_msg)
         except Exception as e:
             print(Fore.RED + f"[SCHEDULER] Speech error: {e}")
