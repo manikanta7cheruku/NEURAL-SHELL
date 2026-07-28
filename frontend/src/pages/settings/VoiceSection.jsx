@@ -655,6 +655,14 @@ function EnrollModal({ onClose }) {
   const timeoutRef     = useRef(null);
   const welcomeFiredRef = useRef(false);
 
+  // Lock background page scroll while modal is open — onWheel
+  // stopPropagation alone does not block native browser scroll
+  useEffect(() => {
+    const _prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = _prevOverflow; };
+  }, []);
+
   useEffect(() => {
     api.get('/voice/enrolled')
        .then(r => setEnrolled(r.data.enrolled || []))
@@ -719,7 +727,7 @@ function EnrollModal({ onClose }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={e => e.stopPropagation()} onWheel={e => e.stopPropagation()}>
       <div className="bg-s-card border border-s-border rounded-xl w-full max-w-sm shadow-2xl overflow-hidden">
         <div className="flex items-center justify-between px-5 py-4 border-b border-s-border">
           <div>
