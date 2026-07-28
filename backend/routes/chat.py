@@ -111,11 +111,6 @@ def chat(req: ChatRequest):
     try:
         response = brain.think(req.text.strip(), speaker_id=req.speaker_id)
 
-        try:
-            telemetry.log_activity()
-        except Exception as _te:
-            _log.debug(f"Telemetry log failed: {_te}")
-
         # Handle streaming response
         is_streaming = (
             isinstance(response, tuple)
