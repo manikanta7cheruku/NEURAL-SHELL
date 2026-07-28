@@ -477,11 +477,11 @@ def seven_logic():
 
     interrupt_context = ctx.interrupt_context
 
-    WAKE_WORDS  = ["wake up", "seven", "hey seven", "listen", "online", "resume"]
-    PAUSE_WORDS = ["not you", "hold it", "hold on", "just a moment", "wait",
-                   "pause", "stop listening", "sleep", "silence", "stop",
-                   "enough", "quiet", "shut up", "be quiet"]
-    KILL_WORDS  = ["shut down", "shutdown", "kill system", "go to sleep", "terminate"]
+    DEFAULT_WAKE_WORDS  = ["wake up", "seven", "hey seven", "listen", "online", "resume"]
+    DEFAULT_PAUSE_WORDS = ["not you", "hold it", "hold on", "just a moment", "wait",
+                           "pause", "stop listening", "sleep", "silence", "stop",
+                           "enough", "quiet", "shut up", "be quiet"]
+    DEFAULT_KILL_WORDS  = ["shut down", "shutdown", "kill system", "go to sleep", "terminate"]
 
     def _word_match(text, phrases):
         """
@@ -492,6 +492,27 @@ def seven_logic():
             if re.search(r'\b' + re.escape(phrase) + r'\b', text):
                 return True
         return False
+
+    def _get_voice_control_words():
+        """
+        Read wake/pause/resume/shutdown words from config, saved by
+        Settings > Voice > Voice Control Commands. Falls back to
+        defaults if nothing configured.
+
+        Previously the Settings UI saved these to config.json but
+        main.py never read them back, so the whole editor had zero
+        effect on Seven's real behavior. This wires it up.
+        """
+        _identity = config.KEY.get("identity", {})
+        _wake     = _identity.get("wake_words",     DEFAULT_WAKE_WORDS)
+        _pause    = _identity.get("pause_words",    DEFAULT_PAUSE_WORDS)
+        _resume   = _identity.get("resume_words",   [])
+        _kill     = _identity.get("shutdown_words", DEFAULT_KILL_WORDS)
+        # resume_words un-pauses Seven, same job WAKE_WORDS already does
+        # when paused — combine rather than replace so customizing one
+        # list doesn't silently drop the other's defaults
+        _combined_wake = list(dict.fromkeys(_wake + _resume)) if _resume else _wake
+        return _combined_wake, _pause, _kill
 
     # PTT listener
     _is_ptt_active_fn = lambda: True
@@ -621,6 +642,10 @@ def seven_logic():
                     pass
                 continue
 
+            # Wake / pause / shutdown words — reloaded live so Settings
+            # changes take effect without restarting Seven
+            WAKE_WORDS, PAUSE_WORDS, KILL_WORDS = _get_voice_control_words()
+
             # Voice gates
             _vg          = config.KEY.get("voice_gates", {})
             _ptt_enabled = _vg.get("push_to_talk",   {}).get("enabled", False)
@@ -695,9 +720,16 @@ def seven_logic():
                 print(Fore.CYAN + f"[VOICE ID] Speaker: {speaker_id}")
                 api_set_state("current_speaker", speaker_id)
 
-            if _sv_enabled and ctx.is_voice_id_enabled() and speaker_id == "unknown":
-                print(Fore.YELLOW + "[GATE3-SV] Unknown speaker — audio discarded")
-                continue
+            if _sv_enabled:
+                if not ctx.is_voice_id_enabled():
+                    # Gate is on but nobody is enrolled. Settings UI tells
+                    # the user Seven will reject all audio in this state —
+                    # previously this branch let everyone through instead.
+                    print(Fore.YELLOW + "[GATE3-SV] Enabled but no voice enrolled — audio discarded")
+                    continue
+                if speaker_id == "unknown":
+                    print(Fore.YELLOW + "[GATE3-SV] Unknown speaker — audio discarded")
+                    continue
 
             # Voice enrollment trigger
             if "enroll my voice" in text_lower or "enroll voice" in text_lower:
