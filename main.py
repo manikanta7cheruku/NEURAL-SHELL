@@ -899,7 +899,8 @@ def seven_logic():
                             _default_uid = config.KEY.get('identity', {}).get('user_name', 'default').lower() or "default"
                             ctx.seven_memory.store_conversation(
                                 user_input, clean_response,
-                                user_id=speaker_id if speaker_id not in ("default", "unknown") else _default_uid
+                                user_id=speaker_id if speaker_id not in ("default", "unknown") else _default_uid,
+                                source="voice"
                             )
                     else:
                         print(Fore.YELLOW + f"[LIMIT] Conversation memory full ({current_convos})")
