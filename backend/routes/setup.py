@@ -159,10 +159,26 @@ async def preview_voice(request: Request):
             print("[PREVIEW] speaker.py not found")
             return
 
+        # Use pythonw.exe instead of python.exe — prevents a console
+        # window from flashing on screen every time a preview plays.
+        _preview_exe = _sys.executable
+        if _sys.platform == 'win32':
+            _pw = _preview_exe.replace('python.exe', 'pythonw.exe')
+            if os.path.exists(_pw):
+                _preview_exe = _pw
+
+        _si     = None
+        _cflags = 0
+        if _sys.platform == 'win32':
+            _si = sp.STARTUPINFO()
+            _si.dwFlags |= sp.STARTF_USESHOWWINDOW
+            _si.wShowWindow = 0
+            _cflags = 0x08000000 | 0x00000008 | 0x00000200
+
         idx = vid if str(vid).isdigit() else "0"
         with _preview_lock:
             _preview_process = sp.Popen(
-                [_sys.executable, "-c",
+                [_preview_exe, "-c",
                  f"""
 import pyttsx3
 engine = pyttsx3.init()
@@ -176,6 +192,7 @@ engine.say('{sample_text}')
 engine.runAndWait()
 """],
                 stdout=sp.PIPE, stderr=sp.PIPE,
+                startupinfo=_si, creationflags=_cflags,
             )
             proc = _preview_process
         proc.wait(timeout=15)
@@ -213,11 +230,21 @@ engine.runAndWait()
                 with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
                     tmp_path = tmp.name
 
+                import sys as _sys2
+                _si2     = None
+                _cflags2 = 0
+                if _sys2.platform == 'win32':
+                    _si2 = sp.STARTUPINFO()
+                    _si2.dwFlags |= sp.STARTF_USESHOWWINDOW
+                    _si2.wShowWindow = 0
+                    _cflags2 = 0x08000000 | 0x00000008 | 0x00000200
+
                 with _preview_lock:
                     _preview_process = sp.Popen(
                         [os.path.join(piper_dir, "piper.exe"),
                          "--model", model_path, "--output_file", tmp_path],
                         stdin=sp.PIPE, stdout=sp.PIPE, stderr=sp.PIPE, cwd=piper_dir,
+                        startupinfo=_si2, creationflags=_cflags2,
                     )
                     proc = _preview_process
 
@@ -239,7 +266,8 @@ engine.runAndWait()
                             f"$p.PlaySync();"
                         )
                         sp.run(["powershell", "-NoProfile", "-Command", ps_script],
-                               capture_output=True, timeout=30)
+                               capture_output=True, timeout=30,
+                               startupinfo=_si2, creationflags=_cflags2)
                     try:
                         os.unlink(tmp_path)
                     except Exception as e:
@@ -319,6 +347,188 @@ def get_available_voices():
         print(f"[VOICES] SAPI scan error: {e}")
 
     return {"voices": result, "count": len(result)}
+
+
+# ── Whisper STT model management ──
+#
+# Not to be confused with the LLM models in StepModel.jsx. This controls
+# the speech-to-text engine only — how Seven turns your voice into text,
+# before that text ever reaches the LLM.
+
+WHISPER_MODELS = [
+    {
+        "id": "tiny.en", "label": "Tiny", "tag": "FASTEST",
+        "size_mb": 75, "param": "39M",
+        "headline": "Fastest transcription, most mistakes",
+        "cpu_speed": "Near instant", "gpu_speed": "Near instant",
+        "accuracy": "Basic — best for short, simple commands",
+    },
+    {
+        "id": "base.en", "label": "Base", "tag": "LIGHT",
+        "size_mb": 145, "param": "74M",
+        "headline": "Quick responses on modest hardware",
+        "cpu_speed": "Fast", "gpu_speed": "Near instant",
+        "accuracy": "Fair — occasional mistranscriptions",
+    },
+    {
+        "id": "small.en", "label": "Small", "tag": "BALANCED",
+        "size_mb": 484, "param": "244M",
+        "headline": "Solid accuracy without a GPU",
+        "cpu_speed": "Moderate", "gpu_speed": "Fast",
+        "accuracy": "Good — recommended for most CPU-only users",
+    },
+    {
+        "id": "medium.en", "label": "Medium", "tag": "RECOMMENDED",
+        "size_mb": 1500, "param": "769M",
+        "headline": "Seven's current default — strong accuracy",
+        "cpu_speed": "Slow without a GPU", "gpu_speed": "Fast",
+        "accuracy": "Very good — fewer hallucinations on silence",
+    },
+    {
+        "id": "large-v3", "label": "Large", "tag": "BEST ACCURACY",
+        "size_mb": 3100, "param": "1550M",
+        "headline": "Best possible transcription quality",
+        "cpu_speed": "Very slow without a GPU", "gpu_speed": "Moderate",
+        "accuracy": "Excellent — near-human transcription accuracy",
+    },
+]
+
+_whisper_download_state = {
+    "downloading": False,
+    "model":       None,
+    "progress":    0,
+    "error":       None,
+}
+_whisper_download_lock = threading.Lock()
+
+
+def _whisper_cache_dir(model_id: str) -> str:
+    """
+    Resolve the huggingface_hub cache folder faster-whisper downloads into.
+    faster-whisper pulls CTranslate2-converted models from the Systran
+    namespace on Hugging Face.
+    """
+    home        = os.path.expanduser("~")
+    folder_name = model_id.replace(".", "-")
+    return os.path.join(
+        home, ".cache", "huggingface", "hub",
+        f"models--Systran--faster-whisper-{folder_name}"
+    )
+
+
+def _folder_size_mb(path: str) -> float:
+    total = 0
+    for root, _, files in os.walk(path):
+        for f in files:
+            try:
+                total += os.path.getsize(os.path.join(root, f))
+            except OSError:
+                pass
+    return total / (1024 * 1024)
+
+
+def _is_whisper_model_installed(model_id: str) -> bool:
+    cache_dir = _whisper_cache_dir(model_id)
+    if not os.path.isdir(cache_dir):
+        return False
+    # Over 1MB means real model files are present, not an empty
+    # or partially-created folder from an interrupted download.
+    return _folder_size_mb(cache_dir) > 1
+
+
+@router.get("/api/setup/whisper-models")
+def get_whisper_models():
+    """List available Whisper STT model sizes with install status."""
+    import config
+    current = config.KEY.get("brain", {}).get("whisper_model", "medium.en")
+    result = []
+    for m in WHISPER_MODELS:
+        result.append({
+            **m,
+            "installed": _is_whisper_model_installed(m["id"]),
+            "active":    m["id"] == current,
+        })
+    return {"models": result, "current": current}
+
+
+@router.post("/api/setup/whisper-model")
+def set_whisper_model(data: dict):
+    """
+    Select a Whisper model. Saves to config immediately.
+    If not yet downloaded, starts a background download — frontend
+    should poll /api/setup/whisper-download-status for progress.
+    """
+    import config
+
+    model_id  = data.get("model", "").strip()
+    valid_ids = [m["id"] for m in WHISPER_MODELS]
+    if model_id not in valid_ids:
+        raise HTTPException(status_code=400, detail="Unknown model")
+
+    config.update_config({
+        "brain": {**config.KEY.get("brain", {}), "whisper_model": model_id}
+    })
+
+    if _is_whisper_model_installed(model_id):
+        return {"success": True, "installed": True,
+                "message": "Model already installed. Restart Seven to apply."}
+
+    with _whisper_download_lock:
+        if _whisper_download_state["downloading"]:
+            return {"success": True, "installed": False,
+                    "message": "A download is already in progress."}
+        _whisper_download_state.update({
+            "downloading": True, "model": model_id, "progress": 0, "error": None
+        })
+
+    def _download():
+        model_meta = next((m for m in WHISPER_MODELS if m["id"] == model_id), None)
+        total_mb   = model_meta["size_mb"] if model_meta else 500
+        cache_dir  = _whisper_cache_dir(model_id)
+        stop_flag  = {"done": False}
+
+        def _watch_progress():
+            import time as _t
+            while not stop_flag["done"]:
+                try:
+                    if os.path.isdir(cache_dir):
+                        current_mb = _folder_size_mb(cache_dir)
+                        pct = min(99, int((current_mb / total_mb) * 100))
+                        with _whisper_download_lock:
+                            _whisper_download_state["progress"] = pct
+                except Exception:
+                    pass
+                _t.sleep(1)
+
+        watcher = threading.Thread(target=_watch_progress, daemon=True)
+        watcher.start()
+
+        try:
+            from faster_whisper import WhisperModel
+            # cpu/int8 used deliberately here only to trigger the download —
+            # this is a one-time cache warm-up, not how the model runs later.
+            # ears/core.py loads the real model with GPU if available.
+            WhisperModel(model_id, device="cpu", compute_type="int8")
+            stop_flag["done"] = True
+            with _whisper_download_lock:
+                _whisper_download_state.update({
+                    "downloading": False, "progress": 100, "error": None
+                })
+        except Exception as e:
+            stop_flag["done"] = True
+            with _whisper_download_lock:
+                _whisper_download_state.update({
+                    "downloading": False, "error": str(e)
+                })
+
+    threading.Thread(target=_download, daemon=True).start()
+    return {"success": True, "installed": False, "message": "Download started."}
+
+
+@router.get("/api/setup/whisper-download-status")
+def get_whisper_download_status():
+    with _whisper_download_lock:
+        return dict(_whisper_download_state)
 
 
 # ── Bootstrap endpoints ──
