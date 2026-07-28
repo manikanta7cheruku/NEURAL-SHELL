@@ -492,7 +492,7 @@ def set_whisper_model(data: dict):
     })
 
     if _is_whisper_model_installed(model_id):
-        return {"success": True, "installed": True,
+        return {"success": True, "installed": True, "current": model_id,
                 "message": "Model already installed. Restart Seven to apply."}
 
     with _whisper_download_lock:
