@@ -26,6 +26,7 @@ from faster_whisper import WhisperModel
 import os
 import re
 import io
+import json
 import wave
 import threading
 import numpy as np
@@ -34,7 +35,30 @@ from colorama import Fore
 
 colorama.init(autoreset=True)
 
-MODEL_SIZE      = "medium.en"
+
+def _get_configured_whisper_model() -> str:
+    """
+    Read Whisper model size from config.json, set via Settings > Voice >
+    Speech Recognition. Falls back to medium.en for installs that have
+    not touched this setting yet, matching the previous fixed default.
+    """
+    try:
+        _cfg_path = os.path.join(
+            os.environ.get('APPDATA', os.path.expanduser('~')),
+            'SEVEN', 'config.json'
+        )
+        if os.path.exists(_cfg_path):
+            with open(_cfg_path, 'r', encoding='utf-8') as _f:
+                _cfg = json.load(_f)
+            _model = _cfg.get('brain', {}).get('whisper_model', '').strip()
+            if _model:
+                return _model
+    except Exception:
+        pass
+    return "medium.en"
+
+
+MODEL_SIZE      = _get_configured_whisper_model()
 AUDIO_TEMP_PATH = "temp_audio.wav"
 
 # External interrupt flag — set True to make listen() return immediately
