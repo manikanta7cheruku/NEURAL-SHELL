@@ -402,28 +402,15 @@ _whisper_download_state = {
 _whisper_download_lock = threading.Lock()
 
 
-def _get_whisper_cache_size(model_id: str) -> float:
+def _is_whisper_model_installed(model_id: str) -> bool:
     """
-    Return cached size for a faster-whisper model in MB.
-    Tries Hugging Face cache index first, then falls back to disk paths.
+    Check if a faster-whisper model is already downloaded on disk.
+    Uses direct folder size check only. scan_cache_dir() is unreliable
+    across huggingface_hub versions and has been removed.
     """
+    home    = os.path.expanduser("~")
     base_id = model_id.split(".")[0]
-    target_names = {
-        f"faster-whisper-{model_id}",
-        f"faster-whisper-{base_id}",
-    }
 
-    try:
-        from huggingface_hub import scan_cache_dir
-        cache_info = scan_cache_dir()
-        for repo in cache_info.repos:
-            repo_id = getattr(repo, "repo_id", "")
-            if any(repo_id.endswith(name) for name in target_names):
-                return repo.size_on_disk / (1024 * 1024)
-    except Exception:
-        pass
-
-    home = os.path.expanduser("~")
     candidates = [
         os.path.join(home, ".cache", "huggingface", "hub", f"models--Systran--faster-whisper-{model_id}"),
         os.path.join(home, ".cache", "huggingface", "hub", f"models--Systran--faster-whisper-{base_id}"),
@@ -431,23 +418,20 @@ def _get_whisper_cache_size(model_id: str) -> float:
         os.path.join(home, ".cache", "huggingface", "hub", f"models--guillaumekln--faster-whisper-{base_id}"),
     ]
 
-    max_size = 0.0
-    for d in candidates:
-        if os.path.isdir(d):
-            total = 0
-            for root, _, files in os.walk(d):
-                for f in files:
-                    try:
-                        total += os.path.getsize(os.path.join(root, f))
-                    except OSError:
-                        pass
-            max_size = max(max_size, total / (1024 * 1024))
+    for folder in candidates:
+        if not os.path.isdir(folder):
+            continue
+        total = 0
+        for root, _, files in os.walk(folder):
+            for f in files:
+                try:
+                    total += os.path.getsize(os.path.join(root, f))
+                except OSError:
+                    pass
+        if total > 1 * 1024 * 1024:
+            return True
 
-    return max_size
-
-
-def _is_whisper_model_installed(model_id: str) -> bool:
-    return _get_whisper_cache_size(model_id) > 1
+    return False
 
 
 @router.get("/api/setup/whisper-models")
@@ -510,10 +494,25 @@ def set_whisper_model(data: dict):
 
         def _watch_progress():
             import time as _t
+            home    = os.path.expanduser("~")
+            base_id = model_id.split(".")[0]
+            folders = [
+                os.path.join(home, ".cache", "huggingface", "hub", f"models--Systran--faster-whisper-{model_id}"),
+                os.path.join(home, ".cache", "huggingface", "hub", f"models--Systran--faster-whisper-{base_id}"),
+            ]
             last_pct = 5
             while not stop_flag["done"]:
                 try:
-                    current_mb = _get_whisper_cache_size(model_id)
+                    total_bytes = 0
+                    for folder in folders:
+                        if os.path.isdir(folder):
+                            for root, _, files in os.walk(folder):
+                                for fn in files:
+                                    try:
+                                        total_bytes += os.path.getsize(os.path.join(root, fn))
+                                    except OSError:
+                                        pass
+                    current_mb = total_bytes / (1024 * 1024)
                     pct = min(99, int((current_mb / total_mb) * 100))
                     if pct < 5:
                         pct = 5
