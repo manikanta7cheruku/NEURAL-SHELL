@@ -10,12 +10,15 @@ Example:
     "open chrome"           → ("open chrome", False)  ← blocked if gate enabled
 """
 
+import difflib
 from colorama import Fore
 
 
 def check_and_strip(text: str, wake_words: list) -> tuple:
     """
     Check if text starts with a configured wake word. Strip it if found.
+    Falls back to fuzzy matching if no exact match is found, to catch
+    Whisper mishearing "hey seven" as "hey stephen" or "hey heaven".
 
     Args:
         text:       transcribed user speech (original case)
@@ -38,11 +41,27 @@ def check_and_strip(text: str, wake_words: list) -> tuple:
         reverse=True
     )
 
+    # Exact match first — fastest and most reliable
     for word in sorted_words:
         if clean.startswith(word):
-            # Strip from original text to preserve case of remainder
             remainder = text[len(word):].strip().lstrip(",.!? ")
-            print(Fore.CYAN + f"[WAKE] '{word}' detected → command: '{remainder}'")
+            print(Fore.CYAN + f"[WAKE] '{word}' detected -> command: '{remainder}'")
+            return remainder, True
+
+    # Fuzzy fallback — only compares the first N words of the transcription
+    # (N = word count of the wake phrase) against each configured wake word.
+    # Threshold 0.72 is a starting point, tune after real-world testing.
+    clean_words = clean.split()
+    orig_words  = text.split()
+    for word in sorted_words:
+        word_len = len(word.split())
+        if len(clean_words) < word_len:
+            continue
+        candidate = " ".join(clean_words[:word_len])
+        ratio = difflib.SequenceMatcher(None, candidate, word).ratio()
+        if ratio >= 0.72:
+            remainder = " ".join(orig_words[word_len:]).strip().lstrip(",.!? ")
+            print(Fore.CYAN + f"[WAKE] Fuzzy match '{candidate}' ~ '{word}' ({ratio:.2f}) -> command: '{remainder}'")
             return remainder, True
 
     return text, False
