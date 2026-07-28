@@ -352,7 +352,7 @@ class SevenMemory:
     # STORE
     # =========================================================================
 
-    def store_conversation(self, user_input, seven_response, user_id="mani", source="chat"):
+    def store_conversation(self, user_input, seven_response, user_id="default", source="chat"):
         """
         source: "chat" (typed in Console) or "voice" (spoken via microphone)
         """
@@ -373,7 +373,7 @@ class SevenMemory:
         )
         print(Fore.CYAN + f"[MEMORY] Stored conversation ({source}): '{user_input[:50]}...'")
 
-    def store_fact(self, fact_text, category="general", user_id="mani"):
+    def store_fact(self, fact_text, category="general", user_id="default"):
         # ── Plan limit check ──
         try:
             import voice_limits
@@ -415,7 +415,7 @@ class SevenMemory:
     # SEARCH
     # =========================================================================
 
-    def search(self, query, user_id="mani", n_results=TOP_K_RESULTS):
+    def search(self, query, user_id="default", n_results=TOP_K_RESULTS):
         all_results = []
 
         fact_results = self._search_collection(
@@ -509,7 +509,7 @@ class SevenMemory:
     # FACT EXTRACTION
     # =========================================================================
 
-    def extract_and_store_facts(self, user_input, user_id="mani"):
+    def extract_and_store_facts(self, user_input, user_id="default"):
         clean = user_input.lower().strip()
 
         _has_name_change = (
