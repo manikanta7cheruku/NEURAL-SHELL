@@ -96,9 +96,19 @@ def handle_pending_enrollment(ctx, api_set_state):
             else:
                 print(Fore.YELLOW + f"[ENROLL] Clip {_i+1} empty")
                 ctx.mouth.speak("I did not catch that. Try again — speak clearly.")
-                _, _clip = ctx.listen()
-                if _clip and os.path.exists(_clip):
-                    _clips.append(_clip)
+                _, _retry_clip = ctx.listen()
+                if _retry_clip and os.path.exists(_retry_clip):
+                    # Same fixed-filename issue as above — copy before
+                    # the next listen() call can overwrite it.
+                    _unique_retry = os.path.join(
+                        os.environ.get('APPDATA', ''), 'SEVEN',
+                        f'enroll_clip_{_i+1}_retry.wav'
+                    )
+                    try:
+                        shutil.copy(_retry_clip, _unique_retry)
+                        _clips.append(_unique_retry)
+                    except Exception:
+                        _clips.append(_retry_clip)
                     _ss("enrollment_clips_done", len(_clips))
 
         _ok = _merge_and_save_enrollment(_clips, _pending_name, ctx)
@@ -163,7 +173,19 @@ def handle_voice_enrollment_command(ctx, api_set_state):
             ctx.update_status(f"ENROLLING — Keep speaking... ({clip_num+1}/5)", "#ff00ff")
         _, clip_path = ctx.listen()
         if clip_path and os.path.exists(clip_path):
-            collected_audio.append(clip_path)
+            # ctx.listen() always writes to the same temp file. Without
+            # copying to a unique name here, every loop iteration would
+            # overwrite the previous clip, and merging would repeat one
+            # clip five times instead of using five distinct recordings.
+            _unique_path = os.path.join(
+                os.environ.get('APPDATA', ''), 'SEVEN',
+                f'voice_enroll_clip_{clip_num + 1}.wav'
+            )
+            try:
+                shutil.copy(clip_path, _unique_path)
+                collected_audio.append(_unique_path)
+            except Exception:
+                collected_audio.append(clip_path)
 
     if not collected_audio:
         ctx.mouth.speak("Did not capture any audio. Try again.")
