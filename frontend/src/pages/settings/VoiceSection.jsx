@@ -313,6 +313,9 @@ export default function VoiceSection({
         )}
         </div>
       </div>
+      {/* Speech Recognition -- Whisper model size */}
+      <WhisperModelPanel hw={hw} />
+
       {/* Voice Security Gates */}
       <VoiceGatesPanel />
     </>
@@ -323,6 +326,188 @@ export default function VoiceSection({
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import api from '../../api';
+
+function WhisperModelPanel({ hw }) {
+  const [models,         setModels]         = useState(null);
+  const [current,        setCurrent]        = useState(null);
+  const [downloading,    setDownloading]    = useState(false);
+  const [downloadModel,  setDownloadModel]  = useState(null);
+  const [progress,       setProgress]       = useState(0);
+  const [error,          setError]          = useState(null);
+  const [pendingRestart, setPendingRestart] = useState(false);
+  const pollRef = useRef(null);
+
+  const load = useCallback(() => {
+    api.get('/setup/whisper-models')
+       .then(r => { setModels(r.data.models); setCurrent(r.data.current); })
+       .catch(() => {});
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
+
+  const hasGPU = hw?.gpu?.available;
+
+  const selectModel = async (model) => {
+    if (downloading) return;
+    setError(null);
+    try {
+      const r = await api.post('/setup/whisper-model', { model: model.id });
+      setCurrent(model.id);
+      if (r.data.installed) {
+        setPendingRestart(true);
+        load();
+        return;
+      }
+      setDownloading(true);
+      setDownloadModel(model.id);
+      setProgress(0);
+      pollRef.current = setInterval(async () => {
+        try {
+          const s = await api.get('/setup/whisper-download-status');
+          setProgress(s.data.progress || 0);
+          if (!s.data.downloading) {
+            clearInterval(pollRef.current);
+            setDownloading(false);
+            if (s.data.error) {
+              setError(s.data.error);
+            } else {
+              setPendingRestart(true);
+              load();
+            }
+          }
+        } catch {}
+      }, 1000);
+    } catch (e) {
+      setError(e.response?.data?.detail || 'Could not change model');
+    }
+  };
+
+  if (!models) {
+    return (
+      <div className="bg-white/[0.02] border border-white/8 rounded-2xl p-5">
+        <div className="text-[9px] text-white/30 uppercase tracking-widest font-semibold mb-2">
+          Speech Recognition
+        </div>
+        <div className="text-[10px] text-s-text-4">Loading...</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-white/[0.02] border border-white/8 rounded-2xl overflow-hidden">
+      <div className="px-5 py-4 border-b border-white/[0.05]">
+        <h2 className="text-[12px] font-semibold text-white/85">Speech Recognition</h2>
+        <p className="text-[9px] text-white/40 mt-0.5 leading-relaxed">
+          This controls how Seven converts your voice into text -- separate from
+          the AI model that writes responses. Larger models make fewer mistakes
+          but take longer to process on machines without a graphics card.
+        </p>
+      </div>
+
+      <div className="p-5 space-y-2">
+        {models.map(m => {
+          const isActive = current === m.id;
+          const isDownloadingThis = downloading && downloadModel === m.id;
+          const needsGpuWarning = !hasGPU && (m.id === 'medium.en' || m.id === 'large-v3');
+
+          return (
+            <div
+              key={m.id}
+              onClick={() => selectModel(m)}
+              className={`rounded-lg border p-3 transition-all cursor-pointer ${
+                downloading && !isDownloadingThis ? 'opacity-40 cursor-not-allowed' : ''
+              } ${
+                isActive
+                  ? 'border-s-accent bg-s-accent/6'
+                  : 'border-s-border bg-s-bg hover:border-s-accent/40 hover:bg-s-card-h'
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                    isActive ? 'bg-s-accent' : 'bg-s-border'
+                  }`} />
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className={`text-[11px] font-semibold ${
+                        isActive ? 'text-s-accent' : 'text-s-text-2'
+                      }`}>
+                        {m.label}
+                      </span>
+                      <span className="text-[8px] px-1.5 py-0.5 rounded font-medium text-s-text-4 bg-white/5">
+                        {m.tag}
+                      </span>
+                      {m.installed && !isActive && (
+                        <span className="text-[8px] text-s-green">Downloaded</span>
+                      )}
+                    </div>
+                    <div className="text-[9px] text-s-text-4 mt-0.5">{m.headline}</div>
+                  </div>
+                </div>
+                <div className="text-right shrink-0 ml-3">
+                  <div className="text-[9px] text-s-text-3 font-mono">
+                    {m.size_mb >= 1000 ? `${(m.size_mb / 1000).toFixed(1)} GB` : `${m.size_mb} MB`}
+                  </div>
+                  {!m.installed && !isDownloadingThis && (
+                    <div className="text-[8px] text-s-accent mt-0.5">Click to download</div>
+                  )}
+                </div>
+              </div>
+
+              {isActive && (
+                <div className="mt-2.5 pt-2.5 border-t border-s-border/40 grid grid-cols-2 gap-2">
+                  <div className="text-[9px] text-s-text-4">
+                    CPU speed: <span className="text-s-text-3">{m.cpu_speed}</span>
+                  </div>
+                  <div className="text-[9px] text-s-text-4">
+                    GPU speed: <span className="text-s-text-3">{m.gpu_speed}</span>
+                  </div>
+                  <div className="col-span-2 text-[9px] text-s-text-4">
+                    Accuracy: <span className="text-s-text-3">{m.accuracy}</span>
+                  </div>
+                </div>
+              )}
+
+              {needsGpuWarning && (
+                <div className="mt-2 flex items-start gap-1.5 text-[9px] text-yellow-400">
+                  <span className="shrink-0 mt-0.5">!</span>
+                  <span>No GPU detected. This model will run slower and may add a noticeable delay before Seven responds.</span>
+                </div>
+              )}
+
+              {isDownloadingThis && (
+                <div className="mt-2.5 space-y-1">
+                  <div className="flex items-center justify-between text-[9px] text-s-text-4">
+                    <span>Downloading...</span>
+                    <span>{progress}%</span>
+                  </div>
+                  <div className="h-1 bg-s-bg rounded-full overflow-hidden">
+                    <div className="h-full bg-s-accent rounded-full transition-all duration-500"
+                         style={{ width: `${progress}%` }} />
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {error && (
+        <div className="mx-5 mb-4 px-3 py-2 bg-s-red/10 border border-s-red/20 rounded text-[9px] text-s-red">
+          {error}
+        </div>
+      )}
+
+      {pendingRestart && !downloading && (
+        <div className="mx-5 mb-5 px-3 py-2 bg-s-accent/5 border border-s-accent/20 rounded flex items-center gap-2">
+          <div className="w-1.5 h-1.5 rounded-full bg-s-accent shrink-0" />
+          <span className="text-[9px] text-s-accent">Restart Seven to apply this change.</span>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function Toggle({ enabled, onToggle }) {
   return (
