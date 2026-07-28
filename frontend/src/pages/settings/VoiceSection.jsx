@@ -351,6 +351,15 @@ function WhisperModelPanel({ hw }) {
   const selectModel = async (model) => {
     if (downloading) return;
     setError(null);
+    if (!model.installed) {
+      const sizLabel = model.size_mb >= 1000
+        ? `${(model.size_mb / 1000).toFixed(1)} GB`
+        : `${model.size_mb} MB`;
+      const ok = window.confirm(
+        `Download ${model.label} (${sizLabel})?\n\nThis requires an internet connection and may take a few minutes.`
+      );
+      if (!ok) return;
+    }
     try {
       const r = await api.post('/setup/whisper-model', { model: model.id });
       setCurrent(model.id);
@@ -399,7 +408,7 @@ function WhisperModelPanel({ hw }) {
       <div className="px-5 py-4 border-b border-white/[0.05]">
         <h2 className="text-[12px] font-semibold text-white/85">Speech Recognition</h2>
         <p className="text-[9px] text-white/40 mt-0.5 leading-relaxed">
-          This controls how Seven converts your voice into text -- separate from
+          This controls how Seven converts your voice into text. Separate from
           the AI model that writes responses. Larger models make fewer mistakes
           but take longer to process on machines without a graphics card.
         </p>
@@ -415,7 +424,7 @@ function WhisperModelPanel({ hw }) {
             <div
               key={m.id}
               onClick={() => selectModel(m)}
-              className={`rounded-lg border p-3 transition-all cursor-pointer ${
+              className={`rounded-lg border p-3 transition-all duration-200 cursor-pointer ${
                 downloading && !isDownloadingThis ? 'opacity-40 cursor-not-allowed' : ''
               } ${
                 isActive
@@ -449,7 +458,7 @@ function WhisperModelPanel({ hw }) {
                   <div className="text-[9px] text-s-text-3 font-mono">
                     {m.size_mb >= 1000 ? `${(m.size_mb / 1000).toFixed(1)} GB` : `${m.size_mb} MB`}
                   </div>
-                  {!m.installed && !isDownloadingThis && (
+                  {!m.installed && !isDownloadingThis && !isActive && (
                     <div className="text-[8px] text-s-accent mt-0.5">Click to download</div>
                   )}
                 </div>
@@ -657,7 +666,7 @@ function VoiceGatesPanel() {
             Voice Security
           </div>
           <div className="text-[9px] text-s-text-4 mt-0.5">
-            Three noise gates -- enable any combination
+            Three noise gates, enable any combination
           </div>
         </div>
         {saving && <span className="text-[9px] text-s-text-4">Saving...</span>}
