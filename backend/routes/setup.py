@@ -361,28 +361,28 @@ WHISPER_MODELS = [
         "size_mb": 75, "param": "39M",
         "headline": "Fastest transcription, most mistakes",
         "cpu_speed": "Near instant", "gpu_speed": "Near instant",
-        "accuracy": "Basic — best for short, simple commands",
+        "accuracy": "Basic, best for short simple commands",
     },
     {
         "id": "base.en", "label": "Base", "tag": "LIGHT",
         "size_mb": 145, "param": "74M",
         "headline": "Quick responses on modest hardware",
         "cpu_speed": "Fast", "gpu_speed": "Near instant",
-        "accuracy": "Fair — occasional mistranscriptions",
+        "accuracy": "Fair, occasional mistranscriptions",
     },
     {
         "id": "small.en", "label": "Small", "tag": "BALANCED",
         "size_mb": 484, "param": "244M",
         "headline": "Solid accuracy without a GPU",
         "cpu_speed": "Moderate", "gpu_speed": "Fast",
-        "accuracy": "Good — recommended for most CPU-only users",
+        "accuracy": "Good, recommended for most CPU-only users",
     },
     {
         "id": "medium.en", "label": "Medium", "tag": "RECOMMENDED",
         "size_mb": 1500, "param": "769M",
-        "headline": "Seven's current default — strong accuracy",
+        "headline": "Seven's current default, strong accuracy",
         "cpu_speed": "Slow without a GPU", "gpu_speed": "Fast",
-        "accuracy": "Very good — fewer hallucinations on silence",
+        "accuracy": "Very good, fewer hallucinations on silence",
     },
     {
         "id": "large-v3", "label": "Large", "tag": "BEST ACCURACY",
@@ -453,19 +453,16 @@ def _is_whisper_model_installed(model_id: str) -> bool:
 @router.get("/api/setup/whisper-models")
 def get_whisper_models():
     """List available Whisper STT model sizes with install status."""
-    import json
+    import json as _json
+    cfg_path = os.path.join(
+        os.environ.get("APPDATA", os.path.expanduser("~")), "SEVEN", "config.json"
+    )
     current = "medium.en"
-    cfg_path = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "SEVEN", "config.json")
     try:
-        if os.path.exists(cfg_path):
-            with open(cfg_path, "r", encoding="utf-8") as f:
-                current = json.load(f).get("brain", {}).get("whisper_model", "medium.en")
-        else:
-            import config
-            current = config.KEY.get("brain", {}).get("whisper_model", "medium.en")
+        with open(cfg_path, "r", encoding="utf-8") as _f:
+            current = _json.load(_f).get("brain", {}).get("whisper_model", "medium.en")
     except Exception:
-        import config
-        current = config.KEY.get("brain", {}).get("whisper_model", "medium.en")
+        pass
     result = []
     for m in WHISPER_MODELS:
         result.append({
