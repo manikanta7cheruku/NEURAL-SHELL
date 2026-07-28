@@ -389,7 +389,7 @@ WHISPER_MODELS = [
         "size_mb": 3100, "param": "1550M",
         "headline": "Best possible transcription quality",
         "cpu_speed": "Very slow without a GPU", "gpu_speed": "Moderate",
-        "accuracy": "Excellent — near-human transcription accuracy",
+        "accuracy": "Excellent, near-human transcription accuracy",
     },
 ]
 
@@ -428,12 +428,38 @@ def _folder_size_mb(path: str) -> float:
 
 
 def _is_whisper_model_installed(model_id: str) -> bool:
-    cache_dir = _whisper_cache_dir(model_id)
-    if not os.path.isdir(cache_dir):
-        return False
-    # Over 1MB means real model files are present, not an empty
-    # or partially-created folder from an interrupted download.
-    return _folder_size_mb(cache_dir) > 1
+    # Check primary cache path first
+    primary = _whisper_cache_dir(model_id)
+    if os.path.isdir(primary) and _folder_size_mb(primary) > 1:
+        return True
+
+    # faster-whisper sometimes caches without the language suffix.
+    # Example: medium.en may be stored as faster-whisper-medium
+    base_id = model_id.split(".")[0]
+    if base_id != model_id:
+        home = os.path.expanduser("~")
+        alt_dir = os.path.join(
+            home, ".cache", "huggingface", "hub",
+            f"models--Systran--faster-whisper-{base_id}"
+        )
+        if os.path.isdir(alt_dir) and _folder_size_mb(alt_dir) > 1:
+            return True
+
+    # Also check if the model is already loaded in the running process.
+    # If ears/core.py has loaded it successfully, it is definitely installed.
+    try:
+        import config as _cfg
+        running_model = _cfg.KEY.get("brain", {}).get("whisper_model", "")
+        if running_model == model_id:
+            # The model is the currently configured one.
+            # If Seven started successfully, it loaded fine, so it exists.
+            from ears.core import MODEL_SIZE
+            if MODEL_SIZE == model_id:
+                return True
+    except Exception:
+        pass
+
+    return False
 
 
 @router.get("/api/setup/whisper-models")
