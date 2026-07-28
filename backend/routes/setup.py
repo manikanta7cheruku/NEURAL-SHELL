@@ -404,59 +404,68 @@ _whisper_download_lock = threading.Lock()
 
 def _get_whisper_cache_size(model_id: str) -> float:
     """
-    Check Hugging Face cache size. faster-whisper does NOT replace '.' with '-'
-    in folder names. It stores them exactly as provided.
+    Return cached size for a faster-whisper model in MB.
+    Tries Hugging Face cache index first, then falls back to disk paths.
     """
-    home = os.path.expanduser("~")
-    
-    # Possible author namespaces faster-whisper uses
-    authors = ["Systran", "guillaumekln", "bofenghuang"]
-    
-    # Also check base name without .en just in case
     base_id = model_id.split(".")[0]
-    
-    max_size = 0.0
-    
-    def _folder_size_mb(path: str) -> float:
-        total = 0
-        for root, _, files in os.walk(path):
-            for f in files:
-                try: total += os.path.getsize(os.path.join(root, f))
-                except OSError: pass
-        return total / (1024 * 1024)
+    target_names = {
+        f"faster-whisper-{model_id}",
+        f"faster-whisper-{base_id}",
+    }
 
-    for author in authors:
-        for check_id in [model_id, base_id]:
-            d = os.path.join(home, ".cache", "huggingface", "hub", f"models--{author}--faster-whisper-{check_id}")
-            if os.path.isdir(d):
-                s = _folder_size_mb(d)
-                if s > max_size:
-                    max_size = s
-
-    return max_size
-
-def _is_whisper_model_installed(model_id: str) -> bool:
-    # Over 1MB means real model files are present
-    if _get_whisper_cache_size(model_id) > 1:
-        return True
-
-    # Fallback: Check if the model is currently active and loaded
     try:
-        import config as _cfg
-        running_model = _cfg.KEY.get("brain", {}).get("whisper_model", "")
-        if running_model == model_id:
-            return True
+        from huggingface_hub import scan_cache_dir
+        cache_info = scan_cache_dir()
+        for repo in cache_info.repos:
+            repo_id = getattr(repo, "repo_id", "")
+            if any(repo_id.endswith(name) for name in target_names):
+                return repo.size_on_disk / (1024 * 1024)
     except Exception:
         pass
 
-    return False
+    home = os.path.expanduser("~")
+    candidates = [
+        os.path.join(home, ".cache", "huggingface", "hub", f"models--Systran--faster-whisper-{model_id}"),
+        os.path.join(home, ".cache", "huggingface", "hub", f"models--Systran--faster-whisper-{base_id}"),
+        os.path.join(home, ".cache", "huggingface", "hub", f"models--guillaumekln--faster-whisper-{model_id}"),
+        os.path.join(home, ".cache", "huggingface", "hub", f"models--guillaumekln--faster-whisper-{base_id}"),
+    ]
+
+    max_size = 0.0
+    for d in candidates:
+        if os.path.isdir(d):
+            total = 0
+            for root, _, files in os.walk(d):
+                for f in files:
+                    try:
+                        total += os.path.getsize(os.path.join(root, f))
+                    except OSError:
+                        pass
+            max_size = max(max_size, total / (1024 * 1024))
+
+    return max_size
+
+
+def _is_whisper_model_installed(model_id: str) -> bool:
+    return _get_whisper_cache_size(model_id) > 1
 
 
 @router.get("/api/setup/whisper-models")
 def get_whisper_models():
     """List available Whisper STT model sizes with install status."""
-    import config
-    current = config.KEY.get("brain", {}).get("whisper_model", "medium.en")
+    import json
+    current = "medium.en"
+    cfg_path = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "SEVEN", "config.json")
+    try:
+        if os.path.exists(cfg_path):
+            with open(cfg_path, "r", encoding="utf-8") as f:
+                current = json.load(f).get("brain", {}).get("whisper_model", "medium.en")
+        else:
+            import config
+            current = config.KEY.get("brain", {}).get("whisper_model", "medium.en")
+    except Exception:
+        import config
+        current = config.KEY.get("brain", {}).get("whisper_model", "medium.en")
     result = []
     for m in WHISPER_MODELS:
         result.append({
@@ -509,13 +518,15 @@ def set_whisper_model(data: dict):
                 try:
                     current_mb = _get_whisper_cache_size(model_id)
                     pct = min(99, int((current_mb / total_mb) * 100))
-                    if pct > last_pct:
+                    if pct < 5:
+                        pct = 5
+                    if pct != last_pct:
                         last_pct = pct
                         with _whisper_download_lock:
                             _whisper_download_state["progress"] = pct
                 except Exception:
                     pass
-                _t.sleep(0.6)
+                _t.sleep(0.5)
 
         watcher = threading.Thread(target=_watch_progress, daemon=True)
         watcher.start()
