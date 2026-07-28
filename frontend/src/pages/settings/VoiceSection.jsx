@@ -351,43 +351,62 @@ function WhisperModelPanel({ hw }) {
   const selectModel = async (model) => {
     if (downloading) return;
     setError(null);
-    if (!model.installed) {
-      const sizLabel = model.size_mb >= 1000
-        ? `${(model.size_mb / 1000).toFixed(1)} GB`
-        : `${model.size_mb} MB`;
+
+    const wasCurrent = current;
+    const alreadyInstalled = !!model.installed;
+    const sizeLabel = model.size_mb >= 1000
+      ? `${(model.size_mb / 1000).toFixed(1)} GB`
+      : `${model.size_mb} MB`;
+
+    if (!alreadyInstalled) {
       const ok = window.confirm(
-        `Download ${model.label} (${sizLabel})?\n\nThis requires an internet connection and may take a few minutes.`
+        `Download ${model.label} (${sizeLabel})?\n\nThis requires an internet connection and may take a few minutes.`
       );
       if (!ok) return;
+      setDownloading(true);
+      setDownloadModel(model.id);
+      setProgress(5);
     }
+
     try {
-      const r = await api.post('/setup/whisper-model', { model: model.id });
       setCurrent(model.id);
+      const r = await api.post('/setup/whisper-model', { model: model.id });
+
       if (r.data.installed) {
+        setDownloading(false);
+        setDownloadModel(null);
+        setProgress(0);
         setPendingRestart(true);
         load();
         return;
       }
-      setDownloading(true);
-      setDownloadModel(model.id);
-      setProgress(0);
-      pollRef.current = setInterval(async () => {
-        try {
-          const s = await api.get('/setup/whisper-download-status');
-          setProgress(s.data.progress || 0);
-          if (!s.data.downloading) {
-            clearInterval(pollRef.current);
-            setDownloading(false);
-            if (s.data.error) {
-              setError(s.data.error);
-            } else {
-              setPendingRestart(true);
-              load();
+
+      if (!alreadyInstalled) {
+        pollRef.current = setInterval(async () => {
+          try {
+            const s = await api.get('/setup/whisper-download-status');
+            setProgress(Math.max(5, s.data.progress || 0));
+            if (!s.data.downloading) {
+              clearInterval(pollRef.current);
+              pollRef.current = null;
+              setDownloading(false);
+              setDownloadModel(null);
+              if (s.data.error) {
+                setCurrent(wasCurrent);
+                setError(s.data.error);
+              } else {
+                setPendingRestart(true);
+                load();
+              }
             }
-          }
-        } catch {}
-      }, 1000);
+          } catch {}
+        }, 700);
+      }
     } catch (e) {
+      setCurrent(wasCurrent);
+      setDownloading(false);
+      setDownloadModel(null);
+      setProgress(0);
       setError(e.response?.data?.detail || 'Could not change model');
     }
   };
@@ -496,7 +515,7 @@ function WhisperModelPanel({ hw }) {
                   </div>
                   <div className="h-1 bg-s-bg rounded-full overflow-hidden">
                     <div className="h-full bg-s-accent rounded-full transition-all duration-500"
-                         style={{ width: `${progress}%` }} />
+                         style={{ width: `${Math.max(5, progress)}%` }} />
                   </div>
                 </div>
               )}
