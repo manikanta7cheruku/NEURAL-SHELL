@@ -72,3 +72,9 @@ class BrainContext:
         # If a layer wants to update USER_NAME (e.g. name-setting layer),
         # it sets this. brain.py reads it after pipeline runs.
         self.new_user_name = None
+
+        # ── LLM instruction note injected by mid-pipeline layers ─
+        # Layer 02 uses this to pass a note to layer_08 without
+        # poisoning prompt_text (which gets stored in history).
+        # layer_08 prepends this to the assembled prompt only.
+        self.llm_note = ""
