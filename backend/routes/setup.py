@@ -402,60 +402,50 @@ _whisper_download_state = {
 _whisper_download_lock = threading.Lock()
 
 
-def _whisper_cache_dir(model_id: str) -> str:
+def _get_whisper_cache_size(model_id: str) -> float:
     """
-    Resolve the huggingface_hub cache folder faster-whisper downloads into.
-    faster-whisper pulls CTranslate2-converted models from the Systran
-    namespace on Hugging Face.
+    Check Hugging Face cache size. faster-whisper does NOT replace '.' with '-'
+    in folder names. It stores them exactly as provided.
     """
-    home        = os.path.expanduser("~")
-    folder_name = model_id.replace(".", "-")
-    return os.path.join(
-        home, ".cache", "huggingface", "hub",
-        f"models--Systran--faster-whisper-{folder_name}"
-    )
+    home = os.path.expanduser("~")
+    
+    # Possible author namespaces faster-whisper uses
+    authors = ["Systran", "guillaumekln", "bofenghuang"]
+    
+    # Also check base name without .en just in case
+    base_id = model_id.split(".")[0]
+    
+    max_size = 0.0
+    
+    def _folder_size_mb(path: str) -> float:
+        total = 0
+        for root, _, files in os.walk(path):
+            for f in files:
+                try: total += os.path.getsize(os.path.join(root, f))
+                except OSError: pass
+        return total / (1024 * 1024)
 
+    for author in authors:
+        for check_id in [model_id, base_id]:
+            d = os.path.join(home, ".cache", "huggingface", "hub", f"models--{author}--faster-whisper-{check_id}")
+            if os.path.isdir(d):
+                s = _folder_size_mb(d)
+                if s > max_size:
+                    max_size = s
 
-def _folder_size_mb(path: str) -> float:
-    total = 0
-    for root, _, files in os.walk(path):
-        for f in files:
-            try:
-                total += os.path.getsize(os.path.join(root, f))
-            except OSError:
-                pass
-    return total / (1024 * 1024)
-
+    return max_size
 
 def _is_whisper_model_installed(model_id: str) -> bool:
-    # Check primary cache path first
-    primary = _whisper_cache_dir(model_id)
-    if os.path.isdir(primary) and _folder_size_mb(primary) > 1:
+    # Over 1MB means real model files are present
+    if _get_whisper_cache_size(model_id) > 1:
         return True
 
-    # faster-whisper sometimes caches without the language suffix.
-    # Example: medium.en may be stored as faster-whisper-medium
-    base_id = model_id.split(".")[0]
-    if base_id != model_id:
-        home = os.path.expanduser("~")
-        alt_dir = os.path.join(
-            home, ".cache", "huggingface", "hub",
-            f"models--Systran--faster-whisper-{base_id}"
-        )
-        if os.path.isdir(alt_dir) and _folder_size_mb(alt_dir) > 1:
-            return True
-
-    # Also check if the model is already loaded in the running process.
-    # If ears/core.py has loaded it successfully, it is definitely installed.
+    # Fallback: Check if the model is currently active and loaded
     try:
         import config as _cfg
         running_model = _cfg.KEY.get("brain", {}).get("whisper_model", "")
         if running_model == model_id:
-            # The model is the currently configured one.
-            # If Seven started successfully, it loaded fine, so it exists.
-            from ears.core import MODEL_SIZE
-            if MODEL_SIZE == model_id:
-                return True
+            return True
     except Exception:
         pass
 
@@ -510,18 +500,16 @@ def set_whisper_model(data: dict):
     def _download():
         model_meta = next((m for m in WHISPER_MODELS if m["id"] == model_id), None)
         total_mb   = model_meta["size_mb"] if model_meta else 500
-        cache_dir  = _whisper_cache_dir(model_id)
         stop_flag  = {"done": False}
 
         def _watch_progress():
             import time as _t
             while not stop_flag["done"]:
                 try:
-                    if os.path.isdir(cache_dir):
-                        current_mb = _folder_size_mb(cache_dir)
-                        pct = min(99, int((current_mb / total_mb) * 100))
-                        with _whisper_download_lock:
-                            _whisper_download_state["progress"] = pct
+                    current_mb = _get_whisper_cache_size(model_id)
+                    pct = min(99, int((current_mb / total_mb) * 100))
+                    with _whisper_download_lock:
+                        _whisper_download_state["progress"] = pct
                 except Exception:
                     pass
                 _t.sleep(1)
