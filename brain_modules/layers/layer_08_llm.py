@@ -39,7 +39,13 @@ _LONG_TRIGGERS = [
     "detail", "everything", "all about", "continue",
     "go on", "more about", "your capabilities",
     "what are you capable", "what do you do",
-    "what you can do", "capable of"
+    "what you can do", "capable of",
+    "meaning of", "purpose of", "difference between",
+    "what is", "what are", "who is", "who was",
+    "opinion on", "thoughts on", "think about",
+    "feel about", "believe in", "your view",
+    "best way", "how to", "should i", "advice",
+    "recommend", "suggestion", "help me",
 ]
 
 _COUNT_TRIGGERS = [
@@ -52,7 +58,9 @@ def process(ctx, deps):
     config     = deps.get("config")
     model_name = deps.get("model_name")
 
-    # Store original input in history
+    # Store original input in history.
+    # Use prompt_text directly - never the modified version with injected notes.
+    # llm_note is passed separately so it never enters the history record.
     _original_input = ctx.prompt_text
     if "===" in _original_input and "User asked:" in _original_input:
         _original_input = _original_input.split("User asked:")[-1].strip()
@@ -88,30 +96,46 @@ def process(ctx, deps):
         memory_context    = ctx.memory_context,
     )
 
+    # Prepend llm_note if layer_02 set one.
+    # This arrives at the LLM but never enters conversation history.
+    if ctx.llm_note:
+        full_prompt = ctx.llm_note + "\n\n" + full_prompt
+
     # Determine response length
     needs_long  = any(t in ctx.clean_in for t in _LONG_TRIGGERS)
     needs_count = any(t in ctx.clean_in for t in _COUNT_TRIGGERS)
 
     if needs_count:
-        response_length = 200
+        response_length = 300
     elif needs_long:
-        response_length = 120
+        response_length = 200
     elif ctx.web_searched:
-        response_length = 80
+        response_length = 120
     else:
-        response_length = 50
+        response_length = 100
+
+    # Temperature scales with humor setting.
+    # Low humor = precise and controlled (0.3).
+    # High humor = more expressive variation (up to 0.65).
+    _humor_level = int(_brain_cfg.get('tars_humor', 75))
+    _temperature = round(0.3 + (_humor_level / 100) * 0.35, 2)
+
+    # num_ctx capped to model capability.
+    # TinyLlama = 2048. All others = 4096.
+    _model_lower = (model_name or "").lower()
+    _ctx_window  = 2048 if "tinyllama" in _model_lower else 4096
 
     payload = {
         "model":   model_name,
         "prompt":  full_prompt,
         "stream":  False,
         "options": {
-            "temperature":    0.3,
-            "num_predict":    min(response_length, 150),
-            "repeat_penalty": 1.2,
+            "temperature":    _temperature,
+            "num_predict":    response_length,
+            "repeat_penalty": 1.3,
             "stop":           ["User:", "System:", "Seven:", "(Note", "(note",
                                "Note to self", "\n\n"],
-            "num_ctx":        4096
+            "num_ctx":        _ctx_window,
         }
     }
 
