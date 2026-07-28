@@ -511,7 +511,7 @@ def listen():
     Signal pipeline:
         Microphone -> SpeechRecognition energy gate -> WAV
         -> RMS gate -> Duration gate -> Crest gate
-        -> Whisper (medium.en, VAD enabled)
+        -> Whisper (model set in config, VAD enabled)
         -> Confidence filter -> Hallucination filter
         -> Autocorrect -> Return
 
