@@ -168,6 +168,158 @@ load_name_from_memory()
 # MAIN THINK FUNCTION
 # =============================================================================
 
+# Greeting inputs that are never worth storing as memories.
+_SKIP_GREETINGS = {"hi", "hello", "hey"}
+
+
+def _save_conversation(prompt_text, result, speaker_id):
+    """
+    Single save point for all conversation turns.
+
+    Filters applied:
+    - Input 3 chars or shorter: skip (noise, accidental triggers)
+    - Input is a bare greeting: skip (no information content)
+    - Response is pure command tags (starts with ###): skip
+    - Streaming responses: skip (text is not reconstructable here,
+      main.py calls flag_last_as_interrupted() post-speak if needed)
+    - Plan limit reached for this tier: skip and print warning
+    - ChromaDB error: log and move on, never crash the pipeline
+
+    Source tagging:
+    - speaker_id != "default"  -> voice (voice ID system identified speaker)
+    - speaker_id == "default"  -> chat (API caller, Console UI)
+
+    Called by think() only. Do not call directly from main.py or chat.py.
+    """
+    try:
+        # Filter 1: too short to be meaningful
+        if len(prompt_text.strip()) <= 3:
+            return
+
+        # Filter 2: bare greeting with no content
+        if prompt_text.lower().strip() in _SKIP_GREETINGS:
+            return
+
+        # Filter 3: streaming response - text not available at this point
+        # main.py reassembles streaming text and calls store_voice_turn() directly
+        if isinstance(result, tuple) and len(result) == 2 and result[0] == "__STREAM__":
+            return
+
+        # Filter 4: must be a non-empty string from here on
+        if not isinstance(result, str) or not result.strip():
+            return
+
+        # Filter 5: pure command response (no conversational text)
+        if result.strip().startswith("###"):
+            return
+
+        # Filter 6: error sentinel
+        if result.startswith("Processing error"):
+            return
+
+        # Resolve user identity
+        _save_user_id = speaker_id if speaker_id not in ("default", "unknown") else (
+            config.KEY.get("identity", {}).get("user_name", "default").lower() or "default"
+        )
+        _source = "voice" if speaker_id not in ("default",) else "chat"
+
+        # Filter 7: plan limit check
+        try:
+            import voice_limits as _vl
+            _current = seven_memory.conversations.count()
+            _allowed, _limit_msg = _vl.check("conversation_history", _current)
+            if not _allowed:
+                print(Fore.YELLOW + f"[BRAIN] Conversation memory full ({_current}) - not saving")
+                return
+        except Exception as _vl_err:
+            # voice_limits failure is non-fatal - continue with save
+            print(Fore.YELLOW + f"[BRAIN] Limit check skipped: {_vl_err}")
+
+        # Clean command tags from response before storing
+        import re as _re
+        _clean_response = _re.sub(r'###\w+:\s*\S+', '', result).strip()
+        if not _clean_response:
+            return
+
+        print(Fore.CYAN + f"[BRAIN] Saving conversation (source={_source})...")
+
+        # Extract and store facts from this input
+        try:
+            seven_memory.extract_and_store_facts(prompt_text, user_id=_save_user_id)
+        except Exception as _fact_err:
+            print(Fore.YELLOW + f"[BRAIN] Fact extraction skipped: {_fact_err}")
+
+        # Store the conversation turn
+        seven_memory.store_conversation(
+            user_input=prompt_text,
+            seven_response=_clean_response,
+            user_id=_save_user_id,
+            source=_source,
+        )
+        print(Fore.GREEN + f"[BRAIN] Saved ({_source}): '{prompt_text[:40]}...'")
+
+    except Exception as _mem_err:
+        import traceback
+        print(Fore.RED + f"[BRAIN] Save error: {_mem_err}")
+        traceback.print_exc()
+
+
+def store_voice_turn(prompt_text, response_text, speaker_id, was_interrupted=False):
+    """
+    Called by main.py's voice loop AFTER speaking is complete.
+    Used specifically for streaming responses, where brain.think() cannot
+    reconstruct the full text (the generator is consumed by the speak loop).
+    Also applies the [INTERRUPTED] prefix when speech was cut off mid-sentence.
+
+    Args:
+        prompt_text    (str):  original user speech
+        response_text  (str):  full assembled response text (after streaming)
+        speaker_id     (str):  speaker profile id
+        was_interrupted(bool): True if user cut Seven off mid-sentence
+    """
+    try:
+        if not prompt_text or not response_text:
+            return
+        if len(prompt_text.strip()) <= 3:
+            return
+        if prompt_text.lower().strip() in _SKIP_GREETINGS:
+            return
+
+        _save_user_id = speaker_id if speaker_id not in ("default", "unknown") else (
+            config.KEY.get("identity", {}).get("user_name", "default").lower() or "default"
+        )
+
+        # Plan limit check
+        try:
+            import voice_limits as _vl
+            _current = seven_memory.conversations.count()
+            _allowed, _ = _vl.check("conversation_history", _current)
+            if not _allowed:
+                print(Fore.YELLOW + f"[BRAIN] Memory full - skipping streaming save")
+                return
+        except Exception:
+            pass
+
+        import re as _re
+        _clean = _re.sub(r'###\w+:\s*\S+', '', response_text).strip()
+        if not _clean:
+            return
+
+        if was_interrupted:
+            _clean = f"[INTERRUPTED] {_clean}"
+
+        seven_memory.store_conversation(
+            user_input=prompt_text,
+            seven_response=_clean,
+            user_id=_save_user_id,
+            source="voice",
+        )
+        print(Fore.GREEN + f"[BRAIN] Streaming turn saved (interrupted={was_interrupted})")
+
+    except Exception as _err:
+        print(Fore.RED + f"[BRAIN] Streaming save error: {_err}")
+
+
 def think(prompt_text, speaker_id="default"):
     """
     Process user input and return Seven's response.
@@ -225,123 +377,10 @@ def think(prompt_text, speaker_id="default"):
     if ctx.new_user_name:
         USER_NAME = ctx.new_user_name
 
-    # Save conversation to memory
-    # Handles both plain string responses and streaming tuples
-    try:
-        _save_user_id = speaker_id if speaker_id != "default" else "mani"
-
-        # Resolve the actual response text regardless of return type
-        if isinstance(result, tuple) and len(result) == 2 and result[0] == "__STREAM__":
-            # Streaming response — the text was already spoken/sent
-            # We save the prompt but cannot reconstruct the full response here
-            # Mark source as "voice" since streaming is only used for voice
-            _response_to_save = "[Voice response]"
-            _source = "voice"
-        elif isinstance(result, str) and len(result.strip()) > 0:
-            _response_to_save = result
-            # Determine source: if speaker_id is not default it came from voice ID
-            # chat.py always passes speaker_id as req.speaker_id which is "default" for API
-            # voice loop in main.py passes the actual speaker_id
-            _source = "voice" if speaker_id not in ("default",) else "chat"
-        else:
-            _response_to_save = None
-
-        if _response_to_save and not _response_to_save.startswith("Processing error"):
-            print(Fore.CYAN + f"[BRAIN] Saving conversation (source={_source})...")
-
-            # Try ChromaDB singleton first
-            _saved = False
-            try:
-                seven_memory.extract_and_store_facts(prompt_text, user_id=_save_user_id)
-                seven_memory.store_conversation(
-                    user_input=prompt_text,
-                    seven_response=_response_to_save,
-                    user_id=_save_user_id,
-                    source=_source,
-                )
-                _saved = True
-                print(Fore.GREEN + "[BRAIN] Memory saved via ChromaDB")
-            except Exception as _chroma_err:
-                print(Fore.YELLOW + f"[BRAIN] ChromaDB save failed: {_chroma_err}")
-
-            # Fallback: write directly to SQLite without embedding model
-            if not _saved:
-                try:
-                    import sqlite3 as _sq
-                    import datetime as _dt_mod
-                    from memory.core import MEMORY_DIR as _mdir
-
-                    _db = os.path.join(_mdir, "chroma.sqlite3")
-                    _conn = _sq.connect(_db, timeout=5)
-
-                    # Get conversations segment ID
-                    _conv_col = _conn.execute(
-                        "SELECT id FROM collections WHERE name = 'conversations'"
-                    ).fetchone()
-
-                    if _conv_col:
-                        _col_id = _conv_col[0]
-                        _seg = _conn.execute(
-                            "SELECT id FROM segments WHERE collection = ? AND scope = 'METADATA'",
-                            (_col_id,)
-                        ).fetchone()
-
-                        if _seg:
-                            _seg_id = _seg[0]
-                            _ts = _dt_mod.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                            _mem_id = f"conv_{_dt_mod.datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
-                            _combined = f"User said: {prompt_text} | Seven replied: {_response_to_save}"
-
-                            # Insert embedding record
-                            _conn.execute(
-                                "INSERT INTO embeddings (segment_id, embedding_id, seq_id, created_at)"
-                                " VALUES (?, ?, randomblob(8), ?)",
-                                (_seg_id, _mem_id, _ts)
-                            )
-                            _emb_row = _conn.execute(
-                                "SELECT id FROM embeddings WHERE embedding_id = ?",
-                                (_mem_id,)
-                            ).fetchone()
-
-                            if _emb_row:
-                                _emb_id = _emb_row[0]
-                                # Insert metadata
-                                for _key, _val in [
-                                    ("user_input",     prompt_text[:500]),
-                                    ("seven_response", _response_to_save[:500]),
-                                    ("timestamp",      _ts),
-                                    ("user_id",        _save_user_id),
-                                    ("type",           "conversation"),
-                                    ("source",         _source),
-                                ]:
-                                    _conn.execute(
-                                        "INSERT INTO embedding_metadata (id, key, string_value)"
-                                        " VALUES (?, ?, ?)",
-                                        (_emb_id, _key, _val)
-                                    )
-                                # Insert fulltext content
-                                _conn.execute(
-                                    "INSERT INTO embedding_fulltext_search_content (rowid, c0)"
-                                    " VALUES (?, ?)",
-                                    (_emb_id, _combined[:1000])
-                                )
-                                _conn.commit()
-                                _saved = True
-                                print(Fore.GREEN + "[BRAIN] Memory saved via SQLite fallback")
-
-                    _conn.close()
-                except Exception as _sq_err:
-                    print(Fore.RED + f"[BRAIN] SQLite fallback also failed: {_sq_err}")
-                    import traceback
-                    traceback.print_exc()
-
-            if not _saved:
-                print(Fore.RED + "[BRAIN] Memory save failed completely")
-
-    except Exception as _mem_err:
-        import traceback
-        print(Fore.RED + f"[BRAIN] Memory save outer error: {_mem_err}")
-        traceback.print_exc()
+    # Save conversation to memory.
+    # This is the single save point for ALL callers (voice and chat).
+    # Filters applied here so neither main.py nor chat.py need their own save logic.
+    _save_conversation(prompt_text, result, speaker_id)
 
     return result
 
