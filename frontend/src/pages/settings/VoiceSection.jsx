@@ -447,6 +447,9 @@ function WhisperModelPanel({ hw }) {
                       <span className="text-[8px] px-1.5 py-0.5 rounded font-medium text-s-text-4 bg-white/5">
                         {m.tag}
                       </span>
+                      {isActive && (
+                        <span className="text-[8px] text-s-green">Active</span>
+                      )}
                       {m.installed && !isActive && (
                         <span className="text-[8px] text-s-green">Downloaded</span>
                       )}
