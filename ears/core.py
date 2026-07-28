@@ -119,6 +119,49 @@ def _get_threshold() -> float:
         return _noise_floor * _MULTIPLIER
 
 
+# =============================================================================
+# NOISE FLOOR DECAY — recovers from "stuck high" threshold
+#
+# PROBLEM:
+#   The noise floor only lowers when a clip is captured AND rejected.
+#   If a loud environment pushes the floor way up, and the room then goes
+#   quiet, nothing quiet enough ever crosses the new high threshold again —
+#   so there is never another sample to lower the average with. The floor
+#   gets stuck high forever until Seven is restarted.
+#
+# FIX:
+#   Every time listen() times out with zero audio, count it. After a few
+#   consecutive silent timeouts, ease the floor down a step. Any real
+#   captured audio resets the counter, since that proves the mic still
+#   works fine at the current threshold.
+# =============================================================================
+
+_consecutive_timeouts  = 0
+_timeout_lock          = threading.Lock()
+_DECAY_AFTER_TIMEOUTS  = 3      # roughly 30s of total silence at 10s per timeout
+_DECAY_FACTOR          = 0.85
+_MIN_NOISE_FLOOR       = 50.0
+
+
+def _decay_noise_floor():
+    global _noise_floor, _consecutive_timeouts
+    with _timeout_lock:
+        _consecutive_timeouts += 1
+        if _consecutive_timeouts >= _DECAY_AFTER_TIMEOUTS:
+            with _floor_lock:
+                if _noise_floor > _MIN_NOISE_FLOOR:
+                    old_thresh   = _noise_floor * _MULTIPLIER
+                    _noise_floor = max(_MIN_NOISE_FLOOR, _noise_floor * _DECAY_FACTOR)
+                    print(Fore.CYAN + f"[EARS] Quiet for a while — easing threshold: {old_thresh:.0f} -> {_noise_floor * _MULTIPLIER:.0f}")
+            _consecutive_timeouts = 0
+
+
+def _reset_timeout_counter():
+    global _consecutive_timeouts
+    with _timeout_lock:
+        _consecutive_timeouts = 0
+
+
 def _do_initial_calibration():
     global _noise_samples, _noise_floor, _initial_floor
     try:
@@ -214,7 +257,7 @@ _SILENCE_HALLUCINATIONS = {
     "thank you", "thanks", "you",
     "bye", "goodbye",
     "the", "a", "i",
-    "so", "and", "or",
+    "so", "and", "or", "but",
     "hmm", "hm", "uh", "um", "ah", "oh",
     "music", "applause", "laughter",
     "subtitles", "caption", "captions",
@@ -478,7 +521,9 @@ def listen():
                 _listen_timeout = 1.5
                 _phrase_limit   = 1
             else:
-                _listen_timeout = None
+                _listen_timeout = 10  # bounded — was None (infinite block), which
+                                       # made it impossible for the noise floor to
+                                       # ever decay back down after a loud environment
                 _phrase_limit   = 15  # raised from 7 — natural speech can be 10-12 seconds
 
             try:
@@ -490,8 +535,10 @@ def listen():
                 )
                 wav_data = audio.get_wav_data()
                 print(Fore.WHITE + f"[EARS] ── Audio captured ({len(wav_data)} bytes)")
+                _reset_timeout_counter()
 
             except sr.WaitTimeoutError:
+                _decay_noise_floor()
                 return None, None
             except OSError as _ose:
                 print(Fore.YELLOW + f"[EARS] Microphone disconnected: {_ose}")
@@ -556,7 +603,7 @@ def listen():
                 _nsp = seg.no_speech_prob if hasattr(seg, 'no_speech_prob') else 0.0
                 _txt = seg.text.strip() if hasattr(seg, 'text') else ''
                 print(Fore.WHITE + f"[EARS] ── Segment: '{_txt}' | no_speech_prob={_nsp:.3f}")
-                if _nsp > 0.6:
+                if _nsp > 0.5:
                     print(Fore.YELLOW + f"[EARS] ── CONFIDENCE REJECTED (no_speech={_nsp:.2f}): '{_txt}'")
                     continue
                 confident_segments.append(seg)
