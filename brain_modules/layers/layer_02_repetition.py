@@ -31,10 +31,12 @@ def process(ctx, deps):
     )
 
     if repeat_result == "__SIMILAR_DETECTED__":
-        # Modify prompt in place — LLM will see the note
-        ctx.prompt_text = (
-            f"[The user asked a similar question before. "
-            f"Acknowledge briefly then answer differently.] {ctx.prompt_text}"
+        # Set llm_note on context instead of modifying prompt_text.
+        # prompt_text modification caused the note to be stored in
+        # conversation history, poisoning future LLM context.
+        ctx.llm_note = (
+            "[The user asked something similar before. "
+            "Give a different angle or phrasing. Do not repeat the previous answer.]"
         )
         return LayerResult.pass_through()
 
