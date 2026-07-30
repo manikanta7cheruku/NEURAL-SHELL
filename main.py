@@ -139,15 +139,17 @@ def _validate_startup():
     warnings = []
 
     # Check 1: Ollama running on port 11434
+    # Non-fatal: Seven starts in degraded mode if Ollama is offline.
+    # Layer 08 handles ConnectionError gracefully at response time.
     try:
         s = socket.create_connection(("127.0.0.1", 11434), timeout=2)
         s.close()
         print("[STARTUP] Ollama: running")
     except Exception:
-        errors.append(
-            "Ollama is not running.\n"
-            "  Fix: Open the Ollama app or run 'ollama serve' in a terminal.\n"
-            "  Seven cannot generate responses without Ollama."
+        warnings.append(
+            "Ollama is not running. Seven will start in degraded mode.\n"
+            "  LLM responses will not work until Ollama is running.\n"
+            "  Fix: Open the Ollama app or run 'ollama serve' in a terminal."
         )
 
     # Check 2: config.json accessible
