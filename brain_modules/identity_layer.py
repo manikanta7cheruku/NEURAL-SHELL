@@ -257,55 +257,12 @@ def handle_repetition(clean_in, speaker_id, speaker_name,
                 similar_detected = True
                 break
 
-    # Exact repeat check
     if clean_in in speaker_questions and not is_command and not is_greeting:
-        # Identity question repeats -- answer immediately without LLM
-        if "your name" in clean_in or "who are you" in clean_in:
-            return random.choice([
-                "Seven.",
-                "I am Seven.",
-                "Seven. That is my name.",
-            ])
+    # Instead of short-circuiting with a robotic response,
+    # allow the LLM to answer again but instruct it to give
+    # a different angle or deeper perspective.
 
-        if "my name" in clean_in or "who am i" in clean_in:
-            if (speaker_id not in ("default", "unknown")
-                    and speaker_name == speaker_id.title()):
-                return "You have not told me your name yet."
-            return random.choice([
-                f"You are {speaker_name}.",
-                f"Still {speaker_name}.",
-                f"{speaker_name}, same as before.",
-            ])
-
-        if "what are you" in clean_in:
-            return "Still Seven, your personal AI assistant."
-
-        if "call you" in clean_in:
-            return "Seven. Same as always."
-
-        if "created you" in clean_in or "made you" in clean_in:
-            creator = config.KEY['identity']['creator']
-            return random.choice([
-                f"{creator}. Same answer.",
-                f"Still {creator}.",
-            ])
-
-        # Check if there is new memory for this repeated question
-        try:
-            search_uid   = (speaker_id if speaker_id not in ("default", "unknown")
-                            else config.KEY.get("identity", {}).get(
-                                "user_name", "default").lower() or "default")
-            fresh_memory = seven_memory.search(clean_in, user_id=search_uid)
-            if fresh_memory:
-                # New memories found -- let the LLM handle it with fresh context
-                return None
-        except Exception:
-            pass
-
-        repeat_count = speaker_questions.count(clean_in)
-        if repeat_count >= 2:
-            return "You have asked me this multiple times. My answer has not changed."
-        return "You just asked me that. Same answer."
+        return "__SIMILAR_DETECTED__"
 
     # Not a repeat -- record this question for future detection
     if not is_command and not is_greeting:
