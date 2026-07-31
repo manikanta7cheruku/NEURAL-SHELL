@@ -123,11 +123,15 @@ def chat(req: ChatRequest):
             parts = list(gen)
             full_response = " ".join(parts)
         elif response == "":
-            # Empty string is the intentional silence sentinel from layer_00.
-            # Acknowledgements like "cool", "okay", "yeah" return empty string.
-            # This is correct behavior - no response needed.
-            set_state("thinking", False)
-            return ChatResponse(response="", actions=[], streaming=False)
+            # Acknowledgement detected.
+            # Provide a short natural reply instead of silence.
+            short_replies = ["Good.", "Alright.", "Fair.", "Okay.", "Works."]
+            import random
+            return ChatResponse(
+                 response=random.choice(short_replies),
+                 actions=[],
+                 streaming=False
+    )
         else:
             full_response = response if response else "Processing error."
 
