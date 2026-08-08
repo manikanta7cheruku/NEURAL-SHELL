@@ -56,8 +56,20 @@ def process(ctx, deps):
 
         print(Fore.CYAN + f"[BRAIN] Web search: '{search_query}'")
 
-        is_news = any(w in ctx.clean_in for w in _NEWS_WORDS)
-        ctx.web_context = web_news(search_query) if is_news else web_search(search_query)
+        _timeout     = config.KEY.get("web", {}).get("timeout", 5)
+        _max_results = config.KEY.get("web", {}).get("max_results", 2)
+        _is_news     = any(w in ctx.clean_in for w in _NEWS_WORDS)
+
+        # Weather needs only 1 result — the current conditions.
+        # More results add noise and inflate response length.
+        if _is_weather:
+            _max_results = 1
+
+        ctx.web_context = (
+            web_news(search_query, max_results=_max_results, timeout=_timeout)
+            if _is_news
+            else web_search(search_query, max_results=_max_results, timeout=_timeout)
+        )
 
         if ctx.web_context:
             ctx.web_searched = True
