@@ -272,16 +272,8 @@ print("[SYSTEM] Packages ready - starting full Seven...")
 import threading
 import re
 
-# Thread exception hook - catches crashes in background threads
-def _thread_exception_handler(args):
-    if args.exc_type in (SystemExit, KeyboardInterrupt):
-        return
-    logging.getLogger('seven.threads').critical(
-        f"Unhandled exception in thread {args.thread.name if args.thread else 'unknown'}",
-        exc_info=(args.exc_type, args.exc_value, args.exc_traceback)
-    )
-
-threading.excepthook = _thread_exception_handler
+# Thread exception hook placeholder — real hook installed after logging setup below
+# Do not reference 'logging' or 'logger' here — they are not imported yet
 
 import colorama
 from colorama import Fore
