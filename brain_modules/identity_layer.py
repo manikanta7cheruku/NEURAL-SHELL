@@ -337,14 +337,38 @@ def handle_identity(clean_in, words, speaker_id, speaker_name, config):
     # Pattern-based greeting detection — no hardcoded list
     # Catches: hi, hey, hello, heyy, hiii, yo, sup, hola, hiya, howdy
     # Logic: short input (1-2 words) that starts with a greeting root
+    # Exact casual openers that need instant short replies.
+    # These never reach the LLM - response is immediate.
+    _CASUAL_OPENERS = {
+        "whats up", "what's up", "sup", "wassup",
+        "how are you", "how are you doing", "how you doing",
+        "hows it going", "how's it going", "how goes it",
+        "you good", "you okay", "all good",
+        "hey there", "hello there", "hi there",
+    }
+    if clean_in in _CASUAL_OPENERS:
+        _hour = datetime.now().hour
+        _time_ctx = "morning" if _hour < 12 else "afternoon" if _hour < 17 else "evening"
+        _casual = [
+            "Good. What do you need?",
+            "Running fine. What's up?",
+            "All good. Go ahead.",
+            "Here. What do you need?",
+            f"Good {_time_ctx}. What's on your mind?",
+        ]
+        if speaker_name and speaker_name.lower() not in ("there", "admin", "default"):
+            _casual += [
+                f"Good. What do you need, {speaker_name}?",
+                f"Here. What's up, {speaker_name}?",
+            ]
+        return random.choice(_casual)
+
     _greeting_roots = {"h", "hey", "hel", "hi", "yo", "sup", "hol", "hiy", "how"}
     _is_short = len(words) <= 2
     _starts_greeting = any(clean_in.startswith(root) for root in _greeting_roots)
     _is_pure_greeting = _is_short and _starts_greeting and len(clean_in) <= 12
 
     if _is_pure_greeting:
-        # Single word greeting — respond instantly without LLM
-        # But vary responses so it does not feel scripted
         _hour = datetime.now().hour
         if _hour < 12:
             _time_greet = ["Morning.", "Up early."]
@@ -353,7 +377,7 @@ def handle_identity(clean_in, words, speaker_id, speaker_name, config):
         else:
             _time_greet = ["Evening.", "Hey."]
 
-        _base = ["Yeah?", "Hey.", "What's up?"]
+        _base = ["Yeah?", "Hey.", "What do you need?"]
         if speaker_name and speaker_name.lower() not in ("there", "admin", "default"):
             _base += [f"Yeah, {speaker_name}?", f"What's up, {speaker_name}?"]
 
@@ -407,6 +431,23 @@ def handle_identity(clean_in, words, speaker_id, speaker_name, config):
     # --- WHAT SHOULD I CALL YOU ---
     if "call you" in clean_in or "should i call" in clean_in:
         return "You can call me Seven."
+
+    # --- WHERE ARE YOU FROM ---
+    _origin_questions = {
+        "where are you from", "where do you come from",
+        "where were you made", "where were you built",
+        "where do you live", "where are you based",
+        "what country are you from", "which country",
+    }
+    if clean_in in _origin_questions or any(p in clean_in for p in [
+        "where are you from", "where do you come from",
+        "where were you made", "where were you built",
+    ]):
+        try:
+            _creator = config.KEY.get('identity', {}).get('creator', 'Team Seven')
+        except Exception:
+            _creator = 'Team Seven'
+        return f"Built by {_creator}. Running on your machine right now."
 
     # "instead of seven" / "other than seven" -- name alternatives
     if (("instead of" in clean_in or "other than" in clean_in
