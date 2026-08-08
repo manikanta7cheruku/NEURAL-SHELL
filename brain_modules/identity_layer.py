@@ -209,8 +209,8 @@ def handle_name_setting(prompt_text, clean_in, speaker_id, speaker_name,
 # Groups of semantically similar questions
 # If user asks anything from the same group twice, we detect it
 SIMILAR_GROUPS = [
-    ["introduce yourself", "tell me what you can do", "what can you do",
-     "what you can do", "what are your capabilities", "tell me about yourself",
+    ["tell me what you can do", "what can you do",
+     "what you can do", "what are your capabilities",
      "list your capabilities"],
     ["whats your name", "who are you", "what should i call you", "tell me your name"],
     ["whats my name", "who am i", "do you know my name", "do you know me"],
@@ -258,10 +258,7 @@ def handle_repetition(clean_in, speaker_id, speaker_name,
                 break
 
     if clean_in in speaker_questions and not is_command and not is_greeting:
-    # Instead of short-circuiting with a robotic response,
-    # allow the LLM to answer again but instruct it to give
-    # a different angle or deeper perspective.
-
+        # Let LLM answer again with a different angle.
         return "__SIMILAR_DETECTED__"
 
     # Not a repeat -- record this question for future detection
@@ -437,7 +434,7 @@ def handle_identity(clean_in, words, speaker_id, speaker_name, config):
         "where are you from", "where do you come from",
         "where were you made", "where were you built",
         "where do you live", "where are you based",
-        "what country are you from", "which country",
+        "what country are you from", "which country are you from",
     }
     if clean_in in _origin_questions or any(p in clean_in for p in [
         "where are you from", "where do you come from",
@@ -447,7 +444,39 @@ def handle_identity(clean_in, words, speaker_id, speaker_name, config):
             _creator = config.KEY.get('identity', {}).get('creator', 'Team Seven')
         except Exception:
             _creator = 'Team Seven'
-        return f"Built by {_creator}. Running on your machine right now."
+        return random.choice([
+            f"Built by {_creator}. Running locally on your machine.",
+            f"{_creator} built me. I live on this device.",
+            f"I was built by {_creator}. No servers. Just this machine.",
+            f"Nowhere and everywhere — {_creator} built me, your machine runs me.",
+        ])
+
+    # --- TELL ME ABOUT YOURSELF ---
+    _about_self = {
+        "tell me about yourself", "tell me about you",
+        "describe yourself", "introduce yourself",
+        "who are you exactly", "what are you exactly",
+        "what kind of ai are you", "what type of ai are you",
+    }
+    if clean_in in _about_self or any(p in clean_in for p in [
+        "tell me about yourself", "describe yourself", "introduce yourself",
+    ]):
+        try:
+            _humor = config.KEY.get('brain', {}).get('tars_humor', 75)
+            _creator = config.KEY.get('identity', {}).get('creator', 'Team Seven')
+        except Exception:
+            _humor = 75
+            _creator = 'Team Seven'
+        if _humor >= 60:
+            return random.choice([
+                f"I'm Seven. Built by {_creator}. I run locally, remember things, open apps, set reminders, and have opinions. Occasionally amusing. Always honest.",
+                f"Seven. Local AI. Built by {_creator}. I don't send your data anywhere, I don't pretend to have feelings I don't have, and I'm reasonably good at my job.",
+                f"Built by {_creator}. I'm the AI that lives on your machine. I handle tasks, remember what you tell me, and occasionally say something worth hearing.",
+            ])
+        return random.choice([
+            f"I'm Seven, built by {_creator}. Local AI assistant. I handle tasks, reminders, app control, web search, and conversation. Everything runs on this device.",
+            f"Seven. Built by {_creator}. I run locally, process your requests, and remember what matters. No cloud dependency.",
+        ])
 
     # "instead of seven" / "other than seven" -- name alternatives
     if (("instead of" in clean_in or "other than" in clean_in
