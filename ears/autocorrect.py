@@ -89,6 +89,23 @@ _CORRECTIONS = [
     ("what's the whether", "what is the weather", 82),
     ("what's the weather", "what is the weather", 82),
     ("whether",            "weather",             85),
+
+    # Common short-clip mishearings
+    # These appear when noise corrupts the first syllable of a command
+    ("can save",      "hey seven",  82),
+    ("can say",       "hey seven",  82),
+    ("consave",       "hey seven",  85),
+    ("canyon",        "hey seven",  82),
+    ("insane",        "hey seven",  82),
+    ("in seven",      "hey seven",  90),
+    ("and seven",     "hey seven",  88),
+    ("a seven",       "hey seven",  88),
+    ("k seven",       "hey seven",  90),
+
+    # "open" mishearings
+    ("hoping",        "open",       85),
+    ("hopping",       "open",       85),
+    ("opan",          "open",       90),
 ]
 
 
