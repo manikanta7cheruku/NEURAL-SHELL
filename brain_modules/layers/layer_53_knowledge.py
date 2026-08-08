@@ -37,8 +37,11 @@ def process(ctx, deps):
             or "VISUAL_REPORT:" in ctx.prompt_text):
         return LayerResult.pass_through()
 
-    # Skip very short inputs — not a real question
-    if len(ctx.clean_in.strip()) < 8:
+    # Skip short inputs — arithmetic, one-liners, simple factual questions
+    # that have nothing to do with uploaded documents.
+    # Minimum 5 words. "What comes after 20" is 4 words — should never
+    # touch the knowledge base.
+    if len(ctx.words) < 5:
         return LayerResult.pass_through()
 
     # Skip hard-skip system commands
@@ -57,18 +60,25 @@ def process(ctx, deps):
     # These bypass ALL other gates — always search
     is_doc_reference = any(t in ctx.clean_in for t in _DOC_TRIGGERS)
 
-    # General knowledge gate: any question-like input
-    _QUESTION_WORDS = [
-        "what", "who", "when", "where", "why", "how",
-        "explain", "define", "describe", "tell me",
-        "difference", "compare", "which", "does", "is ",
-        "summarize", "list", "give me",
+    # Only search knowledge base for domain questions or doc references.
+    # Generic question words alone ("what", "how", "why") are not sufficient
+    # to justify a knowledge search — they match everything including
+    # arithmetic, personal questions, and casual conversation.
+    # The relevance threshold in knowledge/core.py is the final quality gate,
+    # but we avoid the ChromaDB call entirely for clearly non-document queries.
+    _DOMAIN_SIGNALS = [
+        "explain", "define", "describe", "difference between",
+        "compare", "summarize", "summary", "how does", "how do",
+        "what is a", "what are", "tell me about", "give me",
+        "according to", "based on", "from the", "in the",
+        "research", "study", "report", "document", "paper",
+        "article", "chapter", "section", "topic", "subject",
+        "theory", "concept", "method", "process", "algorithm",
+        "history of", "types of", "examples of", "list of",
+        "benefits of", "disadvantages of", "advantages of",
     ]
-    is_question = any(w in ctx.clean_in for w in _QUESTION_WORDS)
-
-    # Search if: doc reference OR (question AND no strong memory match)
-    # Memory context allowed alongside knowledge now — both can enrich answer
-    should_search = is_doc_reference or is_question
+    is_domain_question = any(s in ctx.clean_in for s in _DOMAIN_SIGNALS)
+    should_search = is_doc_reference or is_domain_question
 
     if not should_search:
         return LayerResult.pass_through()
