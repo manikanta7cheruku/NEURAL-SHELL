@@ -38,18 +38,22 @@ OLLAMA_URL = "http://127.0.0.1:11434/api/generate"
 # Re-enable with llama3.1 or phi3:medium when tested.
 
 _LONG_TRIGGERS = [
-    "tell me", "explain", "describe", "what can you",
-    "list", "how does", "how do", "why", "story",
+    # These genuinely need longer responses in chat.
+    # Voice path ignores the upper end of these limits anyway.
+    "tell me", "explain", "describe",
+    "list", "how does", "how do",
     "detail", "everything", "all about", "continue",
-    "go on", "more about", "your capabilities",
+    "go on", "more about",
+    "what can you", "your capabilities",
     "what are you capable", "what do you do",
     "what you can do", "capable of",
     "meaning of", "purpose of", "difference between",
-    "what is", "what are", "who is", "who was",
     "opinion on", "thoughts on", "think about",
     "feel about", "believe in", "your view",
-    "best way", "how to", "should i", "advice",
-    "recommend", "suggestion", "help me",
+    "best way", "advice", "recommend", "suggestion",
+    # Removed: "what is", "what are", "who is", "who was",
+    # "should i", "help me", "how to" — too broad, fires on trivial questions.
+    # "What is 2+2" should not get 200 tokens.
 ]
 
 _COUNT_TRIGGERS = [
@@ -91,6 +95,7 @@ def process(ctx, deps):
         honesty      = _honesty,
         tier         = _tier,
         input_text   = ctx.clean_in,
+        is_voice     = _is_voice,
     )
 
     full_prompt = assemble_prompt(
@@ -110,29 +115,56 @@ def process(ctx, deps):
     # preamble generation instead of actual reasoning, degrading response quality.
     # Revisit with phi3:medium or llama3.1 which follow instructions more precisely.
 
-    # Determine response length
+    # Source detection.
+    # Voice: speaker_id is a real name or "mani", "priya" etc.
+    # Chat: speaker_id is always "default" from chat.py.
+    _is_voice = ctx.speaker_id not in ("default",)
+
+    # Determine response length based on source and question type.
     needs_long  = any(t in ctx.clean_in for t in _LONG_TRIGGERS)
     needs_count = any(t in ctx.clean_in for t in _COUNT_TRIGGERS)
 
-    if needs_count:
-        response_length = 300
-    elif needs_long:
-        response_length = 200
-    elif ctx.web_searched:
-        response_length = 120
+    if _is_voice:
+        # Voice responses must be short and natural.
+        # Human conversation is 1-3 sentences. Never a wall of text.
+        # The model speaks these words — 150 tokens is already ~30 seconds of speech.
+        if needs_count:
+            response_length = 120
+        elif needs_long:
+            response_length = 80
+        elif ctx.web_searched:
+            response_length = 60
+        else:
+            response_length = 50
     else:
-        response_length = 100
+        # Chat path: user is reading, can handle more detail.
+        if needs_count:
+            response_length = 300
+        elif needs_long:
+            response_length = 200
+        elif ctx.web_searched:
+            response_length = 120
+        else:
+            response_length = 100
 
     # Temperature scales with humor setting.
-    # Low humor = precise and controlled (0.3).
-    # High humor = more expressive variation (up to 0.65).
+    # Voice gets slightly higher base temperature for natural speech variation.
     _humor_level = int(_brain_cfg.get('tars_humor', 75))
-    _temperature = round(0.3 + (_humor_level / 100) * 0.35, 2)
+    _base_temp   = 0.35 if _is_voice else 0.3
+    _temperature = round(_base_temp + (_humor_level / 100) * 0.35, 2)
 
-    # num_ctx capped to model capability.
-    # TinyLlama = 2048. All others = 4096.
+    # num_ctx per model capability.
+    # TinyLlama = 2048. llama3 = 8192 but we cap at 4096 for speed.
+    # Others = 4096.
     _model_lower = (model_name or "").lower()
     _ctx_window  = 2048 if "tinyllama" in _model_lower else 4096
+
+    # Stop sequences.
+    # Voice gets tighter stops — halt at sentence boundaries aggressively.
+    # Chat gets looser stops — allow paragraphs to form naturally.
+    _base_stops = ["User:", "System:", "Seven:", "(Note", "(note", "Note to self"]
+    _voice_stops = _base_stops + ["\n\n", "\n"]
+    _chat_stops  = _base_stops + ["\n\n"]
 
     payload = {
         "model":   model_name,
@@ -142,8 +174,7 @@ def process(ctx, deps):
             "temperature":    _temperature,
             "num_predict":    response_length,
             "repeat_penalty": 1.3,
-            "stop":           ["User:", "System:", "Seven:", "(Note", "(note",
-                               "Note to self", "\n\n"],
+            "stop":           _voice_stops if _is_voice else _chat_stops,
             "num_ctx":        _ctx_window,
         }
     }
