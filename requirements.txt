@@ -56,6 +56,9 @@ sentry-sdk
 # --- Proactive Features ---
 pynput
 
+# --- Fuzzy Matching ---
+rapidfuzz
+
 # --- Torch (GPU support) ---
 # Install separately with CUDA:
 # pip install torch torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
