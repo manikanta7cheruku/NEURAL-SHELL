@@ -25,12 +25,25 @@ import numpy as np
 from colorama import Fore
 
 # Tuning constants
-_MULTIPLIER          = 2.2   # threshold = floor * MULTIPLIER
+_MULTIPLIER          = 1.8   # threshold = floor * MULTIPLIER
+#                            # Reduced from 2.2 — at 2.2, a floor of 300
+#                            # gives threshold=660, normal speech at 800
+#                            # barely passes. 1.8 gives threshold=540,
+#                            # normal speech passes with margin.
 _WINDOW              = 20    # rolling average window
-_NOISE_FLOOR_CAP     = 500   # never higher than this (TV/music bleed)
-_MIN_NOISE_FLOOR     = 150.0  # raised from 50 — prevents music/TV triggering at low threshold
+_NOISE_FLOOR_CAP     = 400   # reduced from 500
+#                            # At 500 * 2.2 = 1100 threshold, only loud
+#                            # close-range speech passes. 400 * 1.8 = 720,
+#                            # which is achievable by normal speech in a
+#                            # moderately loud room.
+_MIN_NOISE_FLOOR     = 80.0  # reduced from 150
+#                            # 150 was too conservative — in a quiet room
+#                            # the floor is 60-100, so 150 minimum was
+#                            # artificially raising the threshold.
 _MIN_VALID_RMS       = 20.0  # below this = mic not ready
-_DEFAULT_FLOOR       = 200.0 # safe default if calibration fails
+_DEFAULT_FLOOR       = 150.0 # safe default if calibration fails
+#                            # reduced from 200 — 200 * 1.8 = 360 threshold
+#                            # which is achievable in a quiet room
 
 def get_min_noise_floor() -> float:
     """Public accessor for minimum noise floor. Use instead of _MIN_NOISE_FLOOR directly."""
@@ -54,10 +67,16 @@ def get_threshold() -> float:
     """
     Return current voice detection threshold.
     Always returns at least MIN_NOISE_FLOOR * MULTIPLIER.
+    Hard maximum: 700. Above this, normal speech cannot reliably
+    trigger Seven. If environment is louder than this, PTT mode
+    is the correct solution — no threshold tuning fixes a loud room.
     """
     with _floor_lock:
         floor = max(_noise_floor, _MIN_NOISE_FLOOR)
-    return floor * _MULTIPLIER
+    raw = floor * _MULTIPLIER
+    # Hard ceiling — never return a threshold so high that normal
+    # speech at 0.5m distance (RMS ~1000-2000) cannot pass.
+    return min(raw, 700.0)
 
 
 def update(rms: float):
@@ -209,14 +228,17 @@ def calibrate():
 
         # Hard cap — if environment is very loud during calibration,
         # cap the floor so Seven can still hear normal speech.
-        # Without this cap: threshold=10945, nothing triggers.
-        if measured > 1000:
+        # Without this cap: threshold can reach 1000+, nothing triggers.
+        # New cap: 350 (was 500). At 350 * 1.8 = 630 threshold, normal
+        # speech at 800-2000 RMS still passes comfortably.
+        if measured > 350:
             print(Fore.YELLOW + (
-                f"[EARS] Measured floor {measured:.0f} is very high "
+                f"[EARS] Measured floor {measured:.0f} is high "
                 f"(loud environment during calibration). "
-                f"Capping at 500 — Seven will still respond to speech."
+                f"Capping at 350 — threshold will be {350 * _MULTIPLIER:.0f}. "
+                f"If Seven mishears, reduce background noise or use PTT mode."
             ))
-            measured = 500
+            measured = 350
 
         print(Fore.GREEN + (
             f"[EARS] Calibration complete — "
