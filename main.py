@@ -14,6 +14,19 @@ if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
 if sys.stderr and hasattr(sys.stderr, 'reconfigure'):
     sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 
+# numpy 2.0 removed numpy.iterable.
+# sentence-transformers, faster-whisper, and chromadb embedding functions
+# all call numpy.iterable internally. The embedded Python environment
+# ships with numpy 2.x while the venv has 1.26.4.
+# Patch at process start before any ML library loads.
+try:
+    import numpy as _np_patch
+    if not hasattr(_np_patch, 'iterable'):
+        _np_patch.iterable = lambda obj: hasattr(obj, '__iter__')
+        print("[SYSTEM] numpy.iterable patched for numpy 2.x compatibility")
+except Exception:
+    pass
+
 # ============================================================================
 # PATH SETUP
 # ============================================================================
