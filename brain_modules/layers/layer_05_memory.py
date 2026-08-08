@@ -33,6 +33,13 @@ _OPINION_STARTERS = {
     "your view on", "your opinion on", "your thoughts on",
     "would you say", "would you recommend",
     "is it worth", "should i",
+    "where do you think", "where would you",
+    "where do you want", "where would you like",
+    "what would you", "if you could", "if you were",
+    "would you rather", "do you prefer", "do you like",
+    "what is your favorite", "what is your favourite",
+    "what do you enjoy", "what do you hate",
+    "what do you love", "what do you dislike",
 }
 
 
