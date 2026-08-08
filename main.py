@@ -328,7 +328,9 @@ def _setup_logging():
     # Silence noisy third-party loggers
     for noisy in [
         'chromadb', 'sentence_transformers', 'transformers',
-        'huggingface_hub', 'urllib3', 'httpx', 'uvicorn.access',
+        'huggingface_hub', 'urllib3', 'urllib3.connectionpool',
+        'urllib3.util.retry', 'httpx', 'uvicorn.access',
+        'sentry_sdk', 'sentry_sdk.errors', 'sentry_sdk.transport',
         'matplotlib', 'matplotlib.font_manager', 'matplotlib.pyplot',
         'comtypes', 'comtypes.client', 'comtypes._post_coinit',
         'comtypes._comobject', 'comtypes.client._managing',
