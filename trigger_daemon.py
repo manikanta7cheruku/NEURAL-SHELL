@@ -2233,17 +2233,36 @@ def main():
                 voice_listener.start()
 
             # Self health check — verify hotkey listener alive
-            if hotkey_listener._listener is None or not hotkey_listener._listener.running:
-                print("[TRIGGER DAEMON] Hotkey listener dead — restarting listener")
-                try:
-                    hotkey_listener.stop()
-                    time.sleep(0.5)
-                    hotkey_listener.start()
-                    hotkey_listener.reload(triggers)
-                except Exception as _re:
-                    print(f"[TRIGGER DAEMON] Listener restart failed: {_re}")
-                    print("[TRIGGER DAEMON] Exiting for Task Scheduler restart")
-                    sys.exit(1)
+            # Use consecutive failure count before restarting
+            # to avoid false restarts from brief GIL pauses
+            _listener_obj = hotkey_listener._listener
+            _listener_dead = (
+                _listener_obj is None or
+                not getattr(_listener_obj, 'running', True) is True
+            )
+            if _listener_dead:
+                _hotkey_fail_count = getattr(
+                    main, '_hotkey_fail_count', 0
+                ) + 1
+                main._hotkey_fail_count = _hotkey_fail_count
+                print(
+                    f"[TRIGGER DAEMON] Hotkey check failed "
+                    f"({_hotkey_fail_count}/3)"
+                )
+                if _hotkey_fail_count >= 3:
+                    print("[TRIGGER DAEMON] Hotkey listener confirmed dead — restarting")
+                    try:
+                        hotkey_listener.stop()
+                        time.sleep(1.0)
+                        hotkey_listener.start()
+                        hotkey_listener.reload(triggers)
+                        main._hotkey_fail_count = 0
+                        print("[TRIGGER DAEMON] Hotkey listener restarted")
+                    except Exception as _re:
+                        print(f"[TRIGGER DAEMON] Restart failed: {_re}")
+                        sys.exit(1)
+            else:
+                main._hotkey_fail_count = 0
 
             # Heartbeat log every 30 minutes so users know daemon is alive
             if time.time() - _last_health_log > 1800:
