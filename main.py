@@ -480,6 +480,15 @@ def seven_logic():
     if not load_all_modules(ctx):
         return  # critical load failure
 
+    # Wire speaking state to ears — prevents listen() processing audio
+    # while Seven's TTS is playing (self-echo prevention)
+    try:
+        import ears.core as _ears_core
+        _ears_core.set_speaking_fn(ctx.mouth.is_speaking)
+        print(Fore.CYAN + "[SYSTEM] Speaking guard wired to ears")
+    except Exception as _sg_err:
+        print(Fore.YELLOW + f"[SYSTEM] Speaking guard not wired: {_sg_err}")
+
     # Voice loop configuration
     is_active = True
     interrupt_config   = config.KEY.get('interrupt', {})
