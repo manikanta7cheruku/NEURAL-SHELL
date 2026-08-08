@@ -86,6 +86,7 @@ def process(ctx, deps):
         humor        = _humor,
         honesty      = _honesty,
         tier         = _tier,
+        input_text   = ctx.clean_in,
     )
 
     full_prompt = assemble_prompt(
@@ -140,12 +141,20 @@ def process(ctx, deps):
     }
 
     # ── Streaming path ───────────────────────────────────────────
-    use_streaming = config.KEY.get('brain', {}).get('streaming', False)
+    # Streaming is for voice only — speaker_id != "default" means voice ID
+    # identified a speaker, or main.py is calling with a real speaker id.
+    # Chat API always passes speaker_id="default". Streaming on chat forces
+    # chat.py to consume the full generator before responding anyway,
+    # adding overhead without benefit.
+    use_streaming = (
+        config.KEY.get('brain', {}).get('streaming', False)
+        and ctx.speaker_id != "default"
+    )
 
     if use_streaming:
         from brain_modules.ollama_client import stream_sentences
-        start_time = _time.time()
-        speaker_id = ctx.speaker_id
+        start_time  = _time.time()
+        speaker_id  = ctx.speaker_id
         prompt_text = ctx.prompt_text
 
         def _sentence_gen():
