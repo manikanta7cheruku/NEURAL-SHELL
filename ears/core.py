@@ -44,6 +44,7 @@ import io
 import os
 import re
 import json
+import time
 import threading
 import numpy as np
 import colorama
@@ -204,7 +205,24 @@ def _transcribe(wav_bytes: bytes) -> tuple:
             segments = list(result)
             info     = None
 
-        full_text = "".join(s.text for s in segments).strip()
+        # Per-segment confidence filter
+        # Whisper sets no_speech_prob per segment — high value means
+        # Whisper detected that segment contains no real speech.
+        # Filter out segments where Whisper is not confident.
+        # Threshold: 0.6 — above this the segment is likely silence/noise.
+        clean_segments = []
+        for seg in segments:
+            seg_no_speech = getattr(seg, 'no_speech_prob', 0.0)
+            seg_avg_logp  = getattr(seg, 'avg_logprob',    0.0)
+            if seg_no_speech > 0.6:
+                # Whisper says this segment has no speech — skip it
+                continue
+            if seg_avg_logp < -1.2:
+                # Whisper had very low confidence on this segment — skip it
+                continue
+            clean_segments.append(seg)
+
+        full_text = "".join(s.text for s in clean_segments).strip()
         return full_text, info
 
     except Exception as e:
@@ -274,13 +292,6 @@ def _check_text_validity(text: str) -> tuple:
     if any(c in music_chars for c in text):
         return False, "music unicode characters in transcription"
 
-    # Check for phonetic singing patterns
-    # These appear when Whisper transcribes sung syllables
-    _singing_patterns = [
-        r'\b\w+-\w+-\w+\b',     # "ta-ta-ta", "o-o-o"
-        r'\b[aeiou]-[aeiou]-[aeiou]\b',  # "a-a-a", "o-o-o"
-        r'[aeiou]{4,}',          # "ooooo" stretched vowels
-    ]
     words = text.lower().split()
     hyphenated_count = sum(
         1 for w in words
@@ -315,7 +326,6 @@ def listen() -> tuple:
         mic = sr.Microphone()
     except Exception as e:
         print(Fore.YELLOW + f"[EARS] Microphone unavailable: {e}")
-        import time
         time.sleep(2)
         return None, None
 
@@ -329,7 +339,7 @@ def listen() -> tuple:
             recognizer.phrase_threshold         = 0.1
 
             if _force_return_event.is_set():
-                recognizer.energy_threshold = _nf._MIN_NOISE_FLOOR
+                recognizer.energy_threshold = _nf.get_min_noise_floor()
                 listen_timeout              = 1.5
                 phrase_limit                = 1
             else:
@@ -360,7 +370,6 @@ def listen() -> tuple:
                 return None, None
             except OSError as e:
                 print(Fore.YELLOW + f"[EARS] Mic error: {e}")
-                import time
                 time.sleep(1)
                 return None, None
             except Exception:
@@ -475,7 +484,6 @@ def listen() -> tuple:
 
     except OSError as e:
         print(Fore.YELLOW + f"[EARS] Stream error: {e}")
-        import time
         time.sleep(1)
         return None, None
     except Exception as e:
