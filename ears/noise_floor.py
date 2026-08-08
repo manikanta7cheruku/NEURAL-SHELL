@@ -151,17 +151,42 @@ def calibrate():
 
     print(Fore.CYAN + "[EARS] Calibrating — stay quiet for 1.5 seconds...")
 
-    measured = 0.0
-    for attempt in range(1, 6):  # 5 attempts, 2s apart = up to 10s wait
-        measured = _measure_rms(duration=1.5)
-        if measured >= _MIN_VALID_RMS:
-            break
+    # Take 3 measurements and use the MINIMUM
+    # A single noisy event during calibration should not permanently
+    # raise the threshold. Minimum gives us the true ambient floor.
+    measurements = []
+    for attempt in range(1, 4):
+        m = _measure_rms(duration=1.5)
+        if m >= _MIN_VALID_RMS:
+            measurements.append(m)
+            print(Fore.CYAN + (
+                f"[EARS] Calibration sample {attempt}: RMS={m:.0f}"
+            ))
+        else:
+            print(Fore.YELLOW + (
+                f"[EARS] Calibration sample {attempt}: "
+                f"RMS={m:.0f} (too low — mic may not be ready)"
+            ))
+        if attempt < 3:
+            time.sleep(1.0)
+
+    if not measurements:
+        # All samples were too low — mic not ready, use safe default
         print(Fore.YELLOW + (
-            f"[EARS] Calibration attempt {attempt}: "
-            f"RMS={measured:.0f} (mic not ready or device busy — waiting)"
+            f"[EARS] All calibration samples too low — "
+            f"using safe default: floor={_DEFAULT_FLOOR:.0f}, "
+            f"threshold={_DEFAULT_FLOOR * _MULTIPLIER:.0f}"
         ))
-        # Longer wait gives audio driver time to release from other processes
-        time.sleep(2.0)
+        measured = _DEFAULT_FLOOR
+    else:
+        # Use minimum — represents true quiet floor, not a noise spike
+        measured = min(measurements)
+        if len(measurements) > 1:
+            print(Fore.CYAN + (
+                f"[EARS] Calibration samples: "
+                f"{[f'{x:.0f}' for x in measurements]} "
+                f"— using minimum: {measured:.0f}"
+            ))
 
     if measured < _MIN_VALID_RMS:
         print(Fore.YELLOW + (
