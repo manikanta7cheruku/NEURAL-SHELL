@@ -22,7 +22,6 @@ WHAT CHANGED FROM 1.3:
 """
 
 import speech_recognition as sr
-from faster_whisper import WhisperModel
 import os
 import re
 import io
@@ -32,6 +31,15 @@ import threading
 import numpy as np
 import colorama
 from colorama import Fore
+
+# Compatibility shim: numpy.iterable was removed in numpy 2.0.
+# faster-whisper 1.x calls numpy.iterable internally.
+# If the runtime numpy is 2.x (e.g. in embedded Python environment),
+# patch it back in before WhisperModel loads.
+if not hasattr(np, 'iterable'):
+    np.iterable = lambda obj: hasattr(obj, '__iter__')
+
+from faster_whisper import WhisperModel
 
 colorama.init(autoreset=True)
 
