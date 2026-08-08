@@ -11,11 +11,17 @@ import os
 import json
 from colorama import Fore
 
+import re as _re
+
 _HALLUCINATIONS_PATH = os.path.join(
     os.path.dirname(__file__), "hallucinations.json"
 )
 
 _cache = None
+
+# Pre-compiled patterns — built once at import, not on every call
+_ORDINAL_RE = _re.compile(r'\b(\d+(?:st|nd|rd|th))\b', _re.IGNORECASE)
+_PRICE_RE   = _re.compile(r'\b\d+\s*(?:rupees?|rs\.?|dollars?|euros?)\b')
 
 
 def _load() -> dict:
@@ -187,11 +193,7 @@ def is_hallucination(clean: str, raw_lower: str = "") -> tuple:
 
     # Ordinal number sequence detection
     # "10th, 7th, 8th, 8th, 8th" — TV audio counting, not a command
-    import re as _re
-    ordinal_pattern = _re.compile(
-        r'\b(\d+(?:st|nd|rd|th))\b', _re.IGNORECASE
-    )
-    ordinal_matches = ordinal_pattern.findall(clean)
+    ordinal_matches = _ORDINAL_RE.findall(clean)
     if len(ordinal_matches) >= 3:
         return True, (
             f"ordinal number sequence ({len(ordinal_matches)} ordinals) "
@@ -199,9 +201,7 @@ def is_hallucination(clean: str, raw_lower: str = "") -> tuple:
         )
 
     # Price/commercial number detection
-    # "99 rupees", "at only 99", "from the 99 store"
-    price_pattern = _re.compile(r'\b\d+\s*(?:rupees?|rs\.?|dollars?|euros?)\b')
-    if price_pattern.search(clean):
+    if _PRICE_RE.search(clean):
         return True, "price mention detected — likely commercial audio"
 
     return False, ""
