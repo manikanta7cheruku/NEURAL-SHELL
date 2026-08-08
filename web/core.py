@@ -18,14 +18,15 @@ from colorama import Fore
 colorama.init(autoreset=True)
 
 
-def web_search(query, max_results=2):
+def web_search(query, max_results=2, timeout=5):
     """
     Search the web and return formatted results for LLM context.
+    timeout: seconds to wait for DuckDuckGo. Default 5. Never block the voice loop.
     """
     print(Fore.CYAN + f"[WEB] Searching: '{query}'...")
-    
+
     try:
-        ddgs = DDGS()
+        ddgs = DDGS(timeout=timeout)
         results_raw = ddgs.text(query, max_results=max_results)
         
         results = []
@@ -46,16 +47,11 @@ def web_search(query, max_results=2):
             return ""
         
         formatted = "=== WEB SEARCH RESULTS ===\n"
-        formatted += f"Query: {query}\n"
-        
+
         for i, r in enumerate(results, 1):
-            formatted += f"\n[{i}] {r['title']}\n"
-            formatted += f"    {r['body']}\n"
-        
-        formatted += "=== END WEB RESULTS ===\n"
-        formatted += "Use these search results to answer the user's question accurately. "
-        formatted += "Summarize naturally — do NOT dump raw results. "
-        formatted += "If results don't answer the question, say what you found and that you couldn't find an exact answer."
+            formatted += f"[{i}] {r['title']}\n{r['body']}\n\n"
+
+        formatted += "=== END WEB SEARCH RESULTS ==="
         
         print(Fore.GREEN + f"[WEB] Found {len(results)} results.")
         return formatted
@@ -65,14 +61,15 @@ def web_search(query, max_results=2):
         return ""
 
 
-def web_news(query, max_results=2):
+def web_news(query, max_results=2, timeout=5):
     """
     Search for news specifically.
+    timeout: seconds to wait for DuckDuckGo. Default 5.
     """
     print(Fore.CYAN + f"[WEB] Searching news: '{query}'...")
-    
+
     try:
-        ddgs = DDGS()
+        ddgs = DDGS(timeout=timeout)
         results_raw = ddgs.news(query, max_results=max_results)
         
         results = []
@@ -105,8 +102,7 @@ def web_news(query, max_results=2):
                 formatted += f" — {r['date']}"
             formatted += f"\n    {r['body']}\n"
         
-        formatted += "=== END NEWS ===\n"
-        formatted += "Summarize these news items naturally for the user. Be concise."
+        formatted += "=== END NEWS RESULTS ==="
         
         print(Fore.GREEN + f"[WEB] Found {len(results)} news items.")
         return formatted
