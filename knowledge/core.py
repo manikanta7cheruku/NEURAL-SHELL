@@ -105,11 +105,24 @@ def search_knowledge(query, top_k=None):
         distances = results['distances'][0] if results.get('distances') else [0] * len(docs)
         metadatas = results['metadatas'][0] if results.get('metadatas') else [{}] * len(docs)
         
-        # Filter by relevance — cosine distance < 1.2 (generous for document Q&A)
-        # Lower threshold was rejecting valid chunks from uploaded docs
+        # Cosine distance threshold.
+        # 0.0 = identical. 1.0 = orthogonal. 2.0 = opposite.
+        # 0.55 means the chunk must share at least meaningful semantic overlap
+        # with the query. Chunks above this are unrelated — injecting them
+        # causes the LLM to confabulate connections that do not exist.
+        # For explicit doc-reference queries ("summarize the PDF") this is
+        # loosened to 0.85 since the user is explicitly asking about content.
+        _threshold = 0.85 if any(
+            t in query.lower() for t in [
+                "summarize", "summary", "in the document", "in the file",
+                "in the pdf", "from the file", "uploaded", "indexed",
+                "what does it say", "what's in", "contents of",
+            ]
+        ) else 0.55
+
         relevant = []
         for doc, dist, meta in zip(docs, distances, metadatas):
-            if dist < 1.2:
+            if dist < _threshold:
                 source = meta.get("source", "unknown")
                 relevant.append((doc, dist, source))
         
