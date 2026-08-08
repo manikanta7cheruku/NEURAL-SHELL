@@ -32,6 +32,11 @@ _MIN_NOISE_FLOOR     = 150.0  # raised from 50 — prevents music/TV triggering 
 _MIN_VALID_RMS       = 20.0  # below this = mic not ready
 _DEFAULT_FLOOR       = 200.0 # safe default if calibration fails
 
+def get_min_noise_floor() -> float:
+    """Public accessor for minimum noise floor. Use instead of _MIN_NOISE_FLOOR directly."""
+    return _MIN_NOISE_FLOOR
+
+
 # State
 _noise_floor         = _DEFAULT_FLOOR
 _noise_samples       = []
@@ -84,24 +89,35 @@ def on_timeout():
     After enough consecutive timeouts, ease the floor down.
 
     Prevents stuck-high threshold after a noisy event ends.
+
+    Lock order: always acquire _floor_lock first, then _timeout_lock.
+    Never hold one while acquiring the other in reverse order.
+    Here we read/write _noise_floor outside _timeout_lock to avoid
+    nested acquisition deadlock risk.
     """
     global _consecutive_timeouts, _noise_floor
 
+    # Step 1: check and increment timeout counter under its own lock
+    should_decay = False
     with _timeout_lock:
         _consecutive_timeouts += 1
         if _consecutive_timeouts >= _DECAY_AFTER:
-            with _floor_lock:
-                if _noise_floor > _MIN_NOISE_FLOOR:
-                    old  = _noise_floor * _MULTIPLIER
-                    _noise_floor = max(
-                        _MIN_NOISE_FLOOR, _noise_floor * _DECAY_FACTOR
-                    )
-                    print(Fore.CYAN + (
-                        f"[EARS] Environment quieter — "
-                        f"threshold eased: {old:.0f} -> "
-                        f"{_noise_floor * _MULTIPLIER:.0f}"
-                    ))
+            should_decay          = True
             _consecutive_timeouts = 0
+
+    # Step 2: apply decay under floor lock only — no nesting
+    if should_decay:
+        with _floor_lock:
+            if _noise_floor > _MIN_NOISE_FLOOR:
+                old          = _noise_floor * _MULTIPLIER
+                _noise_floor = max(
+                    _MIN_NOISE_FLOOR, _noise_floor * _DECAY_FACTOR
+                )
+                print(Fore.CYAN + (
+                    f"[EARS] Environment quieter — "
+                    f"threshold eased: {old:.0f} -> "
+                    f"{_noise_floor * _MULTIPLIER:.0f}"
+                ))
 
 
 def on_audio_captured():
@@ -204,7 +220,7 @@ def calibrate():
 
         print(Fore.GREEN + (
             f"[EARS] Calibration complete — "
-            f"floor: {measured:.0f} "
+            f"floor: {measured:.0f} | "
             f"threshold: {measured * _MULTIPLIER:.0f}"
         ))
 
@@ -212,9 +228,5 @@ def calibrate():
         _noise_samples = [measured] * 5
         _noise_floor   = measured
         _initial_floor = measured
-
-    print(Fore.GREEN + (
-        f"[EARS] Calibration complete — "
-        f"noise floor: {measured:.0f} | "
-        f"voice threshold: {measured * _MULTIPLIER:.0f}"
-    ))
+    # Single completion message — the earlier branch already printed one
+    # when measurements succeeded; this prints only for the default-floor path
