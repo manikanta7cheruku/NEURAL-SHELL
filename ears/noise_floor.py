@@ -141,60 +141,72 @@ def _measure_rms(duration: float = 1.5) -> float:
 def calibrate():
     """
     Measure ambient noise floor at startup.
-    Retries up to 3 times if RMS is below valid minimum.
-    Uses safe default if all retries fail.
 
-    Call once at module load.
+    Strategy:
+        Take 3 measurements of 1.0s each.
+        Use the MINIMUM valid measurement.
+        A single noisy event (TV ad, phone alert) should not permanently
+        raise the threshold — minimum gives the true quiet floor.
+
+    Hard cap:
+        If measured floor exceeds 1000, cap at 500.
+        Reason: if room is extremely loud during calibration, a cap
+        prevents threshold from becoming so high Seven never triggers.
+        User will need to re-calibrate in a quieter moment (restart Seven).
+
+    Fallback:
+        If all measurements are below MIN_VALID_RMS (mic not ready):
+        use DEFAULT_FLOOR = 200.
     """
     global _noise_samples, _noise_floor, _initial_floor
     import time
 
-    print(Fore.CYAN + "[EARS] Calibrating — stay quiet for 1.5 seconds...")
+    print(Fore.CYAN + (
+        "[EARS] Calibrating — 3 samples, using minimum..."
+    ))
 
-    # Take 3 measurements and use the MINIMUM
-    # A single noisy event during calibration should not permanently
-    # raise the threshold. Minimum gives us the true ambient floor.
     measurements = []
     for attempt in range(1, 4):
-        m = _measure_rms(duration=1.5)
+        m = _measure_rms(duration=1.0)
         if m >= _MIN_VALID_RMS:
             measurements.append(m)
             print(Fore.CYAN + (
-                f"[EARS] Calibration sample {attempt}: RMS={m:.0f}"
+                f"[EARS] Calibration sample {attempt}: {m:.0f}"
             ))
         else:
             print(Fore.YELLOW + (
-                f"[EARS] Calibration sample {attempt}: "
-                f"RMS={m:.0f} (too low — mic may not be ready)"
+                f"[EARS] Calibration sample {attempt}: {m:.0f} "
+                f"(below minimum — mic may not be ready)"
             ))
         if attempt < 3:
-            time.sleep(1.0)
+            time.sleep(0.8)
 
     if not measurements:
-        # All samples were too low — mic not ready, use safe default
         print(Fore.YELLOW + (
-            f"[EARS] All calibration samples too low — "
-            f"using safe default: floor={_DEFAULT_FLOOR:.0f}, "
+            f"[EARS] No valid calibration samples — "
+            f"using default: floor={_DEFAULT_FLOOR:.0f} "
             f"threshold={_DEFAULT_FLOOR * _MULTIPLIER:.0f}"
         ))
         measured = _DEFAULT_FLOOR
     else:
-        # Use minimum — represents true quiet floor, not a noise spike
         measured = min(measurements)
-        if len(measurements) > 1:
-            print(Fore.CYAN + (
-                f"[EARS] Calibration samples: "
-                f"{[f'{x:.0f}' for x in measurements]} "
-                f"— using minimum: {measured:.0f}"
-            ))
 
-    if measured < _MIN_VALID_RMS:
-        print(Fore.YELLOW + (
-            f"[EARS] Calibration failed after 3 attempts — "
-            f"using safe default: floor={_DEFAULT_FLOOR:.0f}, "
-            f"threshold={_DEFAULT_FLOOR * _MULTIPLIER:.0f}"
+        # Hard cap — if environment is very loud during calibration,
+        # cap the floor so Seven can still hear normal speech.
+        # Without this cap: threshold=10945, nothing triggers.
+        if measured > 1000:
+            print(Fore.YELLOW + (
+                f"[EARS] Measured floor {measured:.0f} is very high "
+                f"(loud environment during calibration). "
+                f"Capping at 500 — Seven will still respond to speech."
+            ))
+            measured = 500
+
+        print(Fore.GREEN + (
+            f"[EARS] Calibration complete — "
+            f"floor: {measured:.0f} "
+            f"threshold: {measured * _MULTIPLIER:.0f}"
         ))
-        measured = _DEFAULT_FLOOR
 
     with _floor_lock:
         _noise_samples = [measured] * 5
