@@ -285,10 +285,12 @@ Personality: Humor {humor}/100, Honesty {honesty}/100. Adjustable in Settings > 
     web_module = ""
     if "WEB SEARCH RESULTS" in input_text or "WEB SEARCH" in input_text:
         web_module = """
-WEB RESULTS: Extract the direct answer. State it in one sentence.
-Never say "according to my search" or "based on results".
-If results lack a clear answer: "I could not find a clear answer on that."
-Never fabricate prices, scores, weather, or news."""
+WEB RESULTS BELOW: One sentence answer only. Extract the fact. State it directly.
+Weather: state temperature and condition. "It is 28 degrees and partly cloudy."
+News: state the headline fact only.
+Price: state the number.
+Never mention the search. Never reference past conversations. Never say "according to".
+Ignore any recalled memories for this response — use only the web results below."""
 
     return "\n".join(filter(None, [
         core, time_module, plan_module, meta_module, web_module
