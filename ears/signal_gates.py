@@ -58,21 +58,21 @@ def check(wav_data: bytes, threshold: float) -> tuple:
                 f"energy gate: RMS {rms:.0f} < threshold {threshold:.0f}"
             )
 
-        # Gate 2: duration
-        if dur < _MIN_DURATION:
+        # Gate 2: duration (min)
+        if duration < _MIN_DURATION:
             return False, rms, (
-                f"duration gate: {dur:.2f}s below minimum {_MIN_DURATION}s"
+                f"duration gate: {duration:.2f}s below minimum {_MIN_DURATION}s"
             )
 
-        # Maximum duration gate
+        # Gate 2b: duration (max)
         # Real voice commands are under 12 seconds.
         # Longer clips are almost always ambient audio — ads, TV, music.
         # 15s is phrase_time_limit in listen() — clips near that limit
         # are almost never real commands.
         _MAX_DURATION = 12.0
-        if dur > _MAX_DURATION:
+        if duration > _MAX_DURATION:
             return False, rms, (
-                f"duration gate: {dur:.2f}s above maximum {_MAX_DURATION}s "
+                f"duration gate: {duration:.2f}s above maximum {_MAX_DURATION}s "
                 f"— likely ambient audio"
             )
 
