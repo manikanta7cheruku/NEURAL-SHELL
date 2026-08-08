@@ -687,7 +687,10 @@ def seven_logic():
                     from ears.wake_word import check_and_strip as _ww_check
                     user_input, _ww_found = _ww_check(user_input, _ww_words)
                     if not _ww_found:
-                        print(Fore.YELLOW + f"[GATE2-WW] No wake word — discarded")
+                        print(Fore.YELLOW + "[GATE2-WW] No wake word — discarded")
+                        continue
+                    if user_input and len(user_input.strip()) < 2:
+                        print(Fore.YELLOW + "[GATE2-WW] Wake word only, no command — discarded")
                         continue
                 except Exception as _ww_err:
                     print(Fore.YELLOW + f"[GATE2-WW] Error: {_ww_err}")
@@ -737,14 +740,23 @@ def seven_logic():
 
             if _sv_enabled:
                 if not ctx.is_voice_id_enabled():
-                    # Gate is on but nobody is enrolled. Settings UI tells
-                    # the user Seven will reject all audio in this state —
-                    # previously this branch let everyone through instead.
                     print(Fore.YELLOW + "[GATE3-SV] Enabled but no voice enrolled — audio discarded")
                     continue
                 if speaker_id == "unknown":
                     print(Fore.YELLOW + "[GATE3-SV] Unknown speaker — audio discarded")
                     continue
+            elif not _sv_enabled and speaker_id == "unknown":
+                # Voice ID disabled — log only, do not block
+                pass
+
+            # Double-speech lock
+            # If Seven is already speaking (reminder, alert, etc.) and user speaks,
+            # do not process voice input until current speech finishes.
+            if ctx.mouth.is_speaking():
+                print(Fore.YELLOW + "[EARS] Speaking in progress — input held")
+                import time as _hold
+                _hold.sleep(0.5)
+                continue
 
             # Voice enrollment trigger
             if "enroll my voice" in text_lower or "enroll voice" in text_lower:
