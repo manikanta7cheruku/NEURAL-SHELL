@@ -26,9 +26,10 @@ OFFLINE: Yes. Pure numpy. No external dependencies.
 import numpy as np
 from colorama import Fore
 
-_TARGET_RMS = 0.08   # target output RMS level
-_MAX_GAIN   = 8.0    # reduced from 20x — prevents noise amplification
-_MIN_GAIN   = 0.1    # never attenuate more than 10x
+_TARGET_RMS      = 0.08   # target output RMS level
+_MAX_GAIN        = 3.0    # conservative — never amplify more than 3x
+_MIN_GAIN        = 0.5    # never attenuate more than 2x
+_NOISE_FLOOR_AGC = 0.02   # below this RMS — do not touch, it is noise
 
 # Smoothed gain — prevents sudden volume jumps between clips
 _smoothed_gain = 1.0
@@ -37,17 +38,17 @@ _SMOOTH_FACTOR = 0.3   # how quickly gain adapts (0=no adapt, 1=instant)
 
 def apply(audio: np.ndarray) -> np.ndarray:
     """
-    Apply AGC to float32 audio array.
+    Conservative AGC.
 
-    Conservative AGC — only corrects large deviations.
-    Does not amplify near-silence (would amplify noise floor).
-    Does not apply large gain to already-reasonable signals.
+    Rules:
+        Below 0.02 RMS: do nothing — that is noise, not speech.
+        Already in acceptable range (0.04-0.16): do nothing.
+        Outside range: gentle correction only, max 3x gain.
 
-    Args:
-        audio: float32 numpy array, range -1.0 to 1.0
-
-    Returns:
-        float32 numpy array with normalized volume
+    This means AGC only activates for:
+        Very loud input (shouting): gentle attenuation.
+        Reasonably quiet speech: gentle amplification.
+    It never activates for near-silence.
     """
     global _smoothed_gain
 
@@ -56,37 +57,36 @@ def apply(audio: np.ndarray) -> np.ndarray:
 
     rms = float(np.sqrt(np.mean(audio ** 2)))
 
-    # Do not touch near-silence — amplifying silence amplifies noise
-    if rms < 0.005:
-        return audio
-
-    # If signal is already in acceptable range, do not touch it
-    # Acceptable: 50% to 200% of target RMS
-    if _TARGET_RMS * 0.5 <= rms <= _TARGET_RMS * 2.0:
+    # Hard floor — below this is noise, not speech
+    # Do not amplify noise. Return untouched.
+    if rms < _NOISE_FLOOR_AGC:
         _smoothed_gain = 1.0
         return audio
 
-    # Calculate required gain
-    raw_gain = _TARGET_RMS / rms
+    # If already in acceptable range, skip correction entirely
+    # Acceptable band: 50% to 200% of target RMS
+    lower = _TARGET_RMS * 0.5   # 0.04
+    upper = _TARGET_RMS * 2.0   # 0.16
+    if lower <= rms <= upper:
+        _smoothed_gain = 1.0
+        return audio
 
-    # Conservative limits — AGC is a helper not a transformer
+    # Outside acceptable range — apply gentle correction
+    raw_gain = _TARGET_RMS / rms
     raw_gain = max(_MIN_GAIN, min(_MAX_GAIN, raw_gain))
 
-    # Smooth gain changes
+    # Smooth gain transitions
     _smoothed_gain = (
         _SMOOTH_FACTOR * raw_gain +
         (1.0 - _SMOOTH_FACTOR) * _smoothed_gain
     )
 
-    applied = audio * _smoothed_gain
-
-    # Clip to valid range
-    applied = np.clip(applied, -1.0, 1.0)
-
+    applied = np.clip(audio * _smoothed_gain, -1.0, 1.0)
     output_rms = float(np.sqrt(np.mean(applied ** 2)))
+
     print(Fore.CYAN + (
         f"[AGC] gain={_smoothed_gain:.2f}x "
-        f"input_rms={rms:.4f} output_rms={output_rms:.4f}"
+        f"input={rms:.4f} output={output_rms:.4f}"
     ))
 
     return applied.astype(np.float32)
