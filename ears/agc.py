@@ -84,10 +84,12 @@ def apply(audio: np.ndarray) -> np.ndarray:
     applied = np.clip(audio * _smoothed_gain, -1.0, 1.0)
     output_rms = float(np.sqrt(np.mean(applied ** 2)))
 
-    print(Fore.CYAN + (
-        f"[AGC] gain={_smoothed_gain:.2f}x "
-        f"input={rms:.4f} output={output_rms:.4f}"
-    ))
+    # Only print when gain correction is significant (>20% change)
+    if abs(_smoothed_gain - 1.0) > 0.2:
+        print(Fore.CYAN + (
+            f"[AGC] gain={_smoothed_gain:.2f}x "
+            f"input={rms:.4f} output={output_rms:.4f}"
+        ))
 
     return applied.astype(np.float32)
 
@@ -117,15 +119,24 @@ def apply_to_wav_bytes(wav_bytes: bytes) -> bytes:
         if channels == 2:
             stereo = audio.reshape(-1, 2)
             mono   = stereo.mean(axis=1)
-            normalized_mono = apply(mono)
-            # Apply same gain to both channels
-            gain = (
-                float(np.sqrt(np.mean(normalized_mono ** 2))) /
-                max(float(np.sqrt(np.mean(mono ** 2))), 1e-8)
-            )
-            normalized_stereo = stereo * gain
-            normalized_stereo = np.clip(normalized_stereo, -1.0, 1.0)
-            audio_out = normalized_stereo.flatten()
+
+            mono_rms = float(np.sqrt(np.mean(mono ** 2)))
+            if mono_rms < _NOISE_FLOOR_AGC:
+                # Below noise floor — return untouched (same logic as apply())
+                audio_out = audio
+            else:
+                # Compute the same gain apply() would use, reuse it on stereo
+                # Do NOT call apply() and then reverse-engineer the gain —
+                # that circular calculation gave gain ≈ 1.0 always.
+                lower = _TARGET_RMS * 0.5
+                upper = _TARGET_RMS * 2.0
+                if lower <= mono_rms <= upper:
+                    audio_out = audio
+                else:
+                    raw_gain  = _TARGET_RMS / mono_rms
+                    raw_gain  = max(_MIN_GAIN, min(_MAX_GAIN, raw_gain))
+                    normalized_stereo = np.clip(stereo * raw_gain, -1.0, 1.0)
+                    audio_out = normalized_stereo.flatten()
         else:
             audio_out = apply(audio)
 
