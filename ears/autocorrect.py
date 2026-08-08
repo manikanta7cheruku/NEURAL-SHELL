@@ -65,6 +65,19 @@ _CORRECTIONS = [
     ("five explorer",  "file explorer",  88),
     ("filed explorer", "file explorer",  88),
 
+    # Close command variants
+    # Whisper frequently mishears "close" in noisy environments
+    ("lose",   "close",  85),
+    ("clothes","close",  85),
+    ("clues",  "close",  85),
+    ("close",  "close",  100),  # identity
+
+    # Camera command variants
+    ("lose camera",    "close camera",   88),
+    ("news camera",    "close camera",   82),
+    ("clues camera",   "close camera",   88),
+    ("clothes camera", "close camera",   85),
+
     # Voice enrollment
     ("and roll my voice", "enroll my voice", 82),
     ("and roll",          "enroll",          82),
