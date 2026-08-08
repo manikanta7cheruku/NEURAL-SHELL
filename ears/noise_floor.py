@@ -115,12 +115,14 @@ def _measure_rms(duration: float = 1.5) -> float:
     """
     Record ambient audio and return RMS.
     Returns 0.0 on failure.
+    Handles device-busy errors from concurrent audio listeners.
     """
-    import time
     import speech_recognition as sr
 
     try:
         r = sr.Recognizer()
+        # Do not call adjust_for_ambient_noise — it interferes with our
+        # own calibration and can cause the returned audio to be silence
         with sr.Microphone() as source:
             audio = r.record(source, duration=duration)
             wav   = audio.get_wav_data()
@@ -150,15 +152,16 @@ def calibrate():
     print(Fore.CYAN + "[EARS] Calibrating — stay quiet for 1.5 seconds...")
 
     measured = 0.0
-    for attempt in range(1, 4):
+    for attempt in range(1, 6):  # 5 attempts, 2s apart = up to 10s wait
         measured = _measure_rms(duration=1.5)
         if measured >= _MIN_VALID_RMS:
             break
         print(Fore.YELLOW + (
             f"[EARS] Calibration attempt {attempt}: "
-            f"RMS={measured:.0f} (too low — mic may not be ready)"
+            f"RMS={measured:.0f} (mic not ready or device busy — waiting)"
         ))
-        time.sleep(1.0)
+        # Longer wait gives audio driver time to release from other processes
+        time.sleep(2.0)
 
     if measured < _MIN_VALID_RMS:
         print(Fore.YELLOW + (
