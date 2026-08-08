@@ -28,7 +28,7 @@ from colorama import Fore
 _MULTIPLIER          = 2.2   # threshold = floor * MULTIPLIER
 _WINDOW              = 20    # rolling average window
 _NOISE_FLOOR_CAP     = 500   # never higher than this (TV/music bleed)
-_MIN_NOISE_FLOOR     = 50.0  # never lower than this
+_MIN_NOISE_FLOOR     = 150.0  # raised from 50 — prevents music/TV triggering at low threshold
 _MIN_VALID_RMS       = 20.0  # below this = mic not ready
 _DEFAULT_FLOOR       = 200.0 # safe default if calibration fails
 
