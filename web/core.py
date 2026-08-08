@@ -49,7 +49,14 @@ def web_search(query, max_results=2, timeout=5):
         formatted = "=== WEB SEARCH RESULTS ===\n"
 
         for i, r in enumerate(results, 1):
-            formatted += f"[{i}] {r['title']}\n{r['body']}\n\n"
+            # Strip timing phrases the LLM tends to echo verbatim.
+            _body = r['body']
+            import re as _re
+            _body = _re.sub(
+                r'\d+\s+(?:hour|hours|minute|minutes|day|days|week|weeks)\s+ago',
+                '', _body
+            ).strip()
+            formatted += f"[{i}] {r['title']}\n{_body}\n\n"
 
         formatted += "=== END WEB SEARCH RESULTS ==="
         
@@ -95,12 +102,7 @@ def web_news(query, max_results=2, timeout=5):
         formatted += f"Topic: {query}\n"
         
         for i, r in enumerate(results, 1):
-            formatted += f"\n[{i}] {r['title']}"
-            if r['source']:
-                formatted += f" ({r['source']})"
-            if r['date']:
-                formatted += f" — {r['date']}"
-            formatted += f"\n    {r['body']}\n"
+            formatted += f"[{i}] {r['title']}\n    {r['body']}\n"
         
         formatted += "=== END NEWS RESULTS ==="
         
