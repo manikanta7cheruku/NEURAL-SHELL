@@ -221,7 +221,10 @@ def _save_conversation(prompt_text, result, speaker_id):
         _save_user_id = speaker_id if speaker_id not in ("default", "unknown") else (
             config.KEY.get("identity", {}).get("user_name", "default").lower() or "default"
         )
-        _source = "voice" if speaker_id not in ("default",) else "chat"
+        # source=voice: came from microphone (speaker_id is anything except "default")
+        # source=chat:  came from API, Console UI, or chat route (speaker_id="default")
+        # "voice_user" is set by main.py when Voice ID is disabled but mic was used
+        _source = "voice" if speaker_id not in ("default", "unknown") else "chat"
 
         # Filter 7: plan limit check
         try:
