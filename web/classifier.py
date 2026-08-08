@@ -22,9 +22,10 @@ LOGIC:
 # Words that signal the user wants LIVE/CURRENT information
 TIME_SENSITIVE = [
     "today", "right now", "currently", "latest", "recent",
-    "this week", "this month", "this year", "yesterday",
-    "tomorrow", "tonight"
+    "this week", "this month", "this year", "tonight"
 ]
+# yesterday and tomorrow removed - these are personal/local context words
+# "what did I do yesterday" and "remind me tomorrow" are not web queries
 
 REALTIME_DATA = [
     "weather", "temperature", "forecast",
@@ -114,27 +115,40 @@ def needs_web_search(user_input):
         if word in clean:
             return True, clean
     
-    # RULE 6: "What is [specific thing]" that LLM might not know
-    # Questions about specific people, companies, events after 2023
-    specific_indicators = [
-        "who is", "what is", "where is",
-        "how much", "how many", "when did", "when will",
-        "is it true", "did they", "has the"
+    # RULE 6: Current events about real-world entities
+    # Fires only when question starts with a factual indicator
+    # AND contains a signal that the answer changes over time.
+    # Pure knowledge questions (math, programming, history) stay local.
+    _factual_starters = [
+        "who is", "who are", "what is", "what are",
+        "where is", "how much", "how many",
+        "when did", "when will", "when is",
+        "is it true", "did they", "has the",
     ]
-    
-    # Only trigger if combined with a proper noun hint or specific detail
-    for indicator in specific_indicators:
-        if clean.startswith(indicator):
-            # Check if it's a general knowledge question LLM can handle
-            general_knowledge = [
-                "python", "java", "programming", "math", "science",
-                "history", "geography", "capital", "continent",
-                "planet", "element", "formula", "equation"
-            ]
-            is_general = any(gk in clean for gk in general_knowledge)
-            if not is_general:
-                # Might need search — but don't force it
-                # Return True only if also has time-sensitive context
-                pass
-    
+    _local_knowledge = {
+        "python", "java", "javascript", "programming", "code", "coding",
+        "math", "mathematics", "science", "physics", "chemistry", "biology",
+        "history", "geography", "capital of", "continent", "country",
+        "planet", "element", "formula", "equation", "theorem",
+        "meaning of", "definition of", "what does", "how does",
+        "you", "seven", "your", "i ", "my ", "me ",
+    }
+    _current_signals = {
+        "now", "currently", "today", "latest", "recent", "new",
+        "this year", "2024", "2025", "2026",
+        "ceo", "president", "prime minister", "founder", "worth",
+        "price", "cost", "value", "stock", "earnings",
+        "population", "rank", "rating", "score",
+    }
+
+    for starter in _factual_starters:
+        if clean.startswith(starter):
+            is_local = any(lk in clean for lk in _local_knowledge)
+            if is_local:
+                break
+            has_current_signal = any(cs in clean for cs in _current_signals)
+            if has_current_signal:
+                return True, clean
+            break
+
     return False, None
