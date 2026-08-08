@@ -80,6 +80,34 @@ def is_hallucination(clean: str, raw_lower: str = "") -> tuple:
     if clean in data["exact"]:
         return True, f"exact match: '{clean}'"
 
+    # Partial match — text starts with a known hallucination phrase
+    # Catches: "thank you bye bye", "thanks for watching everyone"
+    # where the full string is not in exact list but starts with one
+    exact_set = set(data["exact"])
+    for phrase in exact_set:
+        if not phrase:
+            continue
+        if clean.startswith(phrase + " ") or clean.startswith(phrase + "."):
+            return True, f"starts with hallucination: '{phrase}'"
+
+    # Hallucination saturation — more than half the words are known hallucinations
+    # Catches: "thank you bye bye" where 3/3 words are hallucination phrases
+    words = clean.split()
+    if len(words) >= 2:
+        # Check individual words against single-word hallucinations
+        single_word_hallucinations = {
+            p for p in exact_set
+            if p and len(p.split()) == 1
+        }
+        hallucination_word_count = sum(
+            1 for w in words if w in single_word_hallucinations
+        )
+        if hallucination_word_count / len(words) >= 0.75:
+            return True, (
+                f"hallucination saturation "
+                f"({hallucination_word_count}/{len(words)} words): '{clean}'"
+            )
+
     # Outro hallucinations — Whisper invents these from TV/audio bleed
     if clean.startswith(("thank you", "thanks")):
         if any(k in clean for k in (
