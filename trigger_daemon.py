@@ -2161,22 +2161,27 @@ def main():
     # Initialize listeners
     hotkey_listener = HotkeyListener()
     audio_listener  = AudioListener()
+    voice_listener  = VoiceListener()
 
+    # Single reload function — wires all three listeners
     def reload_all():
         nonlocal triggers
         triggers = load_triggers()
         hotkey_listener.reload(triggers)
         audio_listener.reload(triggers)
+        voice_listener.reload()
         print(f"[TRIGGER DAEMON] Reloaded: {len(triggers)} triggers")
 
     reload_poller = ReloadPoller(on_reload=reload_all)
 
-    # Load into listeners
+    # Load triggers into listeners
     hotkey_listener.reload(triggers)
     audio_listener.reload(triggers)
 
-    # Pre-warm overlay daemon at startup
-    threading.Thread(target=_ensure_overlay_alive_safe, daemon=True).start()
+    # Pre-warm overlay daemon
+    threading.Thread(
+        target=_ensure_overlay_alive_safe, daemon=True
+    ).start()
 
     # Pre-load heavy modules so first trigger fires instantly
     def _preload():
@@ -2187,23 +2192,8 @@ def main():
             print("[TRIGGER DAEMON] Modules pre-loaded")
         except Exception:
             pass
+
     threading.Thread(target=_preload, daemon=True).start()
-
-    # Voice trigger listener
-    voice_listener = VoiceListener()
-
-    def reload_all():
-        nonlocal triggers
-        triggers = load_triggers()
-        hotkey_listener.reload(triggers)
-        audio_listener.reload(triggers)
-        voice_listener.reload()
-        print(f"[TRIGGER DAEMON] Reloaded: {len(triggers)} triggers")
-
-    # Note: reload_all is redefined here to include voice_listener.
-    # The ReloadPoller was initialized before voice_listener existed,
-    # so we update its callback reference now.
-    reload_poller._on_reload = reload_all
 
     # Start all listeners
     hotkey_listener.start()
@@ -2213,7 +2203,12 @@ def main():
 
     print("[TRIGGER DAEMON] All listeners active. Waiting for triggers...")
 
-    _last_health_log = time.time()
+    # Track consecutive hotkey check failures
+    # Require 3 consecutive failures before restarting
+    # Prevents false restarts from brief GIL pauses
+    _hotkey_fail_streak = 0
+    _last_health_log    = time.time()
+
     try:
         while True:
             time.sleep(30)
@@ -2226,49 +2221,61 @@ def main():
                     daemon=True
                 ).start()
 
-            # Voice listener health check
-            if not voice_listener.is_alive() and voice_listener._phrase_map:
-                print("[TRIGGER DAEMON] Voice listener stopped — restarting")
-                voice_listener = VoiceListener()
-                voice_listener.start()
-
-            # Self health check — verify hotkey listener alive
-            # Use consecutive failure count before restarting
-            # to avoid false restarts from brief GIL pauses
-            _listener_obj = hotkey_listener._listener
-            _listener_dead = (
-                _listener_obj is None or
-                not getattr(_listener_obj, 'running', True) is True
+            # Hotkey listener health check
+            # Only restart after 3 consecutive failures (90s of failures)
+            # to avoid false restarts from brief internal state transitions
+            _listener_obj   = hotkey_listener._listener
+            _listener_alive = (
+                _listener_obj is not None and
+                getattr(_listener_obj, 'running', False) == True
             )
-            if _listener_dead:
-                _hotkey_fail_count = getattr(
-                    main, '_hotkey_fail_count', 0
-                ) + 1
-                main._hotkey_fail_count = _hotkey_fail_count
+
+            if not _listener_alive:
+                _hotkey_fail_streak += 1
                 print(
-                    f"[TRIGGER DAEMON] Hotkey check failed "
-                    f"({_hotkey_fail_count}/3)"
+                    f"[TRIGGER DAEMON] Hotkey check: not running "
+                    f"(streak={_hotkey_fail_streak}/3)"
                 )
-                if _hotkey_fail_count >= 3:
-                    print("[TRIGGER DAEMON] Hotkey listener confirmed dead — restarting")
+                if _hotkey_fail_streak >= 3:
+                    print(
+                        "[TRIGGER DAEMON] Hotkey listener confirmed dead "
+                        "— restarting"
+                    )
                     try:
                         hotkey_listener.stop()
                         time.sleep(1.0)
                         hotkey_listener.start()
                         hotkey_listener.reload(triggers)
-                        main._hotkey_fail_count = 0
+                        _hotkey_fail_streak = 0
                         print("[TRIGGER DAEMON] Hotkey listener restarted")
                     except Exception as _re:
-                        print(f"[TRIGGER DAEMON] Restart failed: {_re}")
+                        print(
+                            f"[TRIGGER DAEMON] Listener restart failed: {_re}"
+                        )
+                        print(
+                            "[TRIGGER DAEMON] Exiting for Task Scheduler restart"
+                        )
                         sys.exit(1)
             else:
-                main._hotkey_fail_count = 0
+                # Reset streak on healthy check
+                _hotkey_fail_streak = 0
 
-            # Heartbeat log every 30 minutes so users know daemon is alive
+            # Voice listener health check
+            if not voice_listener.is_alive() and voice_listener._phrase_map:
+                print(
+                    "[TRIGGER DAEMON] Voice listener stopped — restarting"
+                )
+                voice_listener = VoiceListener()
+                voice_listener.start()
+
+            # Heartbeat every 30 minutes
             if time.time() - _last_health_log > 1800:
-                print(f"[TRIGGER DAEMON] Heartbeat OK. "
-                      f"Hotkeys: {len(hotkey_listener._hotkey_map)}, "
-                      f"Overlay: {'up' if _is_overlay_alive() else 'down'}")
+                print(
+                    f"[TRIGGER DAEMON] Heartbeat — "
+                    f"hotkeys: {len(hotkey_listener._hotkey_map)}, "
+                    f"overlay: {'up' if _is_overlay_alive() else 'down'}, "
+                    f"voice_phrases: {len(voice_listener._phrase_map)}"
+                )
                 _last_health_log = time.time()
 
     except KeyboardInterrupt:
