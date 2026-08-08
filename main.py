@@ -734,9 +734,22 @@ def seven_logic():
                 continue
 
             # Speaker ID
+            # audio_path is "__voice__" sentinel when input came from microphone.
+            # It is None when input came from chat API.
+            _came_from_voice = (audio_path == "__voice__")
             speaker_id = "default"
-            if audio_path and ctx.is_voice_id_enabled():
-                speaker_id = ctx.identify_speaker(audio_path)
+
+            if _came_from_voice:
+                if ctx.is_voice_id_enabled():
+                    # Voice ID enabled — identify the speaker
+                    # Note: voice_id needs a real audio file.
+                    # For now, use "voice_user" as the speaker ID when
+                    # Voice ID is disabled but input came from mic.
+                    speaker_id = ctx.identify_speaker(audio_path) if audio_path != "__voice__" else "voice_user"
+                else:
+                    # Voice ID disabled — mark as voice_user so brain.py
+                    # saves with source="voice" not source="chat"
+                    speaker_id = "voice_user"
                 print(Fore.CYAN + f"[VOICE ID] Speaker: {speaker_id}")
                 api_set_state("current_speaker", speaker_id)
 
