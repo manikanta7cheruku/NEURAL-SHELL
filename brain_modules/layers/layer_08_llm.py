@@ -163,7 +163,7 @@ def process(ctx, deps):
     # Voice gets tighter stops — halt at sentence boundaries aggressively.
     # Chat gets looser stops — allow paragraphs to form naturally.
     _base_stops = ["User:", "System:", "Seven:", "(Note", "(note", "Note to self"]
-    _voice_stops = _base_stops + ["\n\n", "\n"]
+    _voice_stops = _base_stops + ["\n\n"]
     _chat_stops  = _base_stops + ["\n\n"]
 
     payload = {
