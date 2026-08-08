@@ -33,18 +33,9 @@ from brain_modules.layer_result import LayerResult
 
 OLLAMA_URL = "http://127.0.0.1:11434/api/generate"
 
-# Questions that benefit from brief internal reasoning before answering.
-# These are questions where pattern-matching fails and actual thought wins.
-_REASONING_TRIGGERS = [
-    "meaning of", "purpose of", "why do", "why does", "why is",
-    "should i", "what do you think", "what are your thoughts",
-    "opinion on", "your view", "do you believe", "do you think",
-    "what would you", "if you were", "how would you",
-    "difference between", "better or worse", "which is better",
-    "is it worth", "would you recommend", "advice on",
-    "feel about", "how do you feel", "what does it mean",
-    "what makes", "what causes", "explain why",
-]
+# _REASONING_TRIGGERS removed: chain-of-thought disabled for llama3 local.
+# llama3 does not follow [THINK]/[ANSWER] format reliably at 4096 context.
+# Re-enable with llama3.1 or phi3:medium when tested.
 
 _LONG_TRIGGERS = [
     "tell me", "explain", "describe", "what can you",
@@ -114,19 +105,10 @@ def process(ctx, deps):
     if ctx.llm_note:
         full_prompt = ctx.llm_note + "\n\n" + full_prompt
 
-    # Chain-of-thought reasoning for complex questions.
-    # Inject a brief think instruction. The model reasons first,
-    # then answers. Reasoning is stripped before returning to user.
-    # No extra LLM call. No extra latency. Better answers.
-    _needs_reasoning = any(t in ctx.clean_in for t in _REASONING_TRIGGERS)
-    if _needs_reasoning and not ctx.is_command and not ctx.is_action_cmd:
-        full_prompt = (
-            full_prompt
-            + "\n\n[Think briefly before answering. "
-            + "Start with [THINK] on one line, write 1-2 sentences of reasoning, "
-            + "then write [ANSWER] and give your actual response. "
-            + "Be direct in the answer. The thinking is for you, not the user.]"
-        )
+    # Chain-of-thought removed: llama3 at local context sizes does not follow
+    # structured [THINK]/[ANSWER] format reliably. The instruction causes
+    # preamble generation instead of actual reasoning, degrading response quality.
+    # Revisit with phi3:medium or llama3.1 which follow instructions more precisely.
 
     # Determine response length
     needs_long  = any(t in ctx.clean_in for t in _LONG_TRIGGERS)
@@ -185,22 +167,7 @@ def process(ctx, deps):
 
         def _sentence_gen():
             full_reply = []
-            _in_think_block = False
             for sentence in stream_sentences(full_prompt, payload):
-                # Suppress reasoning block from reaching the user.
-                if "[THINK]" in sentence:
-                    _in_think_block = True
-                if "[ANSWER]" in sentence:
-                    _in_think_block = False
-                    # Yield only what comes after [ANSWER] on this sentence.
-                    _ans_part = sentence.split("[ANSWER]", 1)[-1].strip()
-                    if _ans_part:
-                        full_reply.append(_ans_part)
-                        yield _ans_part
-                    continue
-                if _in_think_block:
-                    full_reply.append(sentence)
-                    continue
                 full_reply.append(sentence)
                 yield sentence
 
@@ -237,7 +204,6 @@ def process(ctx, deps):
 
         if r.status_code == 200:
             reply = r.json().get("response", "").strip() or "Listening."
-            reply = _strip_reasoning(reply)
             reply = _clean_response(reply)
 
             if "VISUAL_REPORT:" not in ctx.prompt_text:
@@ -263,35 +229,6 @@ def process(ctx, deps):
     except Exception as e:
         print(Fore.RED + f"[BRAIN] Unexpected error: {e}")
         return LayerResult.stop("Something went wrong with my thinking.")
-
-
-def _strip_reasoning(text: str) -> str:
-    """
-    Strip internal reasoning block from LLM response.
-    The model generates [THINK]...[ANSWER] format for complex questions.
-    User only sees what comes after [ANSWER].
-    If no reasoning block present, returns text unchanged.
-    """
-    if "[ANSWER]" in text:
-        answer = text.split("[ANSWER]", 1)[-1].strip()
-        if answer:
-            return answer
-    if "[THINK]" in text:
-        # Model started reasoning but did not write [ANSWER] marker.
-        # Find where reasoning ends - usually a blank line or sentence break.
-        lines = text.split("\n")
-        past_think = False
-        answer_lines = []
-        for line in lines:
-            if "[THINK]" in line:
-                past_think = True
-                continue
-            if past_think and line.strip():
-                answer_lines.append(line)
-        if answer_lines:
-            return "\n".join(answer_lines).strip()
-    return text
-
 
 def _clean_response(text):
     """
