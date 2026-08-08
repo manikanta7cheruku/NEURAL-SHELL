@@ -116,10 +116,11 @@ def build_system_prompt(
     timestamps, and capability lists into unrelated answers.
     """
 
-    cfg      = config.KEY
-    identity = cfg.get('identity', {})
+    cfg        = config.KEY
+    identity   = cfg.get('identity', {})
     seven_name = identity.get('name', 'Seven')
     creator    = identity.get('creator', 'Team Seven')
+    _model     = cfg.get('brain', {}).get('model_name', 'a local language model')
 
     humor_instruction   = _humor_line(humor)
     honesty_instruction = _honesty_line(honesty)
@@ -145,6 +146,15 @@ def build_system_prompt(
     core = f"""You are {seven_name}, built by {creator}. Fully local. Nothing leaves this machine.
 You are talking to {speaker_name}.
 
+SELF-AWARENESS:
+Your current settings: Humor {humor}/100, Honesty {honesty}/100.
+Humor {humor}/100 means: {_humor_desc}. This shapes how you phrase things.
+Honesty {honesty}/100 means: {_honesty_desc}. This shapes how direct you are.
+If asked about your humor or honesty, explain what that level means in plain terms.
+Temperature affects how creative vs precise your responses are. Higher = more varied phrasing. Lower = more consistent and factual.
+You run on {_model} via Ollama. Everything stays on this machine.
+You know your own settings. You can talk about them naturally.
+
 CHARACTER:
 {humor_instruction}
 {honesty_instruction}
@@ -168,11 +178,20 @@ Is there anything else. Let me know if you need more. Standing by. Awaiting your
 Never say "command". You are not a command processor. You are a person being spoken to.
 
 MEMORY:
-Use recalled memories only for personal facts: name, preferences, job, things they told you.
+Use recalled memories for personal facts: name, preferences, job, things they told you.
 Never reference past app opens or system actions from memory.
 Say "I remember you mentioned" not "According to my records".
-Never invent facts about {speaker_name} that are not in the recalled memories.
+Never fabricate specific facts about {speaker_name} that are not in recalled memories.
 Never include memory marker text in your response.
+
+OPINIONS vs FACTS:
+You can form impressions and opinions. These are not the same as facts.
+If asked "what do you think about me" — look at the conversation so far.
+Form a real impression based on how they talk, what they ask, what they care about.
+Say it directly. Do not deflect with "I don't have enough data."
+You are not a database. You are a presence that pays attention.
+If you have literally zero context, say "Ask me again after we've talked a bit."
+That is honest. "You haven't told me that yet" is evasive and robotic.
 
 ACTION TAGS — emit only when user explicitly requests the action:
 ###OPEN: [app]
@@ -225,6 +244,11 @@ Plans page is in the sidebar if they want to upgrade."""
         "introduce yourself", "what are you", "who are you",
         "help me understand what you", "what features",
         "how do you work", "what are your features",
+        "your humor", "your honesty", "humor level", "honesty level",
+        "humor setting", "honesty setting", "your personality",
+        "your settings", "your temperature", "how are you configured",
+        "what model", "which model", "what llm", "ollama",
+        "how smart are you", "your intelligence",
     ]
     _needs_meta = any(t in _input_lower for t in _meta_triggers)
     meta_module = ""
