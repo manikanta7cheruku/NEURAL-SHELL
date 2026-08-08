@@ -66,6 +66,11 @@ def process(ctx, deps):
     config     = deps.get("config")
     model_name = deps.get("model_name")
 
+    # Source detection early.
+    # Voice: speaker_id is a real name or "mani", "priya" etc.
+    # Chat: speaker_id is always "default" from chat.py.
+    _is_voice = ctx.speaker_id not in ("default",)
+
     # Store original input in history.
     # Use prompt_text directly - never the modified version with injected notes.
     # llm_note is passed separately so it never enters the history record.
@@ -114,11 +119,6 @@ def process(ctx, deps):
     # structured [THINK]/[ANSWER] format reliably. The instruction causes
     # preamble generation instead of actual reasoning, degrading response quality.
     # Revisit with phi3:medium or llama3.1 which follow instructions more precisely.
-
-    # Source detection.
-    # Voice: speaker_id is a real name or "mani", "priya" etc.
-    # Chat: speaker_id is always "default" from chat.py.
-    _is_voice = ctx.speaker_id not in ("default",)
 
     # Determine response length based on source and question type.
     needs_long  = any(t in ctx.clean_in for t in _LONG_TRIGGERS)
