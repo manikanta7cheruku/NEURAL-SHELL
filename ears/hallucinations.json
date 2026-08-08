@@ -64,7 +64,13 @@
     "leave a comment below", "drop a comment below",
     "o-o-o-o", "we-e-e", "ta-ta-ta", "na-na-na",
     "mm-mm-mm", "hmm-hmm", "doo-doo-doo",
-    "look-ta-ta", "busting-a-ton"
+    "look-ta-ta", "busting-a-ton",     "rupees", "store on swiggy", "order now", "download the app",
+    "swiggy", "zomato", "amazon", "flipkart",
+    "offer valid", "terms and conditions", "limited time",
+    "call now", "visit our website", "log on to",
+    "buy now", "shop now", "subscribe now",
+    "never go out of style", "all the traditions",
+    "flavors never", "crisp chale"
   ],
   "filler_words": [
     "the", "a", "an", "is", "it", "to", "of", "and", "or", "but",
