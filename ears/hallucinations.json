@@ -51,6 +51,11 @@
     "you know", "you know what",
     "i mean", "i mean yeah",
     "kind of", "sort of",
+    "well", "well so", "well then", "well now", "well okay",
+    "okay", "alright", "right", "yeah", "yep", "nope",
+    "baby", "baby don't", "baby don't stop",
+    "oh", "oh yeah", "oh okay", "oh right", "oh well",
+    "hmm okay", "mm hmm", "uh huh", "ah okay",
     ".", "..", "...", " ", ""
   ],
   "substrings": [
