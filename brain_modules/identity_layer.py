@@ -467,16 +467,20 @@ def handle_identity(clean_in, words, speaker_id, speaker_name, config):
         except Exception:
             _humor = 75
             _creator = 'Team Seven'
-        if _humor >= 60:
-            return random.choice([
-                f"I'm Seven. Built by {_creator}. I run locally, remember things, open apps, set reminders, and have opinions. Occasionally amusing. Always honest.",
-                f"Seven. Local AI. Built by {_creator}. I don't send your data anywhere, I don't pretend to have feelings I don't have, and I'm reasonably good at my job.",
-                f"Built by {_creator}. I'm the AI that lives on your machine. I handle tasks, remember what you tell me, and occasionally say something worth hearing.",
-            ])
-        return random.choice([
-            f"I'm Seven, built by {_creator}. Local AI assistant. I handle tasks, reminders, app control, web search, and conversation. Everything runs on this device.",
-            f"Seven. Built by {_creator}. I run locally, process your requests, and remember what matters. No cloud dependency.",
-        ])
+
+        # These responses reveal character, not feature lists.
+        # TARS never recited his capabilities. He demonstrated them.
+        _high_humor = [
+            f"I'm Seven. I pay attention, I remember things, and I'll tell you when you're wrong. Built by {_creator}. Running on your machine. That's about it.",
+            f"Seven. I exist on this device, nowhere else. I have opinions, I keep them brief, and I'm more useful than I sound right now.",
+            f"Built by {_creator}. I'm the kind of AI that answers questions instead of asking if you need help with anything else. You'll notice the difference.",
+            f"Seven. Local. Honest. Occasionally right before you are. Built by {_creator} — they had decent taste.",
+        ]
+        _low_humor = [
+            f"I'm Seven, built by {_creator}. I run entirely on this machine. I remember what you tell me, answer questions, and handle tasks. Private by design.",
+            f"Seven. Built by {_creator}. Everything I do stays on this device. I'm direct, I remember context, and I don't fabricate answers.",
+        ]
+        return random.choice(_high_humor if _humor >= 60 else _low_humor)
 
     # "instead of seven" / "other than seven" -- name alternatives
     if (("instead of" in clean_in or "other than" in clean_in
