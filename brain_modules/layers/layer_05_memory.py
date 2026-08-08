@@ -63,11 +63,19 @@ def process(ctx, deps):
     )
 
     try:
-        ctx.memory_context = seven_memory.search(ctx.prompt_text, user_id=search_uid)
+        raw_memory = seven_memory.search(ctx.prompt_text, user_id=search_uid)
+        if raw_memory:
+            # Wrap memory in clear delimiters so LLM knows what it is.
+            # The raw format contains [FACT] and [CONVERSATION] markers
+            # which the LLM sometimes prints verbatim. This wrapper
+            # frames it as reference context, not content to recite.
+            ctx.memory_context = (
+                "PERSONAL CONTEXT (use naturally, never quote markers):\n"
+                + raw_memory
+                + "\nEND PERSONAL CONTEXT"
+            )
+            print(Fore.MAGENTA + "[MEMORY] Found relevant memories!")
     except Exception as _mem_err:
         print(Fore.YELLOW + f"[BRAIN] Memory search skipped: {_mem_err}")
-
-    if ctx.memory_context:
-        print(Fore.MAGENTA + "[MEMORY] Found relevant memories!")
 
     return LayerResult.pass_through()
