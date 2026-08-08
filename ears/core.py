@@ -170,6 +170,26 @@ def set_force_return(val: bool):
 
 
 # =============================================================================
+# SPEAKING STATE HOOK
+# Injected by main.py after mouth module loads.
+# Returns True if Seven is currently playing TTS audio.
+# Prevents main listen() from processing mic audio while Seven speaks.
+# =============================================================================
+
+_is_speaking_fn = lambda: False
+
+
+def set_speaking_fn(fn):
+    """
+    Register the function that returns True when Seven is speaking.
+    Called by main.py after ctx.mouth is loaded:
+        ears.core.set_speaking_fn(ctx.mouth.is_speaking)
+    """
+    global _is_speaking_fn
+    _is_speaking_fn = fn
+
+
+# =============================================================================
 # WHISPER TRANSCRIPTION — IN MEMORY
 # =============================================================================
 
@@ -188,13 +208,26 @@ def _transcribe(wav_bytes: bytes) -> tuple:
             beam_size=5,
             language="en",
             condition_on_previous_text=False,
-            no_speech_threshold=0.7,
-            log_prob_threshold=-0.5,
+            no_speech_threshold=0.6,
+            # Reduced from 0.7 — stricter silence rejection.
+            # 0.7 meant Whisper would accept segments it was 30% unsure about.
+            # 0.6 means it must be 40% sure there is real speech.
+            log_prob_threshold=-0.4,
+            # Tightened from -0.5 — rejects low-confidence segments sooner.
+            # -0.5 let through many borderline guesses ("Bonjour", "Can save").
+            # -0.4 requires Whisper to be more confident before accepting.
             vad_filter=True,
             vad_parameters={
-                "threshold":               0.5,
-                "min_speech_duration_ms":  200,
-                "min_silence_duration_ms": 300,
+                "threshold":               0.6,
+                # Raised from 0.5 — Silero VAD must be 60% sure speech
+                # is present before passing segment to Whisper decoder.
+                # This is the most impactful single parameter for
+                # reducing ambient audio transcription.
+                "min_speech_duration_ms":  300,
+                # Raised from 200 — segments shorter than 300ms are
+                # almost never real voice commands. Rejects clicks,
+                # coughs, brief noise bursts that Silero misclassifies.
+                "min_silence_duration_ms": 400,
             },
         )
 
@@ -234,17 +267,39 @@ def _check_confidence(info) -> tuple:
     """
     Check TranscriptionInfo for hallucination signals.
 
+    Duration-aware thresholds:
+        Short clips (< 1.5s) require higher confidence.
+        Whisper is much less reliable on short clips — the decoder
+        has less context to work with and guesses more aggressively.
+        A 1-second clip that passes VAD with low logprob is almost
+        certainly a mishearing.
+
     Returns: (passed: bool, reason: str)
     """
     if info is None:
         return True, "no info"
 
     try:
-        avg_lp = getattr(info, 'avg_logprob', None)
-        if avg_lp is not None and avg_lp < -1.0:
-            return False, f"avg_logprob {avg_lp:.3f} below -1.0"
+        duration = getattr(info, 'duration', None)
 
-        duration     = getattr(info, 'duration', None)
+        # Duration-aware logprob threshold
+        # Short clips need stricter confidence requirement
+        if duration is not None and duration < 1.5:
+            logprob_threshold = -0.35
+            # Stricter than normal (-0.4 in Whisper params) for short clips
+            # "Bonjour" from 1.09s clip would have been caught here
+        else:
+            logprob_threshold = -0.8
+
+        avg_lp = getattr(info, 'avg_logprob', None)
+        if avg_lp is not None and avg_lp < logprob_threshold:
+            return False, (
+                f"avg_logprob {avg_lp:.3f} below "
+                f"{'strict ' if duration and duration < 1.5 else ''}"
+                f"threshold {logprob_threshold} "
+                f"(clip duration: {duration:.2f}s)"
+            )
+
         duration_vad = getattr(info, 'duration_after_vad', None)
         if duration and duration_vad is not None and duration > 0:
             removed = duration - duration_vad
@@ -413,6 +468,16 @@ def listen() -> tuple:
                 print(Fore.YELLOW + f"[EARS] Gate rejected — {reason}")
                 return None, None
 
+            # ── Speaking guard ────────────────────────────────────────────
+            # If Seven is currently speaking, audio captured now is either:
+            # (a) Seven's own TTS feeding back through the mic, or
+            # (b) User trying to interrupt — handled by listen_for_interrupt.
+            # Either way, the main pipeline should not process this clip.
+            # main.py double-speech lock handles this at a higher level,
+            # but checking here prevents Whisper from running unnecessarily.
+            if _is_speaking_fn():
+                return None, None
+
             # ── Whisper transcription ────────────────────────────────────
             full_text, info = _transcribe(wav_bytes)
             if not full_text:
@@ -438,6 +503,24 @@ def listen() -> tuple:
             clean = clean.strip()
 
             if len(clean) < 2:
+                return None, None
+
+            # Single word guard
+            # Single isolated words from Whisper are almost always
+            # mishearings or hallucinations unless they are a known command.
+            # "Bonjour", "Yes", "Okay", "Sure" — these are not commands.
+            # Exception: single-word wake words like "Seven" are handled
+            # by the wake word gate in main.py, not here.
+            _single_word_passthrough = {
+                "stop", "seven", "pause", "resume", "yes", "no",
+                "open", "close", "help", "back", "next", "play",
+            }
+            words_check = clean.split()
+            if len(words_check) == 1 and clean not in _single_word_passthrough:
+                print(Fore.YELLOW + (
+                    f"[EARS] Single word rejected — '{clean}' "
+                    f"(not in passthrough list)"
+                ))
                 return None, None
 
             # ── Hallucination filter ─────────────────────────────────────
@@ -535,6 +618,22 @@ def listen_for_interrupt(interrupt_words, on_interrupt_callback, stop_event):
 
             try:
                 wav_bytes = audio.get_wav_data()
+
+                # Quick energy check — if clip is near-silent, skip Whisper.
+                # This prevents 3 unnecessary Whisper runs while Seven speaks.
+                # The interrupt listener runs during TTS — most clips are
+                # just Seven's own voice or room noise. Check energy first.
+                import wave as _wv_int
+                with _wv_int.open(io.BytesIO(wav_bytes), 'rb') as _wf_int:
+                    _pcm_int = _wf_int.readframes(_wf_int.getnframes())
+                _arr_int = np.frombuffer(_pcm_int, dtype=np.int16).astype(np.float32)
+                _rms_int = float(np.sqrt(np.mean(_arr_int ** 2)))
+                # Use a lower threshold than main pipeline — interrupt words
+                # might be spoken quietly. But reject near-silence entirely.
+                _interrupt_threshold = max(_nf.get_threshold() * 0.5, 200.0)
+                if _rms_int < _interrupt_threshold:
+                    continue
+
                 wav_buf   = io.BytesIO(wav_bytes)
 
                 result = audio_model.transcribe(
