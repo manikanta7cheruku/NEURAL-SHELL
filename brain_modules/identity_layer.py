@@ -258,7 +258,20 @@ def handle_repetition(clean_in, speaker_id, speaker_name,
                 break
 
     if clean_in in speaker_questions and not is_command and not is_greeting:
-        # Let LLM answer again with a different angle.
+        # Questions handled by identity fast-path should never go to LLM.
+        # Return None so layer_03 handles them with varied responses.
+        _identity_fast_path = {
+            "tell me about yourself", "tell me about you",
+            "describe yourself", "introduce yourself",
+            "who are you exactly", "what are you exactly",
+            "where are you from", "where do you come from",
+            "where were you made", "where were you built",
+            "whats your name", "what is your name",
+            "who are you", "what are you",
+        }
+        if clean_in in _identity_fast_path:
+            return None
+        # All other repeats go to LLM with instruction for different angle.
         return "__SIMILAR_DETECTED__"
 
     # Not a repeat -- record this question for future detection
