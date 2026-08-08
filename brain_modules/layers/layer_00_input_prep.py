@@ -17,16 +17,13 @@ from colorama import Fore
 from brain_modules.layer_result import LayerResult
 
 
+# Pure positive acknowledgements that need no response on voice.
+# Kept minimal - only unambiguous one-word reactions.
+# "no", "never mind", "nah" removed - these are valid conversational inputs.
 _ACKNOWLEDGEMENTS = {
-    "good", "okay", "ok", "alright", "yeah", "yep", "yup",
-    "sure", "fine", "nice", "cool", "great", "perfect",
-    "right", "correct", "exactly", "indeed", "absolutely",
-    "understood", "noted", "got it", "i see", "i know",
-    "no", "nope", "never mind", "nevermind", "forget it",
-    "nothing", "nah", "not really", "not now", "maybe later",
-    "that's fine", "thats fine", "that's it", "thats it",
-    "that's all", "thats all", "that's good", "thats good",
-    "well", "anyway", "moving on", "never mind",
+    "okay", "ok", "alright", "yeah", "yep", "yup",
+    "got it", "understood", "noted",
+    "cool", "nice", "great", "perfect",
 }
 
 _FILLER_STARTS = [
