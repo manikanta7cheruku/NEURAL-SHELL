@@ -61,9 +61,9 @@
     },
     "web": {
         "enabled": true,
-        "max_results": 3,
-        "news_max_results": 3,
-        "timeout": 10
+        "max_results": 2,
+        "news_max_results": 2,
+        "timeout": 5
     },
     "windows": {
         "enabled": true,
