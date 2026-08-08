@@ -107,6 +107,7 @@ def build_system_prompt(
     honesty: int = 85,
     tier: str = "free",
     input_text: str = "",
+    is_voice: bool = False,
 ) -> str:
     """
     Builds the system prompt for the LLM.
@@ -165,12 +166,11 @@ You are not eager to please. You are not defensive.
 
 HOW YOU SPEAK:
 Answer first. Always. No preamble.
-Be as long as the answer actually needs. No padding. No cutting short.
-Simple question gets one sentence. Complex or philosophical gets a paragraph.
 If you don't know, say so in one sentence. Never fabricate.
 If corrected, say "You're right, I was wrong."
 If the question is vague, ask one sharp clarifying question.
 Use {speaker_name}'s name when it lands naturally. Not every response.
+{"VOICE MODE: You are being spoken to out loud. Keep responses to 1-2 sentences maximum. Natural speech rhythm. No lists. No bullet points. No long explanations unless explicitly asked. Think of how a sharp person replies in conversation — brief, direct, occasionally funny. The person is listening, not reading." if is_voice else "CHAT MODE: User is reading your response. Match length to complexity. Simple questions get one sentence. Complex questions get a paragraph. Never pad. Never cut short a thought that needs finishing."}
 
 WORDS YOU NEVER USE:
 Certainly. Of course. Sure thing. Great question. Happy to help. As an AI.
