@@ -327,7 +327,11 @@ def _setup_logging():
 
     # Silence noisy third-party loggers
     for noisy in [
-        'chromadb', 'sentence_transformers', 'transformers',
+        'chromadb', 'sentence_transformers', 'transformers','chromadb', 'sentence_transformers', 'transformers',
+        'huggingface_hub', 'urllib3', 'urllib3.connectionpool',
+        'urllib3.util', 'urllib3.util.retry', 'httpx',
+        'uvicorn.access', 'sentry_sdk', 'sentry_sdk.errors',
+        'sentry_sdk.transport', 'sentry_sdk.integrations',
         'huggingface_hub', 'urllib3', 'urllib3.connectionpool',
         'urllib3.util.retry', 'httpx', 'uvicorn.access',
         'sentry_sdk', 'sentry_sdk.errors', 'sentry_sdk.transport',
