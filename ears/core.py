@@ -373,10 +373,33 @@ def listen() -> tuple:
                 return None, None
 
             print(Fore.GREEN + f"[EARS] Transcribed: '{final}'")
-            # Return sentinel — tells main.py this input came from voice mic.
-            # Used by brain.py to set source="voice" in memory storage.
-            # "__voice__" is not a file path — it signals origin only.
-            return final, "__voice__"
+
+            # Save audio file only if Voice ID needs it.
+            # Avoids disk writes when Voice ID is disabled.
+            audio_out_path = "__voice__"
+            try:
+                import json as _cfg_json
+                _cfg_p = os.path.join(
+                    os.environ.get('APPDATA', ''), 'SEVEN', 'config.json'
+                )
+                if os.path.exists(_cfg_p):
+                    with open(_cfg_p, 'r') as _cf:
+                        _cfg_data = _cfg_json.load(_cf)
+                    _sv_on = (
+                        _cfg_data
+                        .get('voice_gates', {})
+                        .get('speaker_verify', {})
+                        .get('enabled', False)
+                    )
+                    if _sv_on:
+                        _audio_path = "temp_audio.wav"
+                        with open(_audio_path, "wb") as _af:
+                            _af.write(wav_bytes)
+                        audio_out_path = _audio_path
+            except Exception:
+                pass
+
+            return final, audio_out_path
 
     except OSError as e:
         print(Fore.YELLOW + f"[EARS] Stream error: {e}")
