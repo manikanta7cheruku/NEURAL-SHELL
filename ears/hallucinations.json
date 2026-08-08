@@ -43,6 +43,14 @@
     "welcome back", "welcome back to",
     "welcome to my channel",
     "bada ba ba ba", "ba ba ba", "da da da", "la la la",
+    "well so", "well", "so", "well then", "well now",
+    "alright then", "alright", "okay then", "right then",
+    "yes well", "oh well", "anyway",
+    "as i was saying", "so as i was saying",
+    "moving on", "so moving on",
+    "you know", "you know what",
+    "i mean", "i mean yeah",
+    "kind of", "sort of",
     ".", "..", "...", " ", ""
   ],
   "substrings": [
@@ -53,7 +61,10 @@
     "like and subscribe", "smash that like",
     "hit the like button", "notification bell",
     "hit the bell", "please subscribe",
-    "leave a comment below", "drop a comment below"
+    "leave a comment below", "drop a comment below",
+    "o-o-o-o", "we-e-e", "ta-ta-ta", "na-na-na",
+    "mm-mm-mm", "hmm-hmm", "doo-doo-doo",
+    "look-ta-ta", "busting-a-ton"
   ],
   "filler_words": [
     "the", "a", "an", "is", "it", "to", "of", "and", "or", "but",
