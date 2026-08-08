@@ -83,6 +83,22 @@ def check(wav_data: bytes, threshold: float) -> tuple:
                 f"crest gate: factor {crest:.2f} < {_MIN_CREST} — flat noise"
             )
 
+        # Gate 4: SNR margin
+        # If RMS only barely exceeds threshold, the clip is mostly noise
+        # with a thin speech signal on top. Whisper will mishear this.
+        # Require at least 1.5x the threshold to pass — meaningful margin.
+        # Example: threshold=700, RMS must be >= 1050 to pass this gate.
+        # This gate only activates when threshold > 400 (loud environment).
+        # In quiet rooms the threshold is low enough that any speech passes.
+        _SNR_MARGIN = 1.5
+        if threshold > 400 and rms < threshold * _SNR_MARGIN:
+            return False, rms, (
+                f"SNR margin gate: RMS {rms:.0f} < "
+                f"{threshold * _SNR_MARGIN:.0f} "
+                f"(threshold {threshold:.0f} * {_SNR_MARGIN}) — "
+                f"speech too close to noise floor for reliable transcription"
+            )
+
         print(Fore.CYAN + (
             f"[EARS] Signal OK — "
             f"RMS={rms:.0f} crest={crest:.2f} "
