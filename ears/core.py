@@ -65,6 +65,12 @@ from ears.hallucination_filter import (
     is_incoherent,
 )
 from ears.autocorrect import correct as _autocorrect
+from ears import agc as _agc
+from ears import aec as _aec
+
+# Start AEC loopback capture at module load
+# AEC gracefully disables itself if pyaudiowpatch not installed
+_aec.start()
 
 colorama.init(autoreset=True)
 
@@ -287,6 +293,33 @@ def listen() -> tuple:
             except Exception:
                 return None, None
 
+            # ── AGC: normalize volume before signal check ───────────────────
+            # Brings whispered and shouted audio to consistent level.
+            # Makes signal gates and Whisper work equally well for all users.
+            wav_bytes = _agc.apply_to_wav_bytes(wav_bytes)
+
+            # ── AEC: remove echo if Seven was just speaking ─────────────────
+            # Only active if pyaudiowpatch is installed and loopback found.
+            # Silent no-op if AEC is not available.
+            if _aec.is_available():
+                import io as _aec_io, wave as _aec_wave, numpy as _aec_np
+                try:
+                    with _aec_wave.open(_aec_io.BytesIO(wav_bytes), 'rb') as _wf:
+                        _sr  = _wf.getframerate()
+                        _pcm = _wf.readframes(_wf.getnframes())
+                    _mic_f32 = _aec_np.frombuffer(_pcm, dtype=_aec_np.int16).astype(_aec_np.float32) / 32767.0
+                    _cleaned = _aec.apply(_mic_f32, _sr)
+                    # Pack cleaned audio back to wav_bytes
+                    _buf = _aec_io.BytesIO()
+                    with _aec_wave.open(_buf, 'wb') as _wf_out:
+                        _wf_out.setnchannels(1)
+                        _wf_out.setsampwidth(2)
+                        _wf_out.setframerate(_sr)
+                        _wf_out.writeframes((_cleaned * 32767.0).astype(_aec_np.int16).tobytes())
+                    wav_bytes = _buf.getvalue()
+                except Exception as _aec_err:
+                    print(Fore.YELLOW + f"[EARS] AEC apply error: {_aec_err} — using original")
+
             # ── Signal gates ────────────────────────────────────────────────
             passed, rms, reason = _signal_check(
                 wav_bytes, _nf.get_threshold()
@@ -340,7 +373,10 @@ def listen() -> tuple:
                 return None, None
 
             print(Fore.GREEN + f"[EARS] Transcribed: '{final}'")
-            return final, None
+            # Return sentinel — tells main.py this input came from voice mic.
+            # Used by brain.py to set source="voice" in memory storage.
+            # "__voice__" is not a file path — it signals origin only.
+            return final, "__voice__"
 
     except OSError as e:
         print(Fore.YELLOW + f"[EARS] Stream error: {e}")
