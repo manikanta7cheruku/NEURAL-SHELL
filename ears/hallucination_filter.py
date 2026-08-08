@@ -185,6 +185,25 @@ def is_hallucination(clean: str, raw_lower: str = "") -> tuple:
                 f"no intent words)"
             )
 
+    # Ordinal number sequence detection
+    # "10th, 7th, 8th, 8th, 8th" — TV audio counting, not a command
+    import re as _re
+    ordinal_pattern = _re.compile(
+        r'\b(\d+(?:st|nd|rd|th))\b', _re.IGNORECASE
+    )
+    ordinal_matches = ordinal_pattern.findall(clean)
+    if len(ordinal_matches) >= 3:
+        return True, (
+            f"ordinal number sequence ({len(ordinal_matches)} ordinals) "
+            f"— likely TV/radio audio"
+        )
+
+    # Price/commercial number detection
+    # "99 rupees", "at only 99", "from the 99 store"
+    price_pattern = _re.compile(r'\b\d+\s*(?:rupees?|rs\.?|dollars?|euros?)\b')
+    if price_pattern.search(clean):
+        return True, "price mention detected — likely commercial audio"
+
     return False, ""
 
 
