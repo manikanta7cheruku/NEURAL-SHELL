@@ -138,6 +138,53 @@ def is_hallucination(clean: str, raw_lower: str = "") -> tuple:
         if filler_ratio > 0.85:
             return True, f"pure filler ({filler_ratio:.0%}): '{clean}'"
 
+    # Music/singing detection
+    # Whisper transcribes sung lyrics with characteristic patterns:
+    # repetitive syllables, phonetic spellings, hyphenated sounds
+    words = clean.split() if not words else words
+    if len(words) >= 4:
+        # Check for sung phonetics: "o-o-o-o", "we-e-e", "la-la-la"
+        hyphenated = [w for w in words if '-' in w and len(w) > 3]
+        if len(hyphenated) >= 2:
+            return True, f"sung phonetics detected: {hyphenated[:3]}"
+
+        # Check for music emoji patterns already cleaned
+        if any(c in clean for c in ['♪', '♫', '🎵', '🎶']):
+            return True, "music emoji in transcription"
+
+        # High ratio of very short words (1-2 chars) = phonetic singing
+        short_words = [w for w in words if len(w) <= 2]
+        if len(words) >= 6 and len(short_words) / len(words) > 0.5:
+            return True, f"high ratio of short phonemes ({len(short_words)}/{len(words)})"
+
+    # Commercial / advertisement detection
+    # TV ads and phone ads have specific patterns that are never commands:
+    # prices, brand delivery platforms, calls to action
+    _ad_patterns = {
+        "rupees", "swiggy", "zomato", "amazon", "flipkart",
+        "order now", "download", "offer valid", "call now",
+        "buy now", "shop now", "subscribe now", "click here",
+        "visit", "terms and conditions", "limited time",
+        "never go out of style", "all the traditions",
+        "soft kulab", "crisp chale",
+    }
+    _ad_matches = [p for p in _ad_patterns if p in clean]
+    if _ad_matches:
+        return True, f"commercial content detected: {_ad_matches[:2]}"
+
+    # Long transcriptions with no command structure
+    # Real commands are under 20 words. 25+ words = ambient audio (ads, TV, radio)
+    words = clean.split() if not words else words
+    if len(words) > 25:
+        # Check if there are any intent words at all
+        intent_set = set(data.get("intent_words", []))
+        has_intent = any(w in intent_set for w in words)
+        if not has_intent:
+            return True, (
+                f"long non-command transcription ({len(words)} words, "
+                f"no intent words)"
+            )
+
     return False, ""
 
 
