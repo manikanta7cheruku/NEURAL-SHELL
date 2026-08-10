@@ -36,13 +36,21 @@ def get_config():
 def update_config(req: ConfigUpdate):
     """Partial update of configuration."""
     import config
-    # Strip keys that are managed by dedicated endpoints.
-    # voice_gates is owned by /api/voice/gates -- never let a
-    # general config save overwrite it with stale React state.
     protected = {"voice_gates"}
     updates = {k: v for k, v in req.updates.items() if k not in protected}
     success = config.update_config(updates)
     if success:
+        # If identity.user_name changed, update brain's live USER_NAME
+        # so Seven uses the new name immediately without restart.
+        if "identity" in updates and "user_name" in updates["identity"]:
+            new_name = updates["identity"]["user_name"].strip()
+            if new_name:
+                try:
+                    import brain
+                    brain.USER_NAME = new_name
+                    print(f"[CONFIG] Brain USER_NAME updated live: {new_name}")
+                except Exception as _brain_err:
+                    print(f"[CONFIG] Brain name update skipped: {_brain_err}")
         return {"success": True, "config": config.KEY}
     else:
         raise HTTPException(status_code=500, detail="Failed to save config")
