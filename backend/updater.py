@@ -4,8 +4,7 @@ import threading
 import requests
 import tempfile
 
-SERVER_URL  = "https://seven-server-u2rp.onrender.com"
-TIMEOUT     = 25
+TIMEOUT = 10
 CHECK_DELAY    = 15       # first check after 15 seconds
 RECHECK_DELAY  = 7200     # recheck every 2 hours
 _version_logged = False   # log version only once
