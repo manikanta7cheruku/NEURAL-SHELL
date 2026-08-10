@@ -49,7 +49,10 @@ def process(ctx, deps):
     seven_memory = deps.get("seven_memory")
 
     # ── Resolve speaker name ─────────────────────────────────────
-    if ctx.speaker_id not in ("default", "unknown"):
+    # Generic system speaker IDs that should never appear as display names.
+    _SYSTEM_IDS = {"default", "unknown", "voice_user", "speaker", "user"}
+
+    if ctx.speaker_id not in _SYSTEM_IDS:
         ctx.speaker_name = ctx.speaker_id.title()
         try:
             all_facts = seven_memory.user_facts.get(where={"user_id": ctx.speaker_id})
