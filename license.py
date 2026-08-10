@@ -262,7 +262,7 @@ def validate_key_format(key: str) -> bool:
 # LICENSE ACTIVATION
 # =============================================================================
 
-SERVER_URL = "https://seven-server-u2rp.onrender.com"
+SERVER_URL = "https://seven-server-a825.onrender.com"
 
 
 def activate_license(license_key: str, email: str = None) -> Tuple[bool, str, Optional[Dict]]:
