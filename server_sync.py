@@ -11,7 +11,7 @@ import threading
 # =============================================================================
 
 # To switch servers in future: change only this line
-SERVER_URL = "https://seven-server-u2rp.onrender.com"
+SERVER_URL = "https://seven-server-a825.onrender.com"
 
 ENABLED = True
 TIMEOUT = 5
