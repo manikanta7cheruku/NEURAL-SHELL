@@ -59,6 +59,11 @@ pynput
 # --- Fuzzy Matching ---
 rapidfuzz
 
+# --- Acoustic Echo Cancellation ---
+# pyaudiowpatch provides WASAPI loopback for AEC
+# Falls back gracefully if not installed
+pyaudiowpatch
+
 # --- Torch (GPU support) ---
 # Install separately with CUDA:
 # pip install torch torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
