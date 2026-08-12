@@ -400,9 +400,16 @@ function ReferralBanner({ stats, onDismiss }) {
 
 // ── Main ──────────────────────────────────────────────────────────────────
 
-export default function Home() {
+export default function Home({ isFirstLaunch }) {
   const navigate = useNavigate();
   const st = useStatus();
+  const [showWelcome, setShowWelcome] = useState(isFirstLaunch || false);
+
+  useEffect(() => {
+    if (!showWelcome) return;
+    const t = setTimeout(() => setShowWelcome(false), 8000);
+    return () => clearTimeout(t);
+  }, [showWelcome]);
   const { tasks, stats: ts, fetch: fetchTasks,
           fetchStats: fetchTS, update: updateTask } = useTasks();
 
@@ -589,6 +596,32 @@ export default function Home() {
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+
+        {/* First-launch welcome hint */}
+        {showWelcome && (
+          <div className="flex items-center justify-between px-5 py-3.5
+                          rounded-xl bg-s-accent/[0.05] border border-s-accent/15
+                          animate-[cardReveal_300ms_ease-out]">
+            <div className="flex items-center gap-3">
+              <div className="w-2 h-2 rounded-full bg-s-accent animate-pulse" />
+              <div>
+                <p className="text-[11px] font-medium text-s-text/80">
+                  Seven is ready. Say "Hey Seven" to begin.
+                </p>
+                <p className="text-[9px] text-s-text-4 mt-0.5">
+                  Or type a message in the Console tab.
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => setShowWelcome(false)}
+              className="text-[9px] text-s-text-4 hover:text-s-text-3
+                         transition-colors px-2 py-1"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
 
         {/* Stat strip */}
         <div className="grid grid-cols-5 gap-2">
