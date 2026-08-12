@@ -110,8 +110,13 @@ export default function StepWelcome() {
             <path d="M5 3L9 7L5 11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
           </svg>
         </button>
-        <div className="text-[10px] text-s-text-4 tracking-wide">
-          Takes ~2 min
+        <div className="space-y-0.5 text-right">
+          <div className="text-[10px] text-s-text-4 tracking-wide">
+            20-40 min first time
+          </div>
+          <div className="text-[9px] text-s-text-4/60">
+            Downloads happen once only
+          </div>
         </div>
       </div>
     </div>
