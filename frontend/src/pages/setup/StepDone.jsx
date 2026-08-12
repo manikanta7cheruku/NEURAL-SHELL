@@ -1,23 +1,20 @@
 import { useState } from 'react';
 import useSetup from '../../stores/useSetup';
 
-const COMMANDS = [
-  {
-    phrase: 'Open Chrome',
-    description: 'Launch any application by name',
-  },
-  {
-    phrase: 'Remind me at 6 PM to review the report',
-    description: 'Natural language scheduling',
-  },
-  {
-    phrase: 'Remember that my server IP is 192.168.1.1',
-    description: 'Permanent memory — recalled in future sessions',
-  },
-  {
-    phrase: 'Search for the latest news on AI',
-    description: 'Web search with summarized results',
-  },
+const CAPABILITIES = [
+  { icon: "🎙", label: "Voice Control",    body: "Say 'Hey Seven' to activate. Speak naturally." },
+  { icon: "🧠", label: "Persistent Memory", body: "Seven remembers facts across sessions." },
+  { icon: "⚡", label: "System Commands",   body: "Open apps, control volume, manage windows." },
+  { icon: "🌐", label: "Live Web Search",   body: "Weather, news, prices — fetched in real time." },
+  { icon: "📋", label: "Tasks & Reminders", body: "Create tasks and set reminders by voice." },
+  { icon: "📄", label: "Document Q&A",      body: "Upload PDFs and ask questions about them." },
+];
+
+const FIRST_COMMANDS = [
+  { say: "What can you do?",           why: "Get a quick overview of Seven's capabilities" },
+  { say: "Remember that I prefer dark mode", why: "Store a personal preference" },
+  { say: "Open Chrome",                why: "Launch any app by name" },
+  { say: "Remind me at 9 AM tomorrow", why: "Set a voice reminder" },
 ];
 
 // Wait for full backend by polling /api/schedules
@@ -51,8 +48,18 @@ function waitForFullBackend() {
 
 export default function StepDone({ onComplete }) {
   const { data, completeSetup, loading, error } = useSetup();
-  const [launched, setLaunched] = useState(false);
-  const [statusMsg, setStatusMsg] = useState('Saving configuration...');
+  const [launched,   setLaunched]   = useState(false);
+  const [statusMsg,  setStatusMsg]  = useState('Saving configuration...');
+  const [visibleCap, setVisibleCap] = useState(0);
+
+  // Animate capability cards in one by one
+  useEffect(() => {
+    if (launched) return;
+    const t = setInterval(() => {
+      setVisibleCap(v => Math.min(v + 1, CAPABILITIES.length));
+    }, 120);
+    return () => clearInterval(t);
+  }, [launched]);
 
   const handleLaunch = async () => {
     // Step 1 — save config to backend
@@ -111,25 +118,54 @@ export default function StepDone({ onComplete }) {
         )}
       </div>
 
-      {/* Commands — hide when launched */}
+      {/* Capabilities grid — animate in */}
       {!launched && (
-        <div className="space-y-px">
-          {COMMANDS.map((c, i) => (
-            <div
-              key={i}
-              className="flex items-start gap-4 px-4 py-3.5 bg-s-card border-t border-s-border first:rounded-t-xl last:rounded-b-xl last:border-b"
-            >
-              <div className="mt-1 w-4 flex-shrink-0">
-                <div className="w-1 h-1 rounded-full bg-s-accent/50" />
-              </div>
-              <div className="space-y-0.5 min-w-0">
-                <div className="text-xs font-mono text-s-text">
-                  "{c.phrase}"
+        <div className="space-y-3">
+          <p className="text-[10px] text-s-text-4 uppercase tracking-widest">
+            What Seven can do
+          </p>
+          <div className="grid grid-cols-3 gap-2">
+            {CAPABILITIES.map((cap, i) => (
+              <div
+                key={i}
+                className={`px-4 py-3.5 rounded-xl bg-s-card border border-s-border
+                             space-y-1.5 transition-all duration-300
+                             ${i < visibleCap
+                               ? 'opacity-100 translate-y-0'
+                               : 'opacity-0 translate-y-2'}`}
+              >
+                <div className="text-base">{cap.icon}</div>
+                <div className="text-xs font-medium text-s-text">{cap.label}</div>
+                <div className="text-[10px] text-s-text-4 font-light leading-relaxed">
+                  {cap.body}
                 </div>
-                <div className="text-[11px] text-s-text-4 font-light">{c.description}</div>
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* First commands to try */}
+      {!launched && (
+        <div className="space-y-2">
+          <p className="text-[10px] text-s-text-4 uppercase tracking-widest">
+            Try saying these first
+          </p>
+          <div className="space-y-1.5">
+            {FIRST_COMMANDS.map((cmd, i) => (
+              <div key={i}
+                   className="flex items-center gap-4 px-4 py-3 rounded-xl
+                              bg-s-surface border border-s-border/50">
+                <div className="w-1 h-1 rounded-full bg-s-accent/50 flex-shrink-0" />
+                <div className="font-mono text-xs text-s-text flex-shrink-0">
+                  "{cmd.say}"
+                </div>
+                <div className="text-[10px] text-s-text-4 font-light ml-auto text-right">
+                  {cmd.why}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
