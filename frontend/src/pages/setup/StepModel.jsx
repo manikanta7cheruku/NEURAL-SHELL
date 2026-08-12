@@ -127,6 +127,25 @@ export default function StepModel() {
   // ── Fetch hardware on mount ──
   useEffect(() => { fetchHardware(); }, []);
 
+  // ── Check which models are already installed ──
+  const [installedModels, setInstalledModels] = useState([]);
+
+  useEffect(() => {
+    fetch(`${API}/api/bootstrap/models-installed`)
+      .then(r => r.json())
+      .then(d => setInstalledModels(d.installed || []))
+      .catch(() => {});
+  }, []);
+
+  const isModelInstalled = (ollamaName) => {
+    if (!ollamaName) return false;
+    return installedModels.some(m =>
+      m === ollamaName ||
+      m === ollamaName + ':latest' ||
+      m.startsWith(ollamaName + ':')
+    );
+  };
+
   // ── Model pull state ──
   const [pulling,      setPulling]      = useState(false);
   const [pullError,    setPullError]    = useState(null);
@@ -155,6 +174,12 @@ export default function StepModel() {
   // ── Download model + poll progress ──
   const handleDownloadAndContinue = async () => {
     if (!data.modelName || pulling) return;
+
+    // Model already installed - skip download entirely
+    if (isModelInstalled(data.modelName)) {
+      next();
+      return;
+    }
 
     setPulling(true);
     setPullError(null);
@@ -453,11 +478,20 @@ export default function StepModel() {
           {pulling ? (
             <>
               <div className="w-1.5 h-1.5 rounded-full bg-white/50 animate-pulse" />
-              Downloading model...
+              Downloading...
+            </>
+          ) : isModelInstalled(data.modelName) ? (
+            <>
+              Continue
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none"
+                   className="group-hover:translate-x-0.5 transition-transform duration-200">
+                <path d="M5 3L9 7L5 11" stroke="currentColor" strokeWidth="1.5"
+                      strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
             </>
           ) : (
             <>
-              Download &amp; Continue
+              Download and Continue
               <svg width="14" height="14" viewBox="0 0 14 14" fill="none"
                    className="group-hover:translate-x-0.5 transition-transform duration-200">
                 <path d="M5 3L9 7L5 11" stroke="currentColor" strokeWidth="1.5"
