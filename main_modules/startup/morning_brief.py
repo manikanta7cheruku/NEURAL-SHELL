@@ -120,6 +120,14 @@ def build_morning_brief(ctx, config):
 def speak_morning_brief(ctx, config):
     """Build and speak the morning brief. Called once at startup."""
     try:
+        # Skip morning brief on fresh install - setup just completed
+        # and the restart lands here before user has done anything.
+        # setup_complete is False until StepDone saves it.
+        _setup_done = config.KEY.get("setup_complete", False)
+        if not _setup_done:
+            print(Fore.YELLOW + "[BRIEF] Setup not complete - skipping morning brief")
+            return
+
         _brief = build_morning_brief(ctx, config)
         if _brief:
             ctx.mouth.speak(_brief)
