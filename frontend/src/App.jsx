@@ -33,7 +33,7 @@ function NavigationHelper() {
   return null;
 }
 
-function MainApp() {
+function MainApp({ isFirstLaunch }) {
   const { fetchStatus: fetchUpdateStatus } = useUpdate();
   const location = useLocation();
   useEffect(() => {
@@ -149,7 +149,7 @@ export default function App() {
   return (
     <HashRouter>
       <NavigationHelper />
-      <MainApp />
+      <MainApp isFirstLaunch={isFirstLaunch} />
     </HashRouter>
   );
 }
