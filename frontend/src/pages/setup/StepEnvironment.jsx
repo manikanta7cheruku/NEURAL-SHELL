@@ -118,7 +118,7 @@ function SetupRow({ icon, title, subtitle, status, progress, showProgress, error
     }`}>
       <div className="px-5 py-4 flex items-center gap-4">
         {/* Icon */}
-        <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 text-base
+        <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0
           transition-colors duration-300 ${
             isError
               ? 'bg-red-500/10 border border-red-500/20'
@@ -391,7 +391,16 @@ export default function StepEnvironment() {
       {/* ── Setup rows ── */}
       <div className="space-y-2">
         <SetupRow
-          icon="📦"
+          icon={
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+              <rect x="1.5" y="5" width="11" height="8" rx="1"
+                    stroke="currentColor" strokeWidth="1.2"/>
+              <path d="M1.5 5L7 1.5L12.5 5" stroke="currentColor" strokeWidth="1.2"
+                    strokeLinecap="round" strokeLinejoin="round"/>
+              <path d="M7 5V13" stroke="currentColor" strokeWidth="1.2"
+                    strokeLinecap="round"/>
+            </svg>
+          }
           title="Python AI Libraries"
           subtitle={pkgSubtitle}
           status={pkgStatus}
@@ -400,7 +409,15 @@ export default function StepEnvironment() {
           errorMsg={bState.packages?.error}
         />
         <SetupRow
-          icon="🤖"
+          icon={
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+              <circle cx="7" cy="7" r="5" stroke="currentColor" strokeWidth="1.2"/>
+              <circle cx="5" cy="6.5" r="1" fill="currentColor"/>
+              <circle cx="9" cy="6.5" r="1" fill="currentColor"/>
+              <path d="M5 9.5C5.5 10.5 8.5 10.5 9 9.5" stroke="currentColor"
+                    strokeWidth="1.2" strokeLinecap="round"/>
+            </svg>
+          }
           title="Ollama AI Runtime"
           subtitle={ollamaSubtitle}
           status={ollamaStatus}
@@ -409,7 +426,13 @@ export default function StepEnvironment() {
           errorMsg={bState.ollama_install?.error}
         />
         <SetupRow
-          icon="⚡"
+          icon={
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+              <path d="M8 1.5L3 8H7.5L6 12.5L11 6H6.5L8 1.5Z"
+                    stroke="currentColor" strokeWidth="1.2"
+                    strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          }
           title="Starting Ollama Service"
           subtitle={startSubtitle}
           status={startStatus}
