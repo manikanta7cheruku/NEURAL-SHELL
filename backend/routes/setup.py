@@ -690,6 +690,23 @@ def pull_model_endpoint(data: dict):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/api/bootstrap/models-installed")
+def get_installed_models():
+    """
+    Returns list of Ollama models already pulled on this machine.
+    StepModel calls this to skip download if model already exists.
+    """
+    try:
+        import urllib.request as _ur
+        import json as _js
+        with _ur.urlopen("http://127.0.0.1:11434/api/tags", timeout=3) as r:
+            data = _js.loads(r.read().decode())
+            models = [m["name"] for m in data.get("models", [])]
+            return {"installed": models, "count": len(models)}
+    except Exception:
+        return {"installed": [], "count": 0}
+
+
 @router.get("/api/bootstrap/check")
 def check_environment():
     """Quick environment health check."""
