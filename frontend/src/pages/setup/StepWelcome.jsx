@@ -1,129 +1,119 @@
 import { useEffect, useState } from 'react';
 import useSetup from '../../stores/useSetup';
 
-const STATS = [
-  { value: '100%', label: 'LOCAL', desc: 'Nothing leaves your machine' },
-  { value: '0ms',  label: 'CLOUD', desc: 'Zero network dependency for AI' },
-  { value: '∞',    label: 'MEMORY', desc: 'Remembers across sessions' },
+const PILLARS = [
+  {
+    label: 'LOCAL',
+    value: '100%',
+    desc: 'All AI runs on your hardware. Nothing is sent to any server.',
+  },
+  {
+    label: 'PRIVATE',
+    value: '0 cloud',
+    desc: 'No API keys. No data collection. No accounts required.',
+  },
+  {
+    label: 'MEMORY',
+    value: 'Persistent',
+    desc: 'Remembers facts and preferences across every session.',
+  },
 ];
-
-const STACK = ['Whisper STT', 'Ollama LLM', 'ChromaDB', 'Local TTS'];
 
 export default function StepWelcome() {
   const { next } = useSetup();
-  const [visible, setVisible] = useState(false);
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    const t = setTimeout(() => setVisible(true), 80);
+    const t = setTimeout(() => setReady(true), 60);
     return () => clearTimeout(t);
   }, []);
 
   return (
-    <div className={`space-y-10 transition-all duration-500 ease-out
-                     ${visible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-3'}`}>
+    <div className={`space-y-10 transition-all duration-500
+                     ${ready ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2'}`}>
 
       {/* Hero */}
-      <div className="relative pt-4 pb-2">
-        <div className="absolute inset-0 opacity-[0.025]"
-          style={{
-            backgroundImage: `
-              linear-gradient(rgba(99,102,241,0.4) 1px, transparent 1px),
-              linear-gradient(90deg, rgba(99,102,241,0.4) 1px, transparent 1px)
-            `,
-            backgroundSize: '48px 48px',
-          }}
-        />
+      <div className="space-y-6 pt-2">
 
-        <div className="relative space-y-7">
-
-          {/* Logo */}
-          <div className="flex items-center gap-4">
-            <div className="relative">
-              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br
-                              from-s-accent to-s-accent-dim
-                              flex items-center justify-center
-                              shadow-[0_0_40px_rgba(99,102,241,0.25)]">
-                <span className="font-mono text-base font-bold text-white tracking-[0.25em]">
-                  VII
-                </span>
-              </div>
-              <div className="absolute -inset-1 rounded-2xl bg-s-accent/10
-                              blur-xl -z-10" />
+        {/* Logo */}
+        <div className="flex items-center gap-4">
+          <div className="relative">
+            <div className="w-12 h-12 rounded-2xl bg-s-accent flex items-center
+                            justify-center shadow-[0_0_32px_rgba(99,102,241,0.3)]">
+              <span className="font-mono text-[11px] font-bold text-white tracking-[0.2em]">
+                VII
+              </span>
             </div>
-            <div className="flex-1 h-px bg-gradient-to-r from-s-accent/30 to-transparent" />
+            <div className="absolute -inset-2 rounded-2xl bg-s-accent/8 blur-xl -z-10" />
           </div>
+          <div className="flex-1 h-px bg-gradient-to-r from-white/[0.06] to-transparent" />
+        </div>
 
-          {/* Headline */}
-          <div className="space-y-4">
-            <h1 className="text-[38px] font-bold text-s-text tracking-[-0.03em] leading-[1.08]">
-              Private AI that lives<br />
-              <span className="text-s-accent">on your machine.</span>
-            </h1>
-            <p className="text-[13px] text-s-text-3 leading-relaxed max-w-[480px] font-light">
-              Seven is a voice AI assistant that runs entirely on your hardware.
-              No cloud APIs. No data collection. No subscriptions for core features.
-              Your conversations stay between you and your device.
-            </p>
-          </div>
+        {/* Headline */}
+        <div className="space-y-3">
+          <h1 className="text-[36px] font-bold text-white/95 tracking-[-0.03em] leading-[1.1]">
+            AI that runs<br />
+            <span className="text-s-accent">on your machine.</span>
+          </h1>
+          <p className="text-[13px] text-white/40 leading-relaxed max-w-md font-light">
+            Seven is a voice assistant built for privacy. The AI runs locally,
+            your voice stays on your device, and your data goes nowhere.
+          </p>
         </div>
       </div>
 
-      {/* Stats row */}
+      {/* Pillars */}
       <div className="grid grid-cols-3 gap-3">
-        {STATS.map((s, i) => (
+        {PILLARS.map((p, i) => (
           <div key={i}
-               className="px-5 py-4 rounded-xl bg-s-card border border-s-border
-                          space-y-1.5 group hover:border-s-accent/20
-                          transition-all duration-200">
+               className="px-4 py-4 rounded-xl bg-white/[0.02] border border-white/[0.06]
+                          space-y-2 hover:border-white/[0.10] transition-colors duration-200">
             <div className="flex items-baseline gap-2">
-              <span className="text-[26px] font-bold font-mono text-s-text leading-none">
-                {s.value}
-              </span>
-              <span className="text-[8px] text-s-accent tracking-[0.25em] font-semibold">
-                {s.label}
+              <span className="text-[22px] font-bold font-mono text-white/80 leading-none">
+                {p.value}
               </span>
             </div>
-            <p className="text-[11px] text-s-text-4 font-light">{s.desc}</p>
+            <div className="text-[8px] text-s-accent/70 tracking-[0.2em] font-semibold">
+              {p.label}
+            </div>
+            <p className="text-[10px] text-white/30 font-light leading-relaxed">
+              {p.desc}
+            </p>
           </div>
         ))}
       </div>
 
       {/* Tech stack */}
-      <div className="flex items-center gap-6 px-1">
-        {STACK.map((tech, i) => (
+      <div className="flex items-center gap-5">
+        {['Whisper STT', 'Ollama LLM', 'ChromaDB', 'Local TTS'].map((t, i) => (
           <div key={i} className="flex items-center gap-2">
-            <div className="w-1 h-1 rounded-full bg-s-accent/35" />
-            <span className="text-[9px] text-s-text-4 tracking-wider font-mono">
-              {tech}
-            </span>
+            <div className="w-px h-px rounded-full bg-white/20" />
+            <span className="text-[9px] text-white/25 font-mono tracking-wider">{t}</span>
           </div>
         ))}
       </div>
 
       {/* CTA */}
-      <div className="flex items-center gap-5">
+      <div className="flex items-center gap-4 pt-1">
         <button
           onClick={next}
-          className="group flex-1 py-4 rounded-xl
-                     bg-gradient-to-r from-s-accent to-s-accent-dim
-                     hover:from-s-accent-h hover:to-s-accent
-                     text-white text-sm font-semibold tracking-wide
-                     transition-all duration-200
-                     shadow-[0_0_30px_rgba(99,102,241,0.20)]
-                     hover:shadow-[0_0_40px_rgba(99,102,241,0.30)]
-                     flex items-center justify-center gap-3"
+          className="group flex-1 py-3.5 rounded-xl bg-s-accent
+                     hover:bg-s-accent-h text-white text-[13px]
+                     font-semibold tracking-wide transition-all duration-200
+                     flex items-center justify-center gap-2.5
+                     shadow-[0_0_24px_rgba(99,102,241,0.2)]
+                     hover:shadow-[0_0_32px_rgba(99,102,241,0.3)]"
         >
           Begin Setup
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none"
+          <svg width="13" height="13" viewBox="0 0 13 13" fill="none"
                className="group-hover:translate-x-0.5 transition-transform duration-200">
-            <path d="M5 3L9 7L5 11" stroke="currentColor" strokeWidth="1.5"
-                  strokeLinecap="round" strokeLinejoin="round"/>
+            <path d="M4.5 2.5L8.5 6.5L4.5 10.5" stroke="currentColor"
+                  strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
           </svg>
         </button>
-
-        <div className="text-right space-y-0.5">
-          <div className="text-[10px] text-s-text-4">20-40 min total</div>
-          <div className="text-[9px] text-s-text-4/50">downloads happen once</div>
+        <div className="text-right">
+          <div className="text-[10px] text-white/25">20-40 min total</div>
+          <div className="text-[9px] text-white/15 mt-0.5">downloads happen once</div>
         </div>
       </div>
     </div>
