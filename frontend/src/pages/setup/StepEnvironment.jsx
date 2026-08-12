@@ -17,6 +17,58 @@ import useSetup from '../../stores/useSetup';
 
 const API = 'http://127.0.0.1:7777';
 
+const FACTS = [
+  { heading: "100% Private", body: "Your voice never leaves this machine. Seven processes everything locally." },
+  { heading: "Vector Memory", body: "Seven stores conversations in ChromaDB — a local vector database that understands meaning, not just keywords." },
+  { heading: "No Subscriptions", body: "The AI runs on your GPU. No API calls. No usage limits. No monthly fees for core features." },
+  { heading: "TARS Personality", body: "Seven's responses are shaped by configurable Humor and Honesty sliders — just like TARS from Interstellar." },
+  { heading: "30+ Voice Commands", body: "Open apps, control windows, set reminders, search the web — all through natural speech." },
+  { heading: "Persistent Context", body: "Seven remembers what you tell it across sessions. Facts you share today are recalled next week." },
+  { heading: "Wake Word Detection", body: "Say 'Seven' or 'Hey Seven' and the assistant activates. No button press needed." },
+  { heading: "One-Time Download", body: "These files download once and stay on your machine permanently. Startup after this takes under 10 seconds." },
+];
+
+function RotatingFacts() {
+  const [index, setIndex] = useState(0);
+  const [visible, setVisible] = useState(true);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setVisible(false);
+      setTimeout(() => {
+        setIndex(i => (i + 1) % FACTS.length);
+        setVisible(true);
+      }, 400);
+    }, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const fact = FACTS[index];
+
+  return (
+    <div className={`px-5 py-4 rounded-xl bg-s-surface border border-s-border/50
+                     transition-opacity duration-400 ${visible ? 'opacity-100' : 'opacity-0'}`}>
+      <div className="flex items-start gap-4">
+        <div className="w-1.5 h-1.5 rounded-full bg-s-accent mt-1.5 flex-shrink-0" />
+        <div className="space-y-1">
+          <p className="text-[10px] text-s-accent tracking-[0.2em] font-medium">
+            {fact.heading.toUpperCase()}
+          </p>
+          <p className="text-[11px] text-s-text-3 leading-relaxed font-light">
+            {fact.body}
+          </p>
+        </div>
+        <div className="ml-auto flex gap-1 flex-shrink-0">
+          {FACTS.map((_, i) => (
+            <div key={i} className={`w-1 h-1 rounded-full transition-colors duration-300
+                                     ${i === index ? 'bg-s-accent' : 'bg-s-border'}`} />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Status badge component ──
 function StatusBadge({ status }) {
   const map = {
@@ -329,6 +381,11 @@ export default function StepEnvironment() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* ── Rotating facts during download ── */}
+      {started && !allDone && !errorStep && (
+        <RotatingFacts />
       )}
 
       {/* ── Setup rows ── */}
