@@ -33,7 +33,7 @@ def get_existing_identity():
         import requests as _req
 
         device_id  = tel.get_device_id()
-        SERVER_URL = "https://seven-server-u2rp.onrender.com"
+        SERVER_URL = "https://seven-server-a825.onrender.com"
         r = _req.get(f"{SERVER_URL}/api/device/{device_id}", timeout=5)
         if r.status_code == 200:
             data = r.json()
@@ -442,11 +442,30 @@ def get_whisper_models():
         os.environ.get("APPDATA", os.path.expanduser("~")), "SEVEN", "config.json"
     )
     current = "medium.en"
+    
+    # ALWAYS read from file, never from config.KEY (which can be stale)
     try:
+        # Force fresh read with no caching
         with open(cfg_path, "r", encoding="utf-8") as _f:
-            current = _json.load(_f).get("brain", {}).get("whisper_model", "medium.en")
-    except Exception:
+            cfg_data = _json.load(_f)
+            current = cfg_data.get("brain", {}).get("whisper_model", "medium.en")
+            _log_config_change("GET /whisper-models", current)
+            print(f"[WHISPER] GET models - read from file: {current}")
+            
+        # Also check what config.KEY says (for debugging)
+        import config
+        in_memory = config.KEY.get("brain", {}).get("whisper_model", "N/A")
+        print(f"[WHISPER] GET models - config.KEY says: {in_memory}")
+        
+        if current != in_memory and in_memory != "N/A":
+            print(f"[WHISPER] WARNING: File says {current} but config.KEY says {in_memory} - using file value")
+            # Force update config.KEY to match file
+            config.KEY.setdefault("brain", {})["whisper_model"] = current
+            
+    except Exception as e:
+        print(f"[WHISPER] GET models - config read error: {e}, using default: {current}")
         pass
+    
     result = []
     for m in WHISPER_MODELS:
         result.append({
@@ -454,6 +473,8 @@ def get_whisper_models():
             "installed": _is_whisper_model_installed(m["id"]),
             "active":    m["id"] == current,
         })
+    
+    print(f"[WHISPER] GET models - returning current: {current}")
     return {"models": result, "current": current}
 
 
@@ -465,29 +486,80 @@ def set_whisper_model(data: dict):
     should poll /api/setup/whisper-download-status for progress.
     """
     import config
+    import json as _json
 
     model_id  = data.get("model", "").strip()
     valid_ids = [m["id"] for m in WHISPER_MODELS]
     if model_id not in valid_ids:
         raise HTTPException(status_code=400, detail="Unknown model")
 
-    config.update_config({
-        "brain": {**config.KEY.get("brain", {}), "whisper_model": model_id}
-    })
+    print(f"[WHISPER] POST /whisper-model called with: {model_id}")
+    
+    # Write directly to config.json file — config.update_config() does NOT write to disk!
+    cfg_path = os.path.join(
+        os.environ.get("APPDATA", os.path.expanduser("~")), "SEVEN", "config.json"
+    )
+    
+    # Read current config from file
+    try:
+        with open(cfg_path, "r", encoding="utf-8") as f:
+            cfg_data = _json.load(f)
+    except Exception as e:
+        print(f"[WHISPER] Failed to read config: {e}")
+        cfg_data = {}
+    
+    # Update whisper_model
+    if "brain" not in cfg_data:
+        cfg_data["brain"] = {}
+    cfg_data["brain"]["whisper_model"] = model_id
+    
+    # Write to file with forced flush
+    try:
+        with open(cfg_path, "w", encoding="utf-8") as f:
+            _json.dump(cfg_data, f, indent=4)
+            f.flush()
+            os.fsync(f.fileno())
+        print(f"[WHISPER] Wrote {model_id} to config.json and flushed to disk")
+    except Exception as e:
+        print(f"[WHISPER] Failed to write config: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to save config: {e}")
+    
+    # Verify write by reading back from file
+    try:
+        with open(cfg_path, "r", encoding="utf-8") as f:
+            verify_data = _json.load(f)
+            verified = verify_data.get("brain", {}).get("whisper_model")
+            print(f"[WHISPER] Verified file write: {verified}")
+            
+            if verified != model_id:
+                print(f"[WHISPER] ERROR: Wrote {model_id} but file contains {verified}!")
+                raise HTTPException(status_code=500, detail="Config verification failed")
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[WHISPER] Verification read failed: {e}")
+    
+    # Also update in-memory config.KEY
+    config.KEY.setdefault("brain", {})["whisper_model"] = model_id
+    print(f"[WHISPER] Updated config.KEY to {model_id}")
+    
+    _log_config_change(f"POST /whisper-model", model_id)
 
     if _is_whisper_model_installed(model_id):
+        print(f"[WHISPER] Model {model_id} already installed, returning immediately")
         return {"success": True, "installed": True, "current": model_id,
                 "message": "Model already installed. Restart Seven to apply."}
 
     with _whisper_download_lock:
         if _whisper_download_state["downloading"]:
-            return {"success": True, "installed": False,
+            return {"success": True, "installed": False, "current": model_id,
                     "message": "A download is already in progress."}
         _whisper_download_state.update({
             "downloading": True, "model": model_id, "progress": 5, "error": None
         })
 
     def _download():
+        print(f"[WHISPER] Download thread started for {model_id}")
         model_meta = next((m for m in WHISPER_MODELS if m["id"] == model_id), None)
         total_mb   = model_meta["size_mb"] if model_meta else 500
         stop_flag  = {"done": False}
@@ -528,12 +600,20 @@ def set_whisper_model(data: dict):
         watcher.start()
 
         try:
+            print(f"[WHISPER] Initializing WhisperModel to download {model_id}")
             from faster_whisper import WhisperModel
             # cpu/int8 used deliberately here only to trigger the download —
             # this is a one-time cache warm-up, not how the model runs later.
             # ears/core.py loads the real model with GPU if available.
             WhisperModel(model_id, device="cpu", compute_type="int8")
             stop_flag["done"] = True
+            print(f"[WHISPER] Download completed for {model_id}")
+            
+            # Re-verify config after download to catch any overwrites
+            import config as cfg_check
+            final_model = cfg_check.KEY.get("brain", {}).get("whisper_model")
+            if final_model != model_id:
+                print(f"[WHISPER] WARNING: After download, config shows {final_model} instead of {model_id}!")
             with _whisper_download_lock:
                 _whisper_download_state.update({
                     "downloading": False, "progress": 100, "error": None
@@ -545,8 +625,9 @@ def set_whisper_model(data: dict):
                     "downloading": False, "error": str(e)
                 })
 
+    print(f"[WHISPER] Starting download thread for {model_id}")
     threading.Thread(target=_download, daemon=True).start()
-    return {"success": True, "installed": False, "message": "Download started."}
+    return {"success": True, "installed": False, "current": model_id, "message": "Download started."}
 
 
 @router.get("/api/setup/whisper-download-status")
@@ -645,3 +726,28 @@ def start_ollama_endpoint():
         return {"success": True, "message": "Starting Ollama"}
     except Exception as e:
         return {"success": False, "message": str(e)}
+    
+    # Add this right after the imports at the top, after "router = APIRouter()"
+_last_whisper_model = None
+_config_write_log = []
+
+def _log_config_change(source: str, model: str):
+    """Log all whisper_model changes to track what's overwriting it."""
+    global _last_whisper_model, _config_write_log
+    import datetime
+    timestamp = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+    
+    if model != _last_whisper_model:
+        entry = f"[{timestamp}] {source}: {_last_whisper_model} → {model}"
+        print(f"[WHISPER] CHANGE: {entry}")
+        _config_write_log.append(entry)
+        _last_whisper_model = model
+        
+        # Keep only last 20 changes
+        if len(_config_write_log) > 20:
+            _config_write_log.pop(0)
+
+@router.get("/api/setup/whisper-debug")
+def get_whisper_debug():
+    """Debug endpoint to see all whisper_model changes."""
+    return {"changes": _config_write_log, "current": _last_whisper_model}
