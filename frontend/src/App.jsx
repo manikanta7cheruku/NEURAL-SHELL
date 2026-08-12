@@ -65,7 +65,7 @@ function MainApp() {
         <Sidebar />
         <main className="flex-1 overflow-y-auto">
           <Routes>
-            <Route path="/dashboard" element={<Home />}     />
+            <Route path="/dashboard" element={<Home isFirstLaunch={isFirstLaunch} />} />
             <Route path="/console"   element={<Console />}  />
             <Route path="/commands"  element={<Commands />} />
             <Route path="/memory"    element={<Memory />}   />
@@ -89,7 +89,8 @@ function MainApp() {
 export default function App() {
   const { fetchStatus }                      = useLicense();
   const { config, fetch: fetchConfig, loading: configLoading } = useConfig();
-  const [setupDone, setSetupDone]            = useState(null);
+  const [setupDone,    setSetupDone]    = useState(null);
+  const [isFirstLaunch, setIsFirstLaunch] = useState(false);
 
   useEffect(() => {
     fetchConfig();
@@ -98,7 +99,8 @@ export default function App() {
 
   useEffect(() => {
     if (!configLoading && config !== null) {
-      setSetupDone(config.setup_complete === true);
+      const done = config.setup_complete === true;
+      setSetupDone(done);
     }
   }, [config, configLoading]);
 
@@ -117,14 +119,12 @@ export default function App() {
           </div>
         </div>
 
-        {/* Loading bar */}
-        <div className="w-48 h-px bg-s-border overflow-hidden rounded-full">
-          <div className="h-full bg-s-accent rounded-full animate-[loading_1.5s_ease-in-out_infinite]" 
-               style={{
-                 animation: 'loading 1.5s ease-in-out infinite',
-               }}
-          />
-        </div>
+      {/* Loading bar */}
+      <div className="w-48 h-px bg-s-border overflow-hidden rounded-full">
+        <div className="h-full bg-s-accent rounded-full"
+             style={{ animation: 'loading 1.5s ease-in-out infinite' }}
+        />
+      </div>
 
         <div className="text-[10px] text-s-text-4 font-light tracking-widest">
           Starting...
@@ -137,7 +137,10 @@ export default function App() {
   if (!setupDone) {
     return (
       <HashRouter>
-        <Setup onComplete={() => setSetupDone(true)} />
+        <Setup onComplete={() => {
+          setIsFirstLaunch(true);
+          setSetupDone(true);
+        }} />
       </HashRouter>
     );
   }
