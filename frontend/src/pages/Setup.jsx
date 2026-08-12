@@ -117,7 +117,14 @@ export default function Setup({ onComplete }) {
       {/* ── Step content — scrollable ── */}
       <div className="flex-1 overflow-y-auto">
         <div className="min-h-full flex items-start justify-center px-8 py-6">
-          <div className="w-full max-w-3xl" key={step}>
+          <div
+            className="w-full max-w-3xl transition-all duration-300 ease-out
+                       animate-[fadeSlideIn_300ms_ease-out]"
+            key={step}
+            style={{
+              animation: 'fadeSlideIn 300ms ease-out',
+            }}
+          >
             <StepComponent onComplete={onComplete} />
           </div>
         </div>
