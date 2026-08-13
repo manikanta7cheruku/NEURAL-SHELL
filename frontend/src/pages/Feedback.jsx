@@ -6,13 +6,13 @@ import PageHeader from '../components/PageHeader';
 // See: Seven Settings > Feedback for setup instructions.
 //
 // Form action URL: replace /viewform with /formResponse in your form URL
-const FORM_ACTION_URL = 'https://docs.google.com/forms/d/e/YOUR_FORM_ID/formResponse';
+const FORM_ACTION_URL = 'https://docs.google.com/forms/d/e/1FAIpQLScbQrtJLGQR0fVB2PkG_7uM8xcrRMSF7D9184Fq0X-L1tKnoA/formResponse';
 //
 // Entry IDs — get these from "Get pre-filled link" in Google Forms
-const ENTRY_CATEGORY = 'entry.YOUR_CATEGORY_ID';
-const ENTRY_SEVERITY = 'entry.YOUR_SEVERITY_ID';
-const ENTRY_DETAILS  = 'entry.YOUR_DETAILS_ID';
-const ENTRY_EMAIL    = 'entry.YOUR_EMAIL_ID';
+const E_CATEGORY  = 'entry.1403735424';
+const E_SEVERITY  = 'entry.813819414';
+const E_DETAILS   = 'entry.2134832696';
+const ENTRY_EMAIL = 'entry.1297852434';
 
 const CATS = [
   { id: 'bug', l: 'Bug Report', d: 'Something broken' },
