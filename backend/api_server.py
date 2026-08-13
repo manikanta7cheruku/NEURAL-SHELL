@@ -255,8 +255,30 @@ from backend.routes import triggers as triggers_routes
 from backend.routes import workspaces as workspaces_routes
 from backend.routes import chrome as chrome_routes
 from backend.routes import health as health_routes
+from fastapi import Request
+from fastapi.responses import JSONResponse
 
 app.include_router(health_routes.router)
+
+# Bootstrap restart stub — called by setup wizard after environment setup
+# Real restart is handled by Electron watching Python exit code
+@app.post("/api/bootstrap/restart")
+async def bootstrap_restart():
+    """
+    Called by the setup wizard after first-launch setup completes.
+    Signals Python to restart cleanly so new packages are importable.
+    Electron detects the exit and relaunches Python automatically.
+    """
+    import threading
+    import os
+
+    def _delayed_restart():
+        import time
+        time.sleep(0.5)  # give response time to send
+        os._exit(0)      # clean exit — Electron restarts Python
+
+    threading.Thread(target=_delayed_restart, daemon=True).start()
+    return {"ok": True, "message": "Restarting..."}
 app.include_router(status_routes.router)
 app.include_router(chat_routes.router)
 app.include_router(memory_routes.router)
