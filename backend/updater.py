@@ -4,10 +4,14 @@ import threading
 import requests
 import tempfile
 
-TIMEOUT = 10
+TIMEOUT        = 10
 CHECK_DELAY    = 15       # first check after 15 seconds
 RECHECK_DELAY  = 7200     # recheck every 2 hours
 _version_logged = False   # log version only once
+
+# Update server — your backend that hosts release metadata
+# Set to empty string to disable server checks and use local override only
+SERVER_URL = os.environ.get("SEVEN_UPDATE_SERVER", "").rstrip("/")
 
 def _get_cache_file():
     appdata = os.environ.get("APPDATA", "")
@@ -197,28 +201,85 @@ def check_for_updates(force=False):
             except Exception:
                 pass
 
+        # Check GitHub releases directly — no custom server needed
         try:
-            url = SERVER_URL + "/api/updates/latest"
-            print("[UPDATER] Checking server...")
+            GITHUB_RELEASES_URL = "https://api.github.com/repos/manikanta7cheruku/seven-releases/releases/latest"
+            print("[UPDATER] Checking GitHub releases...")
+
             r = requests.get(
-                url,
-                params={"tier": tier, "current_version": current},
-                timeout=TIMEOUT
+                GITHUB_RELEASES_URL,
+                headers={"Accept": "application/vnd.github.v3+json"},
+                timeout=TIMEOUT,
             )
+
             if r.status_code == 200:
-                data = r.json()
-                if data.get("update_available"):
+                release = r.json()
+                latest_version = release.get("tag_name", "").lstrip("v")
+
+                if not latest_version:
+                    print("[UPDATER] No version tag found in release")
+                    _state["checking"] = False
+                    return
+
+                # Compare versions
+                try:
+                    from packaging import version as pv
+                    is_newer = pv.parse(latest_version) > pv.parse(current)
+                except Exception:
+                    # Fallback string compare
+                    is_newer = latest_version != current
+
+                if is_newer:
+                    # Find the .exe asset
+                    assets = release.get("assets", [])
+                    download_url = ""
+                    size_bytes = 0
+                    for asset in assets:
+                        name = asset.get("name", "")
+                        if name.endswith(".exe") and "Setup" in name:
+                            download_url = asset.get("browser_download_url", "")
+                            size_bytes = asset.get("size", 0)
+                            break
+
+                    # Parse changelog from release body
+                    body = release.get("body", "")
+                    changelog = []
+                    for line in body.splitlines():
+                        line = line.strip()
+                        if line.startswith("- ") or line.startswith("* "):
+                            changelog.append(line[2:].strip())
+                    if not changelog and body.strip():
+                        changelog = [body.strip()[:200]]
+
                     _state["update_available"] = True
-                    _state["info"]             = data
-                    print("[UPDATER] Update available: " + str(data.get("version")))
+                    _state["info"] = {
+                        "version":       latest_version,
+                        "changelog":     changelog,
+                        "download_url":  download_url,
+                        "download_mode": "manual",
+                        "size_mb":       round(size_bytes / (1024 * 1024), 1) if size_bytes else 0,
+                        "published_at":  release.get("published_at", ""),
+                        "is_critical":   "critical" in release.get("body", "").lower(),
+                    }
+                    print("[UPDATER] Update available: " + latest_version)
                 else:
                     _state["update_available"] = False
                     _state["info"]             = None
-                    print("[UPDATER] Up to date")
+                    print("[UPDATER] Up to date: " + current)
+
+            elif r.status_code == 403:
+                print("[UPDATER] GitHub rate limited — will retry later")
+            elif r.status_code == 404:
+                print("[UPDATER] No releases found on GitHub yet")
+                _state["update_available"] = False
             else:
-                _state["error"] = "Server error: " + str(r.status_code)
+                _state["error"] = "GitHub API error: " + str(r.status_code)
+                print("[UPDATER] GitHub error: " + str(r.status_code))
+
         except requests.exceptions.ConnectionError:
-            print("[UPDATER] Offline")
+            print("[UPDATER] Offline — skipping update check")
+        except requests.exceptions.Timeout:
+            print("[UPDATER] Update check timed out")
         except Exception as e:
             _state["error"] = str(e)
             print("[UPDATER] Error: " + str(e))
