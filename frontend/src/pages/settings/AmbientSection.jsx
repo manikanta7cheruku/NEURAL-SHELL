@@ -1,8 +1,24 @@
+import { useEffect, useRef } from 'react';
 import api from '../../api';
 import { Layers } from 'lucide-react';
 
+// Broadcast opacity to the orb window via a dedicated endpoint
+async function broadcastOpacity(value) {
+  try {
+    await api.post('/config/ambient-opacity', { opacity: value });
+  } catch {
+    // Endpoint may not exist yet — fallback to localStorage signal
+    // status.html polls localStorage key 'seven_panel_opacity'
+    try {
+      localStorage.setItem('seven_panel_opacity', String(value));
+      localStorage.setItem('seven_panel_opacity_ts', Date.now().toString());
+    } catch {}
+  }
+}
+
 export default function AmbientSection({ local, setLocal }) {
   const saveOpacity = async (value) => {
+    // 1. Update local React state immediately (optimistic)
     setLocal(prev => {
       if (!prev) return prev;
       return {
@@ -10,11 +26,18 @@ export default function AmbientSection({ local, setLocal }) {
         ambient_panel: { ...(prev.ambient_panel || {}), opacity: value }
       };
     });
+
+    // 2. Persist to backend config
     try {
       await api.put('/config', {
         updates: { ambient_panel: { opacity: value } }
       });
-    } catch (e) { console.error('[AMBIENT] Save failed:', e); }
+    } catch (e) {
+      console.error('[AMBIENT] Save failed:', e);
+    }
+
+    // 3. Signal status.html to apply new opacity immediately
+    await broadcastOpacity(value);
   };
 
   const current = local?.ambient_panel?.opacity ?? 0.65;
@@ -37,7 +60,26 @@ export default function AmbientSection({ local, setLocal }) {
           <div className="flex items-center justify-between mb-3">
             <div>
               <div className="text-[11px] text-white/80 font-medium">Background Opacity</div>
-              <div className="text-[9px] text-white/35 mt-0.5">How transparent the panel appears</div>
+              <div className="text-[9px] text-white/35 mt-0.5">
+                How transparent the panel appears
+              </div>
+            </div>
+            <div className="text-[10px] font-mono text-white/40">
+              {Math.round(current * 100)}%
+            </div>
+          </div>
+
+          {/* Visual preview strip */}
+          <div
+            className="w-full h-8 rounded-lg mb-3 border border-white/8 transition-all duration-300"
+            style={{
+              background: `rgba(8, 8, 12, ${current})`,
+              boxShadow: `inset 0 1px 0 rgba(255,255,255,${current * 0.06})`,
+            }}
+          >
+            <div className="h-full flex items-center px-3 gap-2">
+              <div className="w-1.5 h-1.5 rounded-full bg-indigo-400/60" />
+              <div className="text-[9px] text-white/50 font-light">Preview</div>
             </div>
           </div>
 
@@ -57,6 +99,11 @@ export default function AmbientSection({ local, setLocal }) {
                       ? 'bg-s-accent/8 border-s-accent/25'
                       : 'bg-white/[0.02] border-white/8 hover:border-white/15 hover:bg-white/[0.04]'}`}
                 >
+                  {/* Mini opacity preview swatch */}
+                  <div
+                    className="w-full h-5 rounded-md mb-2 border border-white/10"
+                    style={{ background: `rgba(8, 8, 12, ${value})` }}
+                  />
                   <div className={`text-[11px] font-semibold
                     ${isActive ? 'text-s-accent' : 'text-white/70'}`}>
                     {label}
@@ -72,7 +119,7 @@ export default function AmbientSection({ local, setLocal }) {
         </div>
 
         <p className="text-[9px] text-white/30 italic border-t border-white/[0.04] pt-3">
-          Changes apply immediately.
+          Changes apply immediately to the orb panel.
         </p>
       </div>
     </div>
