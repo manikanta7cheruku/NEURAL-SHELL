@@ -10,7 +10,7 @@ const useUpdate = create((set, get) => ({
   downloadPath:     null,
   error:            null,
   info:             null,          // full update object from server
-  currentVersion:   '1.1.0',
+  currentVersion:   '1.2.7',
   dismissed:        false,         // user dismissed the banner this session
 
   // ── Poll status from Python backend ──
