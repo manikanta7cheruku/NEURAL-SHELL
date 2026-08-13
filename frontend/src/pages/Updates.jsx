@@ -88,7 +88,7 @@ export default function Updates() {
                   You are up to date
                 </h3>
                 <p className="text-[12px] text-s-text-4 font-light">
-                  Seven {currentVersion} is the latest version
+                  Seven {currentVersion || '1.2.7'} is the latest version
                 </p>
               </div>
             </div>
