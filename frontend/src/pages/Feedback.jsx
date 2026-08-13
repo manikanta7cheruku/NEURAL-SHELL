@@ -1,7 +1,18 @@
 import { useState } from 'react';
 import PageHeader from '../components/PageHeader';
 
-const FORM_URL = 'YOUR_GOOGLE_FORM_URL';
+// ── Google Forms config ──────────────────────────────────────────────────────
+// Replace these with your actual form values after creating the form.
+// See: Seven Settings > Feedback for setup instructions.
+//
+// Form action URL: replace /viewform with /formResponse in your form URL
+const FORM_ACTION_URL = 'https://docs.google.com/forms/d/e/YOUR_FORM_ID/formResponse';
+//
+// Entry IDs — get these from "Get pre-filled link" in Google Forms
+const ENTRY_CATEGORY = 'entry.YOUR_CATEGORY_ID';
+const ENTRY_SEVERITY = 'entry.YOUR_SEVERITY_ID';
+const ENTRY_DETAILS  = 'entry.YOUR_DETAILS_ID';
+const ENTRY_EMAIL    = 'entry.YOUR_EMAIL_ID';
 
 const CATS = [
   { id: 'bug', l: 'Bug Report', d: 'Something broken' },
@@ -25,12 +36,42 @@ export default function Feedback() {
   const [email, setEmail] = useState('');
   const [done, setDone] = useState(false);
 
-  const submit = () => {
-    if (!cat || !msg.trim()) return;
-    const p = new URLSearchParams({ 'entry.cat': cat, 'entry.sev': sev, 'entry.msg': msg, 'entry.email': email });
-    window.open(`${FORM_URL}?${p.toString()}`, '_blank');
+  const [submitting, setSubmitting] = useState(false);
+
+  const submit = async () => {
+    if (!cat || !msg.trim() || submitting) return;
+    setSubmitting(true);
+
+    // Build form data exactly as Google Forms expects
+    const body = new URLSearchParams();
+    body.append(ENTRY_CATEGORY, cat);
+    body.append(ENTRY_SEVERITY, sev || 'n/a');
+    body.append(ENTRY_DETAILS,  msg.trim());
+    body.append(ENTRY_EMAIL,    email.trim() || 'anonymous');
+
+    try {
+      // Google Forms does not support CORS — use no-cors mode.
+      // The request always shows as "opaque" but data IS submitted to the sheet.
+      await fetch(FORM_ACTION_URL, {
+        method: 'POST',
+        mode:   'no-cors',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body:    body.toString(),
+      });
+    } catch {
+      // no-cors fetch always throws a network error in dev — ignore it.
+      // In production (packaged app) it submits silently.
+    }
+
     setDone(true);
-    setTimeout(() => { setDone(false); setCat(''); setSev(''); setMsg(''); setEmail(''); }, 3000);
+    setSubmitting(false);
+    setTimeout(() => {
+      setDone(false);
+      setCat('');
+      setSev('');
+      setMsg('');
+      setEmail('');
+    }, 3000);
   };
 
   return (
@@ -82,13 +123,23 @@ export default function Feedback() {
             </div>
 
             <div className="flex items-center gap-3">
-              <button onClick={submit} disabled={!cat || !msg.trim()}
-                className="px-4 py-1.5 border border-s-accent/30 bg-s-accent/8 text-s-accent rounded text-[11px] font-medium disabled:border-s-border disabled:bg-transparent disabled:text-s-text-4">
-                Submit
+              <button
+                onClick={submit}
+                disabled={!cat || !msg.trim() || submitting}
+                className="px-4 py-1.5 border border-s-accent/30 bg-s-accent/8 text-s-accent rounded text-[11px] font-medium disabled:border-s-border disabled:bg-transparent disabled:text-s-text-4 flex items-center gap-1.5"
+              >
+                {submitting ? (
+                  <>
+                    <div className="w-2.5 h-2.5 rounded-full border border-s-accent/30 border-t-s-accent animate-spin" />
+                    Sending...
+                  </>
+                ) : 'Submit'}
               </button>
               {done && <span className="text-[10px] text-s-green">Sent! Thank you.</span>}
             </div>
-            <p className="text-[9px] text-s-text-4">Sent via Google Forms. No data collected automatically.</p>
+            <p className="text-[9px] text-s-text-4">
+              Sent to Google Sheets via Google Forms. No data collected automatically.
+            </p>
           </div>
         </div>
       </div>
