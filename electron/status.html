@@ -318,77 +318,72 @@
 
     /* ══════════════════════════════════════
        STATE CLASSES
+       Orb body stays dark always.
+       Only glow rings and ambient carry color.
     ══════════════════════════════════════ */
 
-    /* IDLE */
-    .idle #orb {
-      border-color: rgba(255,255,255,0.04);
-      box-shadow:
-        inset 0 1px 0 rgba(255,255,255,0.04),
-        inset 0 -1px 0 rgba(0,0,0,0.5),
-        0 2px 8px rgba(0,0,0,0.3);
-    }
-    .idle #orb-text    { color: rgba(255,255,255,0.12); }
-    .idle #orb-ambient { opacity: 0; }
-    .idle #pulse-ring  { border-color: rgba(255,255,255,0.03); }
-    .idle #ghost-ring  { opacity: 0; }
-
-    /* LISTENING */
-    .listening #orb {
-      border-color: rgba(34,197,94,0.16);
+    /* Shared orb body — never changes color */
+    #orb {
+      border-color: rgba(255,255,255,0.05);
       background: radial-gradient(
         ellipse at 38% 32%,
-        rgba(34,197,94,0.06) 0%,
-        rgba(12,28,18,0.97) 55%,
-        rgba(5,10,7,1) 100%
+        rgba(26, 26, 38, 0.97) 0%,
+        rgba(11, 11, 18, 0.99) 55%,
+        rgba(5, 5, 10, 1) 100%
       );
       box-shadow:
-        inset 0 1px 0 rgba(34,197,94,0.08),
-        inset 0 -1px 0 rgba(0,0,0,0.5),
-        0 0 12px rgba(34,197,94,0.06);
+        inset 0 1px 0 rgba(255,255,255,0.055),
+        inset 0 -1px 0 rgba(0,0,0,0.55),
+        0 2px 12px rgba(0,0,0,0.5);
     }
+
+    /* IDLE */
+    .idle #orb-text   { color: rgba(255,255,255,0.14); text-shadow: none; }
+    .idle #orb-ambient { opacity: 0; }
+    .idle #pulse-ring  { border-color: rgba(255,255,255,0.04); animation: none; }
+    .idle #ghost-ring  { opacity: 0; animation: none; }
+
+    /* LISTENING — green glow only outside */
     .listening #orb-text {
-      color: rgba(134,239,172,0.55);
-      text-shadow: 0 0 10px rgba(34,197,94,0.2);
+      color: rgba(255,255,255,0.22);
+      text-shadow: none;
     }
     .listening #orb-ambient {
       opacity: 1;
-      background: radial-gradient(circle, rgba(34,197,94,0.18) 0%, transparent 70%);
+      background: radial-gradient(
+        circle,
+        rgba(34,197,94,0.22) 0%,
+        rgba(34,197,94,0.08) 45%,
+        transparent 70%
+      );
     }
     .listening #pulse-ring {
-      border-color: rgba(34,197,94,0.3);
+      border-color: rgba(34,197,94,0.32);
+      border-width: 1px;
       animation: ringPulse 2.6s cubic-bezier(0.4,0,0.2,1) infinite;
     }
     .listening #ghost-ring {
-      border-color: rgba(34,197,94,0.1);
+      border-color: rgba(34,197,94,0.10);
       opacity: 1;
-      animation: ringPulse 2.6s cubic-bezier(0.4,0,0.2,1) infinite 0.8s;
+      animation: ringPulse 2.6s cubic-bezier(0.4,0,0.2,1) infinite 0.85s;
     }
 
-    /* THINKING */
-    .thinking #orb {
-      border-color: rgba(168,85,247,0.18);
-      background: radial-gradient(
-        ellipse at 38% 32%,
-        rgba(168,85,247,0.08) 0%,
-        rgba(22,10,38,0.97) 55%,
-        rgba(8,4,14,1) 100%
-      );
-      box-shadow:
-        inset 0 1px 0 rgba(168,85,247,0.08),
-        inset 0 -1px 0 rgba(0,0,0,0.5),
-        0 0 14px rgba(168,85,247,0.08);
-    }
+    /* THINKING — violet glow only outside */
     .thinking #orb-text {
-      color: rgba(216,180,254,0.55);
-      text-shadow: 0 0 12px rgba(168,85,247,0.25);
+      color: rgba(255,255,255,0.22);
+      text-shadow: none;
     }
     .thinking #orb-ambient {
       opacity: 1;
-      background: radial-gradient(circle, rgba(168,85,247,0.2) 0%, transparent 70%);
+      background: radial-gradient(
+        circle,
+        rgba(168,85,247,0.24) 0%,
+        rgba(168,85,247,0.08) 45%,
+        transparent 70%
+      );
     }
     .thinking #pulse-ring {
-      border-color: rgba(168,85,247,0.35);
+      border-color: rgba(168,85,247,0.30);
       border-width: 1px;
       animation: ringOrbit 3.5s linear infinite;
     }
@@ -398,35 +393,27 @@
       animation: ringPulse 2s ease-in-out infinite 0.3s;
     }
 
-    /* SPEAKING */
-    .speaking #orb {
-      border-color: rgba(99,102,241,0.2);
-      background: radial-gradient(
-        ellipse at 38% 32%,
-        rgba(99,102,241,0.09) 0%,
-        rgba(14,14,36,0.97) 55%,
-        rgba(6,6,16,1) 100%
-      );
-      box-shadow:
-        inset 0 1px 0 rgba(99,102,241,0.08),
-        inset 0 -1px 0 rgba(0,0,0,0.5),
-        0 0 14px rgba(99,102,241,0.08);
-    }
+    /* SPEAKING — indigo glow only outside */
     .speaking #orb-text {
-      color: rgba(165,180,252,0.6);
-      text-shadow: 0 0 12px rgba(99,102,241,0.28);
+      color: rgba(255,255,255,0.22);
+      text-shadow: none;
     }
     .speaking #orb-ambient {
       opacity: 1;
-      background: radial-gradient(circle, rgba(99,102,241,0.2) 0%, transparent 70%);
+      background: radial-gradient(
+        circle,
+        rgba(99,102,241,0.24) 0%,
+        rgba(99,102,241,0.08) 45%,
+        transparent 70%
+      );
     }
     .speaking #pulse-ring {
-      border-color: rgba(99,102,241,0.38);
+      border-color: rgba(99,102,241,0.32);
       border-width: 1.5px;
       animation: ringBreathe 1.6s ease-in-out infinite;
     }
     .speaking #ghost-ring {
-      border-color: rgba(99,102,241,0.12);
+      border-color: rgba(99,102,241,0.10);
       opacity: 1;
       animation: ringBreathe 1.6s ease-in-out infinite 0.3s;
     }
