@@ -22,20 +22,23 @@
     /* ══════════════════════════════════════
        CONVERSATION PANEL
     ══════════════════════════════════════ */
+    :root {
+      --panel-bg-opacity: 0.78;
+    }
+
     #conv-panel {
       flex: 1;
       height: 72px;
       margin-right: 10px;
       border-radius: 14px;
       opacity: 0;
-      /* Slides RIGHT to hide (toward orb), slides LEFT to show */
       transform: translateX(20px);
       transition:
         opacity 0.5s cubic-bezier(0.4, 0, 0.2, 1),
         transform 0.5s cubic-bezier(0.4, 0, 0.2, 1);
       pointer-events: none;
       overflow: hidden;
-      background: rgba(8, 8, 12, 0.78);
+      background: rgba(8, 8, 12, var(--panel-bg-opacity));
       border: 1px solid rgba(255, 255, 255, 0.055);
       box-shadow:
         0 12px 40px rgba(0,0,0,0.55),
@@ -202,37 +205,68 @@
     }
 
     #orb {
-      width: 42px; height: 42px;
+      width: 44px; height: 44px;
       border-radius: 50%;
-      background: radial-gradient(ellipse at 35% 30%, #1a1a2e 0%, #12121c 40%, #0a0a12 100%);
+      background: radial-gradient(ellipse at 38% 32%,
+        rgba(30,30,45,0.9) 0%,
+        rgba(12,12,20,0.95) 55%,
+        rgba(6,6,12,1) 100%
+      );
       border: 1px solid rgba(255,255,255,0.04);
       display: flex;
       align-items: center;
       justify-content: center;
       position: relative;
       z-index: 3;
-      transition: border-color 0.6s ease, transform 0.12s ease;
+      transition:
+        border-color 0.7s cubic-bezier(0.4,0,0.2,1),
+        background   0.7s cubic-bezier(0.4,0,0.2,1),
+        transform    0.12s ease;
       pointer-events: none;
+      /* Outer rim subtle shadow */
+      box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.06),
+        inset 0 -1px 0 rgba(0,0,0,0.4);
     }
 
+    /* Top specular highlight */
     #orb::before {
       content: '';
       position: absolute;
-      top: 4px; left: 8px;
-      width: 18px; height: 8px;
+      top: 5px; left: 9px;
+      width: 16px; height: 7px;
       border-radius: 50%;
-      background: linear-gradient(180deg, rgba(255,255,255,0.07) 0%, transparent 100%);
+      background: radial-gradient(ellipse,
+        rgba(255,255,255,0.10) 0%,
+        transparent 100%
+      );
+      z-index: 5;
+    }
+
+    /* Bottom rim light */
+    #orb::after {
+      content: '';
+      position: absolute;
+      bottom: 5px; left: 50%;
+      transform: translateX(-50%);
+      width: 20px; height: 3px;
+      border-radius: 50%;
+      background: radial-gradient(ellipse,
+        rgba(255,255,255,0.04) 0%,
+        transparent 100%
+      );
       z-index: 5;
     }
 
     #orb-text {
-      font-family: 'Georgia', serif;
-      font-size: 11px;
-      font-weight: bold;
-      color: rgba(255,255,255,0.35);
-      letter-spacing: 2px;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      font-size: 10px;
+      font-weight: 700;
+      color: rgba(255,255,255,0.18);
+      letter-spacing: 3px;
+      text-transform: uppercase;
       z-index: 4;
-      transition: color 0.6s ease, text-shadow 0.6s ease;
+      transition: color 0.7s cubic-bezier(0.4,0,0.2,1), text-shadow 0.7s ease;
     }
 
     #orb-glow {
@@ -248,26 +282,27 @@
 
     #pulse-ring {
       position: absolute;
-      top:50%; left:50%;
-      transform:translate(-50%,-50%);
-      width:50px; height:50px;
-      border-radius:50%;
-      border:1.5px solid transparent;
-      pointer-events:none;
-      z-index:1;
-      transition:border-color 0.6s ease;
+      top: 50%; left: 50%;
+      transform: translate(-50%,-50%);
+      width: 54px; height: 54px;
+      border-radius: 50%;
+      border: 1px solid transparent;
+      pointer-events: none;
+      z-index: 1;
+      transition: border-color 0.7s cubic-bezier(0.4,0,0.2,1);
     }
 
     #ghost-ring {
       position: absolute;
-      top:50%; left:50%;
-      transform:translate(-50%,-50%);
-      width:50px; height:50px;
-      border-radius:50%;
-      border:1px solid transparent;
-      pointer-events:none;
-      z-index:0;
-      opacity:0;
+      top: 50%; left: 50%;
+      transform: translate(-50%,-50%);
+      width: 62px; height: 62px;
+      border-radius: 50%;
+      border: 1px solid transparent;
+      pointer-events: none;
+      z-index: 0;
+      opacity: 0;
+      transition: opacity 0.7s ease;
     }
 
     #interaction-layer {
@@ -301,42 +336,142 @@
     }
     #orb-container:hover #tooltip { opacity:1; }
 
-    /* ── State classes ── */
-    .idle     #orb        { border-color:rgba(40,40,55,0.3); }
-    .idle     #orb-text   { color:rgba(255,255,255,0.2); }
-    .idle     #orb-glow   { box-shadow:0 0 8px rgba(40,40,60,0.08); }
-    .idle     #pulse-ring { border-color:rgba(40,40,60,0.08); }
+    /* ── State classes — Professional refined ── */
 
-    .listening #orb        { border-color:rgba(34,197,94,0.1); }
-    .listening #orb-text   { color:rgba(255,255,255,0.45); text-shadow:0 0 8px rgba(34,197,94,0.15); }
-    .listening #orb-glow   { box-shadow:0 0 20px rgba(34,197,94,0.12),0 0 40px rgba(34,197,94,0.06); }
-    .listening #pulse-ring { border-color:rgba(34,197,94,0.4); animation:pulse 2.4s cubic-bezier(0.4,0,0.2,1) infinite; }
-    .listening #ghost-ring { border-color:rgba(34,197,94,0.15); opacity:1; animation:pulse 2.4s cubic-bezier(0.4,0,0.2,1) infinite 0.6s; }
-
-    .thinking #orb        { border-color:rgba(168,85,247,0.1); }
-    .thinking #orb-text   { color:rgba(255,255,255,0.45); text-shadow:0 0 8px rgba(168,85,247,0.15); }
-    .thinking #orb-glow   { box-shadow:0 0 22px rgba(168,85,247,0.15),0 0 40px rgba(168,85,247,0.06); }
-    .thinking #pulse-ring { border-color:rgba(168,85,247,0.4); border-style:dashed; border-width:1.5px; animation:spin 2s linear infinite; }
-
-    .speaking #orb        { border-color:rgba(99,102,241,0.15); }
-    .speaking #orb-text   { color:rgba(255,255,255,0.45); text-shadow:0 0 8px rgba(99,102,241,0.2); }
-    .speaking #orb-glow   { box-shadow:0 0 20px rgba(99,102,241,0.15),0 0 40px rgba(99,102,241,0.07); }
-    .speaking #pulse-ring { border-color:rgba(99,102,241,0.4); animation:breathe 1s ease-in-out infinite; }
-    .speaking #ghost-ring { border-color:rgba(99,102,241,0.12); opacity:1; animation:breathe 1s ease-in-out infinite 0.2s; }
-
-    /* ── Animations ── */
-    @keyframes pulse {
-      0%   { transform:translate(-50%,-50%) scale(1); opacity:0.6; }
-      70%  { transform:translate(-50%,-50%) scale(1.35); opacity:0; }
-      100% { transform:translate(-50%,-50%) scale(1.35); opacity:0; }
+    /* IDLE — ghost presence, barely there */
+    .idle #orb {
+      border-color: rgba(255,255,255,0.04);
+      background: radial-gradient(ellipse at 38% 32%,
+        rgba(30,30,45,0.9) 0%,
+        rgba(12,12,20,0.95) 55%,
+        rgba(6,6,12,1) 100%);
     }
-    @keyframes spin {
-      from { transform:translate(-50%,-50%) rotate(0deg); }
-      to   { transform:translate(-50%,-50%) rotate(360deg); }
+    .idle #orb-text   { color: rgba(255,255,255,0.12); text-shadow: none; }
+    .idle #orb-glow   { box-shadow: 0 0 6px rgba(255,255,255,0.02); }
+    .idle #pulse-ring { border-color: rgba(255,255,255,0.03); }
+    .idle #ghost-ring { opacity: 0; }
+
+    /* LISTENING — emerald, calm breathing */
+    .listening #orb {
+      border-color: rgba(34,197,94,0.18);
+      background: radial-gradient(ellipse at 38% 32%,
+        rgba(34,197,94,0.08) 0%,
+        rgba(15,40,25,0.95) 45%,
+        rgba(6,12,8,1) 100%);
     }
-    @keyframes breathe {
-      0%,100% { transform:translate(-50%,-50%) scale(1); opacity:0.5; }
-      50%     { transform:translate(-50%,-50%) scale(1.12); opacity:0.25; }
+    .listening #orb-text {
+      color: rgba(134,239,172,0.6);
+      text-shadow: 0 0 12px rgba(34,197,94,0.25), 0 0 24px rgba(34,197,94,0.1);
+    }
+    .listening #orb-glow {
+      box-shadow:
+        0 0 18px rgba(34,197,94,0.14),
+        0 0 36px rgba(34,197,94,0.07),
+        0 0 60px rgba(34,197,94,0.03);
+    }
+    .listening #pulse-ring {
+      border-color: rgba(34,197,94,0.35);
+      border-width: 1px;
+      animation: pulseSmooth 2.8s cubic-bezier(0.4,0,0.2,1) infinite;
+    }
+    .listening #ghost-ring {
+      border-color: rgba(34,197,94,0.12);
+      border-width: 1px;
+      opacity: 1;
+      animation: pulseSmooth 2.8s cubic-bezier(0.4,0,0.2,1) infinite 0.9s;
+    }
+
+    /* THINKING — violet, geometric spin */
+    .thinking #orb {
+      border-color: rgba(168,85,247,0.2);
+      background: radial-gradient(ellipse at 38% 32%,
+        rgba(168,85,247,0.1) 0%,
+        rgba(35,15,55,0.95) 45%,
+        rgba(10,6,18,1) 100%);
+    }
+    .thinking #orb-text {
+      color: rgba(216,180,254,0.65);
+      text-shadow: 0 0 12px rgba(168,85,247,0.3), 0 0 28px rgba(168,85,247,0.12);
+    }
+    .thinking #orb-glow {
+      box-shadow:
+        0 0 20px rgba(168,85,247,0.18),
+        0 0 40px rgba(168,85,247,0.08),
+        0 0 70px rgba(168,85,247,0.03);
+    }
+    .thinking #pulse-ring {
+      border-color: rgba(168,85,247,0.45);
+      border-style: solid;
+      border-width: 1px;
+      /* Dotted effect via repeating gradient */
+      background: repeating-conic-gradient(
+        rgba(168,85,247,0.3) 0deg,
+        transparent 2deg,
+        transparent 10deg,
+        rgba(168,85,247,0.3) 12deg
+      );
+      -webkit-mask: radial-gradient(
+        transparent calc(50% - 1.5px),
+        black calc(50% - 1px),
+        black calc(50% + 1px),
+        transparent calc(50% + 1.5px)
+      );
+      mask: radial-gradient(
+        transparent calc(50% - 1.5px),
+        black calc(50% - 1px),
+        black calc(50% + 1px),
+        transparent calc(50% + 1.5px)
+      );
+      animation: spinSmooth 3s linear infinite;
+    }
+    .thinking #ghost-ring {
+      border-color: rgba(168,85,247,0.08);
+      opacity: 1;
+      animation: pulseSmooth 2s ease-in-out infinite 0.4s;
+    }
+
+    /* SPEAKING — indigo, wave breathe */
+    .speaking #orb {
+      border-color: rgba(99,102,241,0.22);
+      background: radial-gradient(ellipse at 38% 32%,
+        rgba(99,102,241,0.12) 0%,
+        rgba(20,20,55,0.95) 45%,
+        rgba(8,8,20,1) 100%);
+    }
+    .speaking #orb-text {
+      color: rgba(165,180,252,0.65);
+      text-shadow: 0 0 12px rgba(99,102,241,0.3), 0 0 28px rgba(99,102,241,0.12);
+    }
+    .speaking #orb-glow {
+      box-shadow:
+        0 0 20px rgba(99,102,241,0.18),
+        0 0 40px rgba(99,102,241,0.09),
+        0 0 70px rgba(99,102,241,0.04);
+    }
+    .speaking #pulse-ring {
+      border-color: rgba(99,102,241,0.4);
+      border-width: 1.5px;
+      animation: breatheSmooth 1.4s ease-in-out infinite;
+    }
+    .speaking #ghost-ring {
+      border-color: rgba(99,102,241,0.14);
+      opacity: 1;
+      animation: breatheSmooth 1.4s ease-in-out infinite 0.25s;
+    }
+
+    /* ── Animations — smooth, professional ── */
+    @keyframes pulseSmooth {
+      0%   { transform: translate(-50%,-50%) scale(1);    opacity: 0.65; }
+      65%  { transform: translate(-50%,-50%) scale(1.38); opacity: 0; }
+      100% { transform: translate(-50%,-50%) scale(1.38); opacity: 0; }
+    }
+    @keyframes spinSmooth {
+      from { transform: translate(-50%,-50%) rotate(0deg); }
+      to   { transform: translate(-50%,-50%) rotate(360deg); }
+    }
+    @keyframes breatheSmooth {
+      0%, 100% { transform: translate(-50%,-50%) scale(1);    opacity: 0.55; }
+      50%      { transform: translate(-50%,-50%) scale(1.14); opacity: 0.22; }
     }
     @keyframes tBounce {
       0%,80%,100% { transform:scale(0.6); opacity:0.4; }
@@ -676,6 +811,43 @@
 
     setStatus('listening');
     setTimeout(connect, 1200);
+
+    // ── Opacity sync from Settings ──────────────────────────────────────────
+    // AmbientSection.jsx writes to localStorage 'seven_panel_opacity'
+    // We poll every 500ms and apply to the CSS variable instantly
+    (function applyOpacity(val) {
+      document.documentElement.style.setProperty(
+        '--panel-bg-opacity', String(val)
+      );
+    })(0.78);
+
+    // Load saved opacity on startup
+    (function loadSavedOpacity() {
+      try {
+        const saved = localStorage.getItem('seven_panel_opacity');
+        if (saved) {
+          const v = parseFloat(saved);
+          if (!isNaN(v) && v >= 0.1 && v <= 1.0) {
+            document.documentElement.style.setProperty('--panel-bg-opacity', String(v));
+          }
+        }
+      } catch {}
+    })();
+
+    // Poll for changes from Settings page
+    let _lastOpacityTs = localStorage.getItem('seven_panel_opacity_ts') || '0';
+    setInterval(() => {
+      try {
+        const ts = localStorage.getItem('seven_panel_opacity_ts');
+        if (ts && ts !== _lastOpacityTs) {
+          _lastOpacityTs = ts;
+          const val = parseFloat(localStorage.getItem('seven_panel_opacity') || '0.78');
+          if (!isNaN(val) && val >= 0.1 && val <= 1.0) {
+            document.documentElement.style.setProperty('--panel-bg-opacity', String(val));
+          }
+        }
+      } catch {}
+    }, 500);
   </script>
 </body>
 </html>
