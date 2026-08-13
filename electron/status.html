@@ -19,48 +19,43 @@
       justify-content: flex-end;
     }
 
-    /* ══════════════════════════════════════
-       CONVERSATION PANEL
-    ══════════════════════════════════════ */
     :root {
-      --panel-bg-opacity: 0.78;
+      --panel-opacity: 0.78;
     }
 
+    /* ── Conversation panel ── */
     #conv-panel {
       flex: 1;
       height: 72px;
       margin-right: 10px;
       border-radius: 14px;
       opacity: 0;
-      transform: translateX(20px);
+      transform: translateX(16px);
       transition:
-        opacity 0.5s cubic-bezier(0.4, 0, 0.2, 1),
-        transform 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+        opacity 0.45s cubic-bezier(0.4, 0, 0.2, 1),
+        transform 0.45s cubic-bezier(0.4, 0, 0.2, 1);
       pointer-events: none;
       overflow: hidden;
-      background: rgba(8, 8, 12, var(--panel-bg-opacity));
-      border: 1px solid rgba(255, 255, 255, 0.055);
+      background: rgba(8, 8, 12, var(--panel-opacity));
+      border: 1px solid rgba(255, 255, 255, 0.05);
       box-shadow:
-        0 12px 40px rgba(0,0,0,0.55),
-        0 2px 8px rgba(0,0,0,0.3),
-        inset 0 1px 0 rgba(255,255,255,0.035);
+        0 16px 48px rgba(0,0,0,0.6),
+        0 2px 8px rgba(0,0,0,0.35),
+        inset 0 1px 0 rgba(255,255,255,0.03);
     }
 
-    /* Panel visible — slides LEFT into view */
     #conv-panel.visible {
       opacity: 1;
       transform: translateX(0);
       pointer-events: auto;
     }
 
-    /* Panel hiding — slides RIGHT back toward orb */
     #conv-panel.hiding {
       opacity: 0;
-      transform: translateX(20px);
+      transform: translateX(16px);
       pointer-events: none;
     }
 
-    /* ── Scroll area ── */
     #conv-scroll {
       height: 100%;
       overflow-y: auto;
@@ -71,18 +66,13 @@
       scroll-behavior: smooth;
     }
 
-    /* Minimal professional scrollbar */
     #conv-scroll::-webkit-scrollbar { width: 2px; }
     #conv-scroll::-webkit-scrollbar-track { background: transparent; }
     #conv-scroll::-webkit-scrollbar-thumb {
-      background: rgba(255,255,255,0.08);
+      background: rgba(255,255,255,0.06);
       border-radius: 1px;
     }
-    #conv-scroll::-webkit-scrollbar-thumb:hover {
-      background: rgba(255,255,255,0.18);
-    }
 
-    /* ── History entries ── */
     .hist-user {
       display: flex;
       align-items: flex-start;
@@ -92,11 +82,11 @@
 
     .hist-user-label {
       font-family: 'Segoe UI', system-ui, sans-serif;
-      font-size: 7.5px;
+      font-size: 7px;
       font-weight: 700;
-      letter-spacing: 0.14em;
+      letter-spacing: 0.16em;
       text-transform: uppercase;
-      color: rgba(255,255,255,0.18);
+      color: rgba(255,255,255,0.15);
       flex-shrink: 0;
       width: 20px;
       padding-top: 1px;
@@ -105,7 +95,7 @@
     .hist-user-text {
       font-family: 'Segoe UI', system-ui, sans-serif;
       font-size: 10px;
-      color: rgba(255,255,255,0.32);
+      color: rgba(255,255,255,0.28);
       font-weight: 400;
       line-height: 1.4;
       flex: 1;
@@ -120,21 +110,20 @@
 
     .hist-seven-label {
       font-family: 'Segoe UI', system-ui, sans-serif;
-      font-size: 7.5px;
+      font-size: 7px;
       font-weight: 700;
-      letter-spacing: 0.14em;
+      letter-spacing: 0.16em;
       text-transform: uppercase;
-      color: rgba(99,102,241,0.45);
+      color: rgba(99,102,241,0.4);
       flex-shrink: 0;
       width: 20px;
       padding-top: 1px;
-      transition: color 0.4s ease;
     }
 
     .hist-seven-text {
       font-family: 'Segoe UI', system-ui, sans-serif;
       font-size: 11px;
-      color: rgba(255,255,255,0.75);
+      color: rgba(255,255,255,0.72);
       font-weight: 300;
       line-height: 1.55;
       letter-spacing: 0.01em;
@@ -145,26 +134,23 @@
       height: 1px;
       background: linear-gradient(
         90deg, transparent,
-        rgba(255,255,255,0.04) 30%,
-        rgba(255,255,255,0.04) 70%,
+        rgba(255,255,255,0.03) 40%,
         transparent
       );
       flex-shrink: 0;
       margin: 1px 0;
     }
 
-    /* ── Current (live) seven text ── */
     #live-seven-text {
       font-family: 'Segoe UI', system-ui, sans-serif;
       font-size: 11px;
-      color: rgba(255,255,255,0.88);
+      color: rgba(255,255,255,0.85);
       font-weight: 300;
       line-height: 1.55;
       letter-spacing: 0.01em;
       flex: 1;
     }
 
-    /* Thinking dots */
     #thinking {
       display: none;
       align-items: center;
@@ -174,27 +160,24 @@
     #thinking span {
       width: 3px; height: 3px;
       border-radius: 50%;
-      background: rgba(168,85,247,0.7);
+      background: rgba(168,85,247,0.6);
       display: inline-block;
     }
     #thinking span:nth-child(1) { animation: tBounce 1.2s ease-in-out 0.0s infinite; }
     #thinking span:nth-child(2) { animation: tBounce 1.2s ease-in-out 0.15s infinite; }
     #thinking span:nth-child(3) { animation: tBounce 1.2s ease-in-out 0.30s infinite; }
 
-    /* Cursor */
     .cursor-blink {
       display: inline-block;
       width: 1.5px; height: 11px;
-      background: #6366f1;
+      background: rgba(99,102,241,0.7);
       margin-left: 2px;
       vertical-align: middle;
       border-radius: 1px;
       animation: cursorBlink 0.9s ease-in-out infinite;
     }
 
-    /* ══════════════════════════════════════
-       ORB
-    ══════════════════════════════════════ */
+    /* ── Orb container ── */
     #orb-container {
       width: 80px; height: 80px;
       flex-shrink: 0;
@@ -204,13 +187,56 @@
       justify-content: center;
     }
 
+    /* Outer ambient glow layer */
+    #orb-ambient {
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      width: 70px; height: 70px;
+      border-radius: 50%;
+      pointer-events: none;
+      z-index: 0;
+      opacity: 0;
+      transition: opacity 0.8s ease, background 0.8s ease;
+      filter: blur(14px);
+    }
+
+    /* Ghost ring — outer pulse */
+    #ghost-ring {
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      width: 64px; height: 64px;
+      border-radius: 50%;
+      border: 1px solid transparent;
+      pointer-events: none;
+      z-index: 1;
+      opacity: 0;
+      transition: border-color 0.7s ease, opacity 0.7s ease;
+    }
+
+    /* Pulse ring — inner ring around orb */
+    #pulse-ring {
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      width: 54px; height: 54px;
+      border-radius: 50%;
+      border: 1px solid transparent;
+      pointer-events: none;
+      z-index: 2;
+      transition: border-color 0.7s ease;
+    }
+
+    /* Main orb body */
     #orb {
       width: 44px; height: 44px;
       border-radius: 50%;
-      background: radial-gradient(ellipse at 38% 32%,
-        rgba(30,30,45,0.9) 0%,
-        rgba(12,12,20,0.95) 55%,
-        rgba(6,6,12,1) 100%
+      background: radial-gradient(
+        ellipse at 38% 32%,
+        rgba(24, 24, 36, 0.95) 0%,
+        rgba(10, 10, 18, 0.98) 60%,
+        rgba(5, 5, 10, 1) 100%
       );
       border: 1px solid rgba(255,255,255,0.04);
       display: flex;
@@ -221,274 +247,218 @@
       transition:
         border-color 0.7s cubic-bezier(0.4,0,0.2,1),
         background   0.7s cubic-bezier(0.4,0,0.2,1),
-        transform    0.12s ease;
+        box-shadow   0.7s cubic-bezier(0.4,0,0.2,1);
       pointer-events: none;
-      /* Outer rim subtle shadow */
       box-shadow:
-        inset 0 1px 0 rgba(255,255,255,0.06),
-        inset 0 -1px 0 rgba(0,0,0,0.4);
+        inset 0 1px 0 rgba(255,255,255,0.05),
+        inset 0 -1px 0 rgba(0,0,0,0.5),
+        0 2px 8px rgba(0,0,0,0.4);
     }
 
-    /* Top specular highlight */
+    /* Specular highlight */
     #orb::before {
       content: '';
       position: absolute;
-      top: 5px; left: 9px;
-      width: 16px; height: 7px;
+      top: 6px; left: 9px;
+      width: 14px; height: 6px;
       border-radius: 50%;
-      background: radial-gradient(ellipse,
-        rgba(255,255,255,0.10) 0%,
+      background: radial-gradient(
+        ellipse,
+        rgba(255,255,255,0.09) 0%,
         transparent 100%
       );
       z-index: 5;
-    }
-
-    /* Bottom rim light */
-    #orb::after {
-      content: '';
-      position: absolute;
-      bottom: 5px; left: 50%;
-      transform: translateX(-50%);
-      width: 20px; height: 3px;
-      border-radius: 50%;
-      background: radial-gradient(ellipse,
-        rgba(255,255,255,0.04) 0%,
-        transparent 100%
-      );
-      z-index: 5;
+      pointer-events: none;
     }
 
     #orb-text {
       font-family: 'Segoe UI', system-ui, sans-serif;
-      font-size: 10px;
+      font-size: 9.5px;
       font-weight: 700;
-      color: rgba(255,255,255,0.18);
+      color: rgba(255,255,255,0.14);
       letter-spacing: 3px;
       text-transform: uppercase;
       z-index: 4;
-      transition: color 0.7s cubic-bezier(0.4,0,0.2,1), text-shadow 0.7s ease;
-    }
-
-    #orb-glow {
-      position: absolute;
-      top:50%; left:50%;
-      transform:translate(-50%,-50%);
-      width:42px; height:42px;
-      border-radius:50%;
-      pointer-events:none;
-      z-index:0;
-      transition:box-shadow 0.8s ease;
-    }
-
-    #pulse-ring {
-      position: absolute;
-      top: 50%; left: 50%;
-      transform: translate(-50%,-50%);
-      width: 54px; height: 54px;
-      border-radius: 50%;
-      border: 1px solid transparent;
-      pointer-events: none;
-      z-index: 1;
-      transition: border-color 0.7s cubic-bezier(0.4,0,0.2,1);
-    }
-
-    #ghost-ring {
-      position: absolute;
-      top: 50%; left: 50%;
-      transform: translate(-50%,-50%);
-      width: 62px; height: 62px;
-      border-radius: 50%;
-      border: 1px solid transparent;
-      pointer-events: none;
-      z-index: 0;
-      opacity: 0;
-      transition: opacity 0.7s ease;
+      transition:
+        color      0.7s cubic-bezier(0.4,0,0.2,1),
+        text-shadow 0.7s ease;
     }
 
     #interaction-layer {
       position: absolute;
-      top:0; left:0;
-      width:80px; height:80px;
-      z-index:10;
-      cursor:grab;
-      border-radius:50%;
+      top: 0; left: 0;
+      width: 80px; height: 80px;
+      z-index: 10;
+      cursor: grab;
+      border-radius: 50%;
     }
-    #interaction-layer:active { cursor:grabbing; }
+    #interaction-layer:active { cursor: grabbing; }
 
     #tooltip {
-      position:fixed;
-      top:-26px; left:50%;
-      transform:translateX(-50%);
-      background:#0e0e18;
-      color:rgba(255,255,255,0.4);
-      padding:3px 10px;
-      border-radius:3px;
-      border:1px solid rgba(255,255,255,0.04);
-      font-family:'Segoe UI',system-ui,sans-serif;
-      font-size:9px; font-weight:600;
-      letter-spacing:1.2px;
-      text-transform:uppercase;
-      white-space:nowrap;
-      opacity:0;
-      pointer-events:none;
-      transition:opacity 0.15s ease;
-      z-index:100;
+      position: fixed;
+      top: -24px; left: 50%;
+      transform: translateX(-50%);
+      background: rgba(10,10,16,0.95);
+      color: rgba(255,255,255,0.35);
+      padding: 3px 10px;
+      border-radius: 4px;
+      border: 1px solid rgba(255,255,255,0.05);
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      font-size: 8.5px;
+      font-weight: 600;
+      letter-spacing: 1.4px;
+      text-transform: uppercase;
+      white-space: nowrap;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.15s ease;
+      z-index: 100;
     }
-    #orb-container:hover #tooltip { opacity:1; }
+    #orb-container:hover #tooltip { opacity: 1; }
 
-    /* ── State classes — Professional refined ── */
+    /* ══════════════════════════════════════
+       STATE CLASSES
+    ══════════════════════════════════════ */
 
-    /* IDLE — ghost presence, barely there */
+    /* IDLE */
     .idle #orb {
       border-color: rgba(255,255,255,0.04);
-      background: radial-gradient(ellipse at 38% 32%,
-        rgba(30,30,45,0.9) 0%,
-        rgba(12,12,20,0.95) 55%,
-        rgba(6,6,12,1) 100%);
+      box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.04),
+        inset 0 -1px 0 rgba(0,0,0,0.5),
+        0 2px 8px rgba(0,0,0,0.3);
     }
-    .idle #orb-text   { color: rgba(255,255,255,0.12); text-shadow: none; }
-    .idle #orb-glow   { box-shadow: 0 0 6px rgba(255,255,255,0.02); }
-    .idle #pulse-ring { border-color: rgba(255,255,255,0.03); }
-    .idle #ghost-ring { opacity: 0; }
+    .idle #orb-text    { color: rgba(255,255,255,0.12); }
+    .idle #orb-ambient { opacity: 0; }
+    .idle #pulse-ring  { border-color: rgba(255,255,255,0.03); }
+    .idle #ghost-ring  { opacity: 0; }
 
-    /* LISTENING — emerald, calm breathing */
+    /* LISTENING */
     .listening #orb {
-      border-color: rgba(34,197,94,0.18);
-      background: radial-gradient(ellipse at 38% 32%,
-        rgba(34,197,94,0.08) 0%,
-        rgba(15,40,25,0.95) 45%,
-        rgba(6,12,8,1) 100%);
+      border-color: rgba(34,197,94,0.16);
+      background: radial-gradient(
+        ellipse at 38% 32%,
+        rgba(34,197,94,0.06) 0%,
+        rgba(12,28,18,0.97) 55%,
+        rgba(5,10,7,1) 100%
+      );
+      box-shadow:
+        inset 0 1px 0 rgba(34,197,94,0.08),
+        inset 0 -1px 0 rgba(0,0,0,0.5),
+        0 0 12px rgba(34,197,94,0.06);
     }
     .listening #orb-text {
-      color: rgba(134,239,172,0.6);
-      text-shadow: 0 0 12px rgba(34,197,94,0.25), 0 0 24px rgba(34,197,94,0.1);
+      color: rgba(134,239,172,0.55);
+      text-shadow: 0 0 10px rgba(34,197,94,0.2);
     }
-    .listening #orb-glow {
-      box-shadow:
-        0 0 18px rgba(34,197,94,0.14),
-        0 0 36px rgba(34,197,94,0.07),
-        0 0 60px rgba(34,197,94,0.03);
+    .listening #orb-ambient {
+      opacity: 1;
+      background: radial-gradient(circle, rgba(34,197,94,0.18) 0%, transparent 70%);
     }
     .listening #pulse-ring {
-      border-color: rgba(34,197,94,0.35);
-      border-width: 1px;
-      animation: pulseSmooth 2.8s cubic-bezier(0.4,0,0.2,1) infinite;
+      border-color: rgba(34,197,94,0.3);
+      animation: ringPulse 2.6s cubic-bezier(0.4,0,0.2,1) infinite;
     }
     .listening #ghost-ring {
-      border-color: rgba(34,197,94,0.12);
-      border-width: 1px;
+      border-color: rgba(34,197,94,0.1);
       opacity: 1;
-      animation: pulseSmooth 2.8s cubic-bezier(0.4,0,0.2,1) infinite 0.9s;
+      animation: ringPulse 2.6s cubic-bezier(0.4,0,0.2,1) infinite 0.8s;
     }
 
-    /* THINKING — violet, geometric spin */
+    /* THINKING */
     .thinking #orb {
-      border-color: rgba(168,85,247,0.2);
-      background: radial-gradient(ellipse at 38% 32%,
-        rgba(168,85,247,0.1) 0%,
-        rgba(35,15,55,0.95) 45%,
-        rgba(10,6,18,1) 100%);
+      border-color: rgba(168,85,247,0.18);
+      background: radial-gradient(
+        ellipse at 38% 32%,
+        rgba(168,85,247,0.08) 0%,
+        rgba(22,10,38,0.97) 55%,
+        rgba(8,4,14,1) 100%
+      );
+      box-shadow:
+        inset 0 1px 0 rgba(168,85,247,0.08),
+        inset 0 -1px 0 rgba(0,0,0,0.5),
+        0 0 14px rgba(168,85,247,0.08);
     }
     .thinking #orb-text {
-      color: rgba(216,180,254,0.65);
-      text-shadow: 0 0 12px rgba(168,85,247,0.3), 0 0 28px rgba(168,85,247,0.12);
+      color: rgba(216,180,254,0.55);
+      text-shadow: 0 0 12px rgba(168,85,247,0.25);
     }
-    .thinking #orb-glow {
-      box-shadow:
-        0 0 20px rgba(168,85,247,0.18),
-        0 0 40px rgba(168,85,247,0.08),
-        0 0 70px rgba(168,85,247,0.03);
+    .thinking #orb-ambient {
+      opacity: 1;
+      background: radial-gradient(circle, rgba(168,85,247,0.2) 0%, transparent 70%);
     }
     .thinking #pulse-ring {
-      border-color: rgba(168,85,247,0.45);
-      border-style: solid;
+      border-color: rgba(168,85,247,0.35);
       border-width: 1px;
-      /* Dotted effect via repeating gradient */
-      background: repeating-conic-gradient(
-        rgba(168,85,247,0.3) 0deg,
-        transparent 2deg,
-        transparent 10deg,
-        rgba(168,85,247,0.3) 12deg
-      );
-      -webkit-mask: radial-gradient(
-        transparent calc(50% - 1.5px),
-        black calc(50% - 1px),
-        black calc(50% + 1px),
-        transparent calc(50% + 1.5px)
-      );
-      mask: radial-gradient(
-        transparent calc(50% - 1.5px),
-        black calc(50% - 1px),
-        black calc(50% + 1px),
-        transparent calc(50% + 1.5px)
-      );
-      animation: spinSmooth 3s linear infinite;
+      animation: ringOrbit 3.5s linear infinite;
     }
     .thinking #ghost-ring {
       border-color: rgba(168,85,247,0.08);
       opacity: 1;
-      animation: pulseSmooth 2s ease-in-out infinite 0.4s;
+      animation: ringPulse 2s ease-in-out infinite 0.3s;
     }
 
-    /* SPEAKING — indigo, wave breathe */
+    /* SPEAKING */
     .speaking #orb {
-      border-color: rgba(99,102,241,0.22);
-      background: radial-gradient(ellipse at 38% 32%,
-        rgba(99,102,241,0.12) 0%,
-        rgba(20,20,55,0.95) 45%,
-        rgba(8,8,20,1) 100%);
+      border-color: rgba(99,102,241,0.2);
+      background: radial-gradient(
+        ellipse at 38% 32%,
+        rgba(99,102,241,0.09) 0%,
+        rgba(14,14,36,0.97) 55%,
+        rgba(6,6,16,1) 100%
+      );
+      box-shadow:
+        inset 0 1px 0 rgba(99,102,241,0.08),
+        inset 0 -1px 0 rgba(0,0,0,0.5),
+        0 0 14px rgba(99,102,241,0.08);
     }
     .speaking #orb-text {
-      color: rgba(165,180,252,0.65);
-      text-shadow: 0 0 12px rgba(99,102,241,0.3), 0 0 28px rgba(99,102,241,0.12);
+      color: rgba(165,180,252,0.6);
+      text-shadow: 0 0 12px rgba(99,102,241,0.28);
     }
-    .speaking #orb-glow {
-      box-shadow:
-        0 0 20px rgba(99,102,241,0.18),
-        0 0 40px rgba(99,102,241,0.09),
-        0 0 70px rgba(99,102,241,0.04);
+    .speaking #orb-ambient {
+      opacity: 1;
+      background: radial-gradient(circle, rgba(99,102,241,0.2) 0%, transparent 70%);
     }
     .speaking #pulse-ring {
-      border-color: rgba(99,102,241,0.4);
+      border-color: rgba(99,102,241,0.38);
       border-width: 1.5px;
-      animation: breatheSmooth 1.4s ease-in-out infinite;
+      animation: ringBreathe 1.6s ease-in-out infinite;
     }
     .speaking #ghost-ring {
-      border-color: rgba(99,102,241,0.14);
+      border-color: rgba(99,102,241,0.12);
       opacity: 1;
-      animation: breatheSmooth 1.4s ease-in-out infinite 0.25s;
+      animation: ringBreathe 1.6s ease-in-out infinite 0.3s;
     }
 
-    /* ── Animations — smooth, professional ── */
-    @keyframes pulseSmooth {
-      0%   { transform: translate(-50%,-50%) scale(1);    opacity: 0.65; }
-      65%  { transform: translate(-50%,-50%) scale(1.38); opacity: 0; }
-      100% { transform: translate(-50%,-50%) scale(1.38); opacity: 0; }
+    /* ── Animations ── */
+    @keyframes ringPulse {
+      0%   { transform: translate(-50%,-50%) scale(1);    opacity: 0.7; }
+      70%  { transform: translate(-50%,-50%) scale(1.38); opacity: 0;   }
+      100% { transform: translate(-50%,-50%) scale(1.38); opacity: 0;   }
     }
-    @keyframes spinSmooth {
+    @keyframes ringOrbit {
       from { transform: translate(-50%,-50%) rotate(0deg); }
       to   { transform: translate(-50%,-50%) rotate(360deg); }
     }
-    @keyframes breatheSmooth {
-      0%, 100% { transform: translate(-50%,-50%) scale(1);    opacity: 0.55; }
-      50%      { transform: translate(-50%,-50%) scale(1.14); opacity: 0.22; }
+    @keyframes ringBreathe {
+      0%, 100% { transform: translate(-50%,-50%) scale(1);    opacity: 0.6; }
+      50%      { transform: translate(-50%,-50%) scale(1.16); opacity: 0.2; }
     }
     @keyframes tBounce {
-      0%,80%,100% { transform:scale(0.6); opacity:0.4; }
-      40%         { transform:scale(1); opacity:1; }
+      0%,80%,100% { transform: scale(0.5); opacity: 0.3; }
+      40%         { transform: scale(1);   opacity: 1;   }
     }
     @keyframes cursorBlink {
-      0%,45%   { opacity:1; }
-      55%,100% { opacity:0; }
+      0%,45%   { opacity: 1; }
+      55%,100% { opacity: 0; }
     }
   </style>
 </head>
-<body class="listening">
+<body class="idle">
 
   <div id="conv-panel">
-    <div id="conv-scroll" id="conv-scroll">
-      <!-- History entries injected here by JS -->
-      <!-- Current live row always at bottom -->
+    <div id="conv-scroll">
       <div id="live-user-row" class="hist-user" style="display:none">
         <span class="hist-user-label">You</span>
         <span id="live-user-text" class="hist-user-text"></span>
@@ -505,23 +475,17 @@
   </div>
 
   <div id="orb-container">
-    <div id="orb-glow"></div>
+    <div id="orb-ambient"></div>
     <div id="ghost-ring"></div>
     <div id="pulse-ring"></div>
     <div id="orb"><span id="orb-text">VII</span></div>
     <div id="interaction-layer"></div>
-    <div id="tooltip">Listening</div>
+    <div id="tooltip">Idle</div>
   </div>
 
   <script>
-    // ═══════════════════════════════════════════════════
-    // CONFIGURATION — Change these values to customize
-    // ═══════════════════════════════════════════════════
-    const HIDE_DELAY_MS     = 5000;  // How long panel stays after Seven finishes (ms)
-                                      // 4000 = 4 seconds, 7000 = 7 seconds
-    const SHOW_ANIM_MS      = 500;   // Slide-in animation duration (matches CSS)
-    const MAX_HISTORY       = 6;     // Max past exchanges shown (each = 1 user + 1 seven)
-    // ═══════════════════════════════════════════════════
+    const HIDE_DELAY_MS = 5000;
+    const MAX_HISTORY   = 6;
 
     const body          = document.body;
     const convPanel     = document.getElementById('conv-panel');
@@ -535,27 +499,25 @@
     const tooltip       = document.getElementById('tooltip');
     const iLayer        = document.getElementById('interaction-layer');
 
-    let currentStatus  = 'listening';
-    let ws             = null;
-    let reconnects     = 0;
-    let hideTimer      = null;
-    let panelVisible   = false;
+    let currentStatus = 'idle';
+    let ws            = null;
+    let reconnects    = 0;
+    let hideTimer     = null;
+    let panelVisible  = false;
 
-    // Conversation state tracking
-    let lastUserText   = '';
-    let lastSevenText  = '';
-    let wasActive      = false; // true if panel was shown this exchange
-    let exchangeDone   = false; // true when seven finished speaking
+    let lastUserText  = '';
+    let lastSevenText = '';
+    let wasActive     = false;
+    let exchangeDone  = false;
 
-    // History: array of { user, seven }
     const history = [];
 
     const statusLabels = {
-      idle: 'Offline', listening: 'Listening',
-      thinking: 'Processing', speaking: 'Speaking'
+      idle: 'Idle', listening: 'Listening',
+      thinking: 'Processing', speaking: 'Speaking',
     };
 
-    // ── Show panel (slide LEFT into view) ──
+    // ── Panel show/hide ──
     function showPanel() {
       if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
       convPanel.classList.remove('hiding');
@@ -563,116 +525,77 @@
       panelVisible = true;
     }
 
-    // ── Hide panel (slide RIGHT back toward orb) ──
     function hidePanel() {
       convPanel.classList.remove('visible');
       convPanel.classList.add('hiding');
       panelVisible = false;
     }
 
-    // ── Schedule hide after delay ──
     function scheduleHide() {
       if (hideTimer) clearTimeout(hideTimer);
-      hideTimer = setTimeout(() => {
-        hidePanel();
-        hideTimer = null;
-      }, HIDE_DELAY_MS);
+      hideTimer = setTimeout(() => { hidePanel(); hideTimer = null; }, HIDE_DELAY_MS);
     }
 
-    // ── Smooth scroll to bottom ──
     function scrollToBottom() {
-      convScroll.scrollTo({
-        top: convScroll.scrollHeight,
-        behavior: 'smooth'
-      });
+      convScroll.scrollTo({ top: convScroll.scrollHeight, behavior: 'smooth' });
     }
 
-    // ── Save completed exchange to history ──
+    // ── History ──
     function archiveCurrentExchange() {
       if (!lastUserText && !lastSevenText) return;
-      history.push({
-        user:  lastUserText,
-        seven: lastSevenText,
-      });
-      // Keep only MAX_HISTORY entries
-      while (history.length > MAX_HISTORY) {
-        history.shift();
-      }
+      history.push({ user: lastUserText, seven: lastSevenText });
+      while (history.length > MAX_HISTORY) history.shift();
       renderHistory();
     }
 
-    // ── Render past history above live row ──
     function renderHistory() {
-      // Remove old history elements
-      const old = convScroll.querySelectorAll('.hist-entry');
-      old.forEach(el => el.remove());
-
-      // Insert before the live rows
+      convScroll.querySelectorAll('.hist-entry').forEach(el => el.remove());
       const anchor = liveUserRow;
       history.forEach(entry => {
         const frag = document.createDocumentFragment();
-
         if (entry.user) {
           const uRow = document.createElement('div');
           uRow.className = 'hist-user hist-entry';
-          uRow.style.opacity = '0.55';
-          uRow.innerHTML = `
-            <span class="hist-user-label">You</span>
-            <span class="hist-user-text">${entry.user}</span>
-          `;
+          uRow.style.opacity = '0.45';
+          uRow.innerHTML = `<span class="hist-user-label">You</span><span class="hist-user-text">${entry.user}</span>`;
           frag.appendChild(uRow);
         }
-
         if (entry.seven) {
           const sRow = document.createElement('div');
           sRow.className = 'hist-seven hist-entry';
-          sRow.style.opacity = '0.55';
-          sRow.innerHTML = `
-            <span class="hist-seven-label">VII</span>
-            <span class="hist-seven-text">${entry.seven}</span>
-          `;
+          sRow.style.opacity = '0.45';
+          sRow.innerHTML = `<span class="hist-seven-label">VII</span><span class="hist-seven-text">${entry.seven}</span>`;
           frag.appendChild(sRow);
-
           const sep = document.createElement('div');
           sep.className = 'hist-sep hist-entry';
           frag.appendChild(sep);
         }
-
         convScroll.insertBefore(frag, anchor);
       });
-
       scrollToBottom();
     }
 
-    // ── Main update function ──
+    // ── Conversation update ──
     function updateConversation(userText, sevenText, isThinking, isSpeaking) {
       const hasContent = userText || sevenText || isThinking;
 
-      // ── NEW EXCHANGE STARTED ──
-      // User spoke something new
       if (userText && userText !== lastUserText) {
-        // Archive the previous exchange before starting new one
         if (lastUserText || lastSevenText) {
           archiveCurrentExchange();
-          lastUserText  = '';
-          lastSevenText = '';
+          lastUserText = ''; lastSevenText = '';
         }
         lastUserText = userText;
         exchangeDone = false;
-
-        // Show user line
-        liveUserText.textContent      = userText;
-        liveUserRow.style.display     = 'flex';
-        liveSep.style.display         = 'block';
-        liveSevenText.textContent     = '';
-        liveSevenRow.style.display    = 'none';
-        thinkingEl.style.display      = 'none';
-
+        liveUserText.textContent   = userText;
+        liveUserRow.style.display  = 'flex';
+        liveSep.style.display      = 'block';
+        liveSevenText.textContent  = '';
+        liveSevenRow.style.display = 'none';
+        thinkingEl.style.display   = 'none';
         showPanel();
         wasActive = true;
       }
 
-      // ── THINKING STATE ──
       if (isThinking && !sevenText) {
         liveSevenRow.style.display = 'flex';
         thinkingEl.style.display   = 'flex';
@@ -681,42 +604,30 @@
         showPanel();
       }
 
-      // ── SEVEN IS SPEAKING / HAS RESPONSE ──
       if (sevenText && sevenText !== lastSevenText) {
         lastSevenText = sevenText;
-
         thinkingEl.style.display   = 'none';
         liveSevenRow.style.display = 'flex';
         liveSevenText.textContent  = sevenText;
-
-        // Add blinking cursor while speaking
         removeOldCursor();
         if (isSpeaking) {
           const cur = document.createElement('span');
           cur.className = 'cursor-blink';
-          cur.id        = 'active-cursor';
+          cur.id = 'active-cursor';
           liveSevenText.appendChild(cur);
         }
-
         scrollToBottom();
         showPanel();
       }
 
-      // ── CURSOR: remove when done speaking ──
-      if (!isSpeaking) {
-        removeOldCursor();
-      }
+      if (!isSpeaking) removeOldCursor();
 
-      // ── ALL DONE — schedule hide ──
       if (!isThinking && !isSpeaking && wasActive && sevenText && !exchangeDone) {
         exchangeDone = true;
         scheduleHide();
       }
 
-      // ── NOTHING HAPPENING — hide quickly ──
-      if (!hasContent && panelVisible && !hideTimer) {
-        scheduleHide();
-      }
+      if (!hasContent && panelVisible && !hideTimer) scheduleHide();
     }
 
     function removeOldCursor() {
@@ -724,17 +635,20 @@
       if (old) old.remove();
     }
 
+    // ── Status ──
+    function setStatus(s) {
+      if (currentStatus === s) return;
+      currentStatus = s;
+      body.className = s;
+      tooltip.textContent = statusLabels[s] || '';
+    }
+
     // ── WebSocket ──
     function connect() {
       if (reconnects > 80) return;
       try {
         ws = new WebSocket('ws://127.0.0.1:7777/ws/status');
-
-        ws.onopen = () => {
-          reconnects = 0;
-          setStatus('listening');
-        };
-
+        ws.onopen    = () => { reconnects = 0; setStatus('idle'); };
         ws.onmessage = (e) => {
           try {
             const d = JSON.parse(e.data);
@@ -751,8 +665,7 @@
             );
           } catch {}
         };
-
-        ws.onclose = () => { reconnects++; setTimeout(connect, 2000); };
+        ws.onclose = () => { ws = null; reconnects++; setTimeout(connect, 2000); };
         ws.onerror = () => ws && ws.close();
       } catch {
         reconnects++;
@@ -760,14 +673,7 @@
       }
     }
 
-    function setStatus(s) {
-      if (currentStatus === s) return;
-      currentStatus = s;
-      body.className = s;
-      tooltip.textContent = statusLabels[s] || '';
-    }
-
-    // ── Drag + click ──
+    // ── Drag and click ──
     let isDown = false, startX = 0, startY = 0, dragged = false;
     const THRESH = 5;
 
@@ -781,7 +687,7 @@
 
     document.addEventListener('mousemove', (e) => {
       if (!isDown) return;
-      if (Math.abs(e.screenX-startX) > THRESH || Math.abs(e.screenY-startY) > THRESH)
+      if (Math.abs(e.screenX - startX) > THRESH || Math.abs(e.screenY - startY) > THRESH)
         dragged = true;
       window.orbAPI?.dragMove(e.screenX, e.screenY);
     });
@@ -797,10 +703,10 @@
       window.orbAPI?.showMenu();
     });
 
-    // ── Click-through transparent areas ──
+    // ── Click-through ──
     document.addEventListener('mousemove', (e) => {
       const el = document.elementFromPoint(e.clientX, e.clientY);
-      const onOrb   = el && ['interaction-layer','orb','orb-text','orb-container'].includes(el.id);
+      const onOrb   = el && (el.id === 'interaction-layer' || el.closest('#orb-container'));
       const onPanel = el && (el === convPanel || convPanel.contains(el));
       window.orbAPI?.setIgnoreMouseEvents(!(onOrb || onPanel));
     });
@@ -809,45 +715,35 @@
       window.orbAPI?.setIgnoreMouseEvents(true);
     });
 
-    setStatus('listening');
-    setTimeout(connect, 1200);
-
-    // ── Opacity sync from Settings ──────────────────────────────────────────
-    // AmbientSection.jsx writes to localStorage 'seven_panel_opacity'
-    // We poll every 500ms and apply to the CSS variable instantly
-    (function applyOpacity(val) {
-      document.documentElement.style.setProperty(
-        '--panel-bg-opacity', String(val)
-      );
-    })(0.78);
+    // ── Opacity sync from Settings ──
+    function applyOpacity(val) {
+      const v = parseFloat(val);
+      if (!isNaN(v) && v >= 0.1 && v <= 1.0) {
+        document.documentElement.style.setProperty('--panel-opacity', String(v));
+      }
+    }
 
     // Load saved opacity on startup
-    (function loadSavedOpacity() {
-      try {
-        const saved = localStorage.getItem('seven_panel_opacity');
-        if (saved) {
-          const v = parseFloat(saved);
-          if (!isNaN(v) && v >= 0.1 && v <= 1.0) {
-            document.documentElement.style.setProperty('--panel-bg-opacity', String(v));
-          }
-        }
-      } catch {}
-    })();
+    try {
+      const saved = localStorage.getItem('seven_panel_opacity');
+      if (saved) applyOpacity(saved);
+    } catch {}
 
-    // Poll for changes from Settings page
-    let _lastOpacityTs = localStorage.getItem('seven_panel_opacity_ts') || '0';
+    // Poll for changes every 500ms
+    let _lastOpacityTs = '';
     setInterval(() => {
       try {
-        const ts = localStorage.getItem('seven_panel_opacity_ts');
+        const ts = localStorage.getItem('seven_panel_opacity_ts') || '';
         if (ts && ts !== _lastOpacityTs) {
           _lastOpacityTs = ts;
-          const val = parseFloat(localStorage.getItem('seven_panel_opacity') || '0.78');
-          if (!isNaN(val) && val >= 0.1 && val <= 1.0) {
-            document.documentElement.style.setProperty('--panel-bg-opacity', String(val));
-          }
+          applyOpacity(localStorage.getItem('seven_panel_opacity') || '0.78');
         }
       } catch {}
     }, 500);
+
+    // ── Start ──
+    setStatus('idle');
+    setTimeout(connect, 1200);
   </script>
 </body>
 </html>
