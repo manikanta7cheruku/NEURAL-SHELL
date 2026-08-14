@@ -1632,10 +1632,55 @@ class HotkeyListener:
             self._listener.start()
             print("[HOTKEY] Listener started")
 
+            # Windows low-level keyboard hooks require the installing
+            # thread to pump messages continuously. If the thread blocks
+            # for more than 5 seconds, Windows silently removes the hook.
+            # Start a keepalive thread that pumps messages every second.
+            threading.Thread(
+                target=self._message_pump_keepalive,
+                daemon=True,
+                name="HotkeyMessagePump"
+            ).start()
+
         except ImportError:
             print("[HOTKEY] pynput not installed — hotkeys disabled")
         except Exception as e:
             print(f"[HOTKEY] Start failed: {e}")
+
+    def _message_pump_keepalive(self):
+        """
+        Pump Windows messages to keep low-level keyboard hook alive.
+
+        Windows requires the thread that installed a low-level hook
+        (WH_KEYBOARD_LL) to process messages via GetMessage/PeekMessage
+        regularly. If the thread does not process messages within the
+        LowLevelHooksTimeout registry value (default 300ms, max 5000ms),
+        Windows silently removes the hook.
+
+        pynput installs the hook on its own thread and handles this
+        internally, but when other threads open audio devices or do
+        heavy I/O, the Windows scheduler may starve pynput's thread.
+        This keepalive ensures the message queue is drained regularly.
+        """
+        try:
+            import ctypes
+            _user32   = ctypes.windll.user32
+            _MSG      = ctypes.wintypes.MSG
+
+            while self._running:
+                # PeekMessage with PM_REMOVE — drain the message queue
+                # without blocking. This is what pynput's internal loop
+                # does, but we add a safety net here.
+                msg = _MSG()
+                while _user32.PeekMessageW(
+                    ctypes.byref(msg), None, 0, 0, 0x0001  # PM_REMOVE
+                ):
+                    _user32.TranslateMessage(ctypes.byref(msg))
+                    _user32.DispatchMessageW(ctypes.byref(msg))
+                time.sleep(0.1)
+
+        except Exception as e:
+            print(f"[HOTKEY] Message pump error: {e}")
 
     def stop(self):
         self._running = False
@@ -1968,37 +2013,17 @@ class VoiceListener(threading.Thread):
         print(f"[VOICE TRIGGER] Reload complete: {len(self._phrase_map)} phrases")
 
     def run(self):
-        """
-        Main listener loop.
-        Opens microphone once. Holds it open for entire daemon lifetime.
-        Processes audio chunks in RAM via BytesIO.
-        """
-        if not self._phrase_map:
-            print("[VOICE TRIGGER] No phrases configured — listener not started")
-            return
-
-        if self._model is None:
-            print("[VOICE TRIGGER] Whisper model not loaded — listener not started")
-            return
-
-        try:
-            from rapidfuzz import fuzz as _rfuzz
-        except ImportError:
-            print(
-                "[VOICE TRIGGER] RapidFuzz not installed — voice triggers disabled.\n"
-                "                Run: venv\\Scripts\\pip install rapidfuzz"
-            )
-            return
-
-        import io
-        import speech_recognition as sr
-
-        recognizer                          = sr.Recognizer()
-        recognizer.dynamic_energy_threshold = False
-        recognizer.energy_threshold         = 300
-        recognizer.pause_threshold          = 0.6
-        recognizer.non_speaking_duration    = 0.3
-
+        ...
+        # Delay start — give hotkey listener time to register its
+        # Windows hook before any audio device access happens.
+        # Audio device open on Windows can briefly stall the message
+        # pump that pynput depends on, silently killing the hook.
+        time.sleep(5.0)
+        # Wait for hotkey listener to fully register its Windows hook
+        # before touching any audio device. Audio device access on Windows
+        # briefly stalls the OS message pump that pynput depends on.
+        # 5 seconds is enough for pynput to register and stabilize.
+        time.sleep(5.0)
         print("[VOICE TRIGGER] Listener started — watching for phrases...")
 
         # Open microphone ONCE — hold open for daemon lifetime
