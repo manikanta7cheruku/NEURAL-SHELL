@@ -342,7 +342,12 @@ def install_packages():
 # ============================================================================
 
 def is_ollama_installed():
-    """Check if Ollama is installed on this system."""
+    """
+    Check if Ollama is installed on this system.
+    Checks both PATH and all known install locations.
+    The duplicate dead code block below the first return has been removed.
+    """
+    # Check 1: PATH lookup
     result = subprocess.run(
         ['where', 'ollama'],
         capture_output=True,
@@ -352,58 +357,77 @@ def is_ollama_installed():
         creationflags=0x08000000 if platform.system() == 'Windows' else 0
     )
     if result.returncode == 0 and result.stdout.strip():
+        found = result.stdout.strip().split('\n')[0].strip()
+        print(f"[BOOTSTRAP] Ollama found in PATH: {found}")
         return True
 
-    # Also check common install locations directly
+    # Check 2: All known install locations
+    localappdata  = os.environ.get('LOCALAPPDATA', '')
+    userprofile   = os.environ.get('USERPROFILE', '')
+    programfiles  = os.environ.get('PROGRAMFILES', r'C:\Program Files')
+    programfilesx = os.environ.get('PROGRAMFILES(X86)', r'C:\Program Files (x86)')
+
     paths = [
-        os.path.join(os.environ.get('LOCALAPPDATA', ''),
-                     'Programs', 'Ollama', 'ollama.exe'),
+        os.path.join(localappdata,  'Programs', 'Ollama', 'ollama.exe'),
+        os.path.join(userprofile,   'AppData', 'Local', 'Programs', 'Ollama', 'ollama.exe'),
+        os.path.join(programfiles,  'Ollama', 'ollama.exe'),
+        os.path.join(programfilesx, 'Ollama', 'ollama.exe'),
         r'C:\Program Files\Ollama\ollama.exe',
-        os.path.join(os.environ.get('USERPROFILE', ''),
-                     'AppData', 'Local', 'Programs', 'Ollama', 'ollama.exe'),
+        r'C:\ollama\ollama.exe',
     ]
+
     for p in paths:
         if os.path.exists(p):
             print(f"[BOOTSTRAP] Ollama found at: {p}")
             return True
 
+    print("[BOOTSTRAP] Ollama not found anywhere on this system")
     return False
-
-    paths = [
-        os.path.join(os.environ.get('LOCALAPPDATA', ''),
-                     'Programs', 'Ollama', 'ollama.exe'),
-        r'C:\Program Files\Ollama\ollama.exe',
-        os.path.join(os.environ.get('USERPROFILE', ''),
-                     'AppData', 'Local', 'Programs', 'Ollama', 'ollama.exe'),
-    ]
-    return any(os.path.exists(p) for p in paths)
 
 
 def get_ollama_executable():
-    """Find ollama.exe."""
+    """
+    Find ollama.exe path.
+    Checks PATH first then all known install locations.
+    Never returns a bare string that would fail silently.
+    """
+    # Check PATH first
     result = subprocess.run(
         ['where', 'ollama'],
         capture_output=True,
         text=True,
         encoding='utf-8',
-        errors='ignore'
+        errors='ignore',
+        creationflags=0x08000000 if platform.system() == 'Windows' else 0
     )
     if result.returncode == 0 and result.stdout.strip():
         path = result.stdout.strip().split('\n')[0].strip()
         if os.path.exists(path):
+            print(f"[BOOTSTRAP] Ollama exe from PATH: {path}")
             return path
 
+    # Check all known install locations
+    localappdata  = os.environ.get('LOCALAPPDATA', '')
+    userprofile   = os.environ.get('USERPROFILE', '')
+    programfiles  = os.environ.get('PROGRAMFILES', r'C:\Program Files')
+    programfilesx = os.environ.get('PROGRAMFILES(X86)', r'C:\Program Files (x86)')
+
     paths = [
-        os.path.join(os.environ.get('LOCALAPPDATA', ''),
-                     'Programs', 'Ollama', 'ollama.exe'),
+        os.path.join(localappdata,  'Programs', 'Ollama', 'ollama.exe'),
+        os.path.join(userprofile,   'AppData', 'Local', 'Programs', 'Ollama', 'ollama.exe'),
+        os.path.join(programfiles,  'Ollama', 'ollama.exe'),
+        os.path.join(programfilesx, 'Ollama', 'ollama.exe'),
         r'C:\Program Files\Ollama\ollama.exe',
-        os.path.join(os.environ.get('USERPROFILE', ''),
-                     'AppData', 'Local', 'Programs', 'Ollama', 'ollama.exe'),
+        r'C:\ollama\ollama.exe',
     ]
+
     for p in paths:
         if os.path.exists(p):
+            print(f"[BOOTSTRAP] Ollama exe found at: {p}")
             return p
 
+    # Last resort - hope it is in system PATH
+    print("[BOOTSTRAP] WARNING: ollama.exe not found, falling back to PATH lookup")
     return 'ollama'
 
 
