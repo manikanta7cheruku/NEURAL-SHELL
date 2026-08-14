@@ -1,6 +1,6 @@
 {
     "name": "vii-desktop",
-    "version": "1.2.8",
+    "version": "1.2.9",
     "description": "SEVEN \u2014 Private AI Voice Assistant",
     "main": "electron/main.js",
     "scripts": {
