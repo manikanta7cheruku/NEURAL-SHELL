@@ -54,14 +54,16 @@ function getPythonExecutable() {
   const embeddedW = path.join(getAppSourcePath(), 'python', 'pythonw.exe');
   const embedded  = path.join(getAppSourcePath(), 'python', 'python.exe');
 
-  // pythonw.exe has no console window — always prefer it for packaged app
-  if (fs.existsSync(embeddedW)) {
-    console.log('[PYTHON] Using embedded pythonw (windowless):', embeddedW);
-    return embeddedW;
-  }
+  // Use python.exe with CREATE_NO_WINDOW flag instead of pythonw.exe
+  // pythonw.exe suppresses stdout which breaks the backend startup pipe
+  // CREATE_NO_WINDOW handles the terminal hiding correctly
   if (fs.existsSync(embedded)) {
-    console.log('[PYTHON] Using embedded python (no window via flags):', embedded);
+    console.log('[PYTHON] Using embedded python (windowless via flags):', embedded);
     return embedded;
+  }
+  if (fs.existsSync(embeddedW)) {
+    console.log('[PYTHON] Using embedded pythonw:', embeddedW);
+    return embeddedW;
   }
   console.warn('[PYTHON] Embedded Python not found, falling back to system python');
   return 'python';
