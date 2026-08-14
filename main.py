@@ -72,6 +72,13 @@ _cwd = os.getcwd()
 if _cwd not in sys.path:
     sys.path.insert(0, _cwd)
 
+# Force app root into sys.path so main_modules, ears, brain etc are always found
+# This is the most critical path fix - without it all local imports fail
+_app_root = _app_path if _app_path else os.path.dirname(os.path.abspath(__file__))
+if _app_root not in sys.path:
+    sys.path.insert(0, _app_root)
+print(f"[SYSTEM] App root in path: {_app_root}")
+
 
 # ============================================================================
 # PACKAGE CHECK
