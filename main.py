@@ -994,10 +994,20 @@ def start_app():
     else:
         print(Fore.YELLOW + "[SYSTEM] Running in STANDALONE mode")
 
+    # ── Step 1: API server FIRST ─────────────────────────────────────────
+    # Electron polls /api/status every second with a 2 min timeout.
+    # The server MUST be up and responding before any heavy module loads.
+    # Heavy modules (ChromaDB, resemblyzer) can take 2-5 min on first run.
     start_api_server(host="127.0.0.1", port=7777)
-    logger.info("API server up on port 7777")
-    print(Fore.GREEN + "[SYSTEM] API server up")
+    logger.info("API server started on port 7777")
+    print(Fore.GREEN + "[SYSTEM] API server up on port 7777")
 
+    # Give uvicorn 1.5 seconds to bind the port before anything polls it
+    import time as _startup_time
+    _startup_time.sleep(1.5)
+    print(Fore.GREEN + "[SYSTEM] API server confirmed ready")
+
+    # ── Step 2: Non-blocking services ────────────────────────────────────
     try:
         telemetry.start_telemetry()
     except Exception as e:
@@ -1008,6 +1018,10 @@ def start_app():
     except Exception as e:
         print(Fore.YELLOW + f"[SYSTEM] Admin server skipped: {e}")
 
+    # ── Step 3: DummyUI + voice logic thread ─────────────────────────────
+    # Voice logic runs in a background thread so it never blocks the
+    # API server. Heavy module loading happens inside seven_logic via
+    # module_loader which also uses background threads for heavy models.
     class DummyUI:
         def update_status(self, text, color):
             try:
