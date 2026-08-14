@@ -37,8 +37,8 @@ _os_early.environ.setdefault('TOKENIZERS_PARALLELISM', 'false')
 _os_early.environ.setdefault('PYTORCH_JIT', '0')
 
 import logging as _early_logging
-_early_logging.getLogger('tensorflow').setLevel(logging.ERROR)
-_early_logging.getLogger('torch').setLevel(logging.ERROR)
+_early_logging.getLogger('tensorflow').setLevel(_early_logging.ERROR)
+_early_logging.getLogger('torch').setLevel(_early_logging.ERROR)
 
 # ============================================================================
 # PATH SETUP — Must be the very first thing after imports
