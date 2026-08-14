@@ -27,6 +27,19 @@ try:
 except Exception:
     pass
 
+# Silence TensorFlow and PyTorch before they load
+# These print walls of text even before logging is configured
+import os as _os_early
+_os_early.environ.setdefault('TF_CPP_MIN_LOG_LEVEL', '3')
+_os_early.environ.setdefault('TF_ENABLE_ONEDNN_OPTS', '0')
+_os_early.environ.setdefault('TRANSFORMERS_VERBOSITY', 'error')
+_os_early.environ.setdefault('TOKENIZERS_PARALLELISM', 'false')
+_os_early.environ.setdefault('PYTORCH_JIT', '0')
+
+import logging as _early_logging
+_early_logging.getLogger('tensorflow').setLevel(logging.ERROR)
+_early_logging.getLogger('torch').setLevel(logging.ERROR)
+
 # ============================================================================
 # PATH SETUP — Must be the very first thing after imports
 # ============================================================================
@@ -366,22 +379,45 @@ def _setup_logging():
 
     # Silence noisy third-party loggers
     for noisy in [
-        'chromadb', 'sentence_transformers', 'transformers','chromadb', 'sentence_transformers', 'transformers',
-        'huggingface_hub', 'urllib3', 'urllib3.connectionpool',
-        'urllib3.util', 'urllib3.util.retry', 'httpx',
-        'uvicorn.access', 'sentry_sdk', 'sentry_sdk.errors',
+        # ML frameworks
+        'tensorflow', 'tensorflow.python', 'tensorflow.core',
+        'torch', 'torch._dynamo', 'torch._inductor',
+        'torch._native.dsl_registry',
+        # NVidia / CUDA loggers
+        'nv_one_logger', 'nv_one_logger.api.config',
+        'nv_one_logger.exporter.export_config_manager',
+        'nv_one_logger.training_telemetry.api.training_telemetry_provider',
+        'nv_one_logger.recorder.default_recorder',
+        # Graph tools
+        'graphviz', 'graphviz._tools',
+        # HuggingFace
+        'datasets', 'datasets.builder', 'datasets.info',
+        'huggingface_hub', 'huggingface_hub.utils',
+        'transformers', 'transformers.modeling_utils',
+        'sentence_transformers',
+        # ChromaDB
+        'chromadb', 'chromadb.api', 'chromadb.db',
+        # HTTP
+        'urllib3', 'urllib3.connectionpool', 'urllib3.util',
+        'urllib3.util.retry', 'httpx', 'httpcore',
+        # Uvicorn
+        'uvicorn.access', 'uvicorn.error',
+        # Sentry
+        'sentry_sdk', 'sentry_sdk.errors',
         'sentry_sdk.transport', 'sentry_sdk.integrations',
-        'huggingface_hub', 'urllib3', 'urllib3.connectionpool',
-        'urllib3.util.retry', 'httpx', 'uvicorn.access',
-        'sentry_sdk', 'sentry_sdk.errors', 'sentry_sdk.transport',
-        'matplotlib', 'matplotlib.font_manager', 'matplotlib.pyplot',
-        'comtypes', 'comtypes.client', 'comtypes._post_coinit',
-        'comtypes._comobject', 'comtypes.client._managing',
-        'comtypes.client._generate', 'h5py', 'h5py._conv',
-        'numexpr', 'numexpr.utils', 'asyncio',
-        'PIL', 'pyttsx3', 'speechbrain',
+        # Audio / ML
+        'faster_whisper',
+        'speechbrain',
+        'PIL', 'pyttsx3',
+        # System
+        'matplotlib', 'matplotlib.font_manager',
+        'comtypes', 'comtypes.client',
+        'comtypes._post_coinit', 'comtypes._comobject',
+        'h5py', 'numexpr', 'asyncio',
+        'keras', 'keras.src',
+        'absl', 'absl.logging',
     ]:
-        logging.getLogger(noisy).setLevel(logging.WARNING)
+        logging.getLogger(noisy).setLevel(logging.ERROR)
 
     if not root.handlers:
         root.addHandler(fh)
