@@ -72,6 +72,14 @@ _cwd = os.getcwd()
 if _cwd not in sys.path:
     sys.path.insert(0, _cwd)
 
+# In a packaged app cwd is NOT the app root.
+# We must explicitly add the folder containing main.py
+# so that main_modules, ears, brain, hands, memory are all importable.
+_this_file_dir = os.path.dirname(os.path.abspath(__file__))
+if _this_file_dir not in sys.path:
+    sys.path.insert(0, _this_file_dir)
+    print(f"[SYSTEM] Injected app root into sys.path: {_this_file_dir}")
+
 # Force app root into sys.path so main_modules, ears, brain etc are always found
 # This is the most critical path fix - without it all local imports fail
 _app_root = _app_path if _app_path else os.path.dirname(os.path.abspath(__file__))
@@ -269,6 +277,41 @@ if not _startup_ok:
     os._exit(1)
 
 print("[STARTUP] All checks passed. Starting Seven...")
+
+# Auto-trigger Ollama install on fresh install
+# This runs in background so it does not block startup
+# The setup wizard StepEnvironment polls /api/bootstrap/status for progress
+def _auto_bootstrap():
+    try:
+        from backend.bootstrap import (
+            is_ollama_installed,
+            run_environment_setup,
+        )
+        import json as _bj
+        _cfg_path = os.path.join(
+            os.environ.get('APPDATA', ''), 'SEVEN', 'config.json'
+        )
+        _setup_done = False
+        if os.path.exists(_cfg_path):
+            try:
+                with open(_cfg_path) as _f:
+                    _setup_done = _bj.load(_f).get('setup_complete', False)
+            except Exception:
+                pass
+
+        if not _setup_done and not is_ollama_installed():
+            print("[STARTUP] Fresh install detected - auto-starting Ollama bootstrap")
+            run_environment_setup()
+        elif not is_ollama_installed():
+            print("[STARTUP] Ollama missing - auto-starting bootstrap")
+            run_environment_setup()
+        else:
+            print("[STARTUP] Ollama already installed - skipping auto-bootstrap")
+    except Exception as _be:
+        print(f"[STARTUP] Auto-bootstrap skipped: {_be}")
+
+import threading as _bt
+_bt.Thread(target=_auto_bootstrap, daemon=True, name="AutoBootstrap").start()
 
 # ============================================================================
 # FULL STARTUP
