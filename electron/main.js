@@ -108,6 +108,17 @@ function startPython() {
     return;
   }
 
+  console.log('[PYTHON] PYTHONPATH set to:', isDev
+    ? appSource
+    : [
+        appSource,
+        path.join(appSource, 'python', 'Lib', 'site-packages'),
+        path.join(appSource, 'python', 'Lib'),
+        path.join(appSource, 'python'),
+        path.join(appSource, 'python', 'DLLs'),
+      ].join(path.delimiter)
+  );
+
   pythonProcess = spawn(pythonExe, [pythonScript], {
     cwd: appSource,
     windowsHide: true,
@@ -136,6 +147,7 @@ function startPython() {
             path.join(appSource, 'python', 'Lib', 'site-packages'),
             path.join(appSource, 'python', 'Lib'),
             path.join(appSource, 'python'),
+            path.join(appSource, 'python', 'DLLs'),
           ].join(path.delimiter),
     }
   });
