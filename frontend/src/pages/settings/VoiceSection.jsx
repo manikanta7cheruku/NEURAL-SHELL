@@ -11,6 +11,9 @@
  * PROPS: (all passed from index.jsx — see index for descriptions)
  */
 
+import { useState, useEffect, useCallback, useRef } from 'react';
+import api from '../../api';
+
 export default function VoiceSection({
   local, set, hw,
   voices, selectedVoiceId, selectedEngine,
@@ -314,7 +317,7 @@ export default function VoiceSection({
         </div>
       </div>
       {/* Speech Recognition -- Whisper model size */}
-      <WhisperModelPanel hw={hw} />
+      <WhisperModelPanel hw={hw} setLocal={setLocal} />
 
       {/* Voice Security Gates */}
       <VoiceGatesPanel />
@@ -324,10 +327,7 @@ export default function VoiceSection({
 
 // ─── Voice Gates Panel ───────────────────────────────────────────────────────
 
-import { useState, useEffect, useCallback, useRef } from 'react';
-import api from '../../api';
-
-function WhisperModelPanel({ hw }) {
+function WhisperModelPanel({ hw, setLocal }) {
   const [models,         setModels]         = useState(null);
   const [current,        setCurrent]        = useState(null);
   const [downloading,    setDownloading]    = useState(false);
@@ -337,11 +337,40 @@ function WhisperModelPanel({ hw }) {
   const [pendingRestart, setPendingRestart] = useState(false);
   const pollRef = useRef(null);
 
+  const syncParentWhisperModel = useCallback((modelId) => {
+    if (!modelId || typeof setLocal !== 'function') return;
+
+    setLocal(prev => prev ? {
+      ...prev,
+      brain: {
+        ...(prev.brain || {}),
+        whisper_model: modelId,
+      },
+    } : prev);
+  }, [setLocal]);
+
   const load = useCallback(() => {
-    api.get('/setup/whisper-models')
-       .then(r => { setModels(r.data.models); setCurrent(r.data.current); })
-       .catch(() => {});
-  }, []);
+    // Add timestamp + no-cache headers to prevent Electron/Chrome stale responses
+    api.get(`/setup/whisper-models?t=${Date.now()}`, {
+      headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' }
+    })
+       .then(r => {
+         const freshCurrent = r.data.current;
+
+         console.log('[WHISPER] Load response:', freshCurrent);
+
+         setModels(r.data.models || []);
+         setCurrent(freshCurrent);
+
+         // Important:
+         // Keep the parent Settings draft in sync, otherwise Save Changes
+         // can overwrite whisper_model back to the old value.
+         syncParentWhisperModel(freshCurrent);
+       })
+       .catch((e) => {
+         console.error('[WHISPER] Load error:', e);
+       });
+  }, [syncParentWhisperModel]);
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
@@ -352,69 +381,64 @@ function WhisperModelPanel({ hw }) {
     if (downloading) return;
     setError(null);
 
-    const wasCurrent = current;
-    const alreadyInstalled = !!model.installed;
-    const sizeLabel = model.size_mb >= 1000
-      ? `${(model.size_mb / 1000).toFixed(1)} GB`
-      : `${model.size_mb} MB`;
+    const previousCurrent = current;
 
-    if (!alreadyInstalled) {
-      const ok = window.confirm(
-        `Download ${model.label} (${sizeLabel})?\n\nThis requires an internet connection and may take a few minutes.`
-      );
-      if (!ok) return;
-      setDownloading(true);
-      setDownloadModel(model.id);
-      setProgress(5);
-    }
+    // Optimistic update:
+    // This prevents the main Settings "Save Changes" button from saving
+    // the old whisper_model back over the new one.
+    setCurrent(model.id);
+    syncParentWhisperModel(model.id);
+    setPendingRestart(true);
 
     try {
-      setCurrent(model.id);
       const r = await api.post('/setup/whisper-model', { model: model.id });
+      const newCurrent = r.data.current || model.id;
 
-      if (r.data.installed) {
-        setDownloading(false);
-        setDownloadModel(null);
-        setProgress(0);
-        setCurrent(r.data.current || model.id);
-        setModels(prev => prev
-          ? prev.map(x => ({ ...x, active: x.id === model.id }))
-          : prev
-        );
-        setPendingRestart(true);
-        return;
-      }
+      console.log('[WHISPER] POST response:', JSON.stringify(r.data));
+      console.log('[WHISPER] Setting current to:', newCurrent);
+      console.log('[WHISPER] current before set:', current);
 
-      if (!alreadyInstalled) {
+      setCurrent(newCurrent);
+      syncParentWhisperModel(newCurrent);
+      setPendingRestart(true);
+
+      setTimeout(() => {
+        console.log('[WHISPER] Calling load() now');
+        load();
+      }, 800);
+
+      if (!r.data.installed) {
+        setDownloading(true);
+        setDownloadModel(model.id);
+        setProgress(5);
+
         pollRef.current = setInterval(async () => {
           try {
-            const s = await api.get('/setup/whisper-download-status');
+            const s = await api.get(`/setup/whisper-download-status?t=${Date.now()}`);
             setProgress(Math.max(5, s.data.progress || 0));
+
             if (!s.data.downloading) {
               clearInterval(pollRef.current);
-              pollRef.current = null;
               setDownloading(false);
               setDownloadModel(null);
+
               if (s.data.error) {
-                setCurrent(wasCurrent);
                 setError(s.data.error);
               } else {
                 setPendingRestart(true);
+                syncParentWhisperModel(newCurrent);
                 load();
               }
             }
           } catch {}
-        }, 700);
+        }, 600);
       }
     } catch (e) {
-      setCurrent(wasCurrent);
-      setDownloading(false);
-      setDownloadModel(null);
-      setProgress(0);
+      setCurrent(previousCurrent);
+      syncParentWhisperModel(previousCurrent);
       setError(e.response?.data?.detail || 'Could not change model');
     }
   };
-
   if (!models) {
     return (
       <div className="bg-white/[0.02] border border-white/8 rounded-2xl p-5">
