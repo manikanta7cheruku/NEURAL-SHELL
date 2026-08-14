@@ -32,7 +32,7 @@ from colorama import Fore
 VOICE_PRINTS_DIR     = os.path.join(".", "seven_data", "voice_prints")
 PROFILES_FILE        = os.path.join(VOICE_PRINTS_DIR, "profiles.json")
 # Base threshold — overridden by per-speaker calibration if available
-SIMILARITY_THRESHOLD = 0.20
+SIMILARITY_THRESHOLD = 0.15
 
 _titanet_model = None
 
@@ -120,7 +120,7 @@ def enroll_speaker(name: str, audio_path: str) -> bool:
     appdata = _os.environ.get('APPDATA', '')
     clip_files = [
         _os.path.join(appdata, 'SEVEN', f'enroll_clip_{i}.wav')
-        for i in range(1, 6)  # up to 5 clips
+        for i in range(1, 11)  # up to 10 clips for better variance
     ]
     for clip in clip_files:
         if _os.path.exists(clip):
@@ -161,8 +161,12 @@ def enroll_speaker(name: str, audio_path: str) -> bool:
     if self_scores:
         min_self_score = float(np.min(self_scores))
         avg_self_score = float(np.mean(self_scores))
-        # Threshold = min self-score minus 10% buffer
-        per_speaker_threshold = max(0.10, min_self_score - 0.10)
+        # Threshold set at 25% of avg self-score.
+        # This accounts for real-world variance in microphone distance,
+        # angle, and speaking energy compared to controlled enrollment.
+        # Example: avg_self_score=0.794 -> threshold=0.199
+        # Daily use scores of 0.2-0.35 will pass. Strangers at <0.10 blocked.
+        per_speaker_threshold = max(0.12, avg_self_score * 0.25)
         print(Fore.GREEN + f"[VOICE ID] Self-similarity: avg={avg_self_score:.3f} min={min_self_score:.3f}")
         print(Fore.GREEN + f"[VOICE ID] Per-speaker threshold: {per_speaker_threshold:.3f}")
     else:
@@ -185,7 +189,14 @@ def enroll_speaker(name: str, audio_path: str) -> bool:
     return True
 
 
+# Rolling score history for smoothing
+# Averages last 3 scores per speaker to reduce single-clip variance
+_score_history: dict = {}
+
+
 def identify_speaker(audio_path: str) -> str:
+    global _score_history
+
     profiles = _load_profiles()
     if not profiles:
         return "default"
@@ -209,11 +220,20 @@ def identify_speaker(audio_path: str) -> str:
             print(Fore.YELLOW + f"[VOICE ID] Dim mismatch for {name} — re-enroll")
             continue
 
-        score = float(np.dot(embedding, stored))
-        # Use per-speaker threshold if available, else global
+        raw_score = float(np.dot(embedding, stored))
+
+        # Rolling average of last 3 scores — reduces single-clip variance
+        # One bad clip (cough, mic bump) no longer kills identification
+        if name not in _score_history:
+            _score_history[name] = []
+        _score_history[name].append(raw_score)
+        if len(_score_history[name]) > 3:
+            _score_history[name].pop(0)
+        score = float(np.mean(_score_history[name]))
+
         speaker_threshold = info.get("threshold", SIMILARITY_THRESHOLD)
         thresholds[name]  = speaker_threshold
-        print(Fore.CYAN + f"[VOICE ID] {name}: {score:.3f} (need >{speaker_threshold:.2f})")
+        print(Fore.CYAN + f"[VOICE ID] {name}: raw={raw_score:.3f} avg={score:.3f} (need >{speaker_threshold:.2f})")
 
         if score > best_score:
             best_score = score
