@@ -214,6 +214,7 @@ def check_packages_installed():
 def install_packages():
     """
     Install all packages from requirements.txt into the correct Python.
+    Shows real-time progress with package name, count, and speed.
     """
     _set('packages', status='running', progress=0,
          current='Preparing...', error=None)
@@ -233,54 +234,17 @@ def install_packages():
         _set('packages', status='error', error='requirements.txt not found')
         return False
 
-    # Step 3: Upgrade pip
-    _set('packages', current='Upgrading pip...', progress=3)
+    # Step 3: Upgrade pip silently
+    _set('packages', current='Upgrading pip...', progress=2)
     subprocess.run(
-        [python_exe, '-m', 'pip', 'install', '--upgrade', 'pip', '--quiet'],
+        [python_exe, '-m', 'pip', 'install', '--upgrade', 'pip',
+         '--quiet', '--no-warn-script-location'],
         capture_output=True,
         creationflags=0x08000000 if platform.system() == 'Windows' else 0
     )
+    print("[BOOTSTRAP] pip up to date")
 
-        # ── Step 3b: Ensure critical runtime dependencies exist ──
-    # These must be present BEFORE api_server.py imports
-    _set('packages', current='Installing core dependencies...', progress=4)
-
-    critical_runtime_packages = [
-        "python-multipart",
-        "fastapi",
-        "uvicorn[standard]",
-        "websockets",
-        "pyautogui",
-        "requests",
-        "colorama",
-        "psutil",
-        "pyttsx3",
-        "pywin32",
-        "pycaw",
-        "comtypes",
-        "AppOpener",
-        "ddgs",
-        "SpeechRecognition",
-        "pyaudio",
-        "screen-brightness-control",
-    ]
-
-    for pkg in critical_runtime_packages:
-        result = subprocess.run(
-            [python_exe, "-m", "pip", "install", pkg,
-             "--quiet", "--no-warn-script-location"],
-            capture_output=True,
-            text=True,
-            timeout=120,
-            creationflags=0x08000000 if platform.system() == 'Windows' else 0
-        )
-
-        if result.returncode != 0:
-            print(f"[BOOTSTRAP] Warning: Failed installing {pkg}")
-
-    print("[BOOTSTRAP] Core runtime dependencies ensured.")
-
-    # Step 4: Read packages
+    # Step 4: Read full package list
     with open(req_path, 'r') as f:
         lines = f.readlines()
 
@@ -293,16 +257,48 @@ def install_packages():
         _set('packages', status='error', error='No packages in requirements.txt')
         return False
 
-    total    = len(packages)
-    optional = ['resemblyzer', 'pyaudio', 'screen-brightness-control']
+    # Critical packages go first - these must exist before api_server imports
+    critical_first = [
+        "python-multipart", "fastapi", "uvicorn[standard]", "websockets",
+        "requests", "colorama", "psutil", "pyttsx3", "pywin32",
+        "pycaw", "comtypes", "AppOpener", "ddgs", "SpeechRecognition",
+        "pyaudio", "screen-brightness-control", "pyautogui",
+    ]
 
-    print(f"[BOOTSTRAP] Installing {total} packages into {python_exe}")
+    # Build install order: critical first, then the rest
+    def _pkg_name(p):
+        return p.split('==')[0].split('>=')[0].split('[')[0].strip().lower()
 
-    for i, pkg in enumerate(packages):
+    critical_set    = {c.split('[')[0].lower() for c in critical_first}
+    ordered         = [p for p in packages if _pkg_name(p) in critical_set]
+    remaining       = [p for p in packages if _pkg_name(p) not in critical_set]
+    install_order   = ordered + remaining
+
+    total    = len(install_order)
+    optional = {'resemblyzer', 'pyaudio', 'screen-brightness-control'}
+
+    print(f"[BOOTSTRAP] Installing {total} packages ({len(ordered)} critical first)")
+    print(f"[BOOTSTRAP] Target: {python_exe}")
+    print("-" * 60)
+
+    failed_optional = []
+    install_start   = time.time()
+
+    for i, pkg in enumerate(install_order):
         pkg_display = pkg.split('==')[0].split('>=')[0].strip()
-        progress    = int(((i) / total) * 100)
-        _set('packages', current=f'Installing {pkg_display}...', progress=progress)
-        print(f"[BOOTSTRAP] [{i+1}/{total}] {pkg_display}")
+        is_optional = any(o in pkg.lower() for o in optional)
+        progress    = int(((i) / total) * 95)  # leave 5% for final step
+
+        label = f"[{i+1}/{total}] {pkg_display}"
+        if i < len(ordered):
+            label += " (core)"
+
+        _set('packages',
+             current=f'Installing {pkg_display}...',
+             progress=progress)
+
+        pkg_start = time.time()
+        print(f"[BOOTSTRAP] {label}")
 
         result = subprocess.run(
             [python_exe, '-m', 'pip', 'install', pkg,
@@ -313,19 +309,31 @@ def install_packages():
             creationflags=0x08000000 if platform.system() == 'Windows' else 0
         )
 
-        if result.returncode != 0:
-            is_optional = any(o in pkg.lower() for o in optional)
+        pkg_elapsed = round(time.time() - pkg_start, 1)
+
+        if result.returncode == 0:
+            print(f"[BOOTSTRAP]   done in {pkg_elapsed}s")
+        else:
             if is_optional:
-                print(f"[BOOTSTRAP] Optional skipped: {pkg_display}")
+                failed_optional.append(pkg_display)
+                print(f"[BOOTSTRAP]   optional skipped ({pkg_elapsed}s)")
                 continue
-            err = result.stderr.strip()[-300:] if result.stderr else 'Unknown'
+            err = result.stderr.strip()[-400:] if result.stderr else 'Unknown error'
+            print(f"[BOOTSTRAP]   FAILED: {err}")
             _set('packages', status='error',
-                 error=f'{pkg_display} failed: {err}')
+                 error=f'{pkg_display} install failed. Check your internet connection.')
             return False
 
+    total_elapsed = round(time.time() - install_start, 1)
+
+    if failed_optional:
+        print(f"[BOOTSTRAP] Optional skipped: {', '.join(failed_optional)}")
+
+    print("-" * 60)
+    print(f"[BOOTSTRAP] All packages installed in {total_elapsed}s")
+
     _set('packages', status='done', progress=100,
-         current='All packages installed')
-    print("[BOOTSTRAP] All packages installed.")
+         current=f'All packages ready ({total_elapsed}s)')
     return True
 
 
