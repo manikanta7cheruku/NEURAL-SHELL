@@ -200,15 +200,17 @@ function stopPython() {
 function waitForBackend() {
   return new Promise((resolve) => {
     const startTime = Date.now();
-    // const timeout   = 120_000; // 2 minutes — model loading is slow
-    const timeout = isDev ? 120000 : 120000; // 30s in packaged, 2min in dev
+    const timeout   = 180000; // 3 minutes - first run downloads AI models
 
     let _backendLogged = false;
+    let _lastLogTime   = Date.now();
+
     const check = () => {
       const req = http.get('http://127.0.0.1:7777/api/status', (res) => {
         if (res.statusCode === 200) {
           if (!_backendLogged) {
-            console.log('[BACKEND] Ready!');
+            const elapsed = Math.round((Date.now() - startTime) / 1000);
+            console.log(`[BACKEND] Ready in ${elapsed}s`);
             _backendLogged = true;
           }
           resolve(true);
@@ -221,10 +223,16 @@ function waitForBackend() {
     };
 
     const retry = () => {
-      if (Date.now() - startTime > timeout) {
-        console.error('[BACKEND] Timeout after 2 minutes');
+      const elapsed = Date.now() - startTime;
+      if (elapsed > timeout) {
+        console.error('[BACKEND] Timeout after 3 minutes');
         resolve(false);
       } else {
+        // Log every 15 seconds so you can see it is alive
+        if (Date.now() - _lastLogTime >= 15000) {
+          console.log(`[BACKEND] Still waiting... ${Math.round(elapsed / 1000)}s elapsed`);
+          _lastLogTime = Date.now();
+        }
         setTimeout(check, 1000);
       }
     };
@@ -682,11 +690,26 @@ function launchPanelHost() {
     console.log('[APP] Mode:', isDev ? 'DEVELOPMENT' : 'PACKAGED');
     console.log('[APP] Source path:', getAppSourcePath());
 
-    // Write version.txt so Python reads correct app version
+    // Write version.txt so Python reads correct app version.
+    // In dev mode, app.getVersion() returns Electron's own version (33.x)
+    // not the app version. Read from package.json directly instead.
     try {
       const versionTxtPath = path.join(getAppSourcePath(), 'version.txt');
-      fs.writeFileSync(versionTxtPath, app.getVersion(), 'utf8');
-      console.log('[APP] Version written:', app.getVersion(), '->', versionTxtPath);
+      let appVersion = app.getVersion();
+
+      if (isDev) {
+        // In dev mode read version from root package.json
+        try {
+          const pkgPath = path.join(getAppSourcePath(), 'package.json');
+          const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+          if (pkg.version) appVersion = pkg.version;
+        } catch (e) {
+          console.warn('[APP] Could not read package.json version:', e.message);
+        }
+      }
+
+      fs.writeFileSync(versionTxtPath, appVersion, 'utf8');
+      console.log('[APP] Version written:', appVersion, '->', versionTxtPath);
     } catch (e) {
       console.warn('[APP] Could not write version.txt:', e.message);
     }
