@@ -28,8 +28,17 @@ except Exception:
     pass
 
 # ============================================================================
-# PATH SETUP
+# PATH SETUP — Must be the very first thing after imports
 # ============================================================================
+
+# Inject app root IMMEDIATELY — before any other path logic.
+# This is line 1 of path setup intentionally.
+# In a packaged app the working directory is NOT the app root.
+# __file__ is always reliable — it points to main.py itself.
+_this_file_dir = os.path.dirname(os.path.abspath(__file__))
+if _this_file_dir not in sys.path:
+    sys.path.insert(0, _this_file_dir)
+print(f"[SYSTEM] App root injected: {_this_file_dir}")
 
 _app_path = os.environ.get('SEVEN_APP_PATH', '')
 if _app_path and _app_path not in sys.path:
@@ -71,16 +80,7 @@ if _app_path:
 _cwd = os.getcwd()
 if _cwd not in sys.path:
     sys.path.insert(0, _cwd)
-
-# In a packaged app cwd is NOT the app root.
-# __file__ always points to main.py so its directory
-# is always the true app root regardless of how Python
-# was launched. Without this every local import fails
-# with ModuleNotFoundError in the packaged build.
-_this_file_dir = os.path.dirname(os.path.abspath(__file__))
-if _this_file_dir not in sys.path:
-    sys.path.insert(0, _this_file_dir)
-    print(f"[SYSTEM] App root injected: {_this_file_dir}")
+# Note: _this_file_dir already injected at top of PATH SETUP block
 
 
 # ============================================================================
