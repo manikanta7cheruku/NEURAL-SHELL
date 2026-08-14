@@ -53,12 +53,14 @@ function getPythonExecutable() {
   }
   const embeddedW = path.join(getAppSourcePath(), 'python', 'pythonw.exe');
   const embedded  = path.join(getAppSourcePath(), 'python', 'python.exe');
+
+  // pythonw.exe has no console window — always prefer it for packaged app
   if (fs.existsSync(embeddedW)) {
     console.log('[PYTHON] Using embedded pythonw (windowless):', embeddedW);
     return embeddedW;
   }
   if (fs.existsSync(embedded)) {
-    console.log('[PYTHON] Using embedded python:', embedded);
+    console.log('[PYTHON] Using embedded python (no window via flags):', embedded);
     return embedded;
   }
   console.warn('[PYTHON] Embedded Python not found, falling back to system python');
@@ -123,9 +125,12 @@ function startPython() {
     cwd: appSource,
     windowsHide: true,
     stdio: ['pipe', 'pipe', 'pipe'],
-    // Windows: 0x08000000 = CREATE_NO_WINDOW — prevents console flash
     detached: false,
-    ...(process.platform === 'win32' ? { creationflags: 0x08000000 } : {}),
+    // CREATE_NO_WINDOW (0x08000000) — no terminal window ever
+    // This works even when pythonw.exe is not available
+    ...(process.platform === 'win32' ? {
+      creationflags: 0x08000000
+    } : {}),
     env: {
       ...process.env,
       // Tell Windows audio subsystem Python is a standalone audio app
