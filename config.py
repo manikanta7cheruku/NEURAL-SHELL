@@ -13,7 +13,7 @@ CHANGES FROM V2.0:
 WHY THIS CHANGE:
     In a packaged Electron app, the install directory (C:\Program Files\SEVEN)
     is read-only for standard users. Config, databases, and memory must live
-    in a writable location: %APPDATA%\SEVEN\
+    in a writable location: %APPDATA%\SEVEN
 =============================================================================
 """
 
