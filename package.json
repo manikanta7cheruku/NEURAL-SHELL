@@ -5,7 +5,8 @@
     "main": "electron/main.js",
     "scripts": {
         "kill": "taskkill /F /IM SEVEN.exe /IM pythonw.exe /IM python.exe /IM Electron.exe 2>nul & timeout /t 3 > nul",
-        "build": "npm run kill && npm run build:frontend && npx electron-builder --config electron-builder.yml --x64",
+        "clean": "rmdir /S /Q dist-electron 2>nul & echo cleaned",
+        "build": "npm run kill && npm run clean && npm run build:frontend && npx electron-builder --config electron-builder.yml --x64",
         "dev": "concurrently \"npm run frontend:dev\" \"npm run electron:dev\"",
         "frontend:dev": "cd frontend && npm run dev",
         "electron:dev": "wait-on http://localhost:5173 && electron .",
