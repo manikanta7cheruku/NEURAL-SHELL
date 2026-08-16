@@ -473,27 +473,72 @@ def download_ollama_installer():
 
 
 def install_ollama_silent(installer_path):
-    """Run OllamaSetup.exe silently."""
+    """
+    Run OllamaSetup.exe silently.
+    Uses ShellExecute with runas verb to request elevation properly.
+    Silent /S flag works correctly when elevated.
+    """
     print(f"[BOOTSTRAP] Installing Ollama silently...")
     try:
-        result = subprocess.run(
-            [installer_path, '/S'],
-            capture_output=True,
-            timeout=180,
-            creationflags=0x08000000 if platform.system() == 'Windows' else 0
+        import ctypes
+
+        # Use ShellExecute with runas to properly elevate
+        # This is the correct way to run installers on Windows
+        # subprocess.run() cannot request UAC elevation
+        ret = ctypes.windll.shell32.ShellExecuteW(
+            None,       # hwnd
+            "runas",    # verb - requests elevation
+            installer_path,
+            "/S",       # silent install flag
+            None,       # working directory
+            0           # SW_HIDE - no window
         )
-        if result.returncode == 0:
-            _set('ollama_install', status='done', progress=100)
-            print("[BOOTSTRAP] Ollama installed.")
-            return True
-        else:
-            err = f"Exit code {result.returncode}"
-            _set('ollama_install', status='error', error=err)
+
+        # ShellExecute returns > 32 on success
+        if ret > 32:
+            print("[BOOTSTRAP] Ollama installer launched with elevation")
+            # Wait for Ollama to appear - installer runs async
+            deadline = time.time() + 120
+            while time.time() < deadline:
+                if is_ollama_installed():
+                    _set('ollama_install', status='done', progress=100)
+                    print("[BOOTSTRAP] Ollama installed successfully")
+                    return True
+                time.sleep(3)
+                # Update progress while waiting
+                elapsed  = time.time() - (deadline - 120)
+                progress = min(95, int((elapsed / 120) * 100))
+                _set('ollama_install', progress=progress)
+
+            # Check one final time
+            if is_ollama_installed():
+                _set('ollama_install', status='done', progress=100)
+                return True
+
+            _set('ollama_install', status='error',
+                 error='Ollama installer ran but Ollama was not found after 2 minutes. Try installing manually from ollama.com/download')
             return False
-    except subprocess.TimeoutExpired:
-        _set('ollama_install', status='error', error='Install timed out')
-        return False
+        else:
+            # User denied UAC or other error
+            err_map = {
+                0:  'Out of memory',
+                2:  'Installer file not found',
+                3:  'Path not found',
+                5:  'User denied the administrator request. Please click Yes when prompted.',
+                8:  'Out of memory',
+                26: 'Sharing violation',
+                27: 'File association incomplete',
+                28: 'DDE timeout',
+                32: 'DDE failed',
+            }
+            err_msg = err_map.get(ret, f'ShellExecute failed with code {ret}')
+            print(f"[BOOTSTRAP] Ollama install failed: {err_msg}")
+            _set('ollama_install', status='error',
+                 error=f'{err_msg}. Please install Ollama manually from ollama.com/download')
+            return False
+
     except Exception as e:
+        print(f"[BOOTSTRAP] Ollama install exception: {e}")
         _set('ollama_install', status='error', error=str(e))
         return False
 
