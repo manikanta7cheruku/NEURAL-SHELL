@@ -30,6 +30,8 @@ extraResources:
     to: "app"
     filter:
       - "*.py"
+      - "*.txt"
+      - "*.json"
       - "requirements.txt"
       - "backend/**/*"
       - "brain_modules/**/*"
@@ -55,8 +57,11 @@ extraResources:
       - "!test_*.py"
       - "!check_*.py"
       - "!scan_*.py"
+      - "!scan_catches.py"
+      - "!scan_backend.py"
       - "!baseline_*.txt"
       - "!dev*.bat"
+      - "!dev-keep.bat"
   - from: "python-dist/python"
     to: "app/python"
     filter:
