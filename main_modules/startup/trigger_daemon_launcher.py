@@ -457,55 +457,80 @@ def _register_trigger_startup_folder(python: str, daemon: str):
 # OVERLAY DAEMON
 # ─────────────────────────────────────────────────────────────────────────
 
+def _get_electron_executable() -> str:
+    """
+    Find the Electron executable.
+
+    Dev mode:   node_modules/electron/dist/electron.exe
+    Packaged:   The running Electron process itself (sys.executable sibling)
+                In packaged app Python runs inside resources/app/
+                Electron.exe is at resources/../ which is the app root
+    """
+    root = _get_project_root()
+
+    # Dev mode candidates
+    dev_candidates = [
+        os.path.join(root, "node_modules", "electron", "dist", "electron.exe"),
+        os.path.join(root, "node_modules", ".bin", "electron.cmd"),
+        os.path.join(root, "frontend", "node_modules", "electron", "dist", "electron.exe"),
+    ]
+    for c in dev_candidates:
+        if os.path.exists(c):
+            print(Fore.CYAN + f"[OVERLAY] Dev electron: {c}")
+            return c
+
+    # Packaged mode: Electron.exe is parent of resources/
+    # Python is at: resources/app/python/python.exe
+    # Electron is at: SEVEN.exe (same dir as resources/)
+    app_path = os.environ.get('SEVEN_APP_PATH', '')
+    if app_path:
+        # resources/app -> resources -> install root
+        resources_dir  = os.path.dirname(app_path)
+        install_root   = os.path.dirname(resources_dir)
+        packaged_candidates = [
+            os.path.join(install_root, "SEVEN.exe"),
+            os.path.join(install_root, "seven.exe"),
+        ]
+        for c in packaged_candidates:
+            if os.path.exists(c):
+                print(Fore.CYAN + f"[OVERLAY] Packaged electron: {c}")
+                return c
+
+    print(Fore.YELLOW + "[OVERLAY] Electron executable not found")
+    return ""
+
+
 def launch_overlay_daemon():
     """
     Launch overlay_daemon.js as a detached Electron process.
     Pre-warms notification and arrangement windows on TCP port 7891.
     Survives Seven closing.
-    ALWAYS registers Task Scheduler entry even if daemon already running,
-    so auto-start at login works after next reboot.
     """
     root = _get_project_root()
 
-    electron_check = None
-    for rel in [
-        os.path.join("node_modules", "electron", "dist", "electron.exe"),
-        os.path.join("node_modules", ".bin", "electron.cmd"),
-        os.path.join("frontend", "node_modules", "electron", "dist", "electron.exe"),
-    ]:
-        c = os.path.join(root, rel)
-        if os.path.exists(c):
-            electron_check = c
-            break
-
-    daemon_js_check = os.path.join(root, "electron", "overlay_daemon.js")
-
-    if electron_check and os.path.exists(daemon_js_check):
-        _register_overlay_startup(electron_check, daemon_js_check)
-
     if _is_overlay_alive():
-        print(Fore.CYAN + "[OVERLAY] Already running ✓")
+        print(Fore.CYAN + "[OVERLAY] Already running on port 7891 ✓")
         return
 
-    root = _get_project_root()
-
-    # Find Electron executable
-    electron = None
-    for rel in [
-        os.path.join("node_modules", "electron", "dist", "electron.exe"),
-        os.path.join("node_modules", ".bin", "electron.cmd"),
-        os.path.join("frontend", "node_modules", "electron", "dist", "electron.exe"),
-    ]:
-        c = os.path.join(root, rel)
-        if os.path.exists(c):
-            electron = c
-            break
-
+    electron = _get_electron_executable()
     if not electron:
-        print(Fore.YELLOW + "[OVERLAY] Electron not found — overlay disabled")
+        print(Fore.YELLOW + "[OVERLAY] Electron not found - overlay disabled")
         return
 
     daemon_js = os.path.join(root, "electron", "overlay_daemon.js")
+
+    # In packaged app overlay_daemon.js is inside asar
+    # Check asar path too
+    if not os.path.exists(daemon_js):
+        app_path = os.environ.get('SEVEN_APP_PATH', '')
+        if app_path:
+            resources_dir  = os.path.dirname(app_path)
+            asar_daemon_js = os.path.join(
+                resources_dir, "app.asar", "electron", "overlay_daemon.js"
+            )
+            if os.path.exists(asar_daemon_js):
+                daemon_js = asar_daemon_js
+
     if not os.path.exists(daemon_js):
         print(Fore.YELLOW + f"[OVERLAY] overlay_daemon.js not found: {daemon_js}")
         return
@@ -513,13 +538,18 @@ def launch_overlay_daemon():
     print(Fore.CYAN + f"[OVERLAY] Electron: {electron}")
     print(Fore.CYAN + f"[OVERLAY] Script:   {daemon_js}")
 
-    pid = _spawn_detached([electron, daemon_js], cwd=root)
+    # Register for auto-start at login
+    _register_overlay_startup(electron, daemon_js)
+
+    pid = _spawn_detached(
+        [electron, daemon_js],
+        cwd=root
+    )
     print(Fore.CYAN + f"[OVERLAY] Spawned PID {pid}")
 
-    # Check once after 1s — don't block Seven startup
     time.sleep(1)
     if _is_overlay_alive():
-        print(Fore.GREEN + f"[OVERLAY] Overlay daemon ready ✓ (PID {pid})")
+        print(Fore.GREEN + f"[OVERLAY] Overlay daemon ready on port 7891 ✓ (PID {pid})")
     else:
         print(Fore.CYAN + f"[OVERLAY] Warming up in background (PID {pid})")
 
