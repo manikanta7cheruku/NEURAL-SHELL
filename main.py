@@ -209,17 +209,52 @@ def _validate_startup():
             )
 
     # Check 3: Port 7777 not already in use
+    # If it is in use, kill the process holding it and retry
     try:
         _ps = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         _ps.settimeout(1)
         _result = _ps.connect_ex(("127.0.0.1", 7777))
         _ps.close()
         if _result == 0:
-            errors.append(
-                "Port 7777 is already in use.\n"
-                "  Another Seven instance may be running.\n"
-                "  Fix: Close the other instance or restart your computer."
-            )
+            # Port is in use - try to kill whatever is holding it
+            print("[STARTUP] Port 7777 in use - attempting to free it...")
+            try:
+                import subprocess as _sp
+                # Find and kill the process on port 7777
+                _kill = _sp.run(
+                    ['netstat', '-ano'],
+                    capture_output=True, text=True
+                )
+                for _line in _kill.stdout.splitlines():
+                    if '7777' in _line and 'LISTENING' in _line:
+                        _parts = _line.strip().split()
+                        _pid = _parts[-1]
+                        if _pid and _pid.isdigit() and int(_pid) != os.getpid():
+                            print(f"[STARTUP] Killing PID {_pid} on port 7777")
+                            _sp.run(
+                                ['taskkill', '/PID', _pid, '/F'],
+                                capture_output=True
+                            )
+                import time as _pt
+                _pt.sleep(1)
+                # Retry check
+                _ps2 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                _ps2.settimeout(1)
+                _result2 = _ps2.connect_ex(("127.0.0.1", 7777))
+                _ps2.close()
+                if _result2 == 0:
+                    errors.append(
+                        "Port 7777 is still in use after attempting to free it.\n"
+                        "  Fix: Restart your computer and try again."
+                    )
+                else:
+                    print("[STARTUP] Port 7777: freed successfully")
+            except Exception as _kill_err:
+                print(f"[STARTUP] Could not free port 7777: {_kill_err}")
+                errors.append(
+                    "Port 7777 is already in use.\n"
+                    "  Fix: Restart your computer and try again."
+                )
         else:
             print("[STARTUP] Port 7777: available")
     except Exception as _pe:
