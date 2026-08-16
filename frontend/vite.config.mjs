@@ -21,21 +21,14 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks: {
-          // Split React and router into their own chunk
           'vendor-react': [
             'react',
             'react-dom',
             'react-router-dom',
           ],
-          // Split charting libraries
-          'vendor-charts': [
-            'recharts',
-          ],
-          // Split Zustand state management
           'vendor-state': [
             'zustand',
           ],
-          // Split axios
           'vendor-http': [
             'axios',
           ],
