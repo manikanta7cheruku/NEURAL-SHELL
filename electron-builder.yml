@@ -7,6 +7,11 @@ appId: com.sevenlabs.seven
 productName: SEVEN
 copyright: "Copyright © 2025 Seven Labs. All rights reserved."
 
+# Disable asar packing - prevents file lock issues during builds
+# Files go directly into resources/app/ folder instead of app.asar
+# This also makes debugging easier in production
+asar: false
+
 directories:
   output: dist-electron
   buildResources: electron
