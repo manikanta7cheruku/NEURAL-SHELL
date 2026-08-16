@@ -19,26 +19,42 @@ if sys.stderr and hasattr(sys.stderr, 'reconfigure'):
 # all call numpy.iterable internally. The embedded Python environment
 # ships with numpy 2.x while the venv has 1.26.4.
 # Patch at process start before any ML library loads.
+# Silence noisy env vars before any ML library loads
+import os as _os_early
+_os_early.environ.setdefault('TF_CPP_MIN_LOG_LEVEL',    '3')
+_os_early.environ.setdefault('TF_ENABLE_ONEDNN_OPTS',   '0')
+_os_early.environ.setdefault('TRANSFORMERS_VERBOSITY',   'error')
+_os_early.environ.setdefault('TOKENIZERS_PARALLELISM',   'false')
+_os_early.environ.setdefault('PYTORCH_JIT',              '0')
+
+# Silence noisy loggers before they are imported
+import logging as _early_logging
+for _noisy_logger in [
+    'tensorflow', 'torch', 'torch._dynamo',
+    'nv_one_logger', 'graphviz', 'datasets',
+    'huggingface_hub', 'transformers',
+    'httpcore', 'httpx',
+]:
+    _early_logging.getLogger(_noisy_logger).setLevel(_early_logging.ERROR)
+
+# numpy 2.x compatibility patch
+# Must happen before any ML library imports numpy
 try:
     import numpy as _np_patch
     if not hasattr(_np_patch, 'iterable'):
         _np_patch.iterable = lambda obj: hasattr(obj, '__iter__')
         print("[SYSTEM] numpy.iterable patched for numpy 2.x compatibility")
+    # Also patch deprecated numpy types used by older packages
+    if not hasattr(_np_patch, 'complex'):
+        _np_patch.complex  = complex
+    if not hasattr(_np_patch, 'float'):
+        _np_patch.float    = float
+    if not hasattr(_np_patch, 'int'):
+        _np_patch.int      = int
+    if not hasattr(_np_patch, 'bool'):
+        _np_patch.bool     = bool
 except Exception:
     pass
-
-# Silence TensorFlow and PyTorch before they load
-# These print walls of text even before logging is configured
-import os as _os_early
-_os_early.environ.setdefault('TF_CPP_MIN_LOG_LEVEL', '3')
-_os_early.environ.setdefault('TF_ENABLE_ONEDNN_OPTS', '0')
-_os_early.environ.setdefault('TRANSFORMERS_VERBOSITY', 'error')
-_os_early.environ.setdefault('TOKENIZERS_PARALLELISM', 'false')
-_os_early.environ.setdefault('PYTORCH_JIT', '0')
-
-import logging as _early_logging
-_early_logging.getLogger('tensorflow').setLevel(_early_logging.ERROR)
-_early_logging.getLogger('torch').setLevel(_early_logging.ERROR)
 
 # ============================================================================
 # PATH SETUP — Must be the very first thing after imports
