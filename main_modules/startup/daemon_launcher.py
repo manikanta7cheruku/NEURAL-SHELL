@@ -14,8 +14,17 @@ from colorama import Fore
 def launch_schedule_daemon():
     """Launch schedule_daemon.py if not already running."""
     try:
-        _daemon = os.path.join(os.getcwd(), "schedule_daemon.py")
-        _python = sys.executable
+        # In packaged app os.getcwd() is NOT the app root
+        # Use SEVEN_APP_PATH env var which Electron sets correctly
+        # Fall back to the directory containing this file
+        _app_root = (
+            os.environ.get('SEVEN_APP_PATH') or
+            os.path.dirname(os.path.dirname(os.path.dirname(
+                os.path.abspath(__file__)
+            )))
+        )
+        _daemon  = os.path.join(_app_root, "schedule_daemon.py")
+        _python  = sys.executable
         _pythonw = _python.replace("python.exe", "pythonw.exe")
         if not os.path.exists(_pythonw):
             _pythonw = _python
