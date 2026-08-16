@@ -192,10 +192,128 @@ def _check_schedules():
 
 def _get_version():
     try:
-        here = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        here = os.path.dirname(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__)
+        )))
         vf = os.path.join(here, "version.txt")
         if os.path.exists(vf):
             return open(vf).read().strip()
-    except Exception as _e:
-        _log.debug(f"Health sub-check non-critical: {_e}")
+    except Exception:
+        pass
     return "unknown"
+
+
+@router.get("/api/health/production",
+            summary="Full production diagnostic",
+            description="Returns complete system state for remote debugging. Includes process list, port status, daemon status, Python path, disk, memory.")
+def production_health():
+    """
+    Deep production health check.
+    Use this to remotely diagnose issues on any user machine.
+    Ask user to open: http://127.0.0.1:7777/api/health/production
+    and paste the JSON to you.
+    """
+    import sys
+    import socket
+    import platform
+    import subprocess
+
+    result = {
+        "version":   _get_version(),
+        "platform":  platform.platform(),
+        "python":    sys.version,
+        "exe":       sys.executable,
+        "app_path":  os.environ.get('SEVEN_APP_PATH', 'not set'),
+        "sys_path":  sys.path[:5],
+        "ports":     {},
+        "processes": {},
+        "daemons":   {},
+        "ollama":    {},
+        "disk":      {},
+        "env_vars":  {},
+    }
+
+    # Port checks
+    # 7777  = Main API
+    # 7778  = Panel server
+    # 7779  = Panel host cmd
+    # 7891  = Overlay IPC
+    # 11434 = Ollama
+    # 8888  = Admin dashboard
+    for port in [7777, 7778, 7779, 7891, 11434, 8888]:
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(1)
+            r = s.connect_ex(("127.0.0.1", port))
+            s.close()
+            result["ports"][str(port)] = "open" if r == 0 else "closed"
+        except Exception:
+            result["ports"][str(port)] = "error"
+
+    # Process checks
+    try:
+        import psutil
+        seven_procs = []
+        for p in psutil.process_iter(['pid', 'name', 'cmdline', 'status']):
+            try:
+                name = p.info['name'] or ''
+                cmd  = ' '.join(p.info['cmdline'] or [])
+                if any(x in name.lower() for x in ['python', 'seven', 'ollama', 'electron']):
+                    seven_procs.append({
+                        "pid":    p.info['pid'],
+                        "name":   name,
+                        "status": p.info['status'],
+                        "cmd":    cmd[:100]
+                    })
+            except Exception:
+                pass
+        result["processes"] = seven_procs
+    except Exception as e:
+        result["processes"] = {"error": str(e)}
+
+    # Daemon file checks
+    app_path = os.environ.get('SEVEN_APP_PATH', '')
+    for daemon in [
+        'schedule_daemon.py',
+        'trigger_daemon.py',
+    ]:
+        path = os.path.join(app_path, daemon)
+        result["daemons"][daemon] = os.path.exists(path)
+
+    # Ollama check
+    try:
+        import urllib.request
+        with urllib.request.urlopen(
+            "http://127.0.0.1:11434/api/tags", timeout=3
+        ) as r:
+            import json
+            data   = json.loads(r.read().decode())
+            models = [m["name"] for m in data.get("models", [])]
+            result["ollama"] = {
+                "running": True,
+                "models":  models,
+                "count":   len(models)
+            }
+    except Exception as e:
+        result["ollama"] = {"running": False, "error": str(e)}
+
+    # Key env vars
+    for var in [
+        'SEVEN_APP_PATH', 'SEVEN_ELECTRON_MODE',
+        'APPDATA', 'LOCALAPPDATA', 'PYTHONPATH'
+    ]:
+        result["env_vars"][var] = os.environ.get(var, 'not set')
+
+    # Disk
+    try:
+        import shutil
+        appdata = os.environ.get('APPDATA', '')
+        total, used, free = shutil.disk_usage(appdata or 'C:\\')
+        result["disk"] = {
+            "free_gb":  round(free  / (1024**3), 2),
+            "total_gb": round(total / (1024**3), 2),
+        }
+    except Exception as e:
+        result["disk"] = {"error": str(e)}
+
+    return result
