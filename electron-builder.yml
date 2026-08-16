@@ -98,3 +98,7 @@ nsis:
   installerHeaderIcon: electron/icon.ico
   deleteAppDataOnUninstall: false
   runAfterFinish: false
+
+# Remove win-unpacked folder after installer is built
+# You only need the SEVEN-Setup-x.x.x.exe file
+afterAllArtifactBuild: node -e "require('fs').rmSync('dist-electron/win-unpacked',{recursive:true,force:true})"
