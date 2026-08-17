@@ -52,27 +52,37 @@ def _get_project_root() -> str:
 
 def _get_venv_python(project_root: str) -> str:
     """
-    Find the correct Python executable for daemon spawning.
-
-    Priority order:
-      1. Packaged embedded Python (production install)
-      2. Venv pythonw.exe (dev mode, no console = survives terminal close)
-      3. Venv python.exe (dev fallback)
-      4. Current interpreter (last resort)
+    Always prefer the embedded packaged Python.
+    The embedded Python has all pip packages installed.
+    System Python and venv Python do NOT have the packaged packages.
+    Using wrong Python = missing keyboard library = hotkeys broken.
     """
-    candidates = [
-        # Production: embedded Python in installed app
-        os.path.join(project_root, "python", "pythonw.exe"),
-        os.path.join(project_root, "python", "python.exe"),
-        # Dev: venv
-        os.path.join(project_root, "venv", "Scripts", "pythonw.exe"),
-        os.path.join(project_root, "venv", "Scripts", "python.exe"),
-    ]
-    for c in candidates:
+    # Check SEVEN_APP_PATH first - most reliable in packaged app
+    app_path = os.environ.get('SEVEN_APP_PATH', '')
+    if app_path:
+        for exe in ['pythonw.exe', 'python.exe']:
+            c = os.path.join(app_path, 'python', exe)
+            if os.path.exists(c):
+                print(Fore.CYAN + f"[TRIGGER] Using embedded Python: {c}")
+                return c
+
+    # Then check project root python folder
+    for exe in ['pythonw.exe', 'python.exe']:
+        c = os.path.join(project_root, 'python', exe)
         if os.path.exists(c):
-            print(Fore.CYAN + f"[TRIGGER] Using Python: {c}")
+            print(Fore.CYAN + f"[TRIGGER] Using root Python: {c}")
             return c
 
+    # Dev mode only - venv
+    for c in [
+        os.path.join(project_root, "venv", "Scripts", "pythonw.exe"),
+        os.path.join(project_root, "venv", "Scripts", "python.exe"),
+    ]:
+        if os.path.exists(c):
+            print(Fore.YELLOW + f"[TRIGGER] Using venv Python (dev mode): {c}")
+            return c
+
+    print(Fore.RED + f"[TRIGGER] No embedded Python found in {project_root}")
     return sys.executable
 
 
@@ -117,13 +127,25 @@ def _kill_existing(name_fragment: str, correct_python: str = ""):
 
 
 def _spawn_detached(cmd: list, cwd: str) -> int:
-    """
-    Spawn a fully detached background process.
-    Returns PID or 0 on failure.
-    """
     _CREATE_NO_WINDOW         = 0x08000000
     _DETACHED_PROCESS         = 0x00000008
     _CREATE_NEW_PROCESS_GROUP = 0x00000200
+
+    # Build correct environment for spawned process
+    env = os.environ.copy()
+
+    # Set PYTHONPATH to embedded site-packages
+    app_path = os.environ.get('SEVEN_APP_PATH', cwd)
+    sp       = os.path.join(app_path, 'python', 'Lib', 'site-packages')
+    lib      = os.path.join(app_path, 'python', 'Lib')
+    dlls     = os.path.join(app_path, 'python', 'DLLs')
+    pyroot   = os.path.join(app_path, 'python')
+
+    env['PYTHONPATH']        = os.pathsep.join([app_path, sp, lib, pyroot, dlls])
+    env['SEVEN_APP_PATH']    = app_path
+    env['SEVEN_ELECTRON_MODE'] = '1'
+    env['PYTHONUNBUFFERED']  = '1'
+    env['PYTHONIOENCODING']  = 'utf-8'
 
     proc = subprocess.Popen(
         cmd,
@@ -134,6 +156,7 @@ def _spawn_detached(cmd: list, cwd: str) -> int:
         close_fds=True,
         start_new_session=True,
         cwd=cwd,
+        env=env,
     )
     return proc.pid
 
