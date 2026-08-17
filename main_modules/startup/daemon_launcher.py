@@ -70,6 +70,21 @@ def launch_schedule_daemon():
             _CREATE_NO_WINDOW         = 0x08000000
             _DETACHED_PROCESS         = 0x00000008
             _CREATE_NEW_PROCESS_GROUP = 0x00000200
+
+            # Build correct env for daemon
+            _env = os.environ.copy()
+            _env['PYTHONPATH']          = os.pathsep.join([
+                _app_root,
+                os.path.join(_app_root, 'python', 'Lib', 'site-packages'),
+                os.path.join(_app_root, 'python', 'Lib'),
+                os.path.join(_app_root, 'python'),
+                os.path.join(_app_root, 'python', 'DLLs'),
+            ])
+            _env['SEVEN_APP_PATH']      = _app_root
+            _env['SEVEN_ELECTRON_MODE'] = '1'
+            _env['PYTHONUNBUFFERED']    = '1'
+            _env['PYTHONIOENCODING']    = 'utf-8'
+
             subprocess.Popen(
                 [_pythonw, _daemon],
                 stdout=subprocess.DEVNULL,
@@ -78,10 +93,12 @@ def launch_schedule_daemon():
                 creationflags=_CREATE_NO_WINDOW | _DETACHED_PROCESS | _CREATE_NEW_PROCESS_GROUP,
                 close_fds=True,
                 start_new_session=True,
+                cwd=_app_root,
+                env=_env,
             )
-            print(Fore.CYAN + "[SYSTEM] Schedule daemon started (hidden)")
+            print(Fore.CYAN + f"[SYSTEM] Schedule daemon started: {_pythonw}")
         elif _daemon_count > 0:
-            print(Fore.CYAN + f"[SYSTEM] Daemon already running ({_daemon_count} instance). Skipping.")
+            print(Fore.CYAN + f"[SYSTEM] Schedule daemon already running ({_daemon_count}). Skipping.")
 
     except Exception as _de:
         print(Fore.YELLOW + f"[SYSTEM] Daemon skipped: {_de}")
