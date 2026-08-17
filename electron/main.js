@@ -461,7 +461,18 @@ function performNavigation(route) {
 function resetOrbPosition() {
   if (!statusWindow) return;
   const { width, height } = screen.getPrimaryDisplay().workAreaSize;
-  statusWindow.setPosition(width - 100, height - 100);
+  const orbSize = 80;
+  const panelW  = 340;
+  const margin  = 20;
+  const totalW  = orbSize + panelW;
+
+  // Position bottom right with correct total width so orb is visible
+  const x = width  - totalW - margin;
+  const y = height - orbSize - margin;
+
+  statusWindow.setPosition(x, y);
+  statusWindow.setSize(totalW, orbSize);
+  console.log(`[ORB] Reset to x=${x} y=${y}`);
 }
 
 // ============================================================================
@@ -680,21 +691,26 @@ function launchPanelHost() {
 
   // In packaged app panel_host.js is at resources/app/electron/panel_host.js
   // because asar is disabled and files are unpacked directly
+  // With asar disabled files are at resources/app/electron/panel_host.js
+  // In dev mode they are at project root/electron/panel_host.js
   const panelHostScriptResolved = isDev
-    ? panelHostScript
+    ? path.join(__dirname, 'panel_host.js')
     : path.join(getAppSourcePath(), 'electron', 'panel_host.js');
 
   console.log('[PANEL] Script resolved:', panelHostScriptResolved);
   console.log('[PANEL] Script exists:', fs.existsSync(panelHostScriptResolved));
 
   if (!fs.existsSync(panelHostScriptResolved)) {
-    console.warn('[PANEL] panel_host.js not found - panel disabled');
+    console.warn('[PANEL] panel_host.js not found at:', panelHostScriptResolved);
+    // Try alternate location
+    const altPath = path.join(__dirname, 'panel_host.js');
+    console.warn('[PANEL] Trying alternate:', altPath, 'exists:', fs.existsSync(altPath));
     return;
   }
 
   try {
     panelHostProcess = spawn(electronExe, [panelHostScriptResolved], {
-      cwd:         path.dirname(panelHostScriptResolved),
+      cwd:         getAppSourcePath(),
       detached:    true,
       windowsHide: true,
       stdio:       'ignore',
