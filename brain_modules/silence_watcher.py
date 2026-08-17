@@ -348,11 +348,14 @@ class SilenceWatcher:
                 self._speak(line)
 
                 # Update React frontend state after speaking
+                # Clear all active states so orb returns to idle
                 try:
                     from backend.api_server import set_state as _api_set
-                    _api_set("speaking",  False)
-                    _api_set("listening", False)
-                    # Main loop will set listening=True on next listen() call
+                    _api_set("speaking",   False)
+                    _api_set("thinking",   False)
+                    _api_set("listening",  False)
+                    _api_set("seven_text", "")
+                    _api_set("user_text",  "")
                 except Exception:
                     pass
 
