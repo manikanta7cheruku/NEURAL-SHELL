@@ -14,30 +14,53 @@ from colorama import Fore
 def launch_schedule_daemon():
     """Launch schedule_daemon.py if not already running."""
     try:
-        # In packaged app os.getcwd() is NOT the app root
-        # Use SEVEN_APP_PATH env var which Electron sets correctly
-        # Fall back to the directory containing this file
         _app_root = (
             os.environ.get('SEVEN_APP_PATH') or
             os.path.dirname(os.path.dirname(os.path.dirname(
                 os.path.abspath(__file__)
             )))
         )
-        _daemon  = os.path.join(_app_root, "schedule_daemon.py")
-        _python  = sys.executable
-        _pythonw = _python.replace("python.exe", "pythonw.exe")
-        if not os.path.exists(_pythonw):
-            _pythonw = _python
+        _daemon = os.path.join(_app_root, "schedule_daemon.py")
 
-        # Count running daemon instances
+        # Always use the packaged embedded Python
+        # sys.executable may point to venv or system Python
+        # which does not have the correct packages installed
+        _embedded_pythonw = os.path.join(_app_root, 'python', 'pythonw.exe')
+        _embedded_python  = os.path.join(_app_root, 'python', 'python.exe')
+
+        if os.path.exists(_embedded_pythonw):
+            _pythonw = _embedded_pythonw
+        elif os.path.exists(_embedded_python):
+            _pythonw = _embedded_python
+        else:
+            # Dev mode fallback - use venv
+            _pythonw = sys.executable.replace("python.exe", "pythonw.exe")
+            if not os.path.exists(_pythonw):
+                _pythonw = sys.executable
+
+        print(Fore.CYAN + f"[DAEMON] Using Python: {_pythonw}")
+        print(Fore.CYAN + f"[DAEMON] Daemon path: {_daemon}")
+
+        # Kill any schedule_daemon using wrong Python
+        # then count remaining correct ones
         _daemon_count = 0
         try:
             import psutil
-            for _proc in psutil.process_iter(['pid', 'cmdline']):
+            _pythonw_lower = _pythonw.lower()
+            for _proc in psutil.process_iter(['pid', 'cmdline', 'exe']):
                 try:
                     _cmd = " ".join(_proc.info['cmdline'] or [])
-                    if "schedule_daemon" in _cmd:
+                    _exe = (_proc.info['exe'] or '').lower()
+                    if "schedule_daemon" not in _cmd:
+                        continue
+                    if _exe == _pythonw_lower:
+                        # Correct Python - keep it
                         _daemon_count += 1
+                        print(Fore.CYAN + f"[DAEMON] Correct daemon PID {_proc.info['pid']} running")
+                    else:
+                        # Wrong Python - kill it
+                        print(Fore.YELLOW + f"[DAEMON] Killing wrong daemon PID {_proc.info['pid']} exe={_exe}")
+                        _proc.kill()
                 except Exception:
                     pass
         except Exception:
