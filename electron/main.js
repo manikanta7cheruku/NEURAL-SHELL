@@ -730,24 +730,9 @@ function launchPanelHost() {
 
   const electronExe = process.execPath;
 
-  // In packaged app panel_host.js is at resources/app/electron/panel_host.js
-  // because asar is disabled and files are unpacked directly
-  // With asar disabled files are at resources/app/electron/panel_host.js
-  // In dev mode they are at project root/electron/panel_host.js
-  const panelHostScriptResolved = isDev
-    ? path.join(__dirname, 'panel_host.js')
-    : path.join(getAppSourcePath(), 'electron', 'panel_host.js');
-
-  console.log('[PANEL] Script resolved:', panelHostScriptResolved);
-  console.log('[PANEL] Script exists:', fs.existsSync(panelHostScriptResolved));
-
-  if (!fs.existsSync(panelHostScriptResolved)) {
-    console.warn('[PANEL] panel_host.js not found at:', panelHostScriptResolved);
-    // Try alternate location
-    const altPath = path.join(__dirname, 'panel_host.js');
-    console.warn('[PANEL] Trying alternate:', altPath, 'exists:', fs.existsSync(altPath));
-    return;
-  }
+  console.log('[PANEL] Launching with:', electronExe);
+  console.log('[PANEL] Script:', panelHostScriptResolved);
+  console.log('[PANEL] CWD:', getAppSourcePath());
 
   try {
     panelHostProcess = spawn(electronExe, [panelHostScriptResolved], {
@@ -757,8 +742,10 @@ function launchPanelHost() {
       stdio:       'ignore',
       env: {
         ...process.env,
-        SEVEN_APP_PATH:       getAppSourcePath(),
-        ELECTRON_RUN_AS_NODE: undefined,
+        SEVEN_APP_PATH:        getAppSourcePath(),
+        SEVEN_ELECTRON_MODE:   '1',
+        ELECTRON_RUN_AS_NODE:  undefined,
+        ELECTRON_NO_ASAR:      '1',
       },
     });
 
@@ -910,11 +897,17 @@ function launchPanelHost() {
       }
     }
 
-    // Launch panel host after stale process cleanup
+    // Launch panel host and overlay after stale process cleanup
     // 2 second delay ensures mutex is released before new instance starts
     setTimeout(() => {
       launchPanelHost();
       console.log('[STARTUP] Panel host launched');
+
+      // Launch overlay daemon from Electron - we know our own exe path
+      setTimeout(() => {
+        launchOverlayDaemon();
+        console.log('[STARTUP] Overlay daemon launched');
+      }, 1000);
     }, 2000);
 
     // Poll nav_trigger.json — Python writes this to navigate Seven UI
@@ -973,4 +966,49 @@ function launchPanelHost() {
   });
 
   app.on('activate', () => mainWindow?.show());
+}
+
+// ============================================================================
+// OVERLAY DAEMON — Launch from Electron so we always have correct exe path
+// ============================================================================
+function launchOverlayDaemon() {
+  const overlayScript = isDev
+    ? path.join(__dirname, 'overlay_daemon.js')
+    : path.join(getAppSourcePath(), 'electron', 'overlay_daemon.js');
+
+  console.log('[OVERLAY] Script:', overlayScript);
+  console.log('[OVERLAY] Exists:', fs.existsSync(overlayScript));
+
+  if (!fs.existsSync(overlayScript)) {
+    console.warn('[OVERLAY] overlay_daemon.js not found at:', overlayScript);
+    return;
+  }
+
+  const electronExe = process.execPath;
+  console.log('[OVERLAY] Launching with:', electronExe);
+
+  try {
+    const overlayProcess = spawn(electronExe, [overlayScript], {
+      cwd:         getAppSourcePath(),
+      detached:    true,
+      windowsHide: true,
+      stdio:       'ignore',
+      env: {
+        ...process.env,
+        SEVEN_APP_PATH:       getAppSourcePath(),
+        SEVEN_ELECTRON_MODE:  '1',
+        ELECTRON_RUN_AS_NODE: undefined,
+        ELECTRON_NO_ASAR:     '1',
+      },
+    });
+
+    overlayProcess.unref();
+    overlayProcess.on('error', (err) => {
+      console.error('[OVERLAY] Spawn error:', err.message);
+    });
+
+    console.log('[OVERLAY] Launched PID:', overlayProcess.pid);
+  } catch (e) {
+    console.error('[OVERLAY] Failed to launch:', e.message);
+  }
 }
