@@ -731,11 +731,11 @@ function launchPanelHost() {
   const electronExe = process.execPath;
 
   console.log('[PANEL] Launching with:', electronExe);
-  console.log('[PANEL] Script:', panelHostScriptResolved);
+  console.log('[PANEL] Script:', panelHostScript);
   console.log('[PANEL] CWD:', getAppSourcePath());
 
   try {
-    panelHostProcess = spawn(electronExe, [panelHostScriptResolved], {
+    panelHostProcess = spawn(electronExe, [panelHostScript], {
       cwd:         getAppSourcePath(),
       detached:    true,
       windowsHide: true,
