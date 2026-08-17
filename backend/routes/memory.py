@@ -393,7 +393,30 @@ async def import_memory(request: Request):
     """Import user data from backup JSON. Bypasses plan limits."""
     try:
         data = await request.json()
-        from memory import seven_memory
+
+        # Memory loads in background thread - wait up to 30s for it
+        import time as _t
+        _deadline = _t.time() + 30
+        seven_memory = None
+
+        while _t.time() < _deadline:
+            try:
+                from memory import seven_memory as _sm
+                if _sm is not None:
+                    # Test it is actually ready
+                    _sm.user_facts.count()
+                    seven_memory = _sm
+                    break
+            except Exception:
+                pass
+            _t.sleep(0.5)
+
+        if seven_memory is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Memory system not ready yet. Wait 30 seconds and try again."
+            )
+
         imported = {"facts": 0, "conversations": 0}
 
         import uuid as _uuid
