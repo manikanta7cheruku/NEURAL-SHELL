@@ -697,14 +697,14 @@ function launchPanelHost() {
   // Kill any existing panel_host processes from previous session
   if (process.platform === 'win32') {
     try {
-      exec('wmic process where "commandline like \'%panel_host.js%\'" get processid /format:value',
+      exec(
+        'powershell -NoProfile -Command "Get-WmiObject Win32_Process | Where-Object { $_.CommandLine -like \'*panel_host.js*\' } | Select-Object -ExpandProperty ProcessId"',
         { windowsHide: true },
         (err, stdout) => {
-        if (err) return;
-        const pids = stdout.match(/ProcessId=(\d+)/g);
-        if (pids) {
-          pids.forEach(match => {
-            const pid = match.replace('ProcessId=', '');
+          if (err) return;
+          const pids = stdout.trim().split('\n').filter(p => p.trim());
+          pids.forEach(pid => {
+            pid = pid.trim();
             if (pid && parseInt(pid) !== process.pid) {
               try {
                 exec(`taskkill /pid ${pid} /f /t`, { windowsHide: true });
@@ -713,7 +713,7 @@ function launchPanelHost() {
             }
           });
         }
-      });
+      );
     } catch (e) {}
   }
 
@@ -747,9 +747,14 @@ function launchPanelHost() {
       env: {
         ...process.env,
         SEVEN_APP_PATH:        getAppSourcePath(),
-        SEVEN_ELECTRON_MODE:   '1',
-        ELECTRON_RUN_AS_NODE:  undefined,
+        ELECTRON_RUN_AS_NODE:  '1',
         ELECTRON_NO_ASAR:      '1',
+        PYTHONPATH: [
+          getAppSourcePath(),
+          path.join(getAppSourcePath(), 'python', 'Lib', 'site-packages'),
+          path.join(getAppSourcePath(), 'python', 'Lib'),
+          path.join(getAppSourcePath(), 'python'),
+        ].join(path.delimiter),
       },
     });
 
@@ -869,29 +874,28 @@ function launchPanelHost() {
         const { execSync } = require('child_process');
 
         // Find and kill stale trigger and overlay daemons
-        const targets = ['trigger_daemon', 'overlay_daemon', 'schedule_daemon'];
-        targets.forEach(name => {
-          try {
-            const result = execSync(
-              `wmic process where "commandline like '%${name}%'" get processid /format:value`,
-              { windowsHide: true, encoding: 'utf8', timeout: 5000 }
-            );
-            const pids = result.match(/ProcessId=(\d+)/g);
-            if (pids) {
-              pids.forEach(match => {
-                const pid = match.replace('ProcessId=', '').trim();
-                if (pid && parseInt(pid) !== process.pid) {
-                  try {
-                    execSync(`taskkill /pid ${pid} /f /t 2>nul`,
-                      { windowsHide: true, timeout: 3000 }
-                    );
-                    console.log(`[STARTUP] Killed stale ${name} PID ${pid}`);
-                  } catch (e) {}
-                }
-              });
-            }
-          } catch (e) {}
+    const targets = ['trigger_daemon', 'overlay_daemon', 'schedule_daemon'];
+    targets.forEach(name => {
+      try {
+        // Use PowerShell instead of wmic - wmic removed in Windows 11
+        const result = execSync(
+          `powershell -NoProfile -Command "Get-WmiObject Win32_Process | Where-Object { $_.CommandLine -like '*${name}*' } | Select-Object -ExpandProperty ProcessId"`,
+          { windowsHide: true, encoding: 'utf8', timeout: 5000 }
+        );
+        const pids = result.trim().split('\n').filter(p => p.trim());
+        pids.forEach(pid => {
+          pid = pid.trim();
+          if (pid && parseInt(pid) !== process.pid) {
+            try {
+              execSync(`taskkill /pid ${pid} /f /t`,
+                { windowsHide: true, timeout: 3000 }
+              );
+              console.log(`[STARTUP] Killed stale ${name} PID ${pid}`);
+            } catch (e) {}
+          }
         });
+      } catch (e) {}
+    });
 
         // Wait for mutex releases
         setTimeout(() => {}, 1000);
@@ -947,20 +951,20 @@ function launchPanelHost() {
     // Kill panel host process on Seven quit
     if (process.platform === 'win32') {
       try {
-        exec('wmic process where "commandline like \'%panel_host.js%\'" get processid /format:value',
-        { windowsHide: true },
-        (err, stdout) => {
-          if (err) return;
-          const pids = stdout.match(/ProcessId=(\d+)/g);
-          if (pids) {
-            pids.forEach(match => {
-              const pid = match.replace('ProcessId=', '');
+        exec(
+          'powershell -NoProfile -Command "Get-WmiObject Win32_Process | Where-Object { $_.CommandLine -like \'*panel_host.js*\' } | Select-Object -ExpandProperty ProcessId"',
+          { windowsHide: true },
+          (err, stdout) => {
+            if (err) return;
+            const pids = stdout.trim().split('\n').filter(p => p.trim());
+            pids.forEach(pid => {
+              pid = pid.trim();
               if (pid && parseInt(pid) !== process.pid) {
                 try { exec(`taskkill /pid ${pid} /f /t`, { windowsHide: true }); } catch (e) {}
               }
             });
           }
-        });
+        );
       } catch (e) {}
     }
 
@@ -989,9 +993,11 @@ function launchOverlayDaemon() {
   }
 
   const electronExe = process.execPath;
-  console.log('[OVERLAY] Launching with:', electronExe);
+  console.log('[OVERLAY] Launching with ELECTRON_RUN_AS_NODE:', electronExe);
 
   try {
+    // ELECTRON_RUN_AS_NODE=1 makes Electron behave like Node.js
+    // and actually execute the script file instead of loading main.js
     const overlayProcess = spawn(electronExe, [overlayScript], {
       cwd:         getAppSourcePath(),
       detached:    true,
@@ -1000,9 +1006,14 @@ function launchOverlayDaemon() {
       env: {
         ...process.env,
         SEVEN_APP_PATH:       getAppSourcePath(),
-        SEVEN_ELECTRON_MODE:  '1',
-        ELECTRON_RUN_AS_NODE: undefined,
+        ELECTRON_RUN_AS_NODE: '1',
         ELECTRON_NO_ASAR:     '1',
+        PYTHONPATH: [
+          getAppSourcePath(),
+          path.join(getAppSourcePath(), 'python', 'Lib', 'site-packages'),
+          path.join(getAppSourcePath(), 'python', 'Lib'),
+          path.join(getAppSourcePath(), 'python'),
+        ].join(path.delimiter),
       },
     });
 
