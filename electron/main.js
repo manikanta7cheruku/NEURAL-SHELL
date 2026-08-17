@@ -397,33 +397,66 @@ function createStatusWindow() {
 // ============================================================================
 function showOrbContextMenu() {
   const menuTemplate = [
-    { label: '📊 Dashboard',  click: () => navigateTo('/') },
-    { type: 'separator' },
-    { label: '💬 Console',   click: () => navigateTo('/console') },
-    { label: '⌨️ Commands',  click: () => navigateTo('/commands') },
-    { label: '🧠 Memory',    click: () => navigateTo('/memory') },
-    { label: '📅 Schedules', click: () => navigateTo('/schedules') },
-    { label: '📚 Knowledge', click: () => navigateTo('/knowledge') },
-    { type: 'separator' },
-    { label: '⚙️ Settings',  click: () => navigateTo('/settings') },
-    { label: '💳 Plans',     click: () => navigateTo('/plans') },
-    { label: '📖 Guide',     click: () => navigateTo('/blog') },
-    { label: '💬 Feedback',  click: () => navigateTo('/feedback') },
-    { type: 'separator' },
-    { label: '📍 Reset Orb Position', click: () => resetOrbPosition() },
+    {
+      label:   'SEVEN',
+      enabled: false,
+    },
     { type: 'separator' },
     {
-      label: '❌ Quit VII',
+      label: 'Dashboard',
+      accelerator: 'Alt+S',
+      click: () => navigateTo('/dashboard')
+    },
+    {
+      label: 'Console',
+      click: () => navigateTo('/console')
+    },
+    {
+      label: 'Memory',
+      click: () => navigateTo('/memory')
+    },
+    {
+      label: 'Commands',
+      click: () => navigateTo('/commands')
+    },
+    { type: 'separator' },
+    {
+      label: 'Schedules',
+      click: () => navigateTo('/schedules')
+    },
+    {
+      label: 'Tasks',
+      click: () => navigateTo('/tasks')
+    },
+    {
+      label: 'Knowledge',
+      click: () => navigateTo('/knowledge')
+    },
+    { type: 'separator' },
+    {
+      label: 'Settings',
+      click: () => navigateTo('/settings')
+    },
+    {
+      label: 'Plans',
+      click: () => navigateTo('/plans')
+    },
+    {
+      label: 'Guide',
+      click: () => navigateTo('/blog')
+    },
+    { type: 'separator' },
+    {
+      label: 'Reset Orb Position',
+      click: () => resetOrbPosition()
+    },
+    { type: 'separator' },
+    {
+      label: 'Quit SEVEN',
       click: () => {
         app.isQuitting = true;
-        if (statusWindow) {
-          statusWindow.destroy();
-          statusWindow = null;
-        }
-        if (mainWindow) {
-          mainWindow.destroy();
-          mainWindow = null;
-        }
+        if (statusWindow) { statusWindow.destroy(); statusWindow = null; }
+        if (mainWindow)   { mainWindow.destroy();   mainWindow = null;   }
         stopPython();
         app.quit();
       }
