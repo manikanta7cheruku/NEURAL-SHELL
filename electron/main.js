@@ -1,3 +1,18 @@
+// Route to sub-app scripts before loading main app
+// This must be before any other requires
+const _argv = process.argv;
+const _scriptIdx = _argv.indexOf('--');
+if (_scriptIdx !== -1 && _argv[_scriptIdx + 1]) {
+  const _targetScript = _argv[_scriptIdx + 1];
+  console.log('[ROUTER] Loading sub-script:', _targetScript);
+  try {
+    require(_targetScript);
+  } catch(e) {
+    console.error('[ROUTER] Failed to load:', _targetScript, e.message);
+    process.exit(1);
+  }
+} else {
+
 const { 
   app, 
   BrowserWindow, 
@@ -16,6 +31,33 @@ const fs   = require('node:fs');
 
 // Task panel host — launched as separate detached process
 let panelHostProcess = null;
+
+// ============================================================================
+// SCRIPT ROUTER - Must be first before any app logic
+// SEVEN.exe is used to launch panel_host and overlay_daemon as sub-processes
+// We detect which script was requested and load it instead of main app
+// ============================================================================
+{
+  const _requestedScript = (process.argv[1] || '').replace(/\\/g, '/');
+
+  if (_requestedScript.includes('panel_host')) {
+    console.log('[ROUTER] Starting as panel_host');
+    // Prevent main app from starting
+    app.on('ready', () => {
+      try {
+        const panelHostPath = _requestedScript.includes('/')
+          ? _requestedScript
+          : path.join(__dirname, 'panel_host_impl.js');
+        require(_requestedScript);
+      } catch(e) {
+        console.error('[ROUTER] panel_host load failed:', e.message);
+      }
+    });
+    // Exit router - do not run main app code below
+    module.exports = {};
+    process.exit = process.exit; // no-op
+  }
+}
 
 // ============================================================================
 // ENVIRONMENT DETECTION
@@ -739,7 +781,7 @@ function launchPanelHost() {
   console.log('[PANEL] CWD:', getAppSourcePath());
 
   try {
-    panelHostProcess = spawn(electronExe, [panelHostScript], {
+    panelHostProcess = spawn(electronExe, ['--', panelHostScript], {
       cwd:         getAppSourcePath(),
       detached:    true,
       windowsHide: true,
@@ -998,7 +1040,7 @@ function launchOverlayDaemon() {
   try {
     // ELECTRON_RUN_AS_NODE=1 makes Electron behave like Node.js
     // and actually execute the script file instead of loading main.js
-    const overlayProcess = spawn(electronExe, [overlayScript], {
+    const overlayProcess = spawn(electronExe, ['--', overlayScript], {
       cwd:         getAppSourcePath(),
       detached:    true,
       windowsHide: true,
@@ -1027,3 +1069,4 @@ function launchOverlayDaemon() {
     console.error('[OVERLAY] Failed to launch:', e.message);
   }
 }
+} // end router else
