@@ -87,6 +87,19 @@ function startPython() {
     return;
   }
 
+  // Kill any leftover Python processes from previous session
+  // before starting a new one to prevent multiple instances
+  if (process.platform === 'win32') {
+    try {
+      const appSource = getAppSourcePath();
+      const pythonDir = path.join(appSource, 'python');
+      require('child_process').execSync(
+        `taskkill /F /FI "IMAGENAME eq pythonw.exe" /FI "WINDOWTITLE eq *main.py*" 2>nul`,
+        { windowsHide: true, stdio: 'ignore' }
+      );
+    } catch (e) {}
+  }
+
   const pythonExe    = getPythonExecutable();
   const appSource    = getAppSourcePath();
   const pythonScript = path.join(appSource, 'main.py');
@@ -665,15 +678,29 @@ function launchPanelHost() {
 
   const electronExe = process.execPath;
 
+  // In packaged app panel_host.js is at resources/app/electron/panel_host.js
+  // because asar is disabled and files are unpacked directly
+  const panelHostScriptResolved = isDev
+    ? panelHostScript
+    : path.join(getAppSourcePath(), 'electron', 'panel_host.js');
+
+  console.log('[PANEL] Script resolved:', panelHostScriptResolved);
+  console.log('[PANEL] Script exists:', fs.existsSync(panelHostScriptResolved));
+
+  if (!fs.existsSync(panelHostScriptResolved)) {
+    console.warn('[PANEL] panel_host.js not found - panel disabled');
+    return;
+  }
+
   try {
-    panelHostProcess = spawn(electronExe, [panelHostScript], {
-      cwd:         getAppSourcePath(),
+    panelHostProcess = spawn(electronExe, [panelHostScriptResolved], {
+      cwd:         path.dirname(panelHostScriptResolved),
       detached:    true,
       windowsHide: true,
       stdio:       'ignore',
       env: {
         ...process.env,
-        SEVEN_APP_PATH:      getAppSourcePath(),
+        SEVEN_APP_PATH:       getAppSourcePath(),
         ELECTRON_RUN_AS_NODE: undefined,
       },
     });
