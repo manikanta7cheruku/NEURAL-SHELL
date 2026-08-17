@@ -609,12 +609,15 @@
 
       if (!isSpeaking) removeOldCursor();
 
-      if (!isThinking && !isSpeaking && wasActive && sevenText && !exchangeDone) {
+      if (!isThinking && !isSpeaking && sevenText && !exchangeDone) {
         exchangeDone = true;
         scheduleHide();
       }
 
-      if (!hasContent && panelVisible && !hideTimer) scheduleHide();
+      // If nothing is happening and panel is visible, hide it
+      if (!isThinking && !isSpeaking && !userText && !sevenText && panelVisible && !hideTimer) {
+        scheduleHide();
+      }
     }
 
     function removeOldCursor() {
