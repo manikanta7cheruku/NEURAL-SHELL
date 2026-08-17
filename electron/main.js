@@ -680,7 +680,15 @@ if (!gotTheLock) {
 // PANEL HOST — Independent background process for task panel
 // ============================================================================
 function launchPanelHost() {
-  const panelHostScript = path.join(__dirname, 'panel_host.js');
+  // With asar disabled panel_host.js is at:
+  // resources/app/electron/panel_host.js (packaged)
+  // electron/panel_host.js (dev)
+  const panelHostScript = isDev
+    ? path.join(__dirname, 'panel_host.js')
+    : path.join(getAppSourcePath(), 'electron', 'panel_host.js');
+
+  console.log('[PANEL] Looking for panel_host.js at:', panelHostScript);
+  console.log('[PANEL] Exists:', fs.existsSync(panelHostScript));
 
   // Kill any existing panel_host processes from previous session
   if (process.platform === 'win32') {
@@ -854,7 +862,6 @@ function launchPanelHost() {
     });
 
     // Clear any stale panel trigger files from previous session
-    // Prevents phantom panel opens when Seven restarts
     try {
       const APPDATA = process.env.APPDATA || require('os').homedir();
       const triggerFile = path.join(APPDATA, 'SEVEN', 'panel_trigger.json');
@@ -864,9 +871,51 @@ function launchPanelHost() {
       }
     } catch (e) {}
 
-    // Launch panel host as independent detached process
-    // Stays alive even after Seven quits
-    launchPanelHost();
+    // Kill stale daemon processes from previous session
+    // This releases any mutex locks they hold so new daemons can start
+    if (process.platform === 'win32') {
+      try {
+        const { execSync } = require('child_process');
+
+        // Find and kill stale trigger and overlay daemons
+        const targets = ['trigger_daemon', 'overlay_daemon', 'schedule_daemon'];
+        targets.forEach(name => {
+          try {
+            const result = execSync(
+              `wmic process where "commandline like '%${name}%'" get processid /format:value`,
+              { windowsHide: true, encoding: 'utf8', timeout: 5000 }
+            );
+            const pids = result.match(/ProcessId=(\d+)/g);
+            if (pids) {
+              pids.forEach(match => {
+                const pid = match.replace('ProcessId=', '').trim();
+                if (pid && parseInt(pid) !== process.pid) {
+                  try {
+                    execSync(`taskkill /pid ${pid} /f /t 2>nul`,
+                      { windowsHide: true, timeout: 3000 }
+                    );
+                    console.log(`[STARTUP] Killed stale ${name} PID ${pid}`);
+                  } catch (e) {}
+                }
+              });
+            }
+          } catch (e) {}
+        });
+
+        // Wait for mutex releases
+        setTimeout(() => {}, 1000);
+        console.log('[STARTUP] Stale daemons cleared');
+      } catch (e) {
+        console.warn('[STARTUP] Daemon cleanup error:', e.message);
+      }
+    }
+
+    // Launch panel host after stale process cleanup
+    // 2 second delay ensures mutex is released before new instance starts
+    setTimeout(() => {
+      launchPanelHost();
+      console.log('[STARTUP] Panel host launched');
+    }, 2000);
 
     // Poll nav_trigger.json — Python writes this to navigate Seven UI
     setInterval(() => {
