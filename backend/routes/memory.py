@@ -270,13 +270,17 @@ def delete_conversation(conv_id: str):
 
 @router.get("/api/memory/export")
 def export_memory():
-    """Export all user data as JSON for backup."""
+    """
+    Export all user data as JSON for backup.
+    Reads directly from SQLite as fallback if ChromaDB not ready.
+    """
     import sqlite3
     import config as cfg
+    from memory.core import MEMORY_DIR
 
     export = {
         "exported_at": datetime.datetime.now().isoformat(),
-        "version":     "1.1.4",
+        "version":     "1.3.1",
         "identity": {
             "name":  cfg.KEY.get("identity", {}).get("user_name", ""),
             "email": cfg.KEY.get("email", ""),
@@ -301,19 +305,58 @@ def export_memory():
     except Exception as e:
         export["facts_error"] = str(e)
 
-    # Conversations
+    # Conversations - try ChromaDB first then SQLite fallback
     try:
         from memory import seven_memory
         all_convos = seven_memory.conversations.get()
         if all_convos and all_convos.get('documents'):
             for i, doc in enumerate(all_convos['documents']):
                 meta = all_convos['metadatas'][i] if all_convos.get('metadatas') else {}
-                export["conversations"].append({
-                    "user":  meta.get("user_input", ""),
-                    "seven": doc
-                })
-    except Exception as e:
-        export["conversations_error"] = str(e)
+                user_input     = meta.get("user_input", "")
+                seven_response = meta.get("seven_response", doc)
+                if user_input and seven_response:
+                    export["conversations"].append({
+                        "user":  user_input,
+                        "seven": seven_response
+                    })
+    except Exception:
+        # ChromaDB not ready - read directly from SQLite
+        try:
+            import sqlite3 as _sq
+            _db = os.path.join(MEMORY_DIR, "chroma.sqlite3")
+            if os.path.exists(_db):
+                _conn = _sq.connect(_db, timeout=5)
+                _conv_row = _conn.execute(
+                    "SELECT id FROM collections WHERE name = 'conversations'"
+                ).fetchone()
+                if _conv_row:
+                    _seg_ids = [r[0] for r in _conn.execute(
+                        "SELECT id FROM segments WHERE collection = ? AND scope = 'METADATA'",
+                        (_conv_row[0],)
+                    ).fetchall()]
+                    if _seg_ids:
+                        _ph = ",".join("?" * len(_seg_ids))
+                        _emb_rows = _conn.execute(
+                            f"SELECT id FROM embeddings WHERE segment_id IN ({_ph})",
+                            _seg_ids
+                        ).fetchall()
+                        for (_emb_id,) in _emb_rows:
+                            _meta = {
+                                r[0]: r[1] for r in _conn.execute(
+                                    "SELECT key, string_value FROM embedding_metadata WHERE id=?",
+                                    (_emb_id,)
+                                ).fetchall()
+                            }
+                            user_in  = _meta.get("user_input", "")
+                            seven_r  = _meta.get("seven_response", "")
+                            if user_in and seven_r:
+                                export["conversations"].append({
+                                    "user":  user_in,
+                                    "seven": seven_r
+                                })
+                _conn.close()
+        except Exception as _se:
+            export["conversations_error"] = str(_se)
 
     # Schedules
     try:
@@ -353,43 +396,51 @@ async def import_memory(request: Request):
         from memory import seven_memory
         imported = {"facts": 0, "conversations": 0}
 
-        for fact in data.get("facts", []):
+        import uuid as _uuid
+
+        for idx, fact in enumerate(data.get("facts", [])):
             if fact.get("text"):
                 try:
-                    fact_id = f"fact_import_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
+                    # Use UUID to guarantee unique IDs across all imports
+                    fact_id = f"fact_import_{_uuid.uuid4().hex}"
                     seven_memory.user_facts.add(
                         documents=[fact["text"]],
                         metadatas=[{
                             "category":  fact.get("category", "imported"),
-                            "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            "timestamp": datetime.datetime.now().strftime(
+                                "%Y-%m-%d %H:%M:%S"
+                            ),
                             "user_id":   "default",
                             "type":      "fact"
                         }],
                         ids=[fact_id]
                     )
                     imported["facts"] += 1
-                except Exception:
-                    pass
+                except Exception as _fe:
+                    _log.warning(f"[IMPORT] Fact {idx} failed: {_fe}")
 
-        for conv in data.get("conversations", []):
+        for idx, conv in enumerate(data.get("conversations", [])):
             if conv.get("user") and conv.get("seven"):
                 try:
-                    conv_id  = f"conv_import_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
+                    # Use UUID to guarantee unique IDs
+                    conv_id  = f"conv_import_{_uuid.uuid4().hex}"
                     combined = f"User said: {conv['user']} | Seven replied: {conv['seven']}"
                     seven_memory.conversations.add(
                         documents=[combined],
                         metadatas=[{
                             "user_input":     conv["user"],
                             "seven_response": conv["seven"],
-                            "timestamp":      datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            "timestamp":      datetime.datetime.now().strftime(
+                                "%Y-%m-%d %H:%M:%S"
+                            ),
                             "user_id":        "default",
                             "type":           "conversation"
                         }],
                         ids=[conv_id]
                     )
                     imported["conversations"] += 1
-                except Exception:
-                    pass
+                except Exception as _ce:
+                    _log.warning(f"[IMPORT] Conversation {idx} failed: {_ce}")
 
         return {
             "success":                True,
