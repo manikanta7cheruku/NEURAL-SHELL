@@ -195,12 +195,16 @@ function startPython() {
         // Only reload window if it was a clean restart (setup wizard done)
         // Don't reload on crash restarts — let Python stabilize first
         if (code === 0) {
-          waitForBackend().then((ready) => {
-            if (ready && mainWindow) {
-              console.log('[ELECTRON] Full backend ready — reloading window');
-              mainWindow.webContents.reload();
-            }
-          });
+          // Only wait for backend on clean restart not on initial startup
+          // Initial startup already has its own waitForBackend call
+          setTimeout(() => {
+            waitForBackend().then((ready) => {
+              if (ready && mainWindow) {
+                console.log('[ELECTRON] Full backend ready after restart');
+                mainWindow.webContents.reload();
+              }
+            });
+          }, 3000);
         }
         // For crash restarts (non-zero code), just let Python restart silently
         // The frontend will reconnect via its polling
