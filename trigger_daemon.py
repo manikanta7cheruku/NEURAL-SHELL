@@ -211,14 +211,40 @@ def acquire_lock():
         _kernel32   = ctypes.windll.kernel32
 
         # Stage 1: Try to OPEN existing mutex before creating
-        # If it opens successfully, another instance already holds it.
-        # This catches the inherited-handle case that CreateMutexW misses.
         _existing = _kernel32.OpenMutexW(0x1F0001, False, _mutex_name)
         if _existing:
             _kernel32.CloseHandle(_existing)
-            print(f"[TRIGGER DAEMON] Already running (OpenMutex). "
-                  f"PID {os.getpid()} exiting.")
-            return False
+
+            # Mutex exists - but is the owning process still alive?
+            # Read PID from lock file and verify
+            _owner_alive = False
+            try:
+                if os.path.exists(LOCK_FILE):
+                    with open(LOCK_FILE, 'r') as _lf:
+                        _owner_pid = int(_lf.read().strip())
+                    if _owner_pid != os.getpid():
+                        import psutil
+                        _owner_alive = psutil.pid_exists(_owner_pid)
+                        if _owner_alive:
+                            # Check it is actually trigger_daemon not some other process
+                            try:
+                                _proc = psutil.Process(_owner_pid)
+                                _cmd  = ' '.join(_proc.cmdline())
+                                _owner_alive = 'trigger_daemon' in _cmd
+                            except Exception:
+                                _owner_alive = False
+            except Exception:
+                _owner_alive = False
+
+            if _owner_alive:
+                print(f"[TRIGGER DAEMON] Already running (OpenMutex). "
+                      f"PID {os.getpid()} exiting.")
+                return False
+            else:
+                # Stale mutex from crashed/killed process
+                # Continue to CreateMutexW which will take ownership
+                print(f"[TRIGGER DAEMON] Stale mutex found - previous instance is dead. "
+                      f"Starting fresh.")
 
         # Stage 2: Create and own the mutex
         _mutex    = _kernel32.CreateMutexW(None, True, _mutex_name)
