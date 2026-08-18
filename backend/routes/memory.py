@@ -465,10 +465,35 @@ async def import_memory(request: Request):
                 except Exception as _ce:
                     _log.warning(f"[IMPORT] Conversation {idx} failed: {_ce}")
 
+        # Import schedules too
+        imported_schedules = 0
+        try:
+            schedules_data = data.get("schedules", [])
+            if schedules_data:
+                import json as _json
+                _appdata     = os.environ.get('APPDATA', '')
+                _sched_path  = os.path.join(_appdata, 'SEVEN', 'schedules.json')
+                _existing    = []
+                if os.path.exists(_sched_path):
+                    with open(_sched_path) as _f:
+                        _existing = _json.load(_f)
+                # Add only schedules not already present
+                _existing_ids = {s.get('id') for s in _existing}
+                for sched in schedules_data:
+                    if sched.get('id') not in _existing_ids:
+                        _existing.append(sched)
+                        imported_schedules += 1
+                with open(_sched_path, 'w') as _f:
+                    _json.dump(_existing, _f, indent=2)
+        except Exception as _se:
+            print(f"[IMPORT] Schedules import failed: {_se}")
+
         return {
             "success":                True,
             "imported_facts":         imported["facts"],
-            "imported_conversations": imported["conversations"]
+            "imported_conversations": imported["conversations"],
+            "imported_schedules":     imported_schedules,
+            "message": f"Imported {imported['facts']} facts, {imported['conversations']} conversations, {imported_schedules} schedules"
         }
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
