@@ -722,139 +722,6 @@ if (!gotTheLock) {
     }
   }); 
 // ============================================================================
-// PANEL SERVER — Start panel_server.py directly from main process
-// ============================================================================
-function startPanelServer() {
-  const appSource  = getAppSourcePath();
-  const pythonExe  = path.join(appSource, 'python', 'python.exe');
-  const serverScript = path.join(appSource, 'task_panel', 'panel_server.py');
-
-  if (!fs.existsSync(serverScript)) {
-    console.warn('[PANEL] panel_server.py not found:', serverScript);
-    return;
-  }
-
-  if (!fs.existsSync(pythonExe)) {
-    console.warn('[PANEL] python.exe not found:', pythonExe);
-    return;
-  }
-
-  const env = {
-    ...process.env,
-    SEVEN_APP_PATH:     appSource,
-    PYTHONPATH: [
-      appSource,
-      path.join(appSource, 'python', 'Lib', 'site-packages'),
-      path.join(appSource, 'python', 'Lib'),
-      path.join(appSource, 'python'),
-      path.join(appSource, 'python', 'DLLs'),
-    ].join(path.delimiter),
-    PYTHONUNBUFFERED:   '1',
-    PYTHONIOENCODING:   'utf-8',
-  };
-
-  const proc = spawn(pythonExe, [serverScript], {
-    cwd:         appSource,
-    windowsHide: true,
-    stdio:       ['ignore', 'pipe', 'pipe'],
-    detached:    false,
-    ...(process.platform === 'win32' ? { creationflags: 0x08000000 } : {}),
-    env,
-  });
-
-  proc.stdout.on('data', d => console.log('[PANEL-SRV]', d.toString().trim()));
-  proc.stderr.on('data', d => console.log('[PANEL-SRV ERR]', d.toString().trim()));
-  proc.on('close', code => {
-    console.log('[PANEL-SRV] Exited:', code);
-    // Restart if crashed
-    if (code !== 0 && !app.isQuitting) {
-      console.log('[PANEL-SRV] Restarting in 3s...');
-      setTimeout(() => startPanelServer(), 3000);
-    }
-  });
-  proc.on('error', err => console.error('[PANEL-SRV] Error:', err.message));
-
-  console.log('[PANEL] Panel server started PID:', proc.pid);
-
-  // Register Alt+Shift+T after server starts
-  setTimeout(() => {
-    try {
-      globalShortcut.register('Alt+Shift+T', () => {
-        openPanelWindow();
-      });
-      console.log('[PANEL] Alt+Shift+T registered');
-    } catch (e) {
-      console.error('[PANEL] Shortcut registration failed:', e.message);
-    }
-  }, 2000);
-}
-
-let panelWindow = null;
-
-function openPanelWindow() {
-  if (panelWindow && !panelWindow.isDestroyed()) {
-    if (panelWindow.isVisible()) {
-      panelWindow.hide();
-    } else {
-      panelWindow.show();
-      panelWindow.focus();
-    }
-    return;
-  }
-
-  const appSource  = getAppSourcePath();
-  const panelHtml  = path.join(appSource, 'task_panel', 'panel.html');
-
-  if (!fs.existsSync(panelHtml)) {
-    console.warn('[PANEL] panel.html not found:', panelHtml);
-    return;
-  }
-
-  const display    = screen.getPrimaryDisplay();
-  const { width, height } = display.workAreaSize;
-  const panelWidth = 400;
-
-  panelWindow = new BrowserWindow({
-    width:           panelWidth,
-    height:          height,
-    x:               width - panelWidth,
-    y:               0,
-    frame:           false,
-    transparent:     false,
-    backgroundColor: '#09090b',
-    alwaysOnTop:     true,
-    skipTaskbar:     true,
-    resizable:       false,
-    show:            false,
-    webPreferences: {
-      nodeIntegration:  true,
-      contextIsolation: false,
-    }
-  });
-
-  panelWindow.loadFile(panelHtml);
-
-  panelWindow.once('ready-to-show', () => {
-    panelWindow.show();
-    panelWindow.focus();
-    console.log('[PANEL] Panel window ready and shown');
-  });
-
-  panelWindow.on('closed', () => {
-    panelWindow = null;
-    console.log('[PANEL] Panel window closed');
-  });
-
-  panelWindow.on('blur', () => {
-    if (panelWindow && !panelWindow.isDestroyed()) {
-      panelWindow.hide();
-    }
-  });
-
-  console.log('[PANEL] Panel window creating at x:', width - panelWidth, 'y: 0');
-}
-
-// ============================================================================
 // OVERLAY SERVER — TCP server inside main process
 // ============================================================================
 const net = require('net');
@@ -1076,10 +943,9 @@ function handleOverlayCommand(cmd, appSource) {
 
     // Launch panel host and overlay after stale process cleanup
     // 2 second delay ensures mutex is released before new instance starts
-    // Start panel server and overlay inside main process
-    // No separate Electron processes needed
+    // Start overlay TCP server inside main process
+    // Panel server runs as independent Python daemon
     setTimeout(() => {
-      startPanelServer();
       startOverlayServer();
     }, 3000);
 
