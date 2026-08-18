@@ -720,95 +720,192 @@ if (!gotTheLock) {
       mainWindow.show();
       mainWindow.focus();
     }
-  });
-
+  }); 
 // ============================================================================
-// PANEL HOST — Independent background process for task panel
+// PANEL SERVER — Start panel_server.py directly from main process
 // ============================================================================
-function launchPanelHost() {
-  // With asar disabled panel_host.js is at:
-  // resources/app/electron/panel_host.js (packaged)
-  // electron/panel_host.js (dev)
-  const panelHostScript = isDev
-    ? path.join(__dirname, 'panel_host.js')
-    : path.join(getAppSourcePath(), 'electron', 'panel_host.js');
+function startPanelServer() {
+  const appSource  = getAppSourcePath();
+  const pythonExe  = path.join(appSource, 'python', 'python.exe');
+  const serverScript = path.join(appSource, 'task_panel', 'panel_server.py');
 
-  console.log('[PANEL] Looking for panel_host.js at:', panelHostScript);
-  console.log('[PANEL] Exists:', fs.existsSync(panelHostScript));
-
-  // Kill any existing panel_host processes from previous session
-  if (process.platform === 'win32') {
-    try {
-      exec(
-        'powershell -NoProfile -Command "Get-WmiObject Win32_Process | Where-Object { $_.CommandLine -like \'*panel_host.js*\' } | Select-Object -ExpandProperty ProcessId"',
-        { windowsHide: true },
-        (err, stdout) => {
-          if (err) return;
-          const pids = stdout.trim().split('\n').filter(p => p.trim());
-          pids.forEach(pid => {
-            pid = pid.trim();
-            if (pid && parseInt(pid) !== process.pid) {
-              try {
-                exec(`taskkill /pid ${pid} /f /t`, { windowsHide: true });
-                console.log('[PANEL] Killed old panel_host PID:', pid);
-              } catch (e) {}
-            }
-          });
-        }
-      );
-    } catch (e) {}
-  }
-
-  if (!fs.existsSync(panelHostScript)) {
-    console.warn('[PANEL] panel_host.js not found:', panelHostScript);
+  if (!fs.existsSync(serverScript)) {
+    console.warn('[PANEL] panel_server.py not found:', serverScript);
     return;
   }
 
-  // Clear any stale trigger file BEFORE spawning host
-  try {
-    const APPDATA = process.env.APPDATA || require('os').homedir();
-    const triggerFile = path.join(APPDATA, 'SEVEN', 'panel_trigger.json');
-    if (fs.existsSync(triggerFile)) {
-      fs.unlinkSync(triggerFile);
-      console.log('[PANEL] Cleared stale trigger file before host launch');
-    }
-  } catch (e) {}
-
-  const electronExe = process.execPath;
-
-  console.log('[PANEL] Launching with:', electronExe);
-  console.log('[PANEL] Script:', panelHostScript);
-  console.log('[PANEL] CWD:', getAppSourcePath());
-
-  try {
-    panelHostProcess = spawn(electronExe, ['--', panelHostScript], {
-      cwd:         getAppSourcePath(),
-      detached:    true,
-      windowsHide: true,
-      stdio:       'ignore',
-      env: {
-        ...process.env,
-        SEVEN_APP_PATH:        getAppSourcePath(),
-        ELECTRON_RUN_AS_NODE:  '1',
-        ELECTRON_NO_ASAR:      '1',
-        PYTHONPATH: [
-          getAppSourcePath(),
-          path.join(getAppSourcePath(), 'python', 'Lib', 'site-packages'),
-          path.join(getAppSourcePath(), 'python', 'Lib'),
-          path.join(getAppSourcePath(), 'python'),
-        ].join(path.delimiter),
-      },
-    });
-
-    panelHostProcess.unref();
-    panelHostProcess.on('error', (err) => {
-      console.error('[PANEL] Host spawn error:', err.message);
-    });
-
-    console.log('[PANEL] Host launched as detached process, PID:', panelHostProcess.pid);
-  } catch (e) {
-    console.error('[PANEL] Failed to launch host:', e.message);
+  if (!fs.existsSync(pythonExe)) {
+    console.warn('[PANEL] python.exe not found:', pythonExe);
+    return;
   }
+
+  const env = {
+    ...process.env,
+    SEVEN_APP_PATH:     appSource,
+    PYTHONPATH: [
+      appSource,
+      path.join(appSource, 'python', 'Lib', 'site-packages'),
+      path.join(appSource, 'python', 'Lib'),
+      path.join(appSource, 'python'),
+      path.join(appSource, 'python', 'DLLs'),
+    ].join(path.delimiter),
+    PYTHONUNBUFFERED:   '1',
+    PYTHONIOENCODING:   'utf-8',
+  };
+
+  const proc = spawn(pythonExe, [serverScript], {
+    cwd:         appSource,
+    windowsHide: true,
+    stdio:       ['ignore', 'pipe', 'pipe'],
+    detached:    false,
+    ...(process.platform === 'win32' ? { creationflags: 0x08000000 } : {}),
+    env,
+  });
+
+  proc.stdout.on('data', d => console.log('[PANEL-SRV]', d.toString().trim()));
+  proc.stderr.on('data', d => console.log('[PANEL-SRV ERR]', d.toString().trim()));
+  proc.on('close', code => console.log('[PANEL-SRV] Exited:', code));
+  proc.on('error', err => console.error('[PANEL-SRV] Error:', err.message));
+
+  console.log('[PANEL] Panel server started PID:', proc.pid);
+
+  // Register Alt+Shift+T after server starts
+  setTimeout(() => {
+    try {
+      globalShortcut.register('Alt+Shift+T', () => {
+        openPanelWindow();
+      });
+      console.log('[PANEL] Alt+Shift+T registered');
+    } catch (e) {
+      console.error('[PANEL] Shortcut registration failed:', e.message);
+    }
+  }, 2000);
+}
+
+let panelWindow = null;
+
+function openPanelWindow() {
+  if (panelWindow && !panelWindow.isDestroyed()) {
+    panelWindow.isVisible() ? panelWindow.hide() : panelWindow.show();
+    return;
+  }
+
+  const appSource  = getAppSourcePath();
+  const panelHtml  = path.join(appSource, 'task_panel', 'panel.html');
+
+  if (!fs.existsSync(panelHtml)) {
+    console.warn('[PANEL] panel.html not found:', panelHtml);
+    return;
+  }
+
+  const { width, height } = screen.getPrimaryDisplay().workAreaSize;
+
+  panelWindow = new BrowserWindow({
+    width:       420,
+    height:      height,
+    x:           width - 420,
+    y:           0,
+    frame:       false,
+    transparent: true,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    resizable:   false,
+    webPreferences: {
+      nodeIntegration:  false,
+      contextIsolation: true,
+      preload: path.join(appSource, 'electron', 'panel_preload.js'),
+    }
+  });
+
+  panelWindow.loadFile(panelHtml);
+  panelWindow.on('closed', () => { panelWindow = null; });
+  panelWindow.on('blur', () => panelWindow?.hide());
+
+  console.log('[PANEL] Panel window opened');
+}
+
+// ============================================================================
+// OVERLAY SERVER — TCP server inside main process
+// ============================================================================
+const net = require('net');
+let overlayWindow = null;
+
+function startOverlayServer() {
+  const appSource = getAppSourcePath();
+  const PORT      = 7891;
+
+  const server = net.createServer((socket) => {
+    let buffer = '';
+    socket.on('data', (data) => {
+      buffer += data.toString();
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+      lines.forEach(line => {
+        if (!line.trim()) return;
+        try {
+          const cmd = JSON.parse(line);
+          handleOverlayCommand(cmd, appSource);
+        } catch (e) {
+          console.error('[OVERLAY] Parse error:', e.message);
+        }
+      });
+      socket.write(JSON.stringify({ ok: true }) + '\n');
+    });
+    socket.on('error', () => {});
+  });
+
+  server.listen(PORT, '127.0.0.1', () => {
+    console.log(`[OVERLAY] TCP server listening on port ${PORT}`);
+  });
+
+  server.on('error', (e) => {
+    console.error('[OVERLAY] Server error:', e.message);
+  });
+}
+
+function handleOverlayCommand(cmd, appSource) {
+  console.log('[OVERLAY] Command:', cmd.type || cmd);
+
+  if (cmd.type === 'ping') return;
+
+  const notifHtml = path.join(appSource, 'seven_overlay', 'notification.html');
+  if (!fs.existsSync(notifHtml)) {
+    console.warn('[OVERLAY] notification.html not found');
+    return;
+  }
+
+  const { width, height } = screen.getPrimaryDisplay().workAreaSize;
+
+  const win = new BrowserWindow({
+    width:       380,
+    height:      80,
+    x:           width - 400,
+    y:           20,
+    frame:       false,
+    transparent: true,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    resizable:   false,
+    focusable:   false,
+    webPreferences: {
+      nodeIntegration: true,
+      contextIsolation: false,
+    }
+  });
+
+  win.loadFile(notifHtml);
+  win.setIgnoreMouseEvents(false);
+
+  win.webContents.on('did-finish-load', () => {
+    win.webContents.executeJavaScript(
+      `showNotification(${JSON.stringify(cmd)})`
+    ).catch(() => {});
+  });
+
+  // Auto close after 5 seconds
+  setTimeout(() => {
+    if (!win.isDestroyed()) win.close();
+  }, 5000);
 }
 
   app.whenReady().then(async () => {
@@ -949,16 +1046,12 @@ function launchPanelHost() {
 
     // Launch panel host and overlay after stale process cleanup
     // 2 second delay ensures mutex is released before new instance starts
+    // Start panel server and overlay inside main process
+    // No separate Electron processes needed
     setTimeout(() => {
-      launchPanelHost();
-      console.log('[STARTUP] Panel host launched');
-
-      // Launch overlay daemon from Electron - we know our own exe path
-      setTimeout(() => {
-        launchOverlayDaemon();
-        console.log('[STARTUP] Overlay daemon launched');
-      }, 1000);
-    }, 2000);
+      startPanelServer();
+      startOverlayServer();
+    }, 3000);
 
     // Poll nav_trigger.json — Python writes this to navigate Seven UI
     setInterval(() => {
@@ -1017,56 +1110,4 @@ function launchPanelHost() {
 
   app.on('activate', () => mainWindow?.show());
 }
-
-// ============================================================================
-// OVERLAY DAEMON — Launch from Electron so we always have correct exe path
-// ============================================================================
-function launchOverlayDaemon() {
-  const overlayScript = isDev
-    ? path.join(__dirname, 'overlay_daemon.js')
-    : path.join(getAppSourcePath(), 'electron', 'overlay_daemon.js');
-
-  console.log('[OVERLAY] Script:', overlayScript);
-  console.log('[OVERLAY] Exists:', fs.existsSync(overlayScript));
-
-  if (!fs.existsSync(overlayScript)) {
-    console.warn('[OVERLAY] overlay_daemon.js not found at:', overlayScript);
-    return;
-  }
-
-  const electronExe = process.execPath;
-  console.log('[OVERLAY] Launching with ELECTRON_RUN_AS_NODE:', electronExe);
-
-  try {
-    // ELECTRON_RUN_AS_NODE=1 makes Electron behave like Node.js
-    // and actually execute the script file instead of loading main.js
-    const overlayProcess = spawn(electronExe, ['--', overlayScript], {
-      cwd:         getAppSourcePath(),
-      detached:    true,
-      windowsHide: true,
-      stdio:       'ignore',
-      env: {
-        ...process.env,
-        SEVEN_APP_PATH:       getAppSourcePath(),
-        ELECTRON_RUN_AS_NODE: '1',
-        ELECTRON_NO_ASAR:     '1',
-        PYTHONPATH: [
-          getAppSourcePath(),
-          path.join(getAppSourcePath(), 'python', 'Lib', 'site-packages'),
-          path.join(getAppSourcePath(), 'python', 'Lib'),
-          path.join(getAppSourcePath(), 'python'),
-        ].join(path.delimiter),
-      },
-    });
-
-    overlayProcess.unref();
-    overlayProcess.on('error', (err) => {
-      console.error('[OVERLAY] Spawn error:', err.message);
-    });
-
-    console.log('[OVERLAY] Launched PID:', overlayProcess.pid);
-  } catch (e) {
-    console.error('[OVERLAY] Failed to launch:', e.message);
-  }
 }
-} // end router else
