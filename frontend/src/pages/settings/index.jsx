@@ -297,7 +297,8 @@ export default function Settings() {
       const text = await file.text();
       const data = JSON.parse(text);
       const r = await api.post('/memory/import', data);
-      setImportResult({ success: true, msg: `Imported ${r.data.imported_facts} facts and ${r.data.imported_conversations} conversations` });
+      const msg = r.data.message || `Imported ${r.data.imported_facts} facts, ${r.data.imported_conversations} conversations, ${r.data.imported_schedules || 0} schedules`;
+      setImportResult({ success: true, msg });
     } catch { setImportResult({ success: false, msg: 'Import failed — invalid file' }); }
     setImporting(false);
     e.target.value = '';
