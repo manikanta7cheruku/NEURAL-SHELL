@@ -585,7 +585,7 @@ import telemetry
 from main_modules.startup.context             import SevenContext
 from main_modules.startup.module_loader       import load_all_modules
 from main_modules.startup.morning_brief       import speak_morning_brief
-from main_modules.startup.daemon_launcher     import launch_schedule_daemon
+from main_modules.startup.daemon_launcher     import launch_schedule_daemon, launch_panel_server
 from main_modules.startup.battery_monitor     import start_battery_monitor
 from main_modules.startup.enrollment_handler  import (
     handle_pending_enrollment,
@@ -743,6 +743,7 @@ def seven_logic():
     # Launch daemons immediately — before morning brief
     # Daemons are independent processes, no reason to delay
     launch_schedule_daemon()
+    launch_panel_server()
 
     from main_modules.startup.trigger_daemon_launcher import (
         launch_trigger_daemon,
