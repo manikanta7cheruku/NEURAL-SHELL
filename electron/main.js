@@ -786,7 +786,12 @@ let panelWindow = null;
 
 function openPanelWindow() {
   if (panelWindow && !panelWindow.isDestroyed()) {
-    panelWindow.isVisible() ? panelWindow.hide() : panelWindow.show();
+    if (panelWindow.isVisible()) {
+      panelWindow.hide();
+    } else {
+      panelWindow.show();
+      panelWindow.focus();
+    }
     return;
   }
 
@@ -798,30 +803,48 @@ function openPanelWindow() {
     return;
   }
 
-  const { width, height } = screen.getPrimaryDisplay().workAreaSize;
+  const display    = screen.getPrimaryDisplay();
+  const { width, height } = display.workAreaSize;
+  const panelWidth = 400;
 
   panelWindow = new BrowserWindow({
-    width:       420,
-    height:      height,
-    x:           width - 420,
-    y:           0,
-    frame:       false,
-    transparent: true,
-    alwaysOnTop: true,
-    skipTaskbar: true,
-    resizable:   false,
+    width:           panelWidth,
+    height:          height,
+    x:               width - panelWidth,
+    y:               0,
+    frame:           false,
+    transparent:     false,
+    backgroundColor: '#09090b',
+    alwaysOnTop:     true,
+    skipTaskbar:     true,
+    resizable:       false,
+    show:            false,
     webPreferences: {
-      nodeIntegration:  false,
-      contextIsolation: true,
-      preload: path.join(appSource, 'electron', 'panel_preload.js'),
+      nodeIntegration:  true,
+      contextIsolation: false,
     }
   });
 
   panelWindow.loadFile(panelHtml);
-  panelWindow.on('closed', () => { panelWindow = null; });
-  panelWindow.on('blur', () => panelWindow?.hide());
 
-  console.log('[PANEL] Panel window opened');
+  panelWindow.once('ready-to-show', () => {
+    panelWindow.show();
+    panelWindow.focus();
+    console.log('[PANEL] Panel window ready and shown');
+  });
+
+  panelWindow.on('closed', () => {
+    panelWindow = null;
+    console.log('[PANEL] Panel window closed');
+  });
+
+  panelWindow.on('blur', () => {
+    if (panelWindow && !panelWindow.isDestroyed()) {
+      panelWindow.hide();
+    }
+  });
+
+  console.log('[PANEL] Panel window creating at x:', width - panelWidth, 'y: 0');
 }
 
 // ============================================================================
