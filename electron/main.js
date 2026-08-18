@@ -764,7 +764,14 @@ function startPanelServer() {
 
   proc.stdout.on('data', d => console.log('[PANEL-SRV]', d.toString().trim()));
   proc.stderr.on('data', d => console.log('[PANEL-SRV ERR]', d.toString().trim()));
-  proc.on('close', code => console.log('[PANEL-SRV] Exited:', code));
+  proc.on('close', code => {
+    console.log('[PANEL-SRV] Exited:', code);
+    // Restart if crashed
+    if (code !== 0 && !app.isQuitting) {
+      console.log('[PANEL-SRV] Restarting in 3s...');
+      setTimeout(() => startPanelServer(), 3000);
+    }
+  });
   proc.on('error', err => console.error('[PANEL-SRV] Error:', err.message));
 
   console.log('[PANEL] Panel server started PID:', proc.pid);
@@ -1094,6 +1101,19 @@ function handleOverlayCommand(cmd, appSource) {
         }
       } catch (e) {}
     }, 1000);
+
+    // Poll panel_trigger.json — Python writes this to open task panel
+    setInterval(() => {
+      try {
+        const APPDATA_DIR = process.env.APPDATA || require('os').homedir();
+        const triggerFile = path.join(APPDATA_DIR, 'SEVEN', 'panel_trigger.json');
+        if (fs.existsSync(triggerFile)) {
+          fs.unlinkSync(triggerFile);
+          openPanelWindow();
+          console.log('[PANEL] Triggered by Python');
+        }
+      } catch (e) {}
+    }, 500);
 
     console.log('[APP] SEVEN Desktop ready!');
   });
