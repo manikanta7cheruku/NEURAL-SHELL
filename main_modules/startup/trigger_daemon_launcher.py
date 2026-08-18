@@ -499,6 +499,14 @@ def _get_electron_executable() -> str:
             os.path.join(install_root, "seven.exe"),
             os.path.join(install_root, "SEVEN", "SEVEN.exe"),
         ]
+
+        # Debug - log what we are searching
+        print(Fore.CYAN + f"[OVERLAY] Searching for SEVEN.exe:")
+        print(Fore.CYAN + f"[OVERLAY]   app_path:     {app_path}")
+        print(Fore.CYAN + f"[OVERLAY]   resources:    {resources_dir}")
+        print(Fore.CYAN + f"[OVERLAY]   install_root: {install_root}")
+        for _c in packaged_candidates:
+            print(Fore.CYAN + f"[OVERLAY]   checking: {_c} -> {os.path.exists(_c)}")
         for c in packaged_candidates:
             if os.path.exists(c):
                 print(Fore.CYAN + f"[OVERLAY] Packaged electron: {c}")
