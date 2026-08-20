@@ -378,11 +378,11 @@ def main():
                 except Exception:
                     continue
 
-                    if now >= fire_time:
-                        message = schedule.get("message", "Reminder")
-                        stype   = schedule.get("type", "reminder")
-                        _dbg(f"Schedule firing: id={sid} message={message[:50]}")
-                        fire_notification(message, stype)
+                if now >= fire_time:
+                    message = schedule.get("message", "Reminder")
+                    stype   = schedule.get("type", "reminder")
+                    _dbg(f"Schedule firing: id={sid} message={message[:50]}")
+                    fire_notification(message, stype)
                     fired.add(sid)
                     save_fired(fired)
 
