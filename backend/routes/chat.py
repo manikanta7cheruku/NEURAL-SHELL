@@ -96,6 +96,8 @@ def chat(req: ChatRequest):
     """Send a text message to Seven's brain."""
     import brain
     import telemetry
+    import datetime
+    import uuid
     from backend.api_server import set_state, check_limit
 
     if not req.text or not req.text.strip():
@@ -123,15 +125,13 @@ def chat(req: ChatRequest):
             parts = list(gen)
             full_response = " ".join(parts)
         elif response == "":
-            # Acknowledgement detected.
-            # Provide a short natural reply instead of silence.
             short_replies = ["Good.", "Alright.", "Fair.", "Okay.", "Works."]
             import random
             return ChatResponse(
                  response=random.choice(short_replies),
                  actions=[],
                  streaming=False
-    )
+            )
         else:
             full_response = response if response else "Processing error."
 
@@ -152,6 +152,28 @@ def chat(req: ChatRequest):
             clean_response = _build_clean_response(
                 full_response, req.speaker_id
             )
+
+        # ── SAVE CHAT CONVERSATION TO LONG TERM MEMORY ──
+        try:
+            from memory import seven_memory
+            if seven_memory:
+                _conv_id = f"chat_{uuid.uuid4().hex}"
+                _combined = f"User said: {req.text.strip()} | Seven replied: {clean_response}"
+                seven_memory.conversations.add(
+                    documents=[_combined],
+                    metadatas=[{
+                        "user_input":     req.text.strip(),
+                        "seven_response": clean_response,
+                        "timestamp":      datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "user_id":        req.speaker_id,
+                        "type":           "conversation",
+                        "source":         "chat"
+                    }],
+                    ids=[_conv_id]
+                )
+                print(f"[MEMORY] Chat turn auto-saved to ChromaDB database: {_conv_id}")
+        except Exception as _ms_err:
+            _log.debug(f"Auto-saving chat conversation to memory failed: {_ms_err}")
 
         # Plan limit check for conversation history
         try:
