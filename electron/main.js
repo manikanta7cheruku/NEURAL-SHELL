@@ -634,30 +634,38 @@ ipcMain.on('toggle-dashboard', () => {
 
 let orbDragOffset = { x: 0, y: 0 };
 let orbIsDragging = false;
+let orbDragWidth  = 80;
+let orbDragHeight = 80;
 
-ipcMain.on('orb-drag-start', (_, mousePos) => {
+ipcMain.on('orb-drag-start', (event, mousePos) => {
   if (!statusWindow || statusWindow.isDestroyed()) return;
   const [winX, winY] = statusWindow.getPosition();
+  const bounds = statusWindow.getBounds();
+  
+  // Cache dimensions once to prevent CPU-blocking queries during movement
+  orbDragWidth  = bounds.width;
+  orbDragHeight = bounds.height;
+  
   orbDragOffset = { x: mousePos.x - winX, y: mousePos.y - winY };
   orbIsDragging = true;
-  console.log(`[ORB] Drag started at offset x=${orbDragOffset.x}, y=${orbDragOffset.y}`);
 });
 
-ipcMain.on('orb-drag-move', (_, mousePos) => {
+ipcMain.on('orb-drag-move', (event, mousePos) => {
   if (!statusWindow || statusWindow.isDestroyed() || !orbIsDragging) return;
   const newX = Math.round(mousePos.x - orbDragOffset.x);
   const newY = Math.round(mousePos.y - orbDragOffset.y);
+  
+  // Use bounds caching and disable OS window animations for buttery-smooth movements
   statusWindow.setBounds({
     x: newX,
     y: newY,
-    width: statusWindow.getBounds().width,
-    height: statusWindow.getBounds().height
-  });
+    width: orbDragWidth,
+    height: orbDragHeight
+  }, false);
 });
 
 ipcMain.on('orb-drag-end', () => {
   orbIsDragging = false;
-  console.log('[ORB] Drag ended');
 });
 
 ipcMain.on('toggle-listening', () => {
