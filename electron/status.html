@@ -7,8 +7,8 @@
     * { margin:0; padding:0; box-sizing:border-box; user-select:none; }
 
     html, body {
-      width: 420px;
-      height: 80px;
+      width: 100%;
+      height: 100%;
       background: transparent !important;
       overflow: hidden;
     }
@@ -42,6 +42,7 @@
         0 16px 48px rgba(0,0,0,0.6),
         0 2px 8px rgba(0,0,0,0.35),
         inset 0 1px 0 rgba(255,255,255,0.03);
+      display: none; /* Hide initially to prevent layout corruption */
     }
 
     #conv-panel.visible {
@@ -507,20 +508,22 @@
     // ── Panel show/hide ──
     function showPanel() {
       if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
-      // Expand window boundaries to 420px first before sliding panel in
       window.orbAPI?.setOrbExpanded(true);
-      convPanel.classList.remove('hiding');
-      convPanel.classList.add('visible');
-      panelVisible = true;
+      convPanel.style.display = 'block'; // Make panel interactive
+      setTimeout(() => {
+        convPanel.classList.remove('hiding');
+        convPanel.classList.add('visible');
+        panelVisible = true;
+      }, 20);
     }
 
     function hidePanel() {
       convPanel.classList.remove('visible');
       convPanel.classList.add('hiding');
       panelVisible = false;
-      // Shrink window boundaries to 80x80 immediately after panel slides out
       setTimeout(() => {
         if (!panelVisible) {
+          convPanel.style.display = 'none'; // Unoccupy layout space
           window.orbAPI?.setOrbExpanded(false);
         }
       }, 500);
