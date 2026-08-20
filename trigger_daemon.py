@@ -1006,28 +1006,35 @@ def _ensure_overlay_alive_safe() -> bool:
 
         print("[TRIGGER DAEMON] Overlay daemon down — spawning...")
 
-        # Use PROJECT_ROOT only — it's set from __file__ at module load
-        # so it's always correct regardless of cwd
-        _search_roots = [PROJECT_ROOT]
-
+        # Resolve the main SEVEN.exe path in production instead of node_modules
+        app_path = os.environ.get('SEVEN_APP_PATH') or PROJECT_ROOT
+        resources_dir = os.path.dirname(app_path)
+        install_root = os.path.dirname(resources_dir)
+        
         electron_exe = None
-        for _root in _search_roots:
-            for _rel in [
-                os.path.join("node_modules", "electron", "dist", "electron.exe"),
-                os.path.join("node_modules", ".bin", "electron.cmd"),
-                os.path.join("frontend", "node_modules", "electron", "dist", "electron.exe"),
-            ]:
-                _c = os.path.join(_root, _rel)
-                if os.path.exists(_c):
-                    electron_exe = _c
-                    print(f"[TRIGGER DAEMON] Electron found: {_c}")
-                    break
-            if electron_exe:
+        candidates = [
+            os.path.join(install_root, "SEVEN.exe"),
+            os.path.join(install_root, "seven.exe"),
+        ]
+        
+        for c in candidates:
+            if os.path.exists(c):
+                electron_exe = c
                 break
 
         if not electron_exe:
-            print(f"[TRIGGER DAEMON] Electron not found in {PROJECT_ROOT}")
-            print(f"[TRIGGER DAEMON] Searched: node_modules/electron/dist/electron.exe")
+            # Fall back to dev node_modules if not running packaged
+            for _rel in [
+                os.path.join("node_modules", "electron", "dist", "electron.exe"),
+                os.path.join("node_modules", ".bin", "electron.cmd"),
+            ]:
+                _c = os.path.join(PROJECT_ROOT, _rel)
+                if os.path.exists(_c):
+                    electron_exe = _c
+                    break
+
+        if not electron_exe:
+            print(f"[TRIGGER DAEMON] Electron executable not found anywhere.")
             return False
 
         daemon_js = os.path.join(PROJECT_ROOT, "electron", "overlay_daemon.js")
@@ -1037,8 +1044,9 @@ def _ensure_overlay_alive_safe() -> bool:
 
         print(f"[TRIGGER DAEMON] Spawning overlay: {electron_exe}")
 
+        # Spawn using the early-routed process argument bypass
         subprocess.Popen(
-            [electron_exe, daemon_js],
+            [electron_exe, "--", daemon_js, "--overlay-daemon"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             stdin=subprocess.DEVNULL,
