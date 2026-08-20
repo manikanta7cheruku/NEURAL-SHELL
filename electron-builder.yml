@@ -49,6 +49,7 @@ extraResources:
       - "seven_overlay/**/*"
       - "task_panel/**/*"
       - "web/**/*"
+      - "chrome_extension/**/*"
       - "!**/*.pyc"
       - "!**/__pycache__/**"
       - "!node_modules/**"
