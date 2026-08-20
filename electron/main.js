@@ -13,6 +13,12 @@ const path = require('node:path');
 const { spawn, exec, execSync } = require('node:child_process');
 const http = require('node:http');
 const fs   = require('node:fs');
+const net  = require('net');
+
+// ============================================================================
+// ENVIRONMENT DETECTION
+// ============================================================================
+const isDev = !app.isPackaged;
 
 // ============================================================================
 // SCRIPT ROUTER - Must be line 1 to bypass main single-instance locks
@@ -30,14 +36,15 @@ if (_argv.includes('--overlay-daemon')) {
 }
 
 // ============================================================================
-// MAIN APP VARIABLES
+// GLOBAL STATE
 // ============================================================================
-const isDev = !app.isPackaged;
 let mainWindow    = null;
 let statusWindow  = null;
+let panelWindow   = null;
 let tray          = null;
 let pythonProcess = null;
 let isAppReady    = false;
+let panelHostProcess = null;
 
 let _crashCount    = 0;
 let _lastCrashTime = 0;
@@ -62,7 +69,7 @@ function getPythonExecutable() {
 }
 
 // ============================================================================
-// DAEMON SPAWNERS (With Isolated User Profiles)
+// DAEMON SPAWNERS
 // ============================================================================
 function launchPanelHost() {
   const electronExe = process.execPath;
@@ -311,15 +318,12 @@ function createStatusWindow() {
 
   const { width, height } = screen.getPrimaryDisplay().workAreaSize;
   const orbSize = 80;
-  const panelW  = 340;
-  const margin  = 20;
-  const totalW  = orbSize + panelW;
 
   statusWindow = new BrowserWindow({
-    width:      totalW,
-    height:     orbSize,
-    x:          width  - totalW - margin,
-    y:          height - orbSize - margin,
+    width:       orbSize, // Start collapsed (80x80) to prevent click-blocking
+    height:      orbSize,
+    x:          width  - orbSize - 20,
+    y:          height - orbSize - 20,
     frame:      false,
     transparent: true,
     alwaysOnTop: true,
@@ -339,7 +343,7 @@ function createStatusWindow() {
   });
 
   statusWindow.loadFile(path.join(__dirname, 'status.html'));
-  statusWindow.setIgnoreMouseEvents(true, { forward: true });
+  statusWindow.setIgnoreMouseEvents(false); // Collapsed window always interactive
   statusWindow.setAlwaysOnTop(true, 'screen-saver', 1);
   statusWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   if (process.platform === 'win32') {
@@ -348,19 +352,63 @@ function createStatusWindow() {
   statusWindow.on('closed', () => { statusWindow = null; });
 }
 
-function resetOrbPosition() {
-  if (!statusWindow) return;
-  const { width, height } = screen.getPrimaryDisplay().workAreaSize;
-  const orbSize = 80;
-  const panelW  = 340;
-  const margin  = 20;
-  const totalW  = orbSize + panelW;
+function openPanelWindow() {
+  if (panelWindow && !panelWindow.isDestroyed()) {
+    if (panelWindow.isVisible()) {
+      panelWindow.hide();
+    } else {
+      panelWindow.show();
+      panelWindow.focus();
+    }
+    return;
+  }
 
-  const x = width  - totalW - margin;
-  const y = height - orbSize - margin;
+  const appSource  = getAppSourcePath();
+  const panelHtml  = path.join(appSource, 'task_panel', 'panel.html');
 
-  statusWindow.setPosition(x, y);
-  statusWindow.setSize(totalW, orbSize);
+  if (!fs.existsSync(panelHtml)) {
+    console.warn('[PANEL] panel.html not found:', panelHtml);
+    return;
+  }
+
+  const display    = screen.getPrimaryDisplay();
+  const { width, height } = display.workAreaSize;
+  const panelWidth = 400;
+
+  panelWindow = new BrowserWindow({
+    width:           panelWidth,
+    height:          height,
+    x:               width - panelWidth,
+    y:               0,
+    frame:           false,
+    transparent:     false,
+    backgroundColor: '#09090b',
+    alwaysOnTop:     true,
+    skipTaskbar:     true,
+    resizable:       false,
+    show:            false,
+    webPreferences: {
+      nodeIntegration:  true,
+      contextIsolation: false,
+    }
+  });
+
+  panelWindow.loadFile(panelHtml);
+
+  panelWindow.once('ready-to-show', () => {
+    panelWindow.show();
+    panelWindow.focus();
+  });
+
+  panelWindow.on('closed', () => {
+    panelWindow = null;
+  });
+
+  panelWindow.on('blur', () => {
+    if (panelWindow && !panelWindow.isDestroyed()) {
+      panelWindow.hide();
+    }
+  });
 }
 
 function showOrbContextMenu() {
@@ -457,8 +505,171 @@ function createTray() {
 }
 
 // ============================================================================
-// SINGLE INSTANCE LOCK
+// OVERLAY SERVER (TCP)
 // ============================================================================
+function startOverlayServer() {
+  const appSource = getAppSourcePath();
+  const PORT      = 7891;
+
+  const server = net.createServer((socket) => {
+    let buffer = '';
+    socket.on('data', (data) => {
+      buffer += data.toString();
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+      lines.forEach(line => {
+        if (!line.trim()) return;
+        try {
+          const cmd = JSON.parse(line);
+          handleOverlayCommand(cmd, appSource);
+        } catch (e) {
+          console.error('[OVERLAY] Parse error:', e.message);
+        }
+      });
+      socket.write(JSON.stringify({ ok: true }) + '\n');
+    });
+    socket.on('error', () => {});
+  });
+
+  server.listen(PORT, '127.0.0.1', () => {
+    console.log(`[OVERLAY] TCP server listening on port ${PORT}`);
+  });
+}
+
+function handleOverlayCommand(cmd, appSource) {
+  if (cmd.type === 'ping') return;
+
+  const notifHtml = path.join(appSource, 'seven_overlay', 'notification.html');
+  if (!fs.existsSync(notifHtml)) {
+    return;
+  }
+
+  const { width, height } = screen.getPrimaryDisplay().workAreaSize;
+
+  const win = new BrowserWindow({
+    width:       380,
+    height:      80,
+    x:           width - 400,
+    y:           20,
+    frame:       false,
+    transparent: true,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    resizable:   false,
+    focusable:   false,
+    webPreferences: {
+      nodeIntegration: true,
+      contextIsolation: false,
+    }
+  });
+
+  win.loadFile(notifHtml);
+  win.setIgnoreMouseEvents(false);
+
+  win.webContents.on('did-finish-load', () => {
+    win.webContents.executeJavaScript(
+      `showNotification(${JSON.stringify(cmd)})`
+    ).catch(() => {});
+  });
+
+  setTimeout(() => {
+    if (!win.isDestroyed()) win.close();
+  }, 5000);
+}
+
+// ============================================================================
+// IPC & LIFECYCLE
+// ============================================================================
+ipcMain.on('minimize-window', (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (win) win.minimize();
+});
+ipcMain.on('maximize-window', (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (win) {
+    win.isMaximized() ? win.unmaximize() : win.maximize();
+  }
+});
+ipcMain.on('close-window', (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (win) win.hide();
+});
+ipcMain.on('show-main-window',  () => navigateTo('/'));
+ipcMain.on('show-orb-menu',     () => showOrbContextMenu());
+ipcMain.on('navigate-to',       (_, route) => navigateTo(route));
+ipcMain.on('quit-app', () => { 
+  app.isQuitting = true; 
+  if (statusWindow) { statusWindow.destroy(); statusWindow = null; }
+  if (mainWindow)   { mainWindow.destroy();   mainWindow = null;   }
+  stopPython(); 
+  app.quit(); 
+});
+
+ipcMain.on('toggle-dashboard', () => {
+  if (!mainWindow) { createMainWindow(); return; }
+  mainWindow.isVisible() ? mainWindow.hide() : (mainWindow.show(), mainWindow.focus());
+});
+
+let orbDragOffset = { x: 0, y: 0 };
+let orbIsDragging = false;
+
+ipcMain.on('orb-drag-start', (_, mousePos) => {
+  if (!statusWindow) return;
+  const [winX, winY] = statusWindow.getPosition();
+  orbDragOffset = { x: mousePos.x - winX, y: mousePos.y - winY };
+  orbIsDragging = true;
+});
+
+ipcMain.on('orb-drag-move', (_, mousePos) => {
+  if (!statusWindow || !orbIsDragging) return;
+  statusWindow.setPosition(
+    Math.round(mousePos.x - orbDragOffset.x),
+    Math.round(mousePos.y - orbDragOffset.y)
+  );
+});
+
+ipcMain.on('toggle-listening', () => {
+  const req = http.request({
+    hostname: '127.0.0.1', port: 7777,
+    path: '/api/toggle-listening', method: 'POST'
+  });
+  req.on('error', () => {});
+  req.end();
+});
+
+ipcMain.on('set-ignore-mouse', (_, ignore) => {
+  if (!statusWindow) return;
+  statusWindow.setIgnoreMouseEvents(ignore, ignore ? { forward: true } : undefined);
+});
+
+// Dynamic Orb sizing listener — eliminates desktop click-blocking
+ipcMain.on('set-orb-expanded', (event, expanded) => {
+  if (!statusWindow || statusWindow.isDestroyed()) return;
+  const { width, height } = screen.getPrimaryDisplay().workAreaSize;
+  const orbSize = 80;
+  const panelW  = 340;
+  const margin  = 20;
+  const totalW  = orbSize + panelW;
+
+  if (expanded) {
+    statusWindow.setBounds({
+      width: totalW,
+      height: orbSize,
+      x: width - totalW - margin,
+      y: height - orbSize - margin
+    });
+    statusWindow.setIgnoreMouseEvents(false);
+  } else {
+    statusWindow.setBounds({
+      width: orbSize,
+      height: orbSize,
+      x: width - orbSize - margin,
+      y: height - orbSize - margin
+    });
+    statusWindow.setIgnoreMouseEvents(false);
+  }
+});
+
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
   app.quit();
@@ -514,19 +725,13 @@ if (!gotTheLock) {
       }
     });
 
-    // Register Alt+S for main window toggle
-    try {
-      globalShortcut.unregister('Alt+S');
-    } catch (e) {}
     globalShortcut.register('Alt+S', () => {
       if (mainWindow) {
         mainWindow.isVisible() ? mainWindow.hide() : (mainWindow.show(), mainWindow.focus());
       }
     });
-    console.log('[SHORTCUT] Alt+S registered for main window toggle');
 
     // Launch Background Daemons
-    // Start background daemons (they own their own global shortcuts)
     setTimeout(() => {
       launchPanelHost();
       launchOverlayDaemon();
