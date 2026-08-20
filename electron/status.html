@@ -507,6 +507,8 @@
     // ── Panel show/hide ──
     function showPanel() {
       if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+      // Expand window boundaries to 420px first before sliding panel in
+      window.orbAPI?.setOrbExpanded(true);
       convPanel.classList.remove('hiding');
       convPanel.classList.add('visible');
       panelVisible = true;
@@ -516,6 +518,12 @@
       convPanel.classList.remove('visible');
       convPanel.classList.add('hiding');
       panelVisible = false;
+      // Shrink window boundaries to 80x80 immediately after panel slides out
+      setTimeout(() => {
+        if (!panelVisible) {
+          window.orbAPI?.setOrbExpanded(false);
+        }
+      }, 500);
     }
 
     function scheduleHide() {
