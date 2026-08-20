@@ -347,17 +347,18 @@ def think(prompt_text, speaker_id="default"):
         "model_name":   MODEL_NAME,
     }
 
-    # Run pipeline
+    # Run pipeline directly through processing layers
     result = run_pipeline(ctx, deps)
 
     # If a layer updated the user name (name-setting layer), apply it globally
     if ctx.new_user_name:
         USER_NAME = ctx.new_user_name
 
-    # Save conversation to memory.
-    # This is the single save point for ALL callers (voice and chat).
-    # Filters applied here so neither main.py nor chat.py need their own save logic.
-    _save_conversation(prompt_text, result, speaker_id)
+    # Save conversation to memory
+    try:
+        _save_conversation(prompt_text, result, speaker_id)
+    except Exception as _sc_err:
+        print(f"[BRAIN] Conversation auto-save skipped: {_sc_err}")
 
     return result
 
