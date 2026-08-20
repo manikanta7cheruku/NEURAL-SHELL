@@ -50,6 +50,28 @@ let _crashCount    = 0;
 let _lastCrashTime = 0;
 
 // ============================================================================
+// GLOBAL HOISTED UTILITIES
+// Declared early to guarantee global scope visibility to context menu events
+// ============================================================================
+function resetOrbPosition() {
+  if (!statusWindow || statusWindow.isDestroyed()) return;
+  const { width, height } = screen.getPrimaryDisplay().workAreaSize;
+  const orbSize = 80;
+  const margin  = 20;
+
+  const x = width  - orbSize - margin;
+  const y = height - orbSize - margin;
+
+  statusWindow.setBounds({
+    width: orbSize,
+    height: orbSize,
+    x: x,
+    y: y
+  });
+  console.log(`[ORB] Position reset manually to collapsed state: x=${x}, y=${y}`);
+}
+
+// ============================================================================
 // PATH RESOLUTION HELPERS
 // ============================================================================
 function getAppSourcePath() {
@@ -69,7 +91,7 @@ function getPythonExecutable() {
 }
 
 // ============================================================================
-// DAEMON SPAWNERS
+// DAEMON SPAWNERS (With Correct Argument Order)
 // ============================================================================
 function launchPanelHost() {
   const electronExe = process.execPath;
@@ -80,10 +102,10 @@ function launchPanelHost() {
   console.log('[PANEL] Spawning detached panel host...');
   try {
     const proc = spawn(electronExe, [
+      `--user-data-dir=${panelUserData}`,
       '--',
       path.join(appSource, 'electron', 'panel_host.js'),
-      '--panel-host',
-      `--user-data-dir=${panelUserData}`
+      '--panel-host'
     ], {
       cwd: appSource,
       detached: true,
@@ -110,10 +132,10 @@ function launchOverlayDaemon() {
   console.log('[OVERLAY] Spawning detached overlay daemon...');
   try {
     const proc = spawn(electronExe, [
+      `--user-data-dir=${overlayUserData}`,
       '--',
       path.join(appSource, 'electron', 'overlay_daemon.js'),
-      '--overlay-daemon',
-      `--user-data-dir=${overlayUserData}`
+      '--overlay-daemon'
     ], {
       cwd: appSource,
       detached: true,
@@ -320,7 +342,7 @@ function createStatusWindow() {
   const orbSize = 80;
 
   statusWindow = new BrowserWindow({
-    width:       orbSize, // Start collapsed (80x80) to prevent click-blocking
+    width:       orbSize, 
     height:      orbSize,
     x:          width  - orbSize - 20,
     y:          height - orbSize - 20,
@@ -343,7 +365,7 @@ function createStatusWindow() {
   });
 
   statusWindow.loadFile(path.join(__dirname, 'status.html'));
-  statusWindow.setIgnoreMouseEvents(false); // Collapsed window always interactive
+  statusWindow.setIgnoreMouseEvents(false); 
   statusWindow.setAlwaysOnTop(true, 'screen-saver', 1);
   statusWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   if (process.platform === 'win32') {
@@ -582,24 +604,17 @@ function handleOverlayCommand(cmd, appSource) {
 // ============================================================================
 ipcMain.on('minimize-window', (event) => {
   const win = BrowserWindow.fromWebContents(event.sender) || mainWindow;
-  if (win) {
-    win.minimize();
-    console.log('[WINDOW] Window minimized');
-  }
+  if (win) win.minimize();
 });
 ipcMain.on('maximize-window', (event) => {
   const win = BrowserWindow.fromWebContents(event.sender) || mainWindow;
   if (win) {
     win.isMaximized() ? win.unmaximize() : win.maximize();
-    console.log('[WINDOW] Window maximized toggled');
   }
 });
 ipcMain.on('close-window', (event) => {
   const win = BrowserWindow.fromWebContents(event.sender) || mainWindow;
-  if (win) {
-    win.hide();
-    console.log('[WINDOW] Window hidden to system tray');
-  }
+  if (win) win.hide();
 });
 ipcMain.on('show-main-window',  () => navigateTo('/'));
 ipcMain.on('show-orb-menu',     () => showOrbContextMenu());
