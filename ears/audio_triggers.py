@@ -75,11 +75,11 @@ SENSITIVITY_PROFILES = {
         "leap_ratio":     4.0,
     },
     "high": {
-        "event_floor":    0.02,
-        "snap_peak_min":  0.09,
-        "max_event_ms":   45,
-        "min_event_ms":   5,
-        "leap_ratio":     3.0,
+        "event_floor":    0.015,
+        "snap_peak_min":  0.06,
+        "max_event_ms":   55,
+        "min_event_ms":   3,
+        "leap_ratio":     2.2,
     },
 }
 
