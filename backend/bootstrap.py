@@ -433,7 +433,7 @@ def get_ollama_executable():
 
 
 def download_ollama_installer():
-    """Download OllamaSetup.exe with progress."""
+    """Download OllamaSetup.exe with real-time speed calculation and progress tracking."""
     _set('ollama_install', status='running', progress=0, error=None)
 
     dest = os.path.join(tempfile.gettempdir(), OLLAMA_INSTALLER_NAME)
@@ -443,16 +443,22 @@ def download_ollama_installer():
         print(f"[BOOTSTRAP] Ollama installer cached: {dest}")
         return dest
 
-    print(f"[BOOTSTRAP] Downloading Ollama...")
+    print("[BOOTSTRAP] Downloading Ollama installer with real-time metrics...")
+    _start_time = time.time()
 
     try:
         def _progress(block_num, block_size, total_size):
             if total_size > 0:
-                pct = min(int((block_num * block_size / total_size) * 100), 99)
-                _set('ollama_install', progress=pct)
+                downloaded = block_num * block_size
+                pct = min(int((downloaded / total_size) * 100), 99)
+                elapsed = max(time.time() - _start_time, 0.001)
+                speed_mb_s = round((downloaded / (1024 * 1024)) / elapsed, 2)
+                downloaded_mb = round(downloaded / (1024 * 1024), 1)
+                total_mb = round(total_size / (1024 * 1024), 1)
+                _set('ollama_install', progress=pct, current=f"{downloaded_mb}/{total_mb} MB ({speed_mb_s} MB/s)")
 
         urllib.request.urlretrieve(OLLAMA_DOWNLOAD_URL, dest, _progress)
-        _set('ollama_install', progress=100)
+        _set('ollama_install', progress=100, current="Installer download complete")
         print(f"[BOOTSTRAP] Ollama downloaded: {dest}")
         return dest
 
