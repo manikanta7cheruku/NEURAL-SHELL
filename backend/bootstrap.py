@@ -263,6 +263,7 @@ def install_packages():
         "requests", "colorama", "psutil", "pyttsx3", "pywin32",
         "pycaw", "comtypes", "AppOpener", "ddgs", "SpeechRecognition",
         "pyaudio", "screen-brightness-control", "pyautogui", "keyboard",
+        "pynput", "rapidfuzz",
     ]
 
     # Build install order: critical first, then the rest
