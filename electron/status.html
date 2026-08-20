@@ -698,7 +698,13 @@
       const el = document.elementFromPoint(e.clientX, e.clientY);
       const onOrb   = el && (el.id === 'interaction-layer' || el.closest('#orb-container'));
       const onPanel = el && (el === convPanel || convPanel.contains(el));
-      window.orbAPI?.setIgnoreMouseEvents(!(onOrb || onPanel));
+
+      // Enable interaction when hovering orb or panel; disable when outside
+      if (onOrb || onPanel) {
+        window.orbAPI?.setIgnoreMouseEvents(false);
+      } else {
+        window.orbAPI?.setIgnoreMouseEvents(true, { forward: true });
+      }
     });
 
     document.addEventListener('mouseleave', () => {
