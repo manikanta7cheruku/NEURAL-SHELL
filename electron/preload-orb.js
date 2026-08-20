@@ -21,5 +21,8 @@ contextBridge.exposeInMainWorld('orbAPI', {
   dragMove: (x, y) => ipcRenderer.send('orb-drag-move', { x, y }),
 
   // Click-through control
-  setIgnoreMouseEvents: (ignore) => ipcRenderer.send('set-ignore-mouse', ignore)
+  setIgnoreMouseEvents: (ignore) => ipcRenderer.send('set-ignore-mouse', ignore),
+
+  // Dynamic panel sizing
+  setOrbExpanded: (expanded) => ipcRenderer.send('set-orb-expanded', expanded)
 });
