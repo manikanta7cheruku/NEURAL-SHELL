@@ -13,36 +13,28 @@ const path = require('node:path');
 const { spawn, exec, execSync } = require('node:child_process');
 const http = require('node:http');
 const fs   = require('node:fs');
-const net  = require('net');
 
 // ============================================================================
-// ENVIRONMENT DETECTION
-// ============================================================================
-const isDev = !app.isPackaged;
-
-// ============================================================================
-// SCRIPT ROUTER - Must run before any global variables or window declarations
+// SCRIPT ROUTER - Must be line 1 to bypass main single-instance locks
 // ============================================================================
 const _argv = process.argv;
-const _scriptIdx = _argv.indexOf('--');
-if (_scriptIdx !== -1 && _argv[_scriptIdx + 1]) {
-  const _targetScript = _argv[_scriptIdx + 1];
-  console.log('[ROUTER] Loading sub-script:', _targetScript);
-  try {
-    require(_targetScript);
-  } catch(e) {
-    console.error('[ROUTER] Failed to load:', _targetScript, e.message);
-    process.exit(1);
-  }
+if (_argv.includes('--panel-host')) {
+  console.log('[ROUTER] Loading Panel Host Sub-App');
+  require('./panel_host.js');
+  return;
+}
+if (_argv.includes('--overlay-daemon')) {
+  console.log('[ROUTER] Loading Overlay Daemon Sub-App');
+  require('./overlay_daemon.js');
   return;
 }
 
 // ============================================================================
-// GLOBAL STATE
+// MAIN APP VARIABLES
 // ============================================================================
+const isDev = !app.isPackaged;
 let mainWindow    = null;
 let statusWindow  = null;
-let panelWindow   = null;
 let tray          = null;
 let pythonProcess = null;
 let isAppReady    = false;
@@ -67,6 +59,69 @@ function getPythonExecutable() {
     return embedded;
   }
   return 'python';
+}
+
+// ============================================================================
+// DAEMON SPAWNERS (With Isolated User Profiles)
+// ============================================================================
+function launchPanelHost() {
+  const electronExe = process.execPath;
+  const appSource = getAppSourcePath();
+  const APPDATA = process.env.APPDATA || require('os').homedir();
+  const panelUserData = path.join(APPDATA, 'SEVEN', 'panel_user_data');
+
+  console.log('[PANEL] Spawning detached panel host...');
+  try {
+    const proc = spawn(electronExe, [
+      '--',
+      path.join(appSource, 'electron', 'panel_host.js'),
+      '--panel-host',
+      `--user-data-dir=${panelUserData}`
+    ], {
+      cwd: appSource,
+      detached: true,
+      windowsHide: true,
+      stdio: 'ignore',
+      env: {
+        ...process.env,
+        SEVEN_APP_PATH: appSource,
+      }
+    });
+    proc.unref();
+    console.log('[PANEL] Spawned PID:', proc.pid);
+  } catch (e) {
+    console.error('[PANEL] Spawn failed:', e.message);
+  }
+}
+
+function launchOverlayDaemon() {
+  const electronExe = process.execPath;
+  const appSource = getAppSourcePath();
+  const APPDATA = process.env.APPDATA || require('os').homedir();
+  const overlayUserData = path.join(APPDATA, 'SEVEN', 'overlay_user_data');
+
+  console.log('[OVERLAY] Spawning detached overlay daemon...');
+  try {
+    const proc = spawn(electronExe, [
+      '--',
+      path.join(appSource, 'electron', 'overlay_daemon.js'),
+      '--overlay-daemon',
+      `--user-data-dir=${overlayUserData}`
+    ], {
+      cwd: appSource,
+      detached: true,
+      windowsHide: true,
+      stdio: 'ignore',
+      env: {
+        ...process.env,
+        SEVEN_APP_PATH: appSource,
+      }
+    });
+    proc.unref();
+    console.log('[OVERLAY] Spawned PID:', proc.pid);
+  } catch (e) {
+    console.error('[OVERLAY] Spawn failed:', e.message);
+  }
 }
 
 // ============================================================================
@@ -199,7 +254,7 @@ function waitForBackend() {
 }
 
 // ============================================================================
-// WINDOW ACTIONS (Now in the safe, global scope)
+// WINDOW ACTIONS
 // ============================================================================
 function createMainWindow() {
   if (mainWindow) {
@@ -291,65 +346,6 @@ function createStatusWindow() {
     statusWindow.setContentProtection(true);
   }
   statusWindow.on('closed', () => { statusWindow = null; });
-}
-
-function openPanelWindow() {
-  if (panelWindow && !panelWindow.isDestroyed()) {
-    if (panelWindow.isVisible()) {
-      panelWindow.hide();
-    } else {
-      panelWindow.show();
-      panelWindow.focus();
-    }
-    return;
-  }
-
-  const appSource  = getAppSourcePath();
-  const panelHtml  = path.join(appSource, 'task_panel', 'panel.html');
-
-  if (!fs.existsSync(panelHtml)) {
-    console.warn('[PANEL] panel.html not found:', panelHtml);
-    return;
-  }
-
-  const display    = screen.getPrimaryDisplay();
-  const { width, height } = display.workAreaSize;
-  const panelWidth = 400;
-
-  panelWindow = new BrowserWindow({
-    width:           panelWidth,
-    height:          height,
-    x:               width - panelWidth,
-    y:               0,
-    frame:           false,
-    transparent:     false,
-    backgroundColor: '#09090b',
-    alwaysOnTop:     true,
-    skipTaskbar:     true,
-    resizable:       false,
-    show:            false,
-    webPreferences: {
-      nodeIntegration:  true,
-      contextIsolation: false,
-    }
-  });
-
-  panelWindow.loadFile(panelHtml);
-
-  panelWindow.once('ready-to-show', () => {
-    panelWindow.show();
-    panelWindow.focus();
-  });
-
-  panelWindow.on('closed', () => {
-    panelWindow = null;
-  });
-
-  panelWindow.on('blur', () => {
-    if (panelWindow && !panelWindow.isDestroyed()) {
-      panelWindow.hide();
-    }
-  });
 }
 
 function resetOrbPosition() {
@@ -461,134 +457,8 @@ function createTray() {
 }
 
 // ============================================================================
-// OVERLAY SERVER (TCP)
+// SINGLE INSTANCE LOCK
 // ============================================================================
-function startOverlayServer() {
-  const appSource = getAppSourcePath();
-  const PORT      = 7891;
-
-  const server = net.createServer((socket) => {
-    let buffer = '';
-    socket.on('data', (data) => {
-      buffer += data.toString();
-      const lines = buffer.split('\n');
-      buffer = lines.pop();
-      lines.forEach(line => {
-        if (!line.trim()) return;
-        try {
-          const cmd = JSON.parse(line);
-          handleOverlayCommand(cmd, appSource);
-        } catch (e) {
-          console.error('[OVERLAY] Parse error:', e.message);
-        }
-      });
-      socket.write(JSON.stringify({ ok: true }) + '\n');
-    });
-    socket.on('error', () => {});
-  });
-
-  server.listen(PORT, '127.0.0.1', () => {
-    console.log(`[OVERLAY] TCP server listening on port ${PORT}`);
-  });
-}
-
-function handleOverlayCommand(cmd, appSource) {
-  if (cmd.type === 'ping') return;
-
-  const notifHtml = path.join(appSource, 'seven_overlay', 'notification.html');
-  if (!fs.existsSync(notifHtml)) {
-    return;
-  }
-
-  const { width, height } = screen.getPrimaryDisplay().workAreaSize;
-
-  const win = new BrowserWindow({
-    width:       380,
-    height:      80,
-    x:           width - 400,
-    y:           20,
-    frame:       false,
-    transparent: true,
-    alwaysOnTop: true,
-    skipTaskbar: true,
-    resizable:   false,
-    focusable:   false,
-    webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false,
-    }
-  });
-
-  win.loadFile(notifHtml);
-  win.setIgnoreMouseEvents(false);
-
-  win.webContents.on('did-finish-load', () => {
-    win.webContents.executeJavaScript(
-      `showNotification(${JSON.stringify(cmd)})`
-    ).catch(() => {});
-  });
-
-  setTimeout(() => {
-    if (!win.isDestroyed()) win.close();
-  }, 5000);
-}
-
-// ============================================================================
-// IPC & LIFECYCLE
-// ============================================================================
-ipcMain.on('minimize-window',   () => mainWindow?.minimize());
-ipcMain.on('maximize-window',   () => {
-  mainWindow?.isMaximized() ? mainWindow.unmaximize() : mainWindow?.maximize();
-});
-ipcMain.on('close-window',      () => mainWindow?.hide());
-ipcMain.on('show-main-window',  () => navigateTo('/'));
-ipcMain.on('show-orb-menu',     () => showOrbContextMenu());
-ipcMain.on('navigate-to',       (_, route) => navigateTo(route));
-ipcMain.on('quit-app', () => { 
-  app.isQuitting = true; 
-  if (statusWindow) { statusWindow.destroy(); statusWindow = null; }
-  if (mainWindow)   { mainWindow.destroy();   mainWindow = null;   }
-  stopPython(); 
-  app.quit(); 
-});
-
-ipcMain.on('toggle-dashboard', () => {
-  if (!mainWindow) { createMainWindow(); return; }
-  mainWindow.isVisible() ? mainWindow.hide() : (mainWindow.show(), mainWindow.focus());
-});
-
-let orbDragOffset = { x: 0, y: 0 };
-let orbIsDragging = false;
-
-ipcMain.on('orb-drag-start', (_, mousePos) => {
-  if (!statusWindow) return;
-  const [winX, winY] = statusWindow.getPosition();
-  orbDragOffset = { x: mousePos.x - winX, y: mousePos.y - winY };
-  orbIsDragging = true;
-});
-
-ipcMain.on('orb-drag-move', (_, mousePos) => {
-  if (!statusWindow || !orbIsDragging) return;
-  statusWindow.setPosition(
-    Math.round(mousePos.x - orbDragOffset.x),
-    Math.round(mousePos.y - orbDragOffset.y)
-  );
-});
-
-ipcMain.on('toggle-listening', () => {
-  const req = http.request({
-    hostname: '127.0.0.1', port: 7777,
-    path: '/api/toggle-listening', method: 'POST'
-  });
-  req.on('error', () => {});
-  req.end();
-});
-
-ipcMain.on('set-ignore-mouse', (_, ignore) => {
-  if (!statusWindow) return;
-  statusWindow.setIgnoreMouseEvents(ignore, ignore ? { forward: true } : undefined);
-});
-
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
   app.quit();
@@ -650,13 +520,10 @@ if (!gotTheLock) {
       }
     });
 
-    // Start background daemons
+    // Launch Background Daemons
     setTimeout(() => {
-      globalShortcut.unregister('Alt+Shift+T');
-      globalShortcut.register('Alt+Shift+T', () => {
-        openPanelWindow();
-      });
-      startOverlayServer();
+      launchPanelHost();
+      launchOverlayDaemon();
     }, 2000);
 
     // Poll nav_trigger.json
@@ -676,18 +543,6 @@ if (!gotTheLock) {
         }
       } catch (e) {}
     }, 1000);
-
-    // Poll panel_trigger.json
-    setInterval(() => {
-      try {
-        const APPDATA_DIR = process.env.APPDATA || require('os').homedir();
-        const triggerFile = path.join(APPDATA_DIR, 'SEVEN', 'panel_trigger.json');
-        if (fs.existsSync(triggerFile)) {
-          fs.unlinkSync(triggerFile);
-          openPanelWindow();
-        }
-      } catch (e) {}
-    }, 500);
   });
 
   app.on('window-all-closed', () => {});
