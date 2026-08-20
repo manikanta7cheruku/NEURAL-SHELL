@@ -258,11 +258,11 @@ def install_packages():
         return False
 
     # Critical packages go first - these must exist before api_server imports
-    critical_first = [
+    critical_runtime_packages = [
         "python-multipart", "fastapi", "uvicorn[standard]", "websockets",
         "requests", "colorama", "psutil", "pyttsx3", "pywin32",
         "pycaw", "comtypes", "AppOpener", "ddgs", "SpeechRecognition",
-        "pyaudio", "screen-brightness-control", "pyautogui",
+        "pyaudio", "screen-brightness-control", "pyautogui", "keyboard",
     ]
 
     # Build install order: critical first, then the rest
