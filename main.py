@@ -1062,10 +1062,8 @@ def seven_logic():
             if _silence_watcher:
                 _silence_watcher.on_seven_speaking(False)
 
-            # Store conversation - handled by brain.think() for non-streaming.
-            # Streaming path: brain.think() skips save (text not available at that point).
-            # We save streaming turns here after the generator is fully consumed.
-            if is_streaming and isinstance(response, str) and ctx.seven_memory:
+            # Store conversation turns after streaming completion
+            if is_streaming and isinstance(response, str):
                 try:
                     import brain as _brain_mod
                     _brain_mod.store_voice_turn(
@@ -1075,7 +1073,7 @@ def seven_logic():
                         was_interrupted=not completed,
                     )
                 except Exception as _sv_err:
-                    print(Fore.RED + f"[MEMORY] Streaming save error: {_sv_err}")
+                    print(Fore.YELLOW + f"[MEMORY] Streaming voice save skipped: {_sv_err}")
 
             if not isinstance(response, str):
                 continue
