@@ -581,18 +581,25 @@ function handleOverlayCommand(cmd, appSource) {
 // IPC & LIFECYCLE
 // ============================================================================
 ipcMain.on('minimize-window', (event) => {
-  const win = BrowserWindow.fromWebContents(event.sender);
-  if (win) win.minimize();
+  const win = BrowserWindow.fromWebContents(event.sender) || mainWindow;
+  if (win) {
+    win.minimize();
+    console.log('[WINDOW] Window minimized');
+  }
 });
 ipcMain.on('maximize-window', (event) => {
-  const win = BrowserWindow.fromWebContents(event.sender);
+  const win = BrowserWindow.fromWebContents(event.sender) || mainWindow;
   if (win) {
     win.isMaximized() ? win.unmaximize() : win.maximize();
+    console.log('[WINDOW] Window maximized toggled');
   }
 });
 ipcMain.on('close-window', (event) => {
-  const win = BrowserWindow.fromWebContents(event.sender);
-  if (win) win.hide();
+  const win = BrowserWindow.fromWebContents(event.sender) || mainWindow;
+  if (win) {
+    win.hide();
+    console.log('[WINDOW] Window hidden to system tray');
+  }
 });
 ipcMain.on('show-main-window',  () => navigateTo('/'));
 ipcMain.on('show-orb-menu',     () => showOrbContextMenu());
