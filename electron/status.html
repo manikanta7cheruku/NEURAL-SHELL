@@ -706,25 +706,33 @@
     });
 
     // ── Click-through ──
-    let _lastIgnoreState = null;
-    document.addEventListener('mousemove', (e) => {
-      // Do not modify mouse state during active drag
-      if (isDown) return;
+    // Explicit, element-bound mouse tracking prevents window click-through lockouts
+    const orbContainer = document.getElementById('orb-container');
+    let isMouseOverInteractiveArea = false;
 
-      const el = document.elementFromPoint(e.clientX, e.clientY);
-      const onOrb   = el && (el.id === 'interaction-layer' || el.closest('#orb-container'));
-      const onPanel = el && (el === convPanel || convPanel.contains(el));
-      const shouldIgnore = !(onOrb || onPanel);
+    function updateMouseIgnoreState() {
+      if (isDown) return; // Never modify ignore state while actively dragging
+      window.orbAPI?.setIgnoreMouseEvents(!isMouseOverInteractiveArea);
+    }
 
-      // Only send IPC when state actually changes to prevent event storms
-      if (shouldIgnore !== _lastIgnoreState) {
-        _lastIgnoreState = shouldIgnore;
-        window.orbAPI?.setIgnoreMouseEvents(shouldIgnore);
-      }
+    orbContainer.addEventListener('mouseenter', () => {
+      isMouseOverInteractiveArea = true;
+      updateMouseIgnoreState();
     });
 
-    document.addEventListener('mouseleave', () => {
-      window.orbAPI?.setIgnoreMouseEvents(true);
+    orbContainer.addEventListener('mouseleave', () => {
+      isMouseOverInteractiveArea = false;
+      updateMouseIgnoreState();
+    });
+
+    convPanel.addEventListener('mouseenter', () => {
+      isMouseOverInteractiveArea = true;
+      updateMouseIgnoreState();
+    });
+
+    convPanel.addEventListener('mouseleave', () => {
+      isMouseOverInteractiveArea = false;
+      updateMouseIgnoreState();
     });
 
     // ── Opacity sync from Settings ──
