@@ -52,11 +52,10 @@ colorama.init(autoreset=True)
 import config
 
 # ─────────────────────────────────────────────────────────────────────────
-# MEMORY IMPORTS
-# Imported at module level so they are ready when think() is first called.
+# DEFERRED MEMORY ACCESS
+# Memory modules are resolved dynamically inside functions to prevent
+# startup race conditions before %APPDATA% directories are created.
 # ─────────────────────────────────────────────────────────────────────────
-from memory import seven_memory
-from memory.mood import mood_engine
 
 # ─────────────────────────────────────────────────────────────────────────
 # PIPELINE + CONTEXT
@@ -173,25 +172,10 @@ _SKIP_GREETINGS = {"hi", "hello", "hey"}
 
 
 def _save_conversation(prompt_text, result, speaker_id):
-    """
-    Single save point for all conversation turns.
-
-    Filters applied:
-    - Input 3 chars or shorter: skip (noise, accidental triggers)
-    - Input is a bare greeting: skip (no information content)
-    - Response is pure command tags (starts with ###): skip
-    - Streaming responses: skip (text is not reconstructable here,
-      main.py calls flag_last_as_interrupted() post-speak if needed)
-    - Plan limit reached for this tier: skip and print warning
-    - ChromaDB error: log and move on, never crash the pipeline
-
-    Source tagging:
-    - speaker_id != "default"  -> voice (voice ID system identified speaker)
-    - speaker_id == "default"  -> chat (API caller, Console UI)
-
-    Called by think() only. Do not call directly from main.py or chat.py.
-    """
     try:
+        # Dynamic import to guarantee database is ready
+        from memory import seven_memory
+
         # Filter 1: too short to be meaningful
         if len(prompt_text.strip()) <= 3:
             return
@@ -268,19 +252,9 @@ def _save_conversation(prompt_text, result, speaker_id):
 
 
 def store_voice_turn(prompt_text, response_text, speaker_id, was_interrupted=False):
-    """
-    Called by main.py's voice loop AFTER speaking is complete.
-    Used specifically for streaming responses, where brain.think() cannot
-    reconstruct the full text (the generator is consumed by the speak loop).
-    Also applies the [INTERRUPTED] prefix when speech was cut off mid-sentence.
-
-    Args:
-        prompt_text    (str):  original user speech
-        response_text  (str):  full assembled response text (after streaming)
-        speaker_id     (str):  speaker profile id
-        was_interrupted(bool): True if user cut Seven off mid-sentence
-    """
     try:
+        from memory import seven_memory
+
         if not prompt_text or not response_text:
             return
         if len(prompt_text.strip()) <= 3:
