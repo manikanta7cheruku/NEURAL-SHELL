@@ -393,17 +393,15 @@ async def import_memory(request: Request):
     """Import user data from backup JSON. Bypasses plan limits."""
     try:
         data = await request.json()
-
-        # Memory loads in background thread - wait up to 30s for it
+        
+        # Memory loads in background thread - wait up to 10s for it to initialize
         import time as _t
-        _deadline = _t.time() + 30
+        _deadline = _t.time() + 10
         seven_memory = None
-
         while _t.time() < _deadline:
             try:
                 from memory import seven_memory as _sm
                 if _sm is not None:
-                    # Test it is actually ready
                     _sm.user_facts.count()
                     seven_memory = _sm
                     break
@@ -411,61 +409,51 @@ async def import_memory(request: Request):
                 pass
             _t.sleep(0.5)
 
-        if seven_memory is None:
-            raise HTTPException(
-                status_code=503,
-                detail="Memory system not ready yet. Wait 30 seconds and try again."
-            )
+        if not seven_memory:
+            raise HTTPException(status_code=503, detail="Memory system initializing. Try again.")
 
+        import uuid
         imported = {"facts": 0, "conversations": 0}
 
-        import uuid as _uuid
-
-        for idx, fact in enumerate(data.get("facts", [])):
+        for fact in data.get("facts", []):
             if fact.get("text"):
                 try:
-                    # Use UUID to guarantee unique IDs across all imports
-                    fact_id = f"fact_import_{_uuid.uuid4().hex}"
+                    fact_id = f"fact_import_{uuid.uuid4().hex}"
                     seven_memory.user_facts.add(
                         documents=[fact["text"]],
                         metadatas=[{
                             "category":  fact.get("category", "imported"),
-                            "timestamp": datetime.datetime.now().strftime(
-                                "%Y-%m-%d %H:%M:%S"
-                            ),
+                            "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                             "user_id":   "default",
                             "type":      "fact"
                         }],
                         ids=[fact_id]
                     )
                     imported["facts"] += 1
-                except Exception as _fe:
-                    _log.warning(f"[IMPORT] Fact {idx} failed: {_fe}")
+                except Exception:
+                    pass
 
-        for idx, conv in enumerate(data.get("conversations", [])):
+        for conv in data.get("conversations", []):
             if conv.get("user") and conv.get("seven"):
                 try:
-                    # Use UUID to guarantee unique IDs
-                    conv_id  = f"conv_import_{_uuid.uuid4().hex}"
+                    conv_id  = f"conv_import_{uuid.uuid4().hex}"
                     combined = f"User said: {conv['user']} | Seven replied: {conv['seven']}"
                     seven_memory.conversations.add(
                         documents=[combined],
                         metadatas=[{
                             "user_input":     conv["user"],
                             "seven_response": conv["seven"],
-                            "timestamp":      datetime.datetime.now().strftime(
-                                "%Y-%m-%d %H:%M:%S"
-                            ),
+                            "timestamp":      datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                             "user_id":        "default",
                             "type":           "conversation"
                         }],
                         ids=[conv_id]
                     )
                     imported["conversations"] += 1
-                except Exception as _ce:
-                    _log.warning(f"[IMPORT] Conversation {idx} failed: {_ce}")
+                except Exception:
+                    pass
 
-        # Import schedules too (reassigned IDs on conflict)
+        # Import schedules
         imported_schedules = 0
         try:
             schedules_data = data.get("schedules", [])
@@ -479,13 +467,11 @@ async def import_memory(request: Request):
                         _existing = _json.load(_f)
 
                 _existing_ids = {s.get('id') for s in _existing}
-                # Find maximum existing numeric ID to generate new unique sequential ones
                 _max_id = max([_id for _id in _existing_ids if isinstance(_id, int)] or [0])
 
                 for sched in schedules_data:
                     _sched_id = sched.get('id')
                     if _sched_id in _existing_ids:
-                        # Collision! Reassign to next free sequential integer ID
                         _max_id += 1
                         sched['id'] = _max_id
                         _existing.append(sched)
@@ -497,8 +483,6 @@ async def import_memory(request: Request):
 
                 with open(_sched_path, 'w') as _f:
                     _json.dump(_existing, _f, indent=2)
-        except Exception as _se:
-            print(f"[IMPORT] Schedules import failed: {_se}")
         except Exception as _se:
             print(f"[IMPORT] Schedules import failed: {_se}")
 
