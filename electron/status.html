@@ -696,6 +696,7 @@
     document.addEventListener('mouseup', (e) => {
       if (!isDown) return;
       isDown = false;
+      window.orbAPI?.dragEnd();
       if (e.button === 0 && !dragged) window.orbAPI?.toggleDashboard();
     });
 
@@ -705,16 +706,20 @@
     });
 
     // ── Click-through ──
+    let _lastIgnoreState = null;
     document.addEventListener('mousemove', (e) => {
+      // Do not modify mouse state during active drag
+      if (isDown) return;
+
       const el = document.elementFromPoint(e.clientX, e.clientY);
       const onOrb   = el && (el.id === 'interaction-layer' || el.closest('#orb-container'));
       const onPanel = el && (el === convPanel || convPanel.contains(el));
+      const shouldIgnore = !(onOrb || onPanel);
 
-      // Enable interaction when hovering orb or panel; disable when outside
-      if (onOrb || onPanel) {
-        window.orbAPI?.setIgnoreMouseEvents(false);
-      } else {
-        window.orbAPI?.setIgnoreMouseEvents(true, { forward: true });
+      // Only send IPC when state actually changes to prevent event storms
+      if (shouldIgnore !== _lastIgnoreState) {
+        _lastIgnoreState = shouldIgnore;
+        window.orbAPI?.setIgnoreMouseEvents(shouldIgnore);
       }
     });
 
