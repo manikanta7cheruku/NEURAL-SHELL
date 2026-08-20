@@ -1656,7 +1656,7 @@ class HotkeyListener:
             )
             self._listener.daemon = True
             self._listener.start()
-            print("[HOTKEY] Listener started")
+            print("[HOTKEY] Listener started via pynput engine")
 
             # Windows low-level keyboard hooks require the installing
             # thread to pump messages continuously. If the thread blocks
