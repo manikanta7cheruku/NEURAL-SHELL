@@ -256,19 +256,36 @@ def launch_trigger_daemon():
 def _register_trigger_startup(python: str, daemon: str):
     """
     Register trigger_daemon for auto-start at Windows login.
-    Uses XML Task Scheduler ONLY — never Registry Run (creates duplicates).
-    Cleans up ALL alternate registrations first to prevent ghost daemons.
+    Uses Registry Run (HKCU) instead of Task Scheduler.
+    This guarantees execution inside the active logged-in Windows GUI session,
+    allowing the keyboard hooks to register successfully.
     """
+    import winreg
     task_name = "SevenTriggerDaemon"
 
-    _cleanup_duplicate_registrations(task_name)
+    # Purge old Task Scheduler tasks to prevent conflict/ghost instances
+    try:
+        si = subprocess.STARTUPINFO()
+        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        si.wShowWindow = 0  # SW_HIDE
+        subprocess.run(["schtasks", "/delete", "/f", "/tn", task_name], startupinfo=si, creationflags=0x08000000)
+    except Exception:
+        pass
 
-    if _register_via_xml(task_name, python, daemon):
-        print(Fore.GREEN + "[TRIGGER] Registered in Task Scheduler (XML) ✓")
-        return
-
-    print(Fore.RED + "[TRIGGER] CRITICAL: Task Scheduler registration failed. "
-          "Daemon will not auto-start at login. Reinstall Seven or check admin rights.")
+    try:
+        # Register cleanly inside Windows Registry Run Key
+        key = winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\CurrentVersion\Run",
+            0, winreg.KEY_SET_VALUE
+        )
+        # Format: "python.exe" "daemon_path.py"
+        run_command = f'"{python}" "{daemon}"'
+        winreg.SetValueEx(key, task_name, 0, winreg.REG_SZ, run_command)
+        winreg.CloseKey(key)
+        print(Fore.GREEN + "[TRIGGER] Successfully registered daemon in Registry Run (HKCU) ✓")
+    except Exception as e:
+        print(Fore.RED + f"[TRIGGER] Registry auto-start registration failed: {e}")
 
 
 def _task_already_registered(task_name: str, exe_path: str) -> bool:
