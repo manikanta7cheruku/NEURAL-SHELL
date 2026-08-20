@@ -477,17 +477,23 @@ app.whenReady().then(async () => {
   // Start command server so Python can open panel
   startCommandServer();
 
-  // Register shortcut
+  // Register global shortcut — remains active even when SEVEN main app is closed
+  // First unregister any existing binding to avoid conflicts
+  try {
+    globalShortcut.unregister('Alt+Shift+T');
+  } catch (e) {}
+
   const shortcut = 'Alt+Shift+T';
   const ok = globalShortcut.register(shortcut, () => {
-    console.log('[PANEL HOST] Shortcut pressed');
+    console.log('[PANEL HOST] Shortcut pressed — toggling panel');
     togglePanel();
   });
 
-  if (ok) console.log('[PANEL HOST] Shortcut registered:', shortcut);
-  else {
+  if (ok) {
+    console.log(`[PANEL HOST] ✓ Shortcut registered: ${shortcut}`);
+  } else {
     const fb = globalShortcut.register('Ctrl+Alt+T', () => togglePanel());
-    console.log('[PANEL HOST] Fallback shortcut:', fb ? 'OK' : 'FAILED');
+    console.log(`[PANEL HOST] ✗ Primary failed, fallback Ctrl+Alt+T: ${fb ? 'OK' : 'FAILED'}`);
   }
 
   createTray();
