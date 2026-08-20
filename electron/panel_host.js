@@ -53,10 +53,13 @@ let triggerPoller = null;
 
 // ── Single instance lock ─────────────────────────────────────────────────────
 
-const gotLock = app.requestSingleInstanceLock({ key: 'seven-panel-host' });
+// Set unique application name to generate independent system mutex lock
+app.setName('SevenPanelHost');
+
+const gotLock = app.requestSingleInstanceLock();
 
 if (!gotLock) {
-  console.log('[PANEL HOST] Already running. Exiting.');
+  console.log('[PANEL HOST] Another instance already running. Exiting.');
   app.quit();
   process.exit(0);
 }
