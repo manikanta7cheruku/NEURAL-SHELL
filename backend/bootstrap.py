@@ -433,13 +433,13 @@ def get_ollama_executable():
 
 
 def download_ollama_installer():
-    """Download OllamaSetup.exe with real-time speed calculation and progress tracking."""
+    """Download OllamaSetup.exe with real-time download speed calculation."""
     _set('ollama_install', status='running', progress=0, error=None)
 
     dest = os.path.join(tempfile.gettempdir(), OLLAMA_INSTALLER_NAME)
 
     if os.path.exists(dest) and os.path.getsize(dest) > 10_000_000:
-        _set('ollama_install', progress=100)
+        _set('ollama_install', progress=100, current="Using cached installer")
         print(f"[BOOTSTRAP] Ollama installer cached: {dest}")
         return dest
 
