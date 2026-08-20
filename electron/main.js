@@ -887,11 +887,12 @@ function handleOverlayCommand(cmd, appSource) {
     });
 
     // Global hotkey: Alt+S toggle Seven window
-    globalShortcut.register('Alt+S', () => {
+    const altSRegistered = globalShortcut.register('Alt+S', () => {
       if (mainWindow) {
         mainWindow.isVisible() ? mainWindow.hide() : (mainWindow.show(), mainWindow.focus());
       }
     });
+    console.log('[SHORTCUT] Alt+S registered:', altSRegistered);
 
     // Clear any stale panel trigger files from previous session
     try {
@@ -943,11 +944,22 @@ function handleOverlayCommand(cmd, appSource) {
 
     // Launch panel host and overlay after stale process cleanup
     // 2 second delay ensures mutex is released before new instance starts
-    // Start overlay TCP server inside main process
-    // Panel server runs as independent Python daemon
+    // Register Alt+Shift+T for panel
     setTimeout(() => {
+      try {
+        globalShortcut.unregister('Alt+Shift+T');
+        const registered = globalShortcut.register('Alt+Shift+T', () => {
+          console.log('[PANEL] Alt+Shift+T pressed');
+          openPanelWindow();
+        });
+        console.log('[PANEL] Alt+Shift+T registered:', registered);
+      } catch (e) {
+        console.error('[PANEL] Shortcut failed:', e.message);
+      }
+
+      // Start overlay TCP server inside main process
       startOverlayServer();
-    }, 3000);
+    }, 2000);
 
     // Poll nav_trigger.json — Python writes this to navigate Seven UI
     setInterval(() => {
