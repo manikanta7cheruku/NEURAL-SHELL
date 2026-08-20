@@ -514,13 +514,19 @@ if (!gotTheLock) {
       }
     });
 
+    // Register Alt+S for main window toggle
+    try {
+      globalShortcut.unregister('Alt+S');
+    } catch (e) {}
     globalShortcut.register('Alt+S', () => {
       if (mainWindow) {
         mainWindow.isVisible() ? mainWindow.hide() : (mainWindow.show(), mainWindow.focus());
       }
     });
+    console.log('[SHORTCUT] Alt+S registered for main window toggle');
 
     // Launch Background Daemons
+    // Start background daemons (they own their own global shortcuts)
     setTimeout(() => {
       launchPanelHost();
       launchOverlayDaemon();
