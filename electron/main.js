@@ -636,18 +636,28 @@ let orbDragOffset = { x: 0, y: 0 };
 let orbIsDragging = false;
 
 ipcMain.on('orb-drag-start', (_, mousePos) => {
-  if (!statusWindow) return;
+  if (!statusWindow || statusWindow.isDestroyed()) return;
   const [winX, winY] = statusWindow.getPosition();
   orbDragOffset = { x: mousePos.x - winX, y: mousePos.y - winY };
   orbIsDragging = true;
+  console.log(`[ORB] Drag started at offset x=${orbDragOffset.x}, y=${orbDragOffset.y}`);
 });
 
 ipcMain.on('orb-drag-move', (_, mousePos) => {
-  if (!statusWindow || !orbIsDragging) return;
-  statusWindow.setPosition(
-    Math.round(mousePos.x - orbDragOffset.x),
-    Math.round(mousePos.y - orbDragOffset.y)
-  );
+  if (!statusWindow || statusWindow.isDestroyed() || !orbIsDragging) return;
+  const newX = Math.round(mousePos.x - orbDragOffset.x);
+  const newY = Math.round(mousePos.y - orbDragOffset.y);
+  statusWindow.setBounds({
+    x: newX,
+    y: newY,
+    width: statusWindow.getBounds().width,
+    height: statusWindow.getBounds().height
+  });
+});
+
+ipcMain.on('orb-drag-end', () => {
+  orbIsDragging = false;
+  console.log('[ORB] Drag ended');
 });
 
 ipcMain.on('toggle-listening', () => {
