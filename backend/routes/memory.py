@@ -465,7 +465,7 @@ async def import_memory(request: Request):
                 except Exception as _ce:
                     _log.warning(f"[IMPORT] Conversation {idx} failed: {_ce}")
 
-        # Import schedules too
+        # Import schedules too (reassigned IDs on conflict)
         imported_schedules = 0
         try:
             schedules_data = data.get("schedules", [])
@@ -477,14 +477,28 @@ async def import_memory(request: Request):
                 if os.path.exists(_sched_path):
                     with open(_sched_path) as _f:
                         _existing = _json.load(_f)
-                # Add only schedules not already present
+
                 _existing_ids = {s.get('id') for s in _existing}
+                # Find maximum existing numeric ID to generate new unique sequential ones
+                _max_id = max([_id for _id in _existing_ids if isinstance(_id, int)] or [0])
+
                 for sched in schedules_data:
-                    if sched.get('id') not in _existing_ids:
+                    _sched_id = sched.get('id')
+                    if _sched_id in _existing_ids:
+                        # Collision! Reassign to next free sequential integer ID
+                        _max_id += 1
+                        sched['id'] = _max_id
                         _existing.append(sched)
                         imported_schedules += 1
+                    else:
+                        _existing.append(sched)
+                        _existing_ids.add(_sched_id)
+                        imported_schedules += 1
+
                 with open(_sched_path, 'w') as _f:
                     _json.dump(_existing, _f, indent=2)
+        except Exception as _se:
+            print(f"[IMPORT] Schedules import failed: {_se}")
         except Exception as _se:
             print(f"[IMPORT] Schedules import failed: {_se}")
 
