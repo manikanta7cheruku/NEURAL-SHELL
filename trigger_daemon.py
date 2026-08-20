@@ -32,6 +32,88 @@ COMMUNICATION:
 =============================================================================
 """
 
+# ─────────────────────────────────────────────────────────────────────────
+# ROBUST APPLICATION LAUNCHER — Production Path Solver
+# ─────────────────────────────────────────────────────────────────────────
+
+def _open_app_robust(app_name: str) -> bool:
+    """
+    Launch an application by dynamically resolving local Windows paths.
+    Addresses installations situated outside the global environment %PATH%.
+    """
+    name_clean = app_name.lower().strip()
+    
+    # Resolve Windows standard directories
+    local_appdata = os.environ.get('LOCALAPPDATA', '')
+    program_files = os.environ.get('PROGRAMFILES', 'C:\\Program Files')
+    program_files_x86 = os.environ.get('PROGRAMFILES(X86)', 'C:\\Program Files (x86)')
+    
+    # 1. Visual Studio Code
+    if name_clean in ["vscode", "vs code", "visual studio code", "code"]:
+        candidates = [
+            os.path.join(local_appdata, "Programs", "Microsoft VS Code", "Code.exe"),
+            os.path.join(program_files, "Microsoft VS Code", "Code.exe"),
+            os.path.join(program_files_x86, "Microsoft VS Code", "Code.exe")
+        ]
+        for path in candidates:
+            if os.path.exists(path):
+                subprocess.Popen([path], start_new_session=True)
+                print(f"[TRIGGER DAEMON] Opened VS Code via robust path: {path}")
+                return True
+                
+    # 2. Google Chrome
+    if name_clean in ["chrome", "google chrome"]:
+        candidates = [
+            os.path.join(program_files, "Google", "Chrome", "Application", "chrome.exe"),
+            os.path.join(program_files_x86, "Google", "Chrome", "Application", "chrome.exe"),
+            os.path.join(local_appdata, "Google", "Chrome", "Application", "chrome.exe")
+        ]
+        for path in candidates:
+            if os.path.exists(path):
+                subprocess.Popen([path], start_new_session=True)
+                print(f"[TRIGGER DAEMON] Opened Chrome via robust path: {path}")
+                return True
+
+    # 3. Microsoft Edge
+    if name_clean in ["edge", "microsoft edge"]:
+        candidates = [
+            os.path.join(program_files_x86, "Microsoft", "Edge", "Application", "msedge.exe"),
+            os.path.join(program_files, "Microsoft", "Edge", "Application", "msedge.exe")
+        ]
+        for path in candidates:
+            if os.path.exists(path):
+                subprocess.Popen([path], start_new_session=True)
+                print(f"[TRIGGER DAEMON] Opened Edge via robust path: {path}")
+                return True
+
+    # Fallback to hands.core open_app
+    try:
+        from hands.core import open_app
+        open_app(app_name)
+        print(f"[TRIGGER DAEMON] Opened via hands.core: {app_name}")
+        return True
+    except Exception:
+        pass
+
+    # Fallback to AppOpener
+    try:
+        import AppOpener
+        AppOpener.open(app_name)
+        print(f"[TRIGGER DAEMON] Opened via AppOpener: {app_name}")
+        return True
+    except Exception:
+        pass
+
+    # Fallback to os.startfile
+    try:
+        os.startfile(app_name)
+        print(f"[TRIGGER DAEMON] Opened via os.startfile: {app_name}")
+        return True
+    except Exception:
+        pass
+
+    return False
+
 import os
 import sys
 import time
@@ -1102,7 +1184,7 @@ def _fire_notification(name, action_type, app_count, tab_count, app_names):
 
 
 def _exec_open_app(data):
-    """Launch application(s). Supports single or multiple apps."""
+    """Launch application(s). Supports single or multiple apps using robust helper."""
     apps_list  = data.get("apps", [])
     single_app = data.get("app", "")
     if single_app and not apps_list:
@@ -1115,31 +1197,7 @@ def _exec_open_app(data):
     for app_name in apps_list:
         if not app_name:
             continue
-
-        # Method 1: hands.core.open_app
-        try:
-            from hands.core import open_app
-            open_app(app_name)
-            print(f"[TRIGGER DAEMON] Opened: {app_name}")
-            continue
-        except Exception as e:
-            print(f"[TRIGGER DAEMON] hands.core failed for {app_name}: {e}")
-
-        # Method 2: AppOpener
-        try:
-            import AppOpener
-            AppOpener.open(app_name)
-            print(f"[TRIGGER DAEMON] Opened via AppOpener: {app_name}")
-            continue
-        except Exception as e:
-            print(f"[TRIGGER DAEMON] AppOpener failed for {app_name}: {e}")
-
-        # Method 3: os.startfile (no shell, no cmd, no window)
-        try:
-            os.startfile(app_name)
-            print(f"[TRIGGER DAEMON] Opened via os.startfile: {app_name}")
-        except Exception as e:
-            print(f"[TRIGGER DAEMON] os.startfile failed for {app_name}: {e}")
+        _open_app_robust(app_name)
 
 
 def _exec_open_url(data):
@@ -1520,7 +1578,7 @@ def _exec_seven_action(data):
                 try:
                     import threading as _t
                     _t.Thread(
-                        target=open_app,
+                        target=_open_app_robust,
                         args=(app_name,),
                         daemon=True,
                     ).start()
