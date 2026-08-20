@@ -21,9 +21,7 @@ const net  = require('net');
 const isDev = !app.isPackaged;
 
 // ============================================================================
-// SCRIPT ROUTER
-// If SEVEN.exe is launched as a sub-process with a specific script, route it
-// immediately and bypass the main application loop.
+// SCRIPT ROUTER - Must run before any global variables or window declarations
 // ============================================================================
 const _argv = process.argv;
 const _scriptIdx = _argv.indexOf('--');
@@ -48,7 +46,6 @@ let panelWindow   = null;
 let tray          = null;
 let pythonProcess = null;
 let isAppReady    = false;
-let panelHostProcess = null;
 
 let _crashCount    = 0;
 let _lastCrashTime = 0;
@@ -79,13 +76,6 @@ function startPython() {
   if (pythonProcess) {
     console.log('[PYTHON] Already running');
     return;
-  }
-
-  // Kill stale pythonw processes from previous sessions on start
-  if (process.platform === 'win32') {
-    try {
-      execSync('taskkill /F /FI "IMAGENAME eq pythonw.exe" 2>nul', { windowsHide: true });
-    } catch (e) {}
   }
 
   const pythonExe    = getPythonExecutable();
@@ -209,7 +199,7 @@ function waitForBackend() {
 }
 
 // ============================================================================
-// WINDOW ACTIONS
+// WINDOW ACTIONS (Now in the safe, global scope)
 // ============================================================================
 function createMainWindow() {
   if (mainWindow) {
@@ -303,9 +293,6 @@ function createStatusWindow() {
   statusWindow.on('closed', () => { statusWindow = null; });
 }
 
-// ============================================================================
-// TASK PANEL MANAGEMENT
-// ============================================================================
 function openPanelWindow() {
   if (panelWindow && !panelWindow.isDestroyed()) {
     if (panelWindow.isVisible()) {
