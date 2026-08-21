@@ -747,7 +747,13 @@ if (!gotTheLock) {
             pids.forEach(pid => {
               pid = pid.trim();
               if (pid && parseInt(pid) !== process.pid) {
-                try { execSync(`taskkill /pid ${pid} /f /t`, { windowsHide: true, timeout: 3000 }); } catch (e) {}
+                try { 
+                  execSync(`taskkill /pid ${pid} /f /t 2>nul`, { 
+                    windowsHide: true, 
+                    timeout: 3000, 
+                    stdio: 'ignore' 
+                  }); 
+                } catch (e) {}
               }
             });
           } catch (e) {}
