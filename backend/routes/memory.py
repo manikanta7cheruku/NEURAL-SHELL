@@ -275,6 +275,7 @@ def export_memory():
     Includes: facts, conversations, schedules, tasks, triggers, workspaces.
     """
     import sqlite3
+    import json
     import config as cfg
     from memory.core import MEMORY_DIR
 
@@ -294,7 +295,7 @@ def export_memory():
         "usage":         {}
     }
 
-    # ── Facts ──
+    # 1. Facts
     try:
         from memory import seven_memory
         all_facts = seven_memory.user_facts.get()
@@ -308,7 +309,7 @@ def export_memory():
     except Exception as e:
         export["facts_error"] = str(e)
 
-    # ── Conversations ──
+    # 2. Conversations
     try:
         from memory import seven_memory
         all_convos = seven_memory.conversations.get()
@@ -360,17 +361,17 @@ def export_memory():
         except Exception as _se:
             export["conversations_error"] = str(_se)
 
-    # ── Schedules ──
+    # 3. Schedules
     try:
         _appdata = os.environ.get('APPDATA', '')
         _sched_path = os.path.join(_appdata, 'SEVEN', 'schedules.json')
         if os.path.exists(_sched_path):
-            with open(_sched_path) as _f:
+            with open(_sched_path, 'r', encoding='utf-8') as _f:
                 export["schedules"] = json.load(_f) if _f else []
     except Exception as _e:
         export["schedules_error"] = str(_e)
 
-    # ── Tasks (from SQLite) ──
+    # 4. Tasks
     try:
         from backend.routes.tasks import TASKS_DB, _get_conn, _row_to_dict as _task_row
         if os.path.exists(TASKS_DB):
@@ -380,7 +381,7 @@ def export_memory():
     except Exception as _e:
         export["tasks_error"] = str(_e)
 
-    # ── Triggers (from SQLite) ──
+    # 5. Triggers
     try:
         from backend.routes.triggers import TRIGGERS_DB
         if os.path.exists(TRIGGERS_DB):
@@ -400,7 +401,7 @@ def export_memory():
     except Exception as _e:
         export["triggers_error"] = str(_e)
 
-    # ── Workspaces (from SQLite, same DB as triggers) ──
+    # 6. Workspaces
     try:
         from backend.routes.triggers import TRIGGERS_DB
         if os.path.exists(TRIGGERS_DB):
@@ -418,7 +419,7 @@ def export_memory():
     except Exception as _e:
         export["workspaces_error"] = str(_e)
 
-    # ── Usage stats ──
+    # 7. Telemetry / Usage
     try:
         db_path = os.path.join(
             os.environ.get("APPDATA", ""), "SEVEN", "data", "telemetry.db"
@@ -443,13 +444,14 @@ def export_memory():
 
 @router.post("/api/memory/import")
 async def import_memory(request: Request):
-    """Import ALL user data from backup JSON. Bypasses plan limits."""
+    """Import ALL user data from backup JSON with flexible schema matching."""
     try:
         data = await request.json()
-
-        # Wait for memory system to initialize
-        import time as _t
         import uuid
+        import json as _json
+
+        # Ensure memory system is ready
+        import time as _t
         _deadline = _t.time() + 10
         seven_memory = None
         while _t.time() < _deadline:
@@ -461,194 +463,216 @@ async def import_memory(request: Request):
                     break
             except Exception:
                 pass
-            _t.sleep(0.5)
+            _t.sleep(0.3)
 
         imported = {
             "facts": 0, "conversations": 0, "schedules": 0,
             "tasks": 0, "triggers": 0, "workspaces": 0
         }
 
-        # ── Import Facts ──
-        if seven_memory:
-            for fact in data.get("facts", []):
-                if fact.get("text"):
+        # 1. FACTS
+        raw_facts = data.get("facts") or data.get("user_facts") or []
+        if seven_memory and isinstance(raw_facts, list):
+            for item in raw_facts:
+                text = ""
+                cat = "imported"
+                if isinstance(item, str):
+                    text = item.strip()
+                elif isinstance(item, dict):
+                    text = (item.get("text") or item.get("fact") or item.get("document") or "").strip()
+                    cat = item.get("category", "imported")
+                if text:
                     try:
                         seven_memory.user_facts.add(
-                            documents=[fact["text"]],
+                            documents=[text],
                             metadatas=[{
-                                "category":  fact.get("category", "imported"),
+                                "category": cat,
                                 "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                                "user_id":   "default",
-                                "type":      "fact"
+                                "user_id": "default",
+                                "type": "fact"
                             }],
                             ids=[f"fact_import_{uuid.uuid4().hex}"]
                         )
                         imported["facts"] += 1
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        print(f"[IMPORT] Fact import error: {e}")
 
-            # ── Import Conversations ──
-            for conv in data.get("conversations", []):
-                if conv.get("user") and conv.get("seven"):
+        # 2. CONVERSATIONS
+        raw_convos = data.get("conversations") or data.get("history") or []
+        if seven_memory and isinstance(raw_convos, list):
+            for item in raw_convos:
+                user_txt = ""
+                seven_txt = ""
+                if isinstance(item, dict):
+                    user_txt = (item.get("user") or item.get("user_input") or item.get("prompt") or item.get("input") or "").strip()
+                    seven_txt = (item.get("seven") or item.get("seven_response") or item.get("response") or item.get("output") or "").strip()
+                if user_txt and seven_txt:
                     try:
-                        combined = f"User said: {conv['user']} | Seven replied: {conv['seven']}"
+                        combined = f"User said: {user_txt} | Seven replied: {seven_txt}"
                         seven_memory.conversations.add(
                             documents=[combined],
                             metadatas=[{
-                                "user_input":     conv["user"],
-                                "seven_response": conv["seven"],
-                                "timestamp":      datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                                "user_id":        "default",
-                                "type":           "conversation"
+                                "user_input": user_txt,
+                                "seven_response": seven_txt,
+                                "timestamp": item.get("timestamp") or datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                "user_id": item.get("speaker") or "default",
+                                "type": "conversation",
+                                "source": item.get("source") or "import"
                             }],
                             ids=[f"conv_import_{uuid.uuid4().hex}"]
                         )
                         imported["conversations"] += 1
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        print(f"[IMPORT] Convo import error: {e}")
 
-        # ── Import Schedules ──
-        try:
-            schedules_data = data.get("schedules", [])
-            if schedules_data:
-                import json as _json
-                _appdata    = os.environ.get('APPDATA', '')
+        # 3. SCHEDULES
+        raw_scheds = data.get("schedules") or data.get("reminders") or []
+        if isinstance(raw_scheds, list) and raw_scheds:
+            try:
+                _appdata = os.environ.get('APPDATA', '')
                 _sched_path = os.path.join(_appdata, 'SEVEN', 'schedules.json')
-                _existing   = []
+                os.makedirs(os.path.dirname(_sched_path), exist_ok=True)
+                _existing = []
                 if os.path.exists(_sched_path):
-                    with open(_sched_path) as _f:
-                        _existing = _json.load(_f)
+                    try:
+                        with open(_sched_path, 'r', encoding='utf-8') as _f:
+                            _existing = _json.load(_f)
+                    except Exception:
+                        _existing = []
 
-                _existing_ids = {s.get('id') for s in _existing}
+                _existing_ids = {s.get('id') for s in _existing if isinstance(s, dict)}
                 _max_id = max([_id for _id in _existing_ids if isinstance(_id, int)] or [0])
 
-                for sched in schedules_data:
-                    _sched_id = sched.get('id')
-                    if _sched_id in _existing_ids:
+                for item in raw_scheds:
+                    if isinstance(item, dict) and item.get("message"):
                         _max_id += 1
-                        sched['id'] = _max_id
-                    _existing.append(sched)
-                    _existing_ids.add(sched.get('id'))
-                    imported["schedules"] += 1
+                        item["id"] = _max_id
+                        _existing.append(item)
+                        imported["schedules"] += 1
 
-                with open(_sched_path, 'w') as _f:
+                with open(_sched_path, 'w', encoding='utf-8') as _f:
                     _json.dump(_existing, _f, indent=2)
-        except Exception as _se:
-            print(f"[IMPORT] Schedules import failed: {_se}")
+            except Exception as e:
+                print(f"[IMPORT] Schedules error: {e}")
 
-        # ── Import Tasks ──
-        try:
-            tasks_data = data.get("tasks", [])
-            if tasks_data:
-                from backend.routes.tasks import TASKS_DB
+        # 4. TASKS
+        raw_tasks = data.get("tasks") or data.get("todos") or []
+        if isinstance(raw_tasks, list) and raw_tasks:
+            try:
+                from backend.routes.tasks import TASKS_DB, init_db as init_tasks_db
+                init_tasks_db()
                 if os.path.exists(TASKS_DB):
                     conn = sqlite3.connect(TASKS_DB, timeout=10)
                     conn.execute("PRAGMA journal_mode=WAL")
-                    for task in tasks_data:
-                        try:
-                            import json as _json
-                            subtasks_str = _json.dumps(task.get("subtasks", []))
-                            tags_str = ",".join(task.get("tags", [])) if isinstance(task.get("tags"), list) else task.get("tags")
-                            conn.execute(
-                                "INSERT INTO tasks (text, due_date, due_time, priority, "
-                                "completed, created_at, completed_at, tags, description, subtasks) "
-                                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                                (
-                                    task.get("text", ""),
-                                    task.get("due_date"),
-                                    task.get("due_time"),
-                                    task.get("priority", "medium"),
-                                    1 if task.get("completed") else 0,
-                                    task.get("created_at", datetime.datetime.now().isoformat()),
-                                    task.get("completed_at"),
-                                    tags_str,
-                                    task.get("description"),
-                                    subtasks_str
+                    for item in raw_tasks:
+                        if isinstance(item, dict) and item.get("text"):
+                            try:
+                                subtasks_str = _json.dumps(item.get("subtasks") or [])
+                                tags_raw = item.get("tags")
+                                tags_str = ",".join(tags_raw) if isinstance(tags_raw, list) else (tags_raw or "")
+                                conn.execute(
+                                    "INSERT INTO tasks (text, due_date, due_time, priority, "
+                                    "completed, created_at, completed_at, tags, description, subtasks) "
+                                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                                    (
+                                        item.get("text", "").strip(),
+                                        item.get("due_date"),
+                                        item.get("due_time"),
+                                        item.get("priority", "medium"),
+                                        1 if item.get("completed") else 0,
+                                        item.get("created_at") or datetime.datetime.now().isoformat(),
+                                        item.get("completed_at"),
+                                        tags_str,
+                                        item.get("description"),
+                                        subtasks_str
+                                    )
                                 )
-                            )
-                            imported["tasks"] += 1
-                        except Exception:
-                            pass
+                                imported["tasks"] += 1
+                            except Exception as te:
+                                print(f"[IMPORT] Single task error: {te}")
                     conn.commit()
                     conn.close()
-        except Exception as _te:
-            print(f"[IMPORT] Tasks import failed: {_te}")
+            except Exception as e:
+                print(f"[IMPORT] Tasks error: {e}")
 
-        # ── Import Triggers ──
-        try:
-            triggers_data = data.get("triggers", [])
-            if triggers_data:
-                from backend.routes.triggers import TRIGGERS_DB
+        # 5. TRIGGERS
+        raw_trigs = data.get("triggers") or []
+        if isinstance(raw_trigs, list) and raw_trigs:
+            try:
+                from backend.routes.triggers import TRIGGERS_DB, init_db as init_trig_db
+                init_trig_db()
                 if os.path.exists(TRIGGERS_DB):
                     conn = sqlite3.connect(TRIGGERS_DB, timeout=10)
                     conn.execute("PRAGMA journal_mode=WAL")
-                    import json as _json
                     now_iso = datetime.datetime.now().isoformat()
-                    for trig in triggers_data:
-                        try:
-                            conn.execute(
-                                "INSERT INTO triggers (name, action_type, action_data, hotkey, "
-                                "voice_phrase, audio_pattern, enabled, silent, icon, created_at, updated_at) "
-                                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                                (
-                                    trig.get("name", "Imported Trigger"),
-                                    trig.get("action_type", "open_app"),
-                                    _json.dumps(trig.get("action_data", {})),
-                                    trig.get("hotkey"),
-                                    trig.get("voice_phrase"),
-                                    trig.get("audio_pattern"),
-                                    1 if trig.get("enabled", True) else 0,
-                                    1 if trig.get("silent", False) else 0,
-                                    trig.get("icon"),
-                                    now_iso,
-                                    now_iso
+                    for item in raw_trigs:
+                        if isinstance(item, dict) and item.get("name") and item.get("action_type"):
+                            try:
+                                action_data_str = _json.dumps(item.get("action_data") or {})
+                                conn.execute(
+                                    "INSERT INTO triggers (name, action_type, action_data, hotkey, "
+                                    "voice_phrase, audio_pattern, enabled, silent, icon, created_at, updated_at) "
+                                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                                    (
+                                        item.get("name", "").strip(),
+                                        item.get("action_type"),
+                                        action_data_str,
+                                        item.get("hotkey"),
+                                        item.get("voice_phrase"),
+                                        item.get("audio_pattern"),
+                                        1 if item.get("enabled", True) else 0,
+                                        1 if item.get("silent", False) else 0,
+                                        item.get("icon"),
+                                        now_iso,
+                                        now_iso
+                                    )
                                 )
-                            )
-                            imported["triggers"] += 1
-                        except Exception:
-                            pass
+                                imported["triggers"] += 1
+                            except Exception as tre:
+                                print(f"[IMPORT] Single trigger error: {tre}")
                     conn.commit()
                     conn.close()
-                    # Signal daemon to reload
                     try:
                         from backend.routes.triggers import _signal_daemon_reload
                         _signal_daemon_reload()
                     except Exception:
                         pass
-        except Exception as _tre:
-            print(f"[IMPORT] Triggers import failed: {_tre}")
+            except Exception as e:
+                print(f"[IMPORT] Triggers error: {e}")
 
-        # ── Import Workspaces ──
-        try:
-            workspaces_data = data.get("workspaces", [])
-            if workspaces_data:
-                from backend.routes.triggers import TRIGGERS_DB
+        # 6. WORKSPACES
+        raw_ws = data.get("workspaces") or []
+        if isinstance(raw_ws, list) and raw_ws:
+            try:
+                from backend.routes.triggers import TRIGGERS_DB, init_db as init_trig_db
+                init_trig_db()
                 if os.path.exists(TRIGGERS_DB):
                     conn = sqlite3.connect(TRIGGERS_DB, timeout=10)
                     conn.execute("PRAGMA journal_mode=WAL")
-                    import json as _json
                     now_iso = datetime.datetime.now().isoformat()
-                    for ws in workspaces_data:
-                        try:
-                            conn.execute(
-                                "INSERT INTO workspaces (name, description, apps, icon, created_at, updated_at) "
-                                "VALUES (?, ?, ?, ?, ?, ?)",
-                                (
-                                    ws.get("name", "Imported Workspace"),
-                                    ws.get("description"),
-                                    _json.dumps(ws.get("apps", [])),
-                                    ws.get("icon"),
-                                    now_iso,
-                                    now_iso
+                    for item in raw_ws:
+                        if isinstance(item, dict) and item.get("name"):
+                            try:
+                                apps_str = _json.dumps(item.get("apps") or [])
+                                conn.execute(
+                                    "INSERT INTO workspaces (name, description, apps, icon, created_at, updated_at) "
+                                    "VALUES (?, ?, ?, ?, ?, ?)",
+                                    (
+                                        item.get("name", "").strip(),
+                                        item.get("description"),
+                                        apps_str,
+                                        item.get("icon"),
+                                        now_iso,
+                                        now_iso
+                                    )
                                 )
-                            )
-                            imported["workspaces"] += 1
-                        except Exception:
-                            pass
+                                imported["workspaces"] += 1
+                            except Exception as wse:
+                                print(f"[IMPORT] Single workspace error: {wse}")
                     conn.commit()
                     conn.close()
-        except Exception as _we:
-            print(f"[IMPORT] Workspaces import failed: {_we}")
+            except Exception as e:
+                print(f"[IMPORT] Workspaces error: {e}")
 
         total = sum(imported.values())
         return {
@@ -668,6 +692,8 @@ async def import_memory(request: Request):
                        f"{imported['workspaces']} workspaces"
         }
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=400, detail=str(e))
 
 
