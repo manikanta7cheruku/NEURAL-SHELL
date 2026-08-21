@@ -323,24 +323,37 @@ class SevenMemory:
     # -------------------------------------------------------------------------
 
     def _safe_init_client(self, memory_dir):
-        """Create ChromaDB client, reset if corrupted."""
+        """Create ChromaDB client safely, recover if DB or tenant fails."""
         try:
             settings = chromadb.Settings(
                 anonymized_telemetry=False,
                 allow_reset=True,
             )
-            return chromadb.PersistentClient(path=memory_dir, settings=settings)
+            client = chromadb.PersistentClient(path=memory_dir, settings=settings)
+            # Test database connectivity
+            client.heartbeat()
+            return client
         except Exception as e:
-            print(Fore.YELLOW + f"[MEMORY] Client init failed: {e} — resetting...")
+            print(Fore.YELLOW + f"[MEMORY] Client init failed: {e} -- recovering...")
             return self._reset_and_reinit(memory_dir)
 
     def _reset_and_reinit(self, memory_dir):
-        """Backup corrupt DB, create fresh one."""
-        backup = memory_dir + "_backup"
-        if os.path.exists(backup):
-            shutil.rmtree(backup, ignore_errors=True)
+        """
+        Backup corrupt/locked memory DB with a unique timestamped folder name.
+        Handles PermissionError and FileExistsError gracefully.
+        """
+        import datetime
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        backup = f"{memory_dir}_backup_{timestamp}"
+
         if os.path.exists(memory_dir):
-            shutil.move(memory_dir, backup)
+            try:
+                shutil.move(memory_dir, backup)
+                print(Fore.YELLOW + f"[MEMORY] Corrupt DB moved to: {backup}")
+            except Exception as e:
+                print(Fore.YELLOW + f"[MEMORY] Could not move memory dir ({e}) -- using fresh subfolder")
+                memory_dir = os.path.join(os.path.dirname(memory_dir), f"memory_{timestamp}")
+
         os.makedirs(memory_dir, exist_ok=True)
         settings = chromadb.Settings(
             anonymized_telemetry=False,
