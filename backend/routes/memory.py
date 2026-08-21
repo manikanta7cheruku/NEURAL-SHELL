@@ -444,9 +444,13 @@ def export_memory():
 
 @router.post("/api/memory/import")
 async def import_memory(request: Request):
-    """Import ALL user data from backup JSON with flexible schema matching."""
+    """Import ALL user data from backup JSON. Bypasses plan limits."""
     try:
         data = await request.json()
+
+        # Debug logging to inspect keys in uploaded file
+        detected_keys = list(data.keys()) if isinstance(data, dict) else []
+        print(f"[IMPORT] Backup file keys detected: {detected_keys}")
         import uuid
         import json as _json
 
