@@ -271,8 +271,8 @@ def delete_conversation(conv_id: str):
 @router.get("/api/memory/export")
 def export_memory():
     """
-    Export all user data as JSON for backup.
-    Reads directly from SQLite as fallback if ChromaDB not ready.
+    Export ALL user data as JSON for backup.
+    Includes: facts, conversations, schedules, tasks, triggers, workspaces.
     """
     import sqlite3
     import config as cfg
@@ -288,10 +288,13 @@ def export_memory():
         "facts":         [],
         "conversations": [],
         "schedules":     [],
+        "tasks":         [],
+        "triggers":      [],
+        "workspaces":    [],
         "usage":         {}
     }
 
-    # Facts
+    # ── Facts ──
     try:
         from memory import seven_memory
         all_facts = seven_memory.user_facts.get()
@@ -305,7 +308,7 @@ def export_memory():
     except Exception as e:
         export["facts_error"] = str(e)
 
-    # Conversations - try ChromaDB first then SQLite fallback
+    # ── Conversations ──
     try:
         from memory import seven_memory
         all_convos = seven_memory.conversations.get()
@@ -320,7 +323,6 @@ def export_memory():
                         "seven": seven_response
                     })
     except Exception:
-        # ChromaDB not ready - read directly from SQLite
         try:
             import sqlite3 as _sq
             _db = os.path.join(MEMORY_DIR, "chroma.sqlite3")
@@ -358,14 +360,65 @@ def export_memory():
         except Exception as _se:
             export["conversations_error"] = str(_se)
 
-    # Schedules
+    # ── Schedules ──
     try:
-        import hands.scheduler as sched
-        export["schedules"] = sched.get_all_schedules()
+        _appdata = os.environ.get('APPDATA', '')
+        _sched_path = os.path.join(_appdata, 'SEVEN', 'schedules.json')
+        if os.path.exists(_sched_path):
+            with open(_sched_path) as _f:
+                export["schedules"] = json.load(_f) if _f else []
     except Exception as _e:
-        _log.debug(f"Memory operation non-critical: {_e}")
+        export["schedules_error"] = str(_e)
 
-    # Usage stats
+    # ── Tasks (from SQLite) ──
+    try:
+        from backend.routes.tasks import TASKS_DB, _get_conn, _row_to_dict as _task_row
+        if os.path.exists(TASKS_DB):
+            with _get_conn() as conn:
+                rows = conn.execute("SELECT * FROM tasks ORDER BY id ASC").fetchall()
+                export["tasks"] = [_task_row(r) for r in rows]
+    except Exception as _e:
+        export["tasks_error"] = str(_e)
+
+    # ── Triggers (from SQLite) ──
+    try:
+        from backend.routes.triggers import TRIGGERS_DB
+        if os.path.exists(TRIGGERS_DB):
+            conn = sqlite3.connect(TRIGGERS_DB, timeout=5)
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute("SELECT * FROM triggers ORDER BY id ASC").fetchall()
+            for row in rows:
+                d = dict(row)
+                d["enabled"] = bool(d.get("enabled", 1))
+                d["silent"]  = bool(d.get("silent", 0))
+                try:
+                    d["action_data"] = json.loads(d.get("action_data") or "{}")
+                except Exception:
+                    d["action_data"] = {}
+                export["triggers"].append(d)
+            conn.close()
+    except Exception as _e:
+        export["triggers_error"] = str(_e)
+
+    # ── Workspaces (from SQLite, same DB as triggers) ──
+    try:
+        from backend.routes.triggers import TRIGGERS_DB
+        if os.path.exists(TRIGGERS_DB):
+            conn = sqlite3.connect(TRIGGERS_DB, timeout=5)
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute("SELECT * FROM workspaces ORDER BY id ASC").fetchall()
+            for row in rows:
+                d = dict(row)
+                try:
+                    d["apps"] = json.loads(d.get("apps") or "[]")
+                except Exception:
+                    d["apps"] = []
+                export["workspaces"].append(d)
+            conn.close()
+    except Exception as _e:
+        export["workspaces_error"] = str(_e)
+
+    # ── Usage stats ──
     try:
         db_path = os.path.join(
             os.environ.get("APPDATA", ""), "SEVEN", "data", "telemetry.db"
@@ -382,20 +435,21 @@ def export_memory():
                     "last_seen":     row[1]
                 }
             conn.close()
-    except Exception as _e:
-        _log.debug(f"Memory operation non-critical: {_e}")
+    except Exception:
+        pass
 
     return export
 
 
 @router.post("/api/memory/import")
 async def import_memory(request: Request):
-    """Import user data from backup JSON. Bypasses plan limits."""
+    """Import ALL user data from backup JSON. Bypasses plan limits."""
     try:
         data = await request.json()
-        
-        # Memory loads in background thread - wait up to 10s for it to initialize
+
+        # Wait for memory system to initialize
         import time as _t
+        import uuid
         _deadline = _t.time() + 10
         seven_memory = None
         while _t.time() < _deadline:
@@ -409,59 +463,58 @@ async def import_memory(request: Request):
                 pass
             _t.sleep(0.5)
 
-        if not seven_memory:
-            raise HTTPException(status_code=503, detail="Memory system initializing. Try again.")
+        imported = {
+            "facts": 0, "conversations": 0, "schedules": 0,
+            "tasks": 0, "triggers": 0, "workspaces": 0
+        }
 
-        import uuid
-        imported = {"facts": 0, "conversations": 0}
+        # ── Import Facts ──
+        if seven_memory:
+            for fact in data.get("facts", []):
+                if fact.get("text"):
+                    try:
+                        seven_memory.user_facts.add(
+                            documents=[fact["text"]],
+                            metadatas=[{
+                                "category":  fact.get("category", "imported"),
+                                "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                "user_id":   "default",
+                                "type":      "fact"
+                            }],
+                            ids=[f"fact_import_{uuid.uuid4().hex}"]
+                        )
+                        imported["facts"] += 1
+                    except Exception:
+                        pass
 
-        for fact in data.get("facts", []):
-            if fact.get("text"):
-                try:
-                    fact_id = f"fact_import_{uuid.uuid4().hex}"
-                    seven_memory.user_facts.add(
-                        documents=[fact["text"]],
-                        metadatas=[{
-                            "category":  fact.get("category", "imported"),
-                            "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                            "user_id":   "default",
-                            "type":      "fact"
-                        }],
-                        ids=[fact_id]
-                    )
-                    imported["facts"] += 1
-                except Exception:
-                    pass
+            # ── Import Conversations ──
+            for conv in data.get("conversations", []):
+                if conv.get("user") and conv.get("seven"):
+                    try:
+                        combined = f"User said: {conv['user']} | Seven replied: {conv['seven']}"
+                        seven_memory.conversations.add(
+                            documents=[combined],
+                            metadatas=[{
+                                "user_input":     conv["user"],
+                                "seven_response": conv["seven"],
+                                "timestamp":      datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                "user_id":        "default",
+                                "type":           "conversation"
+                            }],
+                            ids=[f"conv_import_{uuid.uuid4().hex}"]
+                        )
+                        imported["conversations"] += 1
+                    except Exception:
+                        pass
 
-        for conv in data.get("conversations", []):
-            if conv.get("user") and conv.get("seven"):
-                try:
-                    conv_id  = f"conv_import_{uuid.uuid4().hex}"
-                    combined = f"User said: {conv['user']} | Seven replied: {conv['seven']}"
-                    seven_memory.conversations.add(
-                        documents=[combined],
-                        metadatas=[{
-                            "user_input":     conv["user"],
-                            "seven_response": conv["seven"],
-                            "timestamp":      datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                            "user_id":        "default",
-                            "type":           "conversation"
-                        }],
-                        ids=[conv_id]
-                    )
-                    imported["conversations"] += 1
-                except Exception:
-                    pass
-
-        # Import schedules
-        imported_schedules = 0
+        # ── Import Schedules ──
         try:
             schedules_data = data.get("schedules", [])
             if schedules_data:
                 import json as _json
-                _appdata     = os.environ.get('APPDATA', '')
-                _sched_path  = os.path.join(_appdata, 'SEVEN', 'schedules.json')
-                _existing    = []
+                _appdata    = os.environ.get('APPDATA', '')
+                _sched_path = os.path.join(_appdata, 'SEVEN', 'schedules.json')
+                _existing   = []
                 if os.path.exists(_sched_path):
                     with open(_sched_path) as _f:
                         _existing = _json.load(_f)
@@ -474,24 +527,145 @@ async def import_memory(request: Request):
                     if _sched_id in _existing_ids:
                         _max_id += 1
                         sched['id'] = _max_id
-                        _existing.append(sched)
-                        imported_schedules += 1
-                    else:
-                        _existing.append(sched)
-                        _existing_ids.add(_sched_id)
-                        imported_schedules += 1
+                    _existing.append(sched)
+                    _existing_ids.add(sched.get('id'))
+                    imported["schedules"] += 1
 
                 with open(_sched_path, 'w') as _f:
                     _json.dump(_existing, _f, indent=2)
         except Exception as _se:
             print(f"[IMPORT] Schedules import failed: {_se}")
 
+        # ── Import Tasks ──
+        try:
+            tasks_data = data.get("tasks", [])
+            if tasks_data:
+                from backend.routes.tasks import TASKS_DB
+                if os.path.exists(TASKS_DB):
+                    conn = sqlite3.connect(TASKS_DB, timeout=10)
+                    conn.execute("PRAGMA journal_mode=WAL")
+                    for task in tasks_data:
+                        try:
+                            import json as _json
+                            subtasks_str = _json.dumps(task.get("subtasks", []))
+                            tags_str = ",".join(task.get("tags", [])) if isinstance(task.get("tags"), list) else task.get("tags")
+                            conn.execute(
+                                "INSERT INTO tasks (text, due_date, due_time, priority, "
+                                "completed, created_at, completed_at, tags, description, subtasks) "
+                                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                                (
+                                    task.get("text", ""),
+                                    task.get("due_date"),
+                                    task.get("due_time"),
+                                    task.get("priority", "medium"),
+                                    1 if task.get("completed") else 0,
+                                    task.get("created_at", datetime.datetime.now().isoformat()),
+                                    task.get("completed_at"),
+                                    tags_str,
+                                    task.get("description"),
+                                    subtasks_str
+                                )
+                            )
+                            imported["tasks"] += 1
+                        except Exception:
+                            pass
+                    conn.commit()
+                    conn.close()
+        except Exception as _te:
+            print(f"[IMPORT] Tasks import failed: {_te}")
+
+        # ── Import Triggers ──
+        try:
+            triggers_data = data.get("triggers", [])
+            if triggers_data:
+                from backend.routes.triggers import TRIGGERS_DB
+                if os.path.exists(TRIGGERS_DB):
+                    conn = sqlite3.connect(TRIGGERS_DB, timeout=10)
+                    conn.execute("PRAGMA journal_mode=WAL")
+                    import json as _json
+                    now_iso = datetime.datetime.now().isoformat()
+                    for trig in triggers_data:
+                        try:
+                            conn.execute(
+                                "INSERT INTO triggers (name, action_type, action_data, hotkey, "
+                                "voice_phrase, audio_pattern, enabled, silent, icon, created_at, updated_at) "
+                                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                                (
+                                    trig.get("name", "Imported Trigger"),
+                                    trig.get("action_type", "open_app"),
+                                    _json.dumps(trig.get("action_data", {})),
+                                    trig.get("hotkey"),
+                                    trig.get("voice_phrase"),
+                                    trig.get("audio_pattern"),
+                                    1 if trig.get("enabled", True) else 0,
+                                    1 if trig.get("silent", False) else 0,
+                                    trig.get("icon"),
+                                    now_iso,
+                                    now_iso
+                                )
+                            )
+                            imported["triggers"] += 1
+                        except Exception:
+                            pass
+                    conn.commit()
+                    conn.close()
+                    # Signal daemon to reload
+                    try:
+                        from backend.routes.triggers import _signal_daemon_reload
+                        _signal_daemon_reload()
+                    except Exception:
+                        pass
+        except Exception as _tre:
+            print(f"[IMPORT] Triggers import failed: {_tre}")
+
+        # ── Import Workspaces ──
+        try:
+            workspaces_data = data.get("workspaces", [])
+            if workspaces_data:
+                from backend.routes.triggers import TRIGGERS_DB
+                if os.path.exists(TRIGGERS_DB):
+                    conn = sqlite3.connect(TRIGGERS_DB, timeout=10)
+                    conn.execute("PRAGMA journal_mode=WAL")
+                    import json as _json
+                    now_iso = datetime.datetime.now().isoformat()
+                    for ws in workspaces_data:
+                        try:
+                            conn.execute(
+                                "INSERT INTO workspaces (name, description, apps, icon, created_at, updated_at) "
+                                "VALUES (?, ?, ?, ?, ?, ?)",
+                                (
+                                    ws.get("name", "Imported Workspace"),
+                                    ws.get("description"),
+                                    _json.dumps(ws.get("apps", [])),
+                                    ws.get("icon"),
+                                    now_iso,
+                                    now_iso
+                                )
+                            )
+                            imported["workspaces"] += 1
+                        except Exception:
+                            pass
+                    conn.commit()
+                    conn.close()
+        except Exception as _we:
+            print(f"[IMPORT] Workspaces import failed: {_we}")
+
+        total = sum(imported.values())
         return {
-            "success":                True,
+            "success": True,
             "imported_facts":         imported["facts"],
             "imported_conversations": imported["conversations"],
-            "imported_schedules":     imported_schedules,
-            "message": f"Imported {imported['facts']} facts, {imported['conversations']} conversations, {imported_schedules} schedules"
+            "imported_schedules":     imported["schedules"],
+            "imported_tasks":         imported["tasks"],
+            "imported_triggers":      imported["triggers"],
+            "imported_workspaces":    imported["workspaces"],
+            "message": f"Imported {total} items: "
+                       f"{imported['facts']} facts, "
+                       f"{imported['conversations']} conversations, "
+                       f"{imported['schedules']} schedules, "
+                       f"{imported['tasks']} tasks, "
+                       f"{imported['triggers']} triggers, "
+                       f"{imported['workspaces']} workspaces"
         }
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
