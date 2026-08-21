@@ -441,6 +441,26 @@ def export_memory():
 
     return export
 
+@router.delete("/api/memory/clear", summary="Clear all facts and conversations",
+               description="Permanently deletes all stored facts and conversation history from ChromaDB and resets brain session state.")
+def clear_all_memory():
+    """Clear all facts, conversations, and reset brain session state."""
+    try:
+        from memory import seven_memory
+        if seven_memory:
+            seven_memory.clear_all()
+
+        try:
+            import brain
+            brain.reset_session()
+        except Exception as _be:
+            _log.debug(f"[API] Brain session reset skipped: {_be}")
+
+        return {"success": True, "message": "All facts and conversations cleared successfully"}
+    except Exception as e:
+        _log.error(f"[API] Clear memory error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.post("/api/memory/import")
 async def import_memory(request: Request):
