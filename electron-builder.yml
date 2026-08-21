@@ -5,6 +5,7 @@
 
 appId: com.sevenlabs.seven
 productName: SEVEN
+executableName: SEVEN
 copyright: "Copyright © 2025 Seven Labs. All rights reserved."
 
 # Disable asar packing - prevents file lock issues during builds
@@ -88,16 +89,20 @@ forceCodeSigning: false
 # ── NSIS ──
 nsis:
   oneClick: false
+  perMachine: false
   allowToChangeInstallationDirectory: true
   allowElevation: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
   shortcutName: SEVEN
-  perMachine: false
   installerIcon: electron/icon.ico
   uninstallerIcon: electron/icon.ico
   installerHeaderIcon: electron/icon.ico
+  installerSidebar: electron/icon.png
   deleteAppDataOnUninstall: false
-  runAfterFinish: false
+  runAfterFinish: true
+  displayLanguageSelector: false
+  include: electron/installer.nsh
+  license: null
 
 # win-unpacked is cleaned automatically by npm run clean before next build
