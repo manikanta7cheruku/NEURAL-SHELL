@@ -446,15 +446,14 @@ def export_memory():
 async def import_memory(request: Request):
     """Import ALL user data from backup JSON. Bypasses plan limits."""
     try:
+        import json
+        import sqlite3
+        import uuid
+        import datetime
+
         data = await request.json()
 
-        # Debug logging to inspect keys in uploaded file
-        detected_keys = list(data.keys()) if isinstance(data, dict) else []
-        print(f"[IMPORT] Backup file keys detected: {detected_keys}")
-        import uuid
-        import json as _json
-
-        # Ensure memory system is ready
+        # Ensure ChromaDB memory system is ready
         import time as _t
         _deadline = _t.time() + 10
         seven_memory = None
@@ -540,7 +539,7 @@ async def import_memory(request: Request):
                 if os.path.exists(_sched_path):
                     try:
                         with open(_sched_path, 'r', encoding='utf-8') as _f:
-                            _existing = _json.load(_f)
+                            _existing = json.load(_f)
                     except Exception:
                         _existing = []
 
@@ -555,7 +554,7 @@ async def import_memory(request: Request):
                         imported["schedules"] += 1
 
                 with open(_sched_path, 'w', encoding='utf-8') as _f:
-                    _json.dump(_existing, _f, indent=2)
+                    json.dump(_existing, _f, indent=2)
             except Exception as e:
                 print(f"[IMPORT] Schedules error: {e}")
 
@@ -571,7 +570,8 @@ async def import_memory(request: Request):
                     for item in raw_tasks:
                         if isinstance(item, dict) and item.get("text"):
                             try:
-                                subtasks_str = _json.dumps(item.get("subtasks") or [])
+                                subtasks_data = item.get("subtasks") or []
+                                subtasks_str = json.dumps(subtasks_data if isinstance(subtasks_data, list) else [])
                                 tags_raw = item.get("tags")
                                 tags_str = ",".join(tags_raw) if isinstance(tags_raw, list) else (tags_raw or "")
                                 conn.execute(
@@ -579,7 +579,7 @@ async def import_memory(request: Request):
                                     "completed, created_at, completed_at, tags, description, subtasks) "
                                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                                     (
-                                        item.get("text", "").strip(),
+                                        str(item.get("text", "")).strip(),
                                         item.get("due_date"),
                                         item.get("due_time"),
                                         item.get("priority", "medium"),
@@ -612,14 +612,15 @@ async def import_memory(request: Request):
                     for item in raw_trigs:
                         if isinstance(item, dict) and item.get("name") and item.get("action_type"):
                             try:
-                                action_data_str = _json.dumps(item.get("action_data") or {})
+                                action_data = item.get("action_data") or {}
+                                action_data_str = json.dumps(action_data if isinstance(action_data, dict) else {})
                                 conn.execute(
                                     "INSERT INTO triggers (name, action_type, action_data, hotkey, "
                                     "voice_phrase, audio_pattern, enabled, silent, icon, created_at, updated_at) "
                                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                                     (
-                                        item.get("name", "").strip(),
-                                        item.get("action_type"),
+                                        str(item.get("name", "")).strip(),
+                                        str(item.get("action_type")),
                                         action_data_str,
                                         item.get("hotkey"),
                                         item.get("voice_phrase"),
@@ -657,12 +658,13 @@ async def import_memory(request: Request):
                     for item in raw_ws:
                         if isinstance(item, dict) and item.get("name"):
                             try:
-                                apps_str = _json.dumps(item.get("apps") or [])
+                                apps_data = item.get("apps") or []
+                                apps_str = json.dumps(apps_data if isinstance(apps_data, list) else [])
                                 conn.execute(
                                     "INSERT INTO workspaces (name, description, apps, icon, created_at, updated_at) "
                                     "VALUES (?, ?, ?, ?, ?, ?)",
                                     (
-                                        item.get("name", "").strip(),
+                                        str(item.get("name", "")).strip(),
                                         item.get("description"),
                                         apps_str,
                                         item.get("icon"),
