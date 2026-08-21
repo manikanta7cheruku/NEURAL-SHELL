@@ -21,11 +21,12 @@ if sys.stderr and hasattr(sys.stderr, 'reconfigure'):
 # Patch at process start before any ML library loads.
 # Silence noisy env vars before any ML library loads
 import os as _os_early
-_os_early.environ.setdefault('TF_CPP_MIN_LOG_LEVEL',    '3')
-_os_early.environ.setdefault('TF_ENABLE_ONEDNN_OPTS',   '0')
-_os_early.environ.setdefault('TRANSFORMERS_VERBOSITY',   'error')
-_os_early.environ.setdefault('TOKENIZERS_PARALLELISM',   'false')
-_os_early.environ.setdefault('PYTORCH_JIT',              '0')
+_os_early.environ.setdefault('TF_CPP_MIN_LOG_LEVEL',             '3')
+_os_early.environ.setdefault('TF_ENABLE_ONEDNN_OPTS',            '0')
+_os_early.environ.setdefault('TRANSFORMERS_VERBOSITY',            'error')
+_os_early.environ.setdefault('TRANSFORMERS_NO_ADVISORY_WARNINGS', '1')
+_os_early.environ.setdefault('TOKENIZERS_PARALLELISM',            'false')
+_os_early.environ.setdefault('PYTORCH_JIT',                       '0')
 
 # Silence noisy loggers before they are imported
 import logging as _early_logging
