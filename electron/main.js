@@ -16,6 +16,13 @@ const fs   = require('node:fs');
 const net  = require('net');
 
 // ============================================================================
+// APP IDENTITY — Must be set before any window creation
+// This controls the name shown in Task Manager, Alt+Tab, and Volume Mixer
+// ============================================================================
+app.setName('SEVEN');
+app.setAppUserModelId('com.sevenlabs.seven');
+
+// ============================================================================
 // ENVIRONMENT DETECTION
 // ============================================================================
 const isDev = !app.isPackaged;
