@@ -464,7 +464,7 @@ def clear_all_memory():
 
 @router.post("/api/memory/import")
 async def import_memory(request: Request):
-    """Import ALL user data from backup JSON. Bypasses plan limits."""
+    """Import ALL user data from backup JSON. Auto-patches DB schema on the fly."""
     try:
         import json
         import sqlite3
@@ -493,7 +493,7 @@ async def import_memory(request: Request):
             "tasks": 0, "triggers": 0, "workspaces": 0
         }
 
-        # 1. FACTS
+        # ── 1. FACTS ──
         raw_facts = data.get("facts") or data.get("user_facts") or []
         if seven_memory and isinstance(raw_facts, list):
             for item in raw_facts:
@@ -520,7 +520,7 @@ async def import_memory(request: Request):
                     except Exception as e:
                         print(f"[IMPORT] Fact import error: {e}")
 
-        # 2. CONVERSATIONS
+        # ── 2. CONVERSATIONS ──
         raw_convos = data.get("conversations") or data.get("history") or []
         if seven_memory and isinstance(raw_convos, list):
             for item in raw_convos:
@@ -548,7 +548,7 @@ async def import_memory(request: Request):
                     except Exception as e:
                         print(f"[IMPORT] Convo import error: {e}")
 
-        # 3. SCHEDULES
+        # ── 3. SCHEDULES ──
         raw_scheds = data.get("schedules") or data.get("reminders") or []
         if isinstance(raw_scheds, list) and raw_scheds:
             try:
@@ -578,7 +578,15 @@ async def import_memory(request: Request):
             except Exception as e:
                 print(f"[IMPORT] Schedules error: {e}")
 
-        # 4. TASKS
+        # Helper to dynamically patch missing schema columns
+        def _ensure_column(conn, table, column, definition):
+            try:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+                print(f"[IMPORT] Patched schema: Added {column} to {table}")
+            except Exception:
+                pass  # Column already exists
+
+        # ── 4. TASKS ──
         raw_tasks = data.get("tasks") or data.get("todos") or []
         if isinstance(raw_tasks, list) and raw_tasks:
             try:
@@ -587,6 +595,12 @@ async def import_memory(request: Request):
                 if os.path.exists(TASKS_DB):
                     conn = sqlite3.connect(TASKS_DB, timeout=10)
                     conn.execute("PRAGMA journal_mode=WAL")
+                    
+                    # Auto-patch missing columns for older databases
+                    _ensure_column(conn, "tasks", "description", "TEXT")
+                    _ensure_column(conn, "tasks", "subtasks", "TEXT DEFAULT '[]'")
+                    _ensure_column(conn, "tasks", "tags", "TEXT")
+
                     for item in raw_tasks:
                         if isinstance(item, dict) and item.get("text"):
                             try:
@@ -619,7 +633,7 @@ async def import_memory(request: Request):
             except Exception as e:
                 print(f"[IMPORT] Tasks error: {e}")
 
-        # 5. TRIGGERS
+        # ── 5. TRIGGERS ──
         raw_trigs = data.get("triggers") or []
         if isinstance(raw_trigs, list) and raw_trigs:
             try:
@@ -628,6 +642,14 @@ async def import_memory(request: Request):
                 if os.path.exists(TRIGGERS_DB):
                     conn = sqlite3.connect(TRIGGERS_DB, timeout=10)
                     conn.execute("PRAGMA journal_mode=WAL")
+                    
+                    # Auto-patch missing columns for older databases
+                    _ensure_column(conn, "triggers", "audio_pattern", "TEXT")
+                    _ensure_column(conn, "triggers", "silent", "INTEGER DEFAULT 0")
+                    _ensure_column(conn, "triggers", "icon", "TEXT")
+                    _ensure_column(conn, "triggers", "last_fired", "TEXT")
+                    _ensure_column(conn, "triggers", "fire_count", "INTEGER DEFAULT 0")
+
                     now_iso = datetime.datetime.now().isoformat()
                     for item in raw_trigs:
                         if isinstance(item, dict) and item.get("name") and item.get("action_type"):
@@ -648,8 +670,8 @@ async def import_memory(request: Request):
                                         1 if item.get("enabled", True) else 0,
                                         1 if item.get("silent", False) else 0,
                                         item.get("icon"),
-                                        now_iso,
-                                        now_iso
+                                        item.get("created_at", now_iso),
+                                        item.get("updated_at", now_iso)
                                     )
                                 )
                                 imported["triggers"] += 1
@@ -665,7 +687,7 @@ async def import_memory(request: Request):
             except Exception as e:
                 print(f"[IMPORT] Triggers error: {e}")
 
-        # 6. WORKSPACES
+        # ── 6. WORKSPACES ──
         raw_ws = data.get("workspaces") or []
         if isinstance(raw_ws, list) and raw_ws:
             try:
@@ -674,6 +696,13 @@ async def import_memory(request: Request):
                 if os.path.exists(TRIGGERS_DB):
                     conn = sqlite3.connect(TRIGGERS_DB, timeout=10)
                     conn.execute("PRAGMA journal_mode=WAL")
+                    
+                    # Auto-patch missing columns for older databases
+                    _ensure_column(conn, "workspaces", "description", "TEXT")
+                    _ensure_column(conn, "workspaces", "icon", "TEXT")
+                    _ensure_column(conn, "workspaces", "last_used", "TEXT")
+                    _ensure_column(conn, "workspaces", "use_count", "INTEGER DEFAULT 0")
+
                     now_iso = datetime.datetime.now().isoformat()
                     for item in raw_ws:
                         if isinstance(item, dict) and item.get("name"):
@@ -688,8 +717,8 @@ async def import_memory(request: Request):
                                         item.get("description"),
                                         apps_str,
                                         item.get("icon"),
-                                        now_iso,
-                                        now_iso
+                                        item.get("created_at", now_iso),
+                                        item.get("updated_at", now_iso)
                                     )
                                 )
                                 imported["workspaces"] += 1
@@ -711,7 +740,7 @@ async def import_memory(request: Request):
             "imported_workspaces":    imported["workspaces"],
             "message": f"Imported {total} items: "
                        f"{imported['facts']} facts, "
-                       f"{imported['conversations']} conversations, "
+                       f"{imported['conversations']} convos, "
                        f"{imported['schedules']} schedules, "
                        f"{imported['tasks']} tasks, "
                        f"{imported['triggers']} triggers, "
