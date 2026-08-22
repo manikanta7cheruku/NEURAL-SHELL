@@ -209,7 +209,7 @@ function ConsolePanel({ tasks, schedules, triggers, mem, speed, hw }) {
   });
 
   const lines = [
-    { label: 'SYS',   value: `Seven v${hw?.version || '1.3.1'} · ${date}`,     dim: false },
+    { label: 'SYS',   value: `Seven v${hw?.version || '1.3.2'} · ${date}`,     dim: false },
     { label: 'TIME',  value: time,                                                dim: false },
     { label: '─────', value: '',                                                  dim: true  },
     { label: 'TASKS', value: `${pendingTasks.length} pending · ${overdueTasks.length} overdue`, dim: pendingTasks.length === 0 },
@@ -518,7 +518,7 @@ export default function Landing() {
         <div className="flex items-center gap-2">
           <div className="w-1 h-1 rounded-full bg-white/15 animate-pulse" />
           <span className="text-[7px] text-white/15 tracking-wider font-mono">
-            Seven v{hw?.version || '1.3.1'}
+            Seven v{hw?.version || '1.3.2'}
           </span>
         </div>
       </div>
