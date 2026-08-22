@@ -65,7 +65,9 @@ const useTriggers = create((set, get) => ({
       return { ok: false, msg: 'Update failed.' };
     } catch (e) {
       const detail = e.response?.data?.detail;
-      return { ok: false, msg: typeof detail === 'string' ? detail : 'Update failed.' };
+      // Extract specific plan limit message if it's an object
+      const msg = (detail && detail.message) ? detail.message : (typeof detail === 'string' ? detail : 'Update failed.');
+      return { ok: false, msg };
     }
   },
 
