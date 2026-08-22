@@ -118,16 +118,24 @@ def _save_conversation(prompt_text, result, speaker_id):
         )
         _source = "voice" if speaker_id not in ("default", "unknown") else "chat"
 
+        # Enforce memory quotas directly to avoid background API context failures
         try:
-            import voice_limits as _vl
             if seven_memory and hasattr(seven_memory, 'conversations'):
                 _current = seven_memory.conversations.count()
-                _allowed, _ = _vl.check("conversation_history", _current)
-                if not _allowed:
-                    print(Fore.YELLOW + f"[BRAIN] Conversation memory full ({_current}) - skipping save")
+                _tier = config.KEY.get("license", {}).get("tier", "free")
+                
+                _limits = {
+                    "free": 7,
+                    "pro": 77,
+                    "ultimate": -1
+                }
+                _max_allowed = _limits.get(_tier, 7)
+
+                if _max_allowed != -1 and _current >= _max_allowed:
+                    print(Fore.YELLOW + f"[BRAIN] Quota reached ({_current}/{_max_allowed}) for tier '{_tier}' - skipping conversation save.")
                     return
-        except Exception:
-            pass
+        except Exception as _q_err:
+            print(Fore.YELLOW + f"[BRAIN] Quota verification bypassed: {_q_err}")
 
         _clean_response = re.sub(r'###\w+:\s*\S+', '', result).strip()
         if not _clean_response:
