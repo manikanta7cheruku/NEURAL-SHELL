@@ -6,7 +6,7 @@ import useConfig from '../stores/useConfig';
 import {
   Brain, MessageSquare, HardDrive, ChevronDown,
   ChevronRight, Trash2, Plus, Search, X,
-  Calendar, Clock, User, Cpu,
+  Calendar, Clock, User, Cpu, AlertCircle
 } from 'lucide-react';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -480,8 +480,27 @@ export default function Memory() {
 
   if (loading) return <Spinner t="Loading memory..." />;
 
+  const _tier = config?.license?.tier || 'free';
+  const _maxConvos = _tier === 'free' ? 7 : _tier === 'pro' ? 77 : -1;
+  const _maxFacts = _tier === 'free' ? 7 : _tier === 'pro' ? 77 : -1;
+
+  const hitConvoLimit = _maxConvos !== -1 && (stats?.total_conversations >= _maxConvos);
+  const hitFactLimit = _maxFacts !== -1 && (stats?.total_facts >= _maxFacts);
+  const showLimitBanner = hitConvoLimit || hitFactLimit;
+
   return (
     <div className="h-full flex flex-col bg-s-bg">
+      {showLimitBanner && (
+        <div className="bg-orange-500/10 border-b border-orange-500/20 px-6 py-2.5 flex items-center justify-between">
+          <div className="flex items-center gap-2 text-orange-400">
+            <AlertCircle size={12} />
+            <span className="text-[11px] font-medium">Memory Quota Reached</span>
+          </div>
+          <span className="text-[10px] text-orange-400/80">
+            You have reached the {_tier.toUpperCase()} plan limit. Upgrade your license to save new memories.
+          </span>
+        </div>
+      )}
 
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-3.5 border-b border-white/8">
