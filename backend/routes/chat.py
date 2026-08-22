@@ -153,28 +153,6 @@ def chat(req: ChatRequest):
                 full_response, req.speaker_id
             )
 
-        # ── SAVE CHAT CONVERSATION TO LONG TERM MEMORY ──
-        try:
-            from memory import seven_memory
-            if seven_memory:
-                _conv_id = f"chat_{uuid.uuid4().hex}"
-                _combined = f"User said: {req.text.strip()} | Seven replied: {clean_response}"
-                seven_memory.conversations.add(
-                    documents=[_combined],
-                    metadatas=[{
-                        "user_input":     req.text.strip(),
-                        "seven_response": clean_response,
-                        "timestamp":      datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        "user_id":        req.speaker_id,
-                        "type":           "conversation",
-                        "source":         "chat"
-                    }],
-                    ids=[_conv_id]
-                )
-                print(f"[MEMORY] Chat turn auto-saved to ChromaDB database: {_conv_id}")
-        except Exception as _ms_err:
-            _log.debug(f"Auto-saving chat conversation to memory failed: {_ms_err}")
-
         # Plan limit check for conversation history
         try:
             from memory import seven_memory

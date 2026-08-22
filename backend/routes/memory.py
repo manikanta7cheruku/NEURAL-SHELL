@@ -303,8 +303,9 @@ def export_memory():
             for i, doc in enumerate(all_facts['documents']):
                 meta = all_facts['metadatas'][i] if all_facts.get('metadatas') else {}
                 export["facts"].append({
-                    "text":     doc,
-                    "category": meta.get("category", "general")
+                    "text":      doc,
+                    "category":  meta.get("category", "general"),
+                    "timestamp": meta.get("timestamp", "")
                 })
     except Exception as e:
         export["facts_error"] = str(e)
@@ -320,8 +321,9 @@ def export_memory():
                 seven_response = meta.get("seven_response", doc)
                 if user_input and seven_response:
                     export["conversations"].append({
-                        "user":  user_input,
-                        "seven": seven_response
+                        "user":      user_input,
+                        "seven":     seven_response,
+                        "timestamp": meta.get("timestamp", "")
                     })
     except Exception:
         try:
@@ -354,8 +356,9 @@ def export_memory():
                             seven_r  = _meta.get("seven_response", "")
                             if user_in and seven_r:
                                 export["conversations"].append({
-                                    "user":  user_in,
-                                    "seven": seven_r
+                                    "user":      user_in,
+                                    "seven":     seven_r,
+                                    "timestamp": _meta.get("timestamp", "")
                                 })
                 _conn.close()
         except Exception as _se:
@@ -509,10 +512,10 @@ async def import_memory(request: Request):
                         seven_memory.user_facts.add(
                             documents=[text],
                             metadatas=[{
-                                "category": cat,
-                                "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                                "user_id": "default",
-                                "type": "fact"
+                                "category":  cat,
+                                "timestamp": item.get("timestamp") or datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                "user_id":   "default",
+                                "type":      "fact"
                             }],
                             ids=[f"fact_import_{uuid.uuid4().hex}"]
                         )
