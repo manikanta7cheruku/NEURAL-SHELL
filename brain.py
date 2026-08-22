@@ -131,6 +131,7 @@ def _save_conversation(prompt_text, result, speaker_id):
                 }
                 _max_allowed = _limits.get(_tier, 7)
 
+                print(Fore.CYAN + f"[BRAIN QUOTA] Current: {_current}/{_max_allowed} | Tier: {_tier}")
                 if _max_allowed != -1 and _current >= _max_allowed:
                     print(Fore.YELLOW + f"[BRAIN] Quota reached ({_current}/{_max_allowed}) for tier '{_tier}' - skipping conversation save.")
                     return
