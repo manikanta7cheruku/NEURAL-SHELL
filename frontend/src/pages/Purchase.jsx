@@ -1,37 +1,9 @@
-import { useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import PageHeader from '../components/PageHeader';
 
-const PAYMENT_PROVIDERS = {
-  razorpay: {
-    name: "UPI / Cards (India)",
-    logo: "🇮🇳",
-    description: "PhonePe, Google Pay, Credit/Debit Cards",
-    color: "from-blue-500/10 to-blue-500/5 border-blue-500/30",
-    recommended: true, // Mark as recommended
-    pro_monthly: "https://razorpay.me/@yourhandle/99",
-    pro_yearly: "https://razorpay.me/@yourhandle/699",
-    pro_lifetime: "https://razorpay.me/@yourhandle/1299",
-    ultimate_monthly: "https://razorpay.me/@yourhandle/199",
-    ultimate_yearly: "https://razorpay.me/@yourhandle/999",
-    ultimate_lifetime: "https://razorpay.me/@yourhandle/1999"
-  },
-  gumroad: {
-    name: "Credit Card (Global)",
-    logo: "💳",
-    description: "Visa, Mastercard, PayPal",
-    color: "from-pink-500/10 to-pink-500/5 border-pink-500/30",
-    pro_monthly: "https://gumroad.com/l/seven-pro-monthly",
-    pro_yearly: "https://gumroad.com/l/seven-pro-yearly",
-    pro_lifetime: "https://gumroad.com/l/seven-pro-lifetime",
-    ultimate_monthly: "https://gumroad.com/l/seven-ultimate-monthly",
-    ultimate_yearly: "https://gumroad.com/l/seven-ultimate-yearly",
-    ultimate_lifetime: "https://gumroad.com/l/seven-ultimate-lifetime"
-  }
-};
-
 const PLANS = [
-  { id: 'pro_monthly', tier: 'Pro', type: 'Monthly', price: '₹99', period: '/month', desc: '77 facts, 17 schedules, advanced window control' },
+  { id: 'pro_monthly', tier: 'Pro', type: 'Monthly', price: '₹99', period: '/month', desc: '77 facts, 20 schedules, 77 triggers' },
   { id: 'pro_yearly', tier: 'Pro', type: 'Yearly', price: '₹699', period: '/year', badge: 'Save ₹489', desc: 'Best value for regular users' },
   { id: 'pro_lifetime', tier: 'Pro', type: 'Lifetime', price: '₹1,299', period: 'one-time', badge: 'Most Popular', desc: 'Pay once, use forever' },
   { id: 'ultimate_monthly', tier: 'Ultimate', type: 'Monthly', price: '₹199', period: '/month', desc: 'Unlimited everything + future features' },
@@ -41,131 +13,83 @@ const PLANS = [
 
 export default function Purchase() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams] = useSearchParams();
-  const preselected = searchParams.get('plan');
-  
-  const [selectedPlan, setSelectedPlan] = useState(
-    location.state?.plan || 'pro_lifetime'
-  );
-  const [email,    setEmail]   = useState('');
-  const [loading,  setLoading] = useState(false);
+  const preselected = location.state?.plan || searchParams.get('plan') || 'pro_lifetime';
 
-  const handlePurchase = async () => {
-    if (!email || !email.includes('@')) {
-      alert('Please enter a valid email to receive your license key');
-      return;
-    }
+  const [selectedPlan, setSelectedPlan] = useState(preselected);
+  const [email, setEmail] = useState('');
+  const [showBetaModal, setShowBetaModal] = useState(false);
+  const [requestSent, setRequestSent] = useState(false);
+  const [requesting, setRequesting] = useState(false);
 
-    setLoading(true);
-
-    try {
-      // Step 1: Create order on your server
-      const orderRes = await fetch(
-        'https://seven-server-u2rp.onrender.com/api/payment/create-order',
-        {
-          method:  'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body:    JSON.stringify({ plan_id: selectedPlan, email }),
-        }
-      );
-
-      if (!orderRes.ok) throw new Error('Failed to create order');
-      const order = await orderRes.json();
-
-      // Step 2: Load Razorpay checkout
-      const options = {
-        key:         order.key_id,
-        amount:      order.amount,
-        currency:    order.currency,
-        order_id:    order.order_id,
-        name:        'Seven AI',
-        description: `${selected?.tier} ${selected?.type} Plan`,
-        prefill: {
-          email: email,
-        },
-        theme: {
-          color: '#6366f1',
-        },
-        handler: async (response) => {
-          // Step 3: Verify payment and get license key
-          try {
-            const verifyRes = await fetch(
-              'https://seven-server-u2rp.onrender.com/api/payment/verify',
-              {
-                method:  'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body:    JSON.stringify({
-                  razorpay_order_id:   response.razorpay_order_id,
-                  razorpay_payment_id: response.razorpay_payment_id,
-                  razorpay_signature:  response.razorpay_signature,
-                  plan_id:             selectedPlan,
-                  email:               email,
-                }),
-              }
-            );
-
-            const result = await verifyRes.json();
-
-            if (result.success) {
-              alert(
-                `Payment successful!\n\nYour license key:\n${result.license_key}\n\n` +
-                `Also sent to: ${email}\n\n` +
-                `Go to Plans page → Activate to use it now.`
-              );
-              navigate('/plans');
-            } else {
-              alert('Payment verified but key generation failed. Contact support.');
-            }
-          } catch (e) {
-            alert('Payment done but verification failed. Contact support@seven.app');
-          }
-        },
-        modal: {
-          ondismiss: () => {
-            setLoading(false);
-          }
-        }
-      };
-
-      // Load Razorpay script dynamically
-      if (!window.Razorpay) {
-        await new Promise((resolve, reject) => {
-          const script    = document.createElement('script');
-          script.src      = 'https://checkout.razorpay.com/v1/checkout.js';
-          script.onload   = resolve;
-          script.onerror  = reject;
-          document.body.appendChild(script);
-        });
-      }
-
-      const rzp = new window.Razorpay(options);
-      rzp.open();
-      setLoading(false);
-
-    } catch (e) {
-      console.error('[PURCHASE]', e);
-      alert('Failed to start payment. Please try again.');
-      setLoading(false);
-    }
-  };
+  useEffect(() => {
+    setSelectedPlan(preselected);
+  }, [preselected]);
 
   const selected = PLANS.find(p => p.id === selectedPlan);
+
+  const handlePurchase = () => {
+    if (!email || !email.includes('@')) {
+      alert('Please enter a valid email');
+      return;
+    }
+    setShowBetaModal(true);
+  };
+
+  const requestBetaAccess = async () => {
+    if (!email || !email.includes('@')) {
+      alert('Enter your email first');
+      return;
+    }
+    setRequesting(true);
+    try {
+      await fetch('https://seven-server-u2rp.onrender.com/api/beta-request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: email,
+          plan: selected?.tier,
+          type: selected?.type,
+          requested_at: new Date().toISOString()
+        })
+      }).catch(() => {});
+      setRequestSent(true);
+    } catch (e) {
+      setRequestSent(true);
+    }
+    setRequesting(false);
+  };
 
   return (
     <div className="h-full flex flex-col">
       <PageHeader 
         title="Purchase Seven" 
-        sub="Get your license key instantly after payment"
+        sub="Beta users receive Ultimate access free of charge"
         right={
           <button onClick={() => navigate('/plans')} className="px-3 py-1.5 border border-s-border bg-s-card text-s-text-3 rounded text-[11px] hover:bg-s-card-h">
             ← Back to Plans
           </button>
         }
       />
-      
+
       <div className="flex-1 overflow-y-auto p-4">
         <div className="max-w-4xl mx-auto space-y-4">
-          
+
+          {/* Beta Notice Banner */}
+          <div className="bg-gradient-to-r from-s-accent/10 to-purple-500/10 border border-s-accent/30 rounded p-4">
+            <div className="flex items-start gap-3">
+              <div className="text-2xl">🎁</div>
+              <div className="flex-1">
+                <div className="text-[13px] font-semibold text-s-accent mb-1">Beta Version - Free Ultimate Access</div>
+                <p className="text-[11px] text-s-text-3 leading-relaxed">
+                  Payments are being finalized. As a beta tester, you can request free Ultimate access with all premium features unlocked. 
+                  Enter your email and click Request Free Access below.
+                </p>
+              </div>
+            </div>
+          </div>
+
           {/* Step 1: Choose Plan */}
           <div className="bg-s-card border border-s-border rounded p-4">
             <div className="text-[10px] text-s-text-4 uppercase tracking-wider font-medium mb-3">Step 1: Choose Your Plan</div>
@@ -209,34 +133,7 @@ export default function Purchase() {
               placeholder="your@email.com"
               className="w-full bg-s-bg border border-s-border rounded px-3 py-2 text-[12px] text-s-text placeholder-s-text-4"
             />
-            <p className="text-[9px] text-s-text-4 mt-2">Your license key will be sent to this email immediately after payment</p>
-          </div>
-
-          {/* Step 3: Payment Method */}
-          <div className="bg-s-card border border-s-border rounded p-4">
-            <div className="text-[10px] text-s-text-4 uppercase tracking-wider font-medium mb-3">Step 3: Choose Payment Method</div>
-            <div className="grid grid-cols-3 gap-3">
-              {Object.entries(PAYMENT_PROVIDERS).map(([key, p]) => (
-  <button
-    key={key}
-    onClick={() => setProvider(key)}
-    className={`p-3 rounded border transition-all ${
-      provider === key 
-        ? `bg-gradient-to-br ${p.color}` 
-        : 'border-s-border bg-s-bg hover:bg-s-card-h'
-    }`}
-  >
-    {p.recommended && (
-      <div className="text-[8px] px-1.5 py-0.5 bg-s-accent/20 text-s-accent rounded mb-1 inline-block">
-        Recommended
-      </div>
-    )}
-    <div className="text-2xl mb-1">{p.logo}</div>
-    <div className="text-[11px] font-medium text-s-text">{p.name}</div>
-    <div className="text-[9px] text-s-text-4 mt-0.5">{p.description}</div>
-  </button>
-))}
-            </div>
+            <p className="text-[9px] text-s-text-4 mt-2">Your license key will be sent to this email</p>
           </div>
 
           {/* Summary & Purchase */}
@@ -246,10 +143,6 @@ export default function Purchase() {
               <div className="flex justify-between text-[11px]">
                 <span className="text-s-text-3">Plan</span>
                 <span className="text-s-text font-medium">{selected?.tier} ({selected?.type})</span>
-              </div>
-              <div className="flex justify-between text-[11px]">
-                <span className="text-s-text-3">Payment Method</span>
-                <span className="text-s-text">{PAYMENT_PROVIDERS[provider].name}</span>
               </div>
               <div className="flex justify-between text-[11px]">
                 <span className="text-s-text-3">Email</span>
@@ -268,7 +161,7 @@ export default function Purchase() {
               Proceed to Payment →
             </button>
             <p className="text-[9px] text-s-text-4 text-center mt-2">
-              Secure checkout via {PAYMENT_PROVIDERS[provider].name} • License key sent instantly
+              Beta users get free Ultimate access • Regular payment coming soon
             </p>
           </div>
 
@@ -277,8 +170,8 @@ export default function Purchase() {
             <div className="text-[10px] text-s-text-4 uppercase tracking-wider font-medium mb-3">Frequently Asked Questions</div>
             <div className="space-y-2">
               {[
-                { q: 'How do I receive my license key?', a: 'Instantly via email after payment (check spam folder)' },
-                { q: 'Can I upgrade later?', a: 'Yes! Email support@seven.app and we\'ll credit your previous payment' },
+                { q: 'How do I receive my license key?', a: 'Instantly via email after activation approval' },
+                { q: 'Can I upgrade later?', a: 'Yes, email support@seven.app and we credit your previous payment' },
                 { q: 'Refund policy?', a: '30-day money-back guarantee, no questions asked' },
                 { q: 'How many devices?', a: 'Pro: 1 device, Ultimate: 3 devices' }
               ].map((faq, i) => (
@@ -292,6 +185,99 @@ export default function Purchase() {
 
         </div>
       </div>
+
+      {/* Beta Access Modal */}
+      {showBetaModal && (
+        <div 
+          className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+          onClick={() => !requestSent && setShowBetaModal(false)}
+        >
+          <div 
+            className="bg-s-card border border-s-accent/30 rounded-lg max-w-md w-full p-6 space-y-4"
+            onClick={e => e.stopPropagation()}
+          >
+            {!requestSent ? (
+              <>
+                <div className="flex items-start gap-3">
+                  <div className="text-3xl">🚀</div>
+                  <div className="flex-1">
+                    <div className="text-[16px] font-semibold text-s-text mb-1">Beta Program Notice</div>
+                    <p className="text-[11px] text-s-text-3 leading-relaxed">
+                      Payment gateways are currently being integrated with our Indian and international partners. 
+                      During this beta period, you can request free Ultimate access.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="bg-s-bg border border-s-border rounded p-3 space-y-2">
+                  <div className="text-[10px] text-s-text-4 uppercase tracking-wider font-medium">What You Get</div>
+                  <div className="space-y-1.5">
+                    {[
+                      'Full Ultimate features unlocked',
+                      'Unlimited memory, tasks, triggers',
+                      'Voice recognition & multi-device',
+                      'Free until stable release',
+                      'Founder badge on official launch'
+                    ].map(feat => (
+                      <div key={feat} className="flex items-center gap-2 text-[11px] text-s-text-2">
+                        <span className="text-s-green">✓</span> {feat}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="bg-s-bg border border-s-border rounded p-2">
+                  <div className="text-[9px] text-s-text-4 uppercase tracking-wider mb-1">Registered Email</div>
+                  <div className="text-[11px] text-s-text font-mono">{email}</div>
+                </div>
+
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setShowBetaModal(false)}
+                    className="flex-1 py-2 border border-s-border bg-s-bg text-s-text-3 rounded text-[11px] font-medium hover:bg-s-card-h"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={requestBetaAccess}
+                    disabled={requesting}
+                    className="flex-1 py-2 bg-s-accent text-white rounded text-[11px] font-medium hover:bg-s-accent/90 disabled:opacity-50"
+                  >
+                    {requesting ? 'Requesting...' : 'Request Free Access'}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="text-center space-y-3">
+                  <div className="text-5xl">✅</div>
+                  <div className="text-[16px] font-semibold text-s-text">Request Received</div>
+                  <p className="text-[11px] text-s-text-3 leading-relaxed">
+                    Thank you for joining our beta. We will send your Ultimate license key to{' '}
+                    <span className="text-s-accent font-mono">{email}</span> within 24 hours.
+                  </p>
+                  <div className="bg-s-bg border border-s-border rounded p-3 text-left space-y-1">
+                    <div className="text-[10px] text-s-text-4 uppercase tracking-wider mb-1">Next Steps</div>
+                    <div className="text-[10px] text-s-text-3">1. Check your email inbox (and spam folder)</div>
+                    <div className="text-[10px] text-s-text-3">2. Copy the license key we send you</div>
+                    <div className="text-[10px] text-s-text-3">3. Go to Plans page → Activate the key</div>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setShowBetaModal(false);
+                      setRequestSent(false);
+                      navigate('/plans');
+                    }}
+                    className="w-full py-2 bg-s-accent text-white rounded text-[11px] font-medium hover:bg-s-accent/90"
+                  >
+                    Back to Plans
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
