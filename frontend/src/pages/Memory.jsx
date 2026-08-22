@@ -491,13 +491,13 @@ export default function Memory() {
   return (
     <div className="h-full flex flex-col bg-s-bg">
       {showLimitBanner && (
-        <div className="bg-orange-500/10 border-b border-orange-500/20 px-6 py-2.5 flex items-center justify-between">
-          <div className="flex items-center gap-2 text-orange-400">
-            <AlertCircle size={12} />
-            <span className="text-[11px] font-medium">Memory Quota Reached</span>
+        <div className="bg-s-accent/10 border-b border-s-accent/20 px-6 py-3 flex items-center justify-between shadow-sm">
+          <div className="flex items-center gap-2 text-s-accent">
+            <AlertCircle size={13} />
+            <span className="text-[12px] font-semibold tracking-wide">Storage Capacity Reached</span>
           </div>
-          <span className="text-[10px] text-orange-400/80">
-            You have reached the {_tier.toUpperCase()} plan limit. Upgrade your license to save new memories.
+          <span className="text-[10.5px] text-s-accent/80 font-medium">
+            You hit the {_tier.toUpperCase()} plan limit. New chats and facts cannot be stored. Upgrade to save more.
           </span>
         </div>
       )}

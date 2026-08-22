@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { Zap } from 'lucide-react';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import PageHeader from '../components/PageHeader';
 
@@ -77,9 +78,11 @@ export default function Purchase() {
         <div className="max-w-4xl mx-auto space-y-4">
 
           {/* Beta Notice Banner */}
-          <div className="bg-gradient-to-r from-s-accent/10 to-purple-500/10 border border-s-accent/30 rounded p-4">
+          <div className="bg-gradient-to-r from-s-accent/10 to-purple-500/10 border border-s-accent/30 rounded p-4 shadow-sm">
             <div className="flex items-start gap-3">
-              <div className="text-2xl">🎁</div>
+              <div className="w-10 h-10 rounded-full bg-s-accent/20 flex items-center justify-center flex-shrink-0 text-s-accent">
+                <Zap size={20} />
+              </div>
               <div className="flex-1">
                 <div className="text-[13px] font-semibold text-s-accent mb-1">Beta Version - Free Ultimate Access</div>
                 <p className="text-[11px] text-s-text-3 leading-relaxed">
@@ -199,7 +202,9 @@ export default function Purchase() {
             {!requestSent ? (
               <>
                 <div className="flex items-start gap-3">
-                  <div className="text-3xl">🚀</div>
+                  <div className="w-10 h-10 rounded-full bg-s-accent/20 flex items-center justify-center flex-shrink-0 text-s-accent">
+                    <Zap size={20} />
+                  </div>
                   <div className="flex-1">
                     <div className="text-[16px] font-semibold text-s-text mb-1">Beta Program Notice</div>
                     <p className="text-[11px] text-s-text-3 leading-relaxed">

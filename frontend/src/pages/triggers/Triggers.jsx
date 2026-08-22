@@ -146,7 +146,29 @@ export default function Triggers() {
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-3.5 border-b border-white/8">
         <div>
-          <h1 className="text-[15px] font-semibold text-white/95 tracking-tight">Triggers</h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-[15px] font-semibold text-white/95 tracking-tight">Triggers</h1>
+            
+            {/* Professional Bulk Toggles */}
+            {tab === 'triggers' && triggers.length > 0 && (
+              <div className="flex items-center gap-1 bg-white/[0.03] border border-white/10 rounded overflow-hidden">
+                <button 
+                  onClick={async () => { await api.post('/triggers/bulk-toggle', { enable: true }); fetchTriggers(); fetchStats(); }}
+                  className="px-2 py-0.5 text-[9px] font-medium text-s-green hover:bg-s-green/10 transition-colors"
+                >
+                  Enable All
+                </button>
+                <div className="w-px h-3 bg-white/10" />
+                <button 
+                  onClick={async () => { await api.post('/triggers/bulk-toggle', { enable: false }); fetchTriggers(); fetchStats(); }}
+                  className="px-2 py-0.5 text-[9px] font-medium text-red-400 hover:bg-red-400/10 transition-colors"
+                >
+                  Disable All
+                </button>
+              </div>
+            )}
+          </div>
+
           <div className="flex items-center gap-3 mt-0.5">
             <span className="text-[9px] text-white/40">{stats.enabled} active</span>
             {stats.hotkey > 0 && (

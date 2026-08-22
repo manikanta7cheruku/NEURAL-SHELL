@@ -329,6 +329,29 @@ def get_active():
         print(Fore.RED + f"[TRIGGERS] active error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.post("/api/triggers/bulk-toggle")
+def bulk_toggle_triggers(data: dict):
+    """Enable or disable all triggers. Respects limits when enabling."""
+    enable_all = data.get("enable", False)
+    try:
+        from backend.api_server import check_limit
+        with _get_conn() as conn:
+            if enable_all:
+                # Check limit first
+                total_triggers = conn.execute("SELECT COUNT(*) FROM triggers").fetchone()[0]
+                limit_check = check_limit("triggers", total_triggers)
+                if not limit_check["allowed"] and total_triggers > limit_check["limit"]:
+                    # Can only enable up to limit
+                    conn.execute(f"UPDATE triggers SET enabled = 1 WHERE id IN (SELECT id FROM triggers LIMIT {limit_check['limit']})")
+                else:
+                    conn.execute("UPDATE triggers SET enabled = 1")
+            else:
+                conn.execute("UPDATE triggers SET enabled = 0")
+            conn.commit()
+            _signal_daemon_reload()
+        return {"success": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/api/triggers")
 def list_triggers(
@@ -506,6 +529,15 @@ def update_trigger(trigger_id: int, body: TriggerUpdate):
                 params.append(body.audio_pattern if body.audio_pattern else None)
 
             if body.enabled is not None:
+                # If turning ON, check plan limits
+                if body.enabled:
+                    from backend.api_server import check_limit, plan_limit_error
+                    active_count = conn.execute("SELECT COUNT(*) FROM triggers WHERE enabled = 1").fetchone()[0]
+                    if not existing["enabled"]: # It was off, turning on
+                        limit_check = check_limit("triggers", active_count)
+                        if not limit_check["allowed"]:
+                            raise plan_limit_error("triggers", limit_check)
+
                 updates.append("enabled = ?")
                 params.append(1 if body.enabled else 0)
 

@@ -433,7 +433,65 @@ def get_ollama_executable():
 
 
 def download_ollama_installer():
-    """Download OllamaSetup.exe with real-time download speed calculation."""
+    """Download OllamaSetup.exe with chunked streaming, MB/s, and ETA calculation."""
+    _set('ollama_install', status='running', progress=0, error=None)
+
+    dest = os.path.join(tempfile.gettempdir(), OLLAMA_INSTALLER_NAME)
+
+    if os.path.exists(dest) and os.path.getsize(dest) > 10_000_000:
+        _set('ollama_install', progress=100, current="Using cached installer")
+        print(f"[BOOTSTRAP] Ollama installer cached: {dest}")
+        return dest
+
+    print("[BOOTSTRAP] Downloading Ollama installer with real-time metrics...")
+    
+    try:
+        import requests
+        response = requests.get(OLLAMA_DOWNLOAD_URL, stream=True, timeout=15)
+        response.raise_for_status()
+        
+        total_size = int(response.headers.get('content-length', 0))
+        downloaded = 0
+        start_time = time.time()
+        
+        with open(dest, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                if chunk:
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    
+                    elapsed = max(time.time() - start_time, 0.001)
+                    speed_bps = downloaded / elapsed
+                    speed_mb_s = round(speed_bps / (1024 * 1024), 2)
+                    
+                    if total_size > 0:
+                        pct = min(int((downloaded / total_size) * 100), 99)
+                        downloaded_mb = round(downloaded / (1024 * 1024), 1)
+                        total_mb = round(total_size / (1024 * 1024), 1)
+                        
+                        # Calculate ETA
+                        bytes_remaining = total_size - downloaded
+                        eta_seconds = bytes_remaining / speed_bps if speed_bps > 0 else 0
+                        eta_str = f"{int(eta_seconds)}s left" if eta_seconds < 60 else f"{int(eta_seconds // 60)}m {int(eta_seconds % 60)}s left"
+                        
+                        _set('ollama_install', progress=pct, current=f"{downloaded_mb}/{total_mb} MB  ·  {speed_mb_s} MB/s  ·  {eta_str}")
+        
+        _set('ollama_install', progress=100, current="Installer download complete")
+        print(f"[BOOTSTRAP] Ollama downloaded successfully to {dest}")
+        return dest
+
+    except Exception as e:
+        err_msg = str(e)
+        friendly = (
+            "Network timeout while downloading Ollama. "
+            "Please install it manually: "
+            "1. Visit ollama.com/download  "
+            "2. Download & Run OllamaSetup.exe  "
+            "3. Restart Seven"
+        )
+        _set('ollama_install', status='error', error=friendly)
+        print(f"[BOOTSTRAP] Ollama download failed: {err_msg}")
+        return None
     _set('ollama_install', status='running', progress=0, error=None)
 
     dest = os.path.join(tempfile.gettempdir(), OLLAMA_INSTALLER_NAME)

@@ -390,8 +390,8 @@ export default function Plans() {
           </div>
 
           {/* Slide-down — current plan features */}
-          {expandedPlan === tier && DETAILED_FEATURES[tier] && (
-            <div className="border-t border-s-border pt-3 space-y-2">
+          <div className={`grid transition-all duration-300 ease-in-out ${expandedPlan === tier ? 'grid-rows-[1fr] opacity-100 mt-3 pt-3 border-t border-s-border' : 'grid-rows-[0fr] opacity-0 mt-0 pt-0 border-t-0'}`}>
+            <div className="overflow-hidden space-y-2">
               <div className="text-[9px] text-s-text-4 uppercase tracking-widest font-medium">
                 Included in your plan
               </div>
@@ -404,7 +404,7 @@ export default function Plans() {
                 ))}
               </div>
             </div>
-          )}
+          </div>
         </div>
 
         {/* ================================================================= */}
@@ -513,11 +513,12 @@ export default function Plans() {
         {/* ================================================================= */}
         {/* FUTURE FEATURES MODAL */}
         {/* ================================================================= */}
-        {showFuture && (
-          <div className="bg-gradient-to-br from-s-accent/5 to-s-accent/10 border border-s-accent/30 rounded p-4">
+        <div className={`grid transition-all duration-400 ease-in-out ${showFuture ? 'grid-rows-[1fr] opacity-100 mt-4' : 'grid-rows-[0fr] opacity-0 mt-0'}`}>
+          <div className="overflow-hidden">
+            <div className="bg-gradient-to-br from-s-accent/5 to-s-accent/10 border border-s-accent/30 rounded p-4">
             <div className="flex items-center justify-between mb-3">
               <div>
-                <div className="text-[13px] font-semibold text-s-accent">🚀 Coming in Phase 2: The Senses</div>
+                <div className="text-[13px] font-semibold text-s-accent">Coming in Phase 2: The Senses</div>
                 <p className="text-[10px] text-s-text-3 mt-1">Screen control, vision, and gesture recognition — Ultimate users get free access</p>
               </div>
               <button onClick={() => setShowFuture(false)} className="text-s-text-4 hover:text-s-text-2 text-lg">✕</button>
@@ -547,7 +548,8 @@ export default function Plans() {
               Close
             </button>
           </div>
-        )}
+         </div>
+        </div>
 
         {/* ================================================================= */}
         {/* ACTIVATION SECTION */}

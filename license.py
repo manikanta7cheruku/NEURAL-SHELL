@@ -41,15 +41,16 @@ DEVICE_ID_FILE = os.path.join(DATA_DIR, "device_id.txt")
 OFFLINE_GRACE_DAYS = 30
 
 # Feature limits by tier
+# -1 means unlimited
 TIER_FEATURES = {
     "free": {
         "conversation_history": 7,
         "facts_limit": 7,
-        "tasks": -1,
+        "tasks": -1,         # Unlimited
         "triggers": 7,
-        "workspaces": 0,
+        "workspaces": -1,    # Unlimited
         "knowledge_files": 1,
-        "schedules": 3,
+        "schedules": 7,
         "web_searches_per_day": 7,
         "url_shortcuts": 3,
         "app_aliases": 3,
@@ -64,11 +65,11 @@ TIER_FEATURES = {
     "pro": {
         "conversation_history": 77,
         "facts_limit": 77,
-        "tasks": -1,
+        "tasks": -1,         # Unlimited
         "triggers": 77,
-        "workspaces": 5,
+        "workspaces": -1,    # Unlimited
         "knowledge_files": 7,
-        "schedules": 20,
+        "schedules": 77,
         "web_searches_per_day": 77,
         "url_shortcuts": 7,
         "app_aliases": 7,

@@ -735,6 +735,15 @@
       updateMouseIgnoreState();
     });
 
+    // Safety Force Shrink: If mouse leaves the panel entirely, force Electron to shrink bounds
+    convPanel.addEventListener('mouseleave', () => {
+       setTimeout(() => {
+           if (!isMouseOverInteractiveArea && !panelVisible) {
+               window.orbAPI?.setOrbExpanded(false);
+           }
+       }, 300);
+    });
+
     // ── Opacity sync from Settings ──
     function applyOpacity(val) {
       const v = parseFloat(val);
