@@ -13,35 +13,36 @@ const FEATURES = {
   free: [
     '7 facts remembered',
     '7 conversations saved',
+    'Unlimited tasks',
+    '7 triggers & hotkeys',
+    '3 schedules',
     '1 knowledge file',
-    '7 schedules',
-    '7 web searches/day',
     '3 URL shortcuts',
     '3 app aliases',
-    '1 custom command',
     'Basic window control'
   ],
   pro: [
     '77 facts remembered',
     '77 conversations saved',
+    'Unlimited tasks',
+    '77 triggers & hotkeys',
+    '20 schedules',
     '7 knowledge files',
-    '17 schedules',
-    '77 web searches/day',
     '7 URL shortcuts',
     '7 app aliases',
-    '7 custom commands',
     'Advanced window control',
     'Memory search'
   ],
   ultimate: [
     'Unlimited everything',
+    'Unlimited tasks & triggers',
     'Voice recognition',
     'Full system control',
     'Recurring schedules',
     'Memory export & backup',
     'Multi-device (3 devices)',
     'Priority support',
-    'All future features ✨'
+    'All future features'
   ]
 };
 
