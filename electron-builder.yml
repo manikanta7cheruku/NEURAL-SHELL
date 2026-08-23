@@ -17,6 +17,9 @@ directories:
   output: dist-electron
   buildResources: electron
 
+# Balance compression size and extraction speed to prevent installer freezing
+compression: normal
+
 # ── Files packed into asar ──
 files:
   - electron/**/*
@@ -52,6 +55,7 @@ extraResources:
       - "web/**/*"
       - "chrome_extension/**/*"
       - "!**/*.pyc"
+      - "!**/*.pyo"
       - "!**/__pycache__/**"
       - "!node_modules/**"
       - "!venv/**"
@@ -73,6 +77,15 @@ extraResources:
     to: "app/python"
     filter:
       - "**/*"
+      - "!**/*.pyc"
+      - "!**/*.pyo"
+      - "!**/*.pdb"
+      - "!**/*.a"
+      - "!**/*.lib"
+      - "!**/__pycache__/**"
+      - "!**/tests/**"
+      - "!**/test/**"
+      - "!**/testing/**"
 
 # ── Windows — x64 only ──
 win:
@@ -104,5 +117,7 @@ nsis:
   displayLanguageSelector: false
   include: electron/installer.nsh
   license: null
+  # Force detailed extraction logs so the user knows it hasn't frozen
+  warningsAsErrors: false
 
 # win-unpacked is cleaned automatically by npm run clean before next build
