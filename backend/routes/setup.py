@@ -175,21 +175,25 @@ async def preview_voice(request: Request):
             _si.wShowWindow = 0
             _cflags = 0x08000000 | 0x00000008 | 0x00000200
 
-        idx = vid if str(vid).isdigit() else "0"
+        idx = int(vid) if str(vid).isdigit() else 0
         with _preview_lock:
             _preview_process = sp.Popen(
                 [_preview_exe, "-c",
                  f"""
 import pyttsx3
-engine = pyttsx3.init()
+import time
+engine = pyttsx3.init('sapi5')
 voices = engine.getProperty('voices')
 idx = {idx}
-if voices and idx < len(voices):
+if voices and 0 <= idx < len(voices):
     engine.setProperty('voice', voices[idx].id)
+    print(f'Using voice: {{voices[idx].name}}')
 engine.setProperty('rate', 165)
 engine.setProperty('volume', 1.0)
 engine.say('{sample_text}')
 engine.runAndWait()
+engine.stop()
+time.sleep(0.1)
 """],
                 stdout=sp.PIPE, stderr=sp.PIPE,
                 startupinfo=_si, creationflags=_cflags,

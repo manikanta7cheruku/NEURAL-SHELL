@@ -301,14 +301,44 @@ def install_packages():
         pkg_start = time.time()
         print(f"[BOOTSTRAP] {label}")
 
-        result = subprocess.run(
+        # Use Popen for real-time streaming so UI never freezes
+        process = subprocess.Popen(
             [python_exe, '-m', 'pip', 'install', pkg,
-             '--quiet', '--no-warn-script-location'],
-            capture_output=True,
+             '--no-warn-script-location', '--disable-pip-version-check',
+             '--progress-bar', 'off'],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
             text=True,
-            timeout=300,
+            bufsize=1,
             creationflags=0x08000000 if platform.system() == 'Windows' else 0
         )
+        
+        # Track download progress for large packages
+        pkg_last_update = time.time()
+        for line in iter(process.stdout.readline, ''):
+            line = line.strip()
+            if not line:
+                continue
+            # Extract MB downloaded from pip output for user feedback
+            if 'Downloading' in line or 'Collecting' in line:
+                _set('packages',
+                     current=f'Installing {pkg_display} — {line[:60]}',
+                     progress=progress)
+                pkg_last_update = time.time()
+            # Heartbeat to prevent UI thinking we're frozen
+            if time.time() - pkg_last_update > 5:
+                _set('packages',
+                     current=f'Installing {pkg_display} — downloading...',
+                     progress=progress)
+                pkg_last_update = time.time()
+        
+        process.wait(timeout=600)
+        result_returncode = process.returncode
+
+        class _R:
+            returncode = result_returncode
+            stderr = ""
+        result = _R()
 
         pkg_elapsed = round(time.time() - pkg_start, 1)
 

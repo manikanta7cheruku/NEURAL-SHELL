@@ -238,13 +238,27 @@ function startPython() {
 
 function stopPython() {
   if (!pythonProcess) return;
-  if (process.platform === 'win32') {
-    spawn('taskkill', ['/pid', pythonProcess.pid.toString(), '/f', '/t'], {
-      windowsHide: true,
-      stdio: 'ignore'
-    });
-  } else {
-    pythonProcess.kill('SIGTERM');
+  try {
+    if (process.platform === 'win32') {
+      // Use full path to taskkill for reliability
+      const taskkillPath = process.env.SystemRoot 
+        ? path.join(process.env.SystemRoot, 'System32', 'taskkill.exe')
+        : 'taskkill.exe';
+      
+      try {
+        require('child_process').execFileSync(taskkillPath, 
+          ['/pid', pythonProcess.pid.toString(), '/f', '/t'], 
+          { windowsHide: true, stdio: 'ignore', timeout: 5000 }
+        );
+      } catch (e) {
+        // Fallback to process.kill
+        try { pythonProcess.kill(); } catch (e2) {}
+      }
+    } else {
+      pythonProcess.kill('SIGTERM');
+    }
+  } catch (e) {
+    console.error('[PYTHON] Stop error:', e.message);
   }
   pythonProcess = null;
 }
