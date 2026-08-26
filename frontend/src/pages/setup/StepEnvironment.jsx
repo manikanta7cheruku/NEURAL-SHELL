@@ -1,6 +1,20 @@
 import { useEffect, useState, useRef } from 'react';
 import useSetup from '../../stores/useSetup';
+
 const API = 'http://127.0.0.1:7777';
+
+const WHAT_HAPPENS = [
+  { num: '01', title: 'Python AI Libraries', desc: 'Installs Faster-Whisper, ChromaDB, and backend dependencies.', size: '2-4 GB' },
+  { num: '02', title: 'Ollama Runtime', desc: 'The core engine required to run Large Language Models locally.', size: '~180 MB' },
+  { num: '03', title: 'System Services', desc: 'Registers background daemons for triggers and schedules.', size: 'Instant' },
+];
+
+const CAPABILITIES = [
+  { title: 'Voice Commands', desc: 'Control your PC and type hands-free.' },
+  { title: 'Persistent Memory', desc: 'Recalls facts across sessions.' },
+  { title: 'Smart Triggers', desc: 'Automate workflows with custom hotkeys.' },
+  { title: '100% Offline', desc: 'Absolute privacy for your data.' },
+];
 
 export default function StepEnvironment() {
   const { next, back } = useSetup();
@@ -11,6 +25,7 @@ export default function StepEnvironment() {
   const [bState, setBState] = useState({});
   const pollRef = useRef(null);
   const logsEndRef = useRef(null);
+  const lastLogRef = useRef('');
 
   useEffect(() => { if (logsEndRef.current) logsEndRef.current.scrollIntoView({ behavior: 'smooth' }); }, [logs]);
 
@@ -19,12 +34,14 @@ export default function StepEnvironment() {
     pollRef.current = setInterval(async () => {
       try {
         const r = await fetch(`${API}/api/bootstrap/status`);
+        if (!r.ok) return;
         const data = await r.json();
         setBState(data);
         
         const currentText = data.packages?.current || data.ollama_install?.current || data.ollama_start?.current || '';
-        if (currentText && (!logs.length || logs[logs.length - 1].text !== currentText)) {
-          setLogs(prev => [...prev.slice(-30), { time: new Date().toLocaleTimeString([], { hour12: false }), text: currentText }]);
+        if (currentText && currentText !== lastLogRef.current) {
+          lastLogRef.current = currentText;
+          setLogs(p => [...p.slice(-40), { time: new Date().toLocaleTimeString([], { hour12: false }), text: currentText }]);
         }
         
         if ((data.packages?.status === 'done' || data.packages?.status === 'skipped') &&
@@ -39,9 +56,7 @@ export default function StepEnvironment() {
 
   useEffect(() => {
     fetch(`${API}/api/bootstrap/check`).then(r => r.json()).then(d => {
-      if (d.packages_installed && d.ollama_installed && d.ollama_running) {
-        setAllDone(true);
-      }
+      if (d.packages_installed && d.ollama_installed && d.ollama_running) setAllDone(true);
       setChecked(true);
     }).catch(() => setChecked(true));
     return () => clearInterval(pollRef.current);
@@ -49,7 +64,6 @@ export default function StepEnvironment() {
 
   const handleStart = async () => {
     setStarted(true);
-    // CRITICAL UX FIX: Tell the user we are verifying immediately.
     setLogs([{ time: new Date().toLocaleTimeString([], { hour12: false }), text: 'Initializing deployment...' }]);
     if (allDone) {
         setLogs(prev => [...prev, { time: new Date().toLocaleTimeString([], { hour12: false }), text: 'Verifying local runtime binaries...' }]);
@@ -59,34 +73,54 @@ export default function StepEnvironment() {
   };
 
   const progress = Math.round(((bState.packages?.progress || 0) + (bState.ollama_install?.progress || 0)) / 2);
+  const errorMsg = bState.packages?.error || bState.ollama_install?.error || bState.ollama_start?.error;
 
   return (
     <div className="max-w-4xl grid grid-cols-5 gap-8">
       <div className="col-span-2 space-y-6">
-        <div className="space-y-2">
-          <div className="text-[10px] text-white/50 tracking-[0.3em] font-medium uppercase">Step 4 of 6</div>
+        <div className="space-y-3">
+          <div className="text-[10px] text-white/40 tracking-[0.3em] font-medium uppercase">Step 4 of 6</div>
           <h2 className="text-[28px] font-bold text-white tracking-tight leading-tight">Environment Deployment</h2>
-          <p className="text-[12px] text-white/50 font-light">Extracting AI models and databases. This ensures offline privacy.</p>
+          <p className="text-[12px] text-white/40 font-light">Installing required Local AI binaries. This one-time process takes 5-10 minutes.</p>
         </div>
-        <div className="space-y-2">
-          <div className="text-[9px] text-white/30 tracking-[0.25em] font-semibold uppercase mb-2">COMPONENTS</div>
-          <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.05]">
-            <div className="text-[12px] font-semibold text-white mb-1">Python AI Runtime</div>
-            <div className="text-[10px] text-white/40 leading-relaxed">Faster-Whisper STT, ChromaDB Vector DB.</div>
-          </div>
-          <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.05]">
-            <div className="text-[12px] font-semibold text-white mb-1">Ollama Engine</div>
-            <div className="text-[10px] text-white/40 leading-relaxed">Local LLM execution runtime.</div>
-          </div>
-        </div>
+        {!started && !allDone && (
+          <>
+            <div className="space-y-2">
+              <div className="text-[9px] text-white/30 tracking-[0.25em] font-semibold uppercase mb-2">COMPONENTS</div>
+              {WHAT_HAPPENS.map(item => (
+                <div key={item.num} className="p-4 rounded-xl bg-[#0e0e11] border border-white/[0.06] flex items-start gap-4">
+                  <div className="text-[11px] font-mono text-white/40 font-bold mt-0.5">{item.num}</div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="text-[13px] font-semibold text-white">{item.title}</div>
+                      <div className="text-[10px] text-white/40 font-mono">{item.size}</div>
+                    </div>
+                    <p className="text-[11px] text-white/50 font-light leading-relaxed">{item.desc}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="space-y-2">
+              <div className="text-[9px] text-white/30 tracking-[0.25em] font-semibold uppercase mb-2">CAPABILITIES</div>
+              <div className="grid grid-cols-2 gap-2">
+                {CAPABILITIES.map(cap => (
+                  <div key={cap.title} className="p-3 rounded-lg bg-white/[0.01] border border-white/[0.04]">
+                    <div className="text-[11px] font-semibold text-white mb-1">{cap.title}</div>
+                    <div className="text-[9px] text-white/30">{cap.desc}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
       </div>
 
       <div className="col-span-3 space-y-4">
         {started && !allDone && (
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-medium text-white/80">Extraction Progress</span>
-              <span className="text-[11px] font-mono text-white">{progress}%</span>
+              <span className="text-[11px] font-medium text-white/60">Extraction Progress</span>
+              <span className="text-[11px] font-mono text-white/80">{progress}%</span>
             </div>
             <div className="h-1 bg-white/[0.1] rounded-full overflow-hidden">
               <div className="h-full bg-white transition-all duration-300" style={{ width: `${progress}%` }} />
@@ -94,13 +128,13 @@ export default function StepEnvironment() {
           </div>
         )}
 
-        <div className="bg-[#09090b] border border-white/[0.08] rounded-xl overflow-hidden flex flex-col h-[320px]">
-          <div className="px-4 py-2.5 border-b border-white/[0.08] flex items-center justify-between bg-white/[0.02]">
-            <div className="text-[10px] font-mono text-white/40 uppercase">deployment.log</div>
+        <div className="bg-[#050505] border border-white/[0.08] rounded-xl overflow-hidden flex flex-col h-[380px]">
+          <div className="px-4 py-3 border-b border-white/[0.08] flex items-center justify-between bg-white/[0.02]">
+            <div className="text-[10px] font-mono text-white/30 uppercase">deployment.log</div>
             <div className="text-[10px] font-mono text-white/30">{logs.length} events</div>
           </div>
-          <div className="flex-1 overflow-y-auto p-4 font-mono text-[11px] bg-black/40 scrollbar-thin">
-            {!started && !allDone && <div className="text-white/30 italic">Awaiting initialization...</div>}
+          <div className="flex-1 overflow-y-auto p-4 font-mono text-[11px] bg-[#030303] scrollbar-thin">
+            {!started && !allDone && <div className="text-white/20 italic">Awaiting initialization...</div>}
             {logs.map((l, i) => (
               <div key={i} className="flex gap-3 py-1">
                 <span className="text-white/30 flex-shrink-0">{l.time}</span>
@@ -111,8 +145,9 @@ export default function StepEnvironment() {
           </div>
         </div>
 
-        {bState.ollama_install?.current?.includes("Administrator") && <div className="p-4 bg-white/10 border border-white/20 rounded-xl text-[11px] text-white font-medium">Windows Permission Prompt Active — Please click YES on the shield icon.</div>}
+        {bState.ollama_install?.current?.includes("Administrator") && <div className="p-4 bg-white/10 border border-white/20 rounded-xl text-[11px] text-white font-medium">Windows Permission Prompt Active — Please click YES.</div>}
         {allDone && <div className="p-4 bg-white/[0.05] border border-white/10 rounded-xl text-[12px] font-medium text-white text-center">Environment configuration successful.</div>}
+        {errorMsg && <div className="p-4 bg-white/[0.05] border border-white/20 rounded-xl text-[11px] text-white font-mono break-all">{errorMsg}</div>}
 
         <div className="flex gap-3 pt-2">
           <button onClick={back} className="px-6 py-3.5 text-[12px] font-medium text-white/50 border border-white/[0.1] rounded-lg hover:bg-white/[0.05]">Back</button>
