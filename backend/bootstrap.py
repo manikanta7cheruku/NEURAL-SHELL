@@ -192,23 +192,53 @@ def _fix_pth_file(python_exe):
 # ============================================================================
 
 def check_packages_installed():
-    """Check if core packages are installed in the correct Python."""
+    """Check if core packages are installed in the correct Python (single subprocess)."""
     python = get_python_executable()
 
-    critical = ['fastapi', 'uvicorn', 'pyttsx3', 'chromadb',
-                'sentence_transformers', 'psutil', 'keyboard', 'pynput']
+    # Ensure ._pth file is correct BEFORE checking — without this,
+    # embedded Python can't see site-packages and returns false negatives
+    # even when every package is already installed.
+    _fix_pth_file(python)
 
-    for pkg in critical:
+    # Single subprocess checks ALL packages at once.
+    # Old code spawned 8 separate Python processes (10-30s on cold start).
+    # This runs in ~1-2s regardless of machine speed.
+    check_script = (
+        "import sys\n"
+        "pkgs = ['fastapi','uvicorn','pyttsx3','chromadb',"
+        "'sentence_transformers','psutil','keyboard','pynput']\n"
+        "missing = []\n"
+        "for p in pkgs:\n"
+        "    try:\n"
+        "        __import__(p)\n"
+        "    except ImportError:\n"
+        "        missing.append(p)\n"
+        "if missing:\n"
+        "    print(','.join(missing))\n"
+        "    sys.exit(1)\n"
+        "print('OK')\n"
+    )
+
+    try:
         result = subprocess.run(
-            [python, '-c', f'import {pkg.replace("-", "_")}'],
+            [python, '-c', check_script],
             capture_output=True,
+            text=True,
+            timeout=15,
             creationflags=0x08000000 if platform.system() == 'Windows' else 0
         )
-        if result.returncode != 0:
-            print(f"[BOOTSTRAP] Missing: {pkg}")
-            return False
-
-    return True
+        if result.returncode == 0:
+            print("[BOOTSTRAP] All critical packages verified.")
+            return True
+        missing = result.stdout.strip()
+        print(f"[BOOTSTRAP] Missing packages: {missing}")
+        return False
+    except subprocess.TimeoutExpired:
+        print("[BOOTSTRAP] Package check timed out after 15s")
+        return False
+    except Exception as e:
+        print(f"[BOOTSTRAP] Package check failed: {e}")
+        return False
 
 
 def install_packages():
