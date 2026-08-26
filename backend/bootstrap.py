@@ -212,159 +212,130 @@ def check_packages_installed():
 
 
 def install_packages():
-    """
-    Install all packages from requirements.txt into the correct Python.
-    Shows real-time progress with package name, count, and speed.
-    """
-    _set('packages', status='running', progress=0,
-         current='Preparing...', error=None)
+    """Install all packages with non-blocking threaded output reading to prevent UI freeze."""
+    import threading as _th
 
+    _set('packages', status='running', progress=0, current='Preparing environment...', error=None)
     python_exe = get_python_executable()
 
-    # Step 0: Fix ._pth file (must happen before pip)
     _fix_pth_file(python_exe)
-
-    # Step 1: Ensure pip exists
     if not _ensure_pip(python_exe):
         return False
 
-    # Step 2: Get requirements
     req_path = get_requirements_path()
     if not req_path:
         _set('packages', status='error', error='requirements.txt not found')
         return False
 
-    # Step 3: Upgrade pip silently
     _set('packages', current='Upgrading pip...', progress=2)
-    subprocess.run(
-        [python_exe, '-m', 'pip', 'install', '--upgrade', 'pip',
-         '--quiet', '--no-warn-script-location'],
-        capture_output=True,
-        creationflags=0x08000000 if platform.system() == 'Windows' else 0
-    )
-    print("[BOOTSTRAP] pip up to date")
+    try:
+        subprocess.run(
+            [python_exe, '-m', 'pip', 'install', '--upgrade', 'pip',
+             '--disable-pip-version-check', '--no-warn-script-location', '--quiet'],
+            capture_output=True, timeout=120,
+            creationflags=0x08000000 if platform.system() == 'Windows' else 0
+        )
+    except Exception:
+        pass
 
-    # Step 4: Read full package list
     with open(req_path, 'r') as f:
-        lines = f.readlines()
-
-    packages = [
-        l.strip() for l in lines
-        if l.strip() and not l.startswith('#') and not l.startswith('-')
-    ]
+        packages = [l.strip() for l in f.readlines() if l.strip() and not l.startswith('#') and not l.startswith('-')]
 
     if not packages:
         _set('packages', status='error', error='No packages in requirements.txt')
         return False
 
-    # Critical packages go first - these must exist before api_server imports
-    critical_runtime_packages = [
-        "python-multipart", "fastapi", "uvicorn[standard]", "websockets",
+    critical_first = [
+        "python-multipart", "fastapi", "uvicorn", "websockets",
         "requests", "colorama", "psutil", "pyttsx3", "pywin32",
         "pycaw", "comtypes", "AppOpener", "ddgs", "SpeechRecognition",
         "pyaudio", "screen-brightness-control", "pyautogui", "keyboard",
         "pynput", "rapidfuzz",
     ]
 
-    # Build install order: critical first, then the rest
     def _pkg_name(p):
         return p.split('==')[0].split('>=')[0].split('[')[0].strip().lower()
 
-    critical_set    = {c.split('[')[0].lower() for c in critical_first}
-    ordered         = [p for p in packages if _pkg_name(p) in critical_set]
-    remaining       = [p for p in packages if _pkg_name(p) not in critical_set]
-    install_order   = ordered + remaining
+    critical_set = {c.split('[')[0].lower() for c in critical_first}
+    ordered = [p for p in packages if _pkg_name(p) in critical_set]
+    remaining = [p for p in packages if _pkg_name(p) not in critical_set]
+    install_order = ordered + remaining
 
-    total    = len(install_order)
-    optional = {'resemblyzer', 'pyaudio', 'screen-brightness-control'}
-
-    print(f"[BOOTSTRAP] Installing {total} packages ({len(ordered)} critical first)")
-    print(f"[BOOTSTRAP] Target: {python_exe}")
-    print("-" * 60)
-
-    failed_optional = []
-    install_start   = time.time()
+    total = len(install_order)
+    optional = {'resemblyzer'}
+    install_start = time.time()
 
     for i, pkg in enumerate(install_order):
         pkg_display = pkg.split('==')[0].split('>=')[0].strip()
         is_optional = any(o in pkg.lower() for o in optional)
-        progress    = int(((i) / total) * 95)  # leave 5% for final step
+        progress    = int(((i) / total) * 95)
 
         label = f"[{i+1}/{total}] {pkg_display}"
         if i < len(ordered):
             label += " (core)"
 
-        _set('packages',
-             current=f'Installing {pkg_display}...',
-             progress=progress)
-
+        _set('packages', current=f'[{i+1}/{total}] Installing {pkg_display}...', progress=progress)
         pkg_start = time.time()
         print(f"[BOOTSTRAP] {label}")
 
-        # Use Popen for real-time streaming so UI never freezes
-        process = subprocess.Popen(
-            [python_exe, '-m', 'pip', 'install', pkg,
-             '--no-warn-script-location', '--disable-pip-version-check',
-             '--progress-bar', 'off'],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-            creationflags=0x08000000 if platform.system() == 'Windows' else 0
-        )
-        
-        # Track download progress for large packages
-        pkg_last_update = time.time()
-        for line in iter(process.stdout.readline, ''):
-            line = line.strip()
-            if not line:
-                continue
-            # Extract MB downloaded from pip output for user feedback
-            if 'Downloading' in line or 'Collecting' in line:
-                _set('packages',
-                     current=f'Installing {pkg_display} — {line[:60]}',
-                     progress=progress)
-                pkg_last_update = time.time()
-            # Heartbeat to prevent UI thinking we're frozen
-            if time.time() - pkg_last_update > 5:
-                _set('packages',
-                     current=f'Installing {pkg_display} — downloading...',
-                     progress=progress)
-                pkg_last_update = time.time()
-        
-        process.wait(timeout=600)
-        result_returncode = process.returncode
+        success = False
+        try:
+            import threading as _th
+            # DEVNULL for stdout prevents Windows pipe buffer deadlock on massive packages
+            process = subprocess.Popen(
+                [python_exe, '-m', 'pip', 'install', pkg,
+                 '--no-warn-script-location', '--disable-pip-version-check',
+                 '--retries', '3', '--timeout', '60', '--progress-bar', 'off'],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True,
+                creationflags=0x08000000 if platform.system() == 'Windows' else 0
+            )
 
-        class _R:
-            returncode = result_returncode
-            stderr = ""
-        result = _R()
+            # Heartbeat thread keeps UI updated and prevents frozen appearance
+            stop_hb = _th.Event()
+            def _heartbeat():
+                dots = 0
+                while not stop_hb.is_set():
+                    dots = (dots + 1) % 4
+                    elapsed = int(time.time() - pkg_start)
+                    _set('packages', current=f'[{i+1}/{total}] Installing {pkg_display}{"." * dots} ({elapsed}s)', progress=progress)
+                    time.sleep(1)
+
+            hb_thread = _th.Thread(target=_heartbeat, daemon=True)
+            hb_thread.start()
+
+            try:
+                stderr_output = process.stderr.read()
+                return_code = process.wait(timeout=600)
+                stop_hb.set()
+                hb_thread.join(timeout=2)
+                success = (return_code == 0)
+            except subprocess.TimeoutExpired:
+                stop_hb.set()
+                process.kill()
+                stderr_output = "Timeout expired"
+
+        except Exception as e:
+            stderr_output = str(e)
 
         pkg_elapsed = round(time.time() - pkg_start, 1)
 
-        if result.returncode == 0:
+        if success:
             print(f"[BOOTSTRAP]   done in {pkg_elapsed}s")
         else:
             if is_optional:
                 failed_optional.append(pkg_display)
                 print(f"[BOOTSTRAP]   optional skipped ({pkg_elapsed}s)")
                 continue
-            err = result.stderr.strip()[-400:] if result.stderr else 'Unknown error'
+            err = stderr_output.strip()[-400:] if stderr_output else 'Unknown error'
             print(f"[BOOTSTRAP]   FAILED: {err}")
             _set('packages', status='error',
                  error=f'{pkg_display} install failed. Check your internet connection.')
             return False
 
     total_elapsed = round(time.time() - install_start, 1)
-
-    if failed_optional:
-        print(f"[BOOTSTRAP] Optional skipped: {', '.join(failed_optional)}")
-
-    print("-" * 60)
-    print(f"[BOOTSTRAP] All packages installed in {total_elapsed}s")
-
-    _set('packages', status='done', progress=100,
-         current=f'All packages ready ({total_elapsed}s)')
+    _set('packages', status='done', progress=100, current=f'All packages ready ({total_elapsed}s)')
     return True
 
 
@@ -463,15 +434,12 @@ def get_ollama_executable():
 
 
 def download_ollama_installer():
-    """Download OllamaSetup.exe with chunked streaming, MB/s, and ETA calculation."""
+    """Download OllamaSetup.exe with unique naming, chunked streaming, and ETA."""
     _set('ollama_install', status='running', progress=0, error=None)
 
-    dest = os.path.join(tempfile.gettempdir(), OLLAMA_INSTALLER_NAME)
-
-    if os.path.exists(dest) and os.path.getsize(dest) > 10_000_000:
-        _set('ollama_install', progress=100, current="Using cached installer")
-        print(f"[BOOTSTRAP] Ollama installer cached: {dest}")
-        return dest
+    # Unique name completely prevents Windows Defender "Sharing Violation" locks from previous failed runs
+    unique_name = f"OllamaSetup_{int(time.time())}.exe"
+    dest = os.path.join(tempfile.gettempdir(), unique_name)
 
     print("[BOOTSTRAP] Downloading Ollama installer with real-time metrics...")
     
@@ -485,7 +453,7 @@ def download_ollama_installer():
         start_time = time.time()
         
         with open(dest, 'wb') as f:
-            for chunk in response.iter_content(chunk_size=8192):
+            for chunk in response.iter_content(chunk_size=65536):
                 if chunk:
                     f.write(chunk)
                     downloaded += len(chunk)
@@ -499,21 +467,27 @@ def download_ollama_installer():
                         downloaded_mb = round(downloaded / (1024 * 1024), 1)
                         total_mb = round(total_size / (1024 * 1024), 1)
                         
-                        # Calculate ETA
                         bytes_remaining = total_size - downloaded
                         eta_seconds = bytes_remaining / speed_bps if speed_bps > 0 else 0
                         eta_str = f"{int(eta_seconds)}s left" if eta_seconds < 60 else f"{int(eta_seconds // 60)}m {int(eta_seconds % 60)}s left"
                         
                         _set('ollama_install', progress=pct, current=f"{downloaded_mb}/{total_mb} MB  ·  {speed_mb_s} MB/s  ·  {eta_str}")
         
-        _set('ollama_install', progress=100, current="Installer download complete")
+        # Corrupted download check (Ollama is ~180MB. Anything under 50MB is corrupted)
+        if os.path.getsize(dest) < 50_000_000:
+            raise Exception("Downloaded file is too small (corrupted).")
+
+        _set('ollama_install', progress=100, current="Awaiting Windows Defender Scan...")
         print(f"[BOOTSTRAP] Ollama downloaded successfully to {dest}")
+        
+        # Wait 2 seconds for Defender to release the file lock
+        time.sleep(2)
         return dest
 
     except Exception as e:
         err_msg = str(e)
         friendly = (
-            "Network timeout while downloading Ollama. "
+            "Network timeout or file corruption. "
             "Please install it manually: "
             "1. Visit ollama.com/download  "
             "2. Download & Run OllamaSetup.exe  "
@@ -522,49 +496,101 @@ def download_ollama_installer():
         _set('ollama_install', status='error', error=friendly)
         print(f"[BOOTSTRAP] Ollama download failed: {err_msg}")
         return None
-    _set('ollama_install', status='running', progress=0, error=None)
 
-    dest = os.path.join(tempfile.gettempdir(), OLLAMA_INSTALLER_NAME)
-
-    if os.path.exists(dest) and os.path.getsize(dest) > 10_000_000:
-        _set('ollama_install', progress=100, current="Using cached installer")
-        print(f"[BOOTSTRAP] Ollama installer cached: {dest}")
-        return dest
-
-    print("[BOOTSTRAP] Downloading Ollama installer with real-time metrics...")
-    _start_time = time.time()
-
+def install_ollama_silent(installer_path):
+    """
+    Run OllamaSetup.exe silently. Uses ShellExecuteW to prompt UAC.
+    """
+    print(f"[BOOTSTRAP] Installing Ollama silently...")
+    _set('ollama_install', current="Waiting for Administrator permission (Please click YES)...")
     try:
-        def _progress(block_num, block_size, total_size):
-            if total_size > 0:
-                downloaded = block_num * block_size
-                pct = min(int((downloaded / total_size) * 100), 99)
-                elapsed = max(time.time() - _start_time, 0.001)
-                speed_mb_s = round((downloaded / (1024 * 1024)) / elapsed, 2)
-                downloaded_mb = round(downloaded / (1024 * 1024), 1)
-                total_mb = round(total_size / (1024 * 1024), 1)
-                _set('ollama_install', progress=pct, current=f"{downloaded_mb}/{total_mb} MB ({speed_mb_s} MB/s)")
+        import ctypes
 
-        urllib.request.urlretrieve(OLLAMA_DOWNLOAD_URL, dest, _progress)
-        _set('ollama_install', progress=100, current="Installer download complete")
-        print(f"[BOOTSTRAP] Ollama downloaded: {dest}")
-        return dest
+        ret = ctypes.windll.shell32.ShellExecuteW(
+            None,       # hwnd
+            "runas",    # verb - requests elevation (Triggers UAC)
+            installer_path,
+            "/S",       # silent install flag
+            None,       # working directory
+            0           # SW_HIDE - no window
+        )
+
+        if ret > 32:
+            print("[BOOTSTRAP] Ollama installer launched with elevation")
+            _set('ollama_install', current="Installing Ollama background services...")
+            deadline = time.time() + 180
+            while time.time() < deadline:
+                if is_ollama_installed():
+                    _set('ollama_install', status='done', progress=100, current="Ollama installed successfully")
+                    print("[BOOTSTRAP] Ollama installed successfully")
+                    return True
+                time.sleep(3)
+                elapsed  = time.time() - (deadline - 180)
+                progress = min(95, int((elapsed / 180) * 100))
+                _set('ollama_install', progress=progress)
+
+            _set('ollama_install', status='error',
+                 error='Ollama installer ran but was not found after 3 minutes. Try installing manually from ollama.com/download')
+            return False
+        else:
+            err_msg = f"User denied UAC or sharing violation (Code {ret})."
+            print(f"[BOOTSTRAP] Ollama install failed: {err_msg}")
+            _set('ollama_install', status='error',
+                 error=f'Permission denied. Please click YES on the Windows prompt, or install manually.')
+            return False
 
     except Exception as e:
-        error_msg = str(e).encode('ascii', errors='replace').decode('ascii')
+        print(f"[BOOTSTRAP] Ollama install exception: {e}")
+        _set('ollama_install', status='error', error=str(e))
+        return False
 
-        # Give user clear instructions
-        friendly = (
-            "Could not download Ollama automatically. "
-            "Please install it manually: "
-            "1. Visit ollama.com/download  "
-            "2. Download OllamaSetup.exe  "
-            "3. Run it  "
-            "4. Then restart Seven setup"
+def install_ollama_silent(installer_path):
+    """
+    Run OllamaSetup.exe silently.
+    Uses ShellExecuteW to prompt UAC (Required by Windows).
+    """
+    print(f"[BOOTSTRAP] Installing Ollama silently...")
+    _set('ollama_install', current="Waiting for Administrator permission (Please click YES)...")
+    try:
+        import ctypes
+
+        ret = ctypes.windll.shell32.ShellExecuteW(
+            None,       # hwnd
+            "runas",    # verb - requests elevation (Triggers UAC)
+            installer_path,
+            "/S",       # silent install flag
+            None,       # working directory
+            0           # SW_HIDE - no window
         )
-        _set('ollama_install', status='error', error=friendly)
-        print(f"[BOOTSTRAP] Ollama download failed: {error_msg}")
-        return None
+
+        if ret > 32:
+            print("[BOOTSTRAP] Ollama installer launched with elevation")
+            _set('ollama_install', current="Installing Ollama background services...")
+            deadline = time.time() + 180
+            while time.time() < deadline:
+                if is_ollama_installed():
+                    _set('ollama_install', status='done', progress=100, current="Ollama installed successfully")
+                    print("[BOOTSTRAP] Ollama installed successfully")
+                    return True
+                time.sleep(3)
+                elapsed  = time.time() - (deadline - 180)
+                progress = min(95, int((elapsed / 180) * 100))
+                _set('ollama_install', progress=progress)
+
+            _set('ollama_install', status='error',
+                 error='Ollama installer ran but was not found after 3 minutes. Try installing manually from ollama.com/download')
+            return False
+        else:
+            err_msg = f"User denied UAC or sharing violation (Code {ret})."
+            print(f"[BOOTSTRAP] Ollama install failed: {err_msg}")
+            _set('ollama_install', status='error',
+                 error=f'Permission denied. Please click YES on the Windows prompt, or install manually.')
+            return False
+
+    except Exception as e:
+        print(f"[BOOTSTRAP] Ollama install exception: {e}")
+        _set('ollama_install', status='error', error=str(e))
+        return False
 
 
 def install_ollama_silent(installer_path):
@@ -712,67 +738,61 @@ def start_ollama():
 # ============================================================================
 
 def pull_model(model_name: str):
-    """Pull an Ollama model with progress tracking."""
+    """Pull an Ollama model using the REST API with ETA and MB/s."""
     _set('model_pull', status='running', model=model_name,
-         progress=0, downloaded_gb=0.0, total_gb=0.0, error=None)
+         progress=0, current="", downloaded_gb=0.0, total_gb=0.0, error=None)
 
-    ollama_exe = get_ollama_executable()
-    print(f"[BOOTSTRAP] Pulling: {model_name}")
+    print(f"[BOOTSTRAP] Pulling model via API: {model_name}")
 
     try:
-        process = subprocess.Popen(
-            [ollama_exe, 'pull', model_name],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            encoding='utf-8',
-            errors='replace',
-            bufsize=1,
-            creationflags=(
-                subprocess.CREATE_NO_WINDOW
-                if platform.system() == 'Windows' else 0
-            )
-        )
-
-        total_bytes     = 0
-        completed_bytes = 0
-
-        for line in process.stdout:
-            line = line.strip()
-            if not line:
-                continue
-
-            try:
-                data   = json.loads(line)
-                status = data.get('status', '')
-
-                if 'total' in data and data['total'] > 0:
-                    total_bytes     = max(total_bytes, data['total'])
-                    completed_bytes = data.get('completed', completed_bytes)
-                    pct             = int((completed_bytes / total_bytes) * 100)
-                    dl_gb           = round(completed_bytes / (1024 ** 3), 2)
-                    total_gb        = round(total_bytes     / (1024 ** 3), 2)
-                    _set('model_pull', progress=pct,
-                         downloaded_gb=dl_gb, total_gb=total_gb)
-
-                elif status == 'success':
-                    _set('model_pull', status='done', progress=100)
-
-            except json.JSONDecodeError:
-                print(f"[BOOTSTRAP] ollama: {line}")
-
-        process.wait()
-
-        if process.returncode == 0:
-            _set('model_pull', status='done', progress=100)
-            print(f"[BOOTSTRAP] Model {model_name} ready.")
-            return True
-        else:
-            _set('model_pull', status='error',
-                 error=f'Pull exited with code {process.returncode}')
-            return False
+        import requests
+        response = requests.post(f"{OLLAMA_HOST}/api/pull", json={"name": model_name}, stream=True, timeout=600)
+        response.raise_for_status()
+        
+        last_update = 0
+        start_time = time.time()
+        
+        for line in response.iter_lines():
+            if line:
+                try:
+                    data = json.loads(line)
+                    
+                    if 'total' in data and data['total'] > 0:
+                        completed = data.get('completed', 0)
+                        total = data['total']
+                        pct = int((completed / total) * 100)
+                        now = time.time()
+                        
+                        if now - last_update > 0.5:
+                            dl_gb = round(completed / (1024 ** 3), 2)
+                            tot_gb = round(total / (1024 ** 3), 2)
+                            
+                            elapsed = max(now - start_time, 0.001)
+                            speed_bps = completed / elapsed
+                            speed_mb_s = round(speed_bps / (1024 * 1024), 2)
+                            
+                            bytes_remaining = total - completed
+                            eta_seconds = bytes_remaining / speed_bps if speed_bps > 0 else 0
+                            eta_str = f"{int(eta_seconds)}s left" if eta_seconds < 60 else f"{int(eta_seconds // 60)}m {int(eta_seconds % 60)}s left"
+                            
+                            current_str = f"{dl_gb}/{tot_gb} GB  ·  {speed_mb_s} MB/s  ·  {eta_str}"
+                            
+                            _set('model_pull', progress=pct, current=current_str, downloaded_gb=dl_gb, total_gb=tot_gb)
+                            last_update = now
+                    elif 'status' in data and not ('total' in data):
+                        # Catch intermediate statuses like 'pulling manifest'
+                        if now - last_update > 0.5:
+                            _set('model_pull', current=data['status'])
+                            last_update = now
+                except Exception:
+                    pass
+                
+        _set('model_pull', status='done', progress=100, current="Pull complete")
+        print(f"[BOOTSTRAP] Model {model_name} pulled successfully.")
+        return True
 
     except Exception as e:
+        print(f"[BOOTSTRAP] Pull failed: {e}")
         _set('model_pull', status='error', error=str(e))
         return False
 
