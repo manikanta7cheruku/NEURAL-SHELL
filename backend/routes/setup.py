@@ -157,13 +157,8 @@ async def preview_voice(request: Request):
             _si.wShowWindow = 0
             _cflags = 0x08000000 | 0x00000008 | 0x00000200
 
-        try:
-            idx = int(vid) if str(vid).isdigit() else 0
-        except Exception:
-            idx = 0
-
         # Safely escape the voice ID for the python script string
-        safe_voice_id = str(voice_id).replace("'", "\\'")
+        safe_voice_id = str(vid).replace("'", "\\'")
         
         script = f"""
 import pyttsx3
@@ -172,7 +167,6 @@ import time
 try:
     engine = pyttsx3.init('sapi5')
     voices = engine.getProperty('voices')
-    # Find exact matching voice ID
     for v in voices:
         if v.id == '{safe_voice_id}':
             engine.setProperty('voice', v.id)
