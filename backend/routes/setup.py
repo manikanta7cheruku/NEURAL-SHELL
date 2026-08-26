@@ -158,7 +158,8 @@ async def preview_voice(request: Request):
             _cflags = 0x08000000 | 0x00000008 | 0x00000200
 
         # Safely escape the voice ID for the python script string
-        safe_voice_id = str(vid).replace("'", "\\'")
+        # Use raw string r'...' to preserve Windows Registry backslashes in PyTTSx3
+        clean_id = str(vid).strip()
         
         script = f"""
 import pyttsx3
@@ -167,11 +168,12 @@ import time
 try:
     engine = pyttsx3.init('sapi5')
     voices = engine.getProperty('voices')
+    target = r'{clean_id}'
     for v in voices:
-        if v.id == '{safe_voice_id}':
+        if v.id.lower() == target.lower() or v.name.lower() == target.lower():
             engine.setProperty('voice', v.id)
             break
-    engine.setProperty('rate', 175)
+    engine.setProperty('rate', 170)
     engine.setProperty('volume', 1.0)
     engine.say('{sample_text}')
     engine.runAndWait()
