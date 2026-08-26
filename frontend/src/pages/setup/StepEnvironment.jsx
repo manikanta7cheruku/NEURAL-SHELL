@@ -57,11 +57,15 @@ export default function StepEnvironment() {
   };
 
   useEffect(() => {
+    // Safety net: force button enabled after 2s even if backend is slow.
+    // The old code blocked the button for 10-30s while 8 Python subprocesses ran.
+    const safetyTimer = setTimeout(() => setChecked(true), 2000);
     fetch(`${API}/api/bootstrap/check`).then(r => r.json()).then(d => {
+      clearTimeout(safetyTimer);
       if (d.packages_installed && d.ollama_installed && d.ollama_running) setAllDone(true);
       setChecked(true);
-    }).catch(() => setChecked(true));
-    return () => clearInterval(pollRef.current);
+    }).catch(() => { clearTimeout(safetyTimer); setChecked(true); });
+    return () => { clearTimeout(safetyTimer); clearInterval(pollRef.current); };
   }, []);
 
   const handleStart = async () => {
@@ -70,7 +74,28 @@ export default function StepEnvironment() {
     try {
       await fetch(`${API}/api/bootstrap/start`, { method: 'POST' });
       startPolling();
-    } catch (e) {}
+    } catch (e) {
+      setLogs(p => [...p, { time: new Date().toLocaleTimeString([], { hour12: false }), text: '⚠ Could not reach backend. Retrying in 3s...' }]);
+      setTimeout(() => handleStart(), 3000);
+    }
+  };
+
+  const handleRetry = async () => {
+    // Reset error state and restart deployment.
+    // Backend skips already-completed steps (packages, ollama) automatically.
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+    setAllDone(false);
+    setBState({});
+    lastLogRef.current = '';
+    setStarted(true);
+    setLogs([{ time: new Date().toLocaleTimeString([], { hour12: false }), text: '🔄 Retrying deployment...' }]);
+    try {
+      await fetch(`${API}/api/bootstrap/start`, { method: 'POST' });
+      startPolling();
+    } catch (e) {
+      setLogs(p => [...p, { time: new Date().toLocaleTimeString([], { hour12: false }), text: '⚠ Backend unreachable. Retrying in 3s...' }]);
+      setTimeout(() => handleRetry(), 3000);
+    }
   };
 
   // STRICT SEQUENTIAL PROGRESS — NEVER JUMPS BACKWARDS
@@ -177,8 +202,11 @@ export default function StepEnvironment() {
         </div>
 
         {errorMsg && (
-          <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl text-[11px] text-red-400 font-mono break-all">
-            {errorMsg}
+          <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl space-y-3">
+            <div className="text-[11px] text-red-400 font-mono break-all">{errorMsg}</div>
+            <button onClick={handleRetry} className="w-full py-2.5 bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 text-red-300 text-[11px] font-semibold rounded-lg transition-all cursor-pointer">
+              🔄 Retry Installation
+            </button>
           </div>
         )}
 
@@ -192,12 +220,12 @@ export default function StepEnvironment() {
           <button onClick={back} className="px-6 py-3.5 text-[12px] font-medium text-white/40 border border-white/[0.1] rounded-lg hover:bg-white/[0.05]">
             Back
           </button>
-          {!started && !allDone && (
-            <button onClick={handleStart} disabled={!checked} className="flex-1 py-3.5 bg-white text-black text-[12px] font-semibold rounded-lg hover:bg-white/90 transition-all">
-              Initialize Deployment
+          {!started && !allDone && !errorMsg && (
+            <button onClick={handleStart} className="flex-1 py-3.5 bg-white text-black text-[12px] font-semibold rounded-lg hover:bg-white/90 transition-all disabled:opacity-40" disabled={!checked}>
+              {checked ? 'Initialize Deployment' : 'Checking environment...'}
             </button>
           )}
-          {started && !allDone && (
+          {started && !allDone && !errorMsg && (
             <button disabled className="flex-1 py-3.5 bg-white/10 text-white/50 text-[12px] font-semibold rounded-lg cursor-not-allowed">
               Deploying...
             </button>
