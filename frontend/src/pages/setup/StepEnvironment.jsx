@@ -1,335 +1,125 @@
 import { useEffect, useState, useRef } from 'react';
 import useSetup from '../../stores/useSetup';
-
 const API = 'http://127.0.0.1:7777';
 
 export default function StepEnvironment() {
   const { next, back } = useSetup();
-
   const [checked, setChecked] = useState(false);
   const [started, setStarted] = useState(false);
   const [allDone, setAllDone] = useState(false);
   const [logs, setLogs] = useState([]);
-  const [bState, setBState] = useState({
-    packages: { status: 'pending', current: '', progress: 0, error: null },
-    ollama_install: { status: 'pending', progress: 0, error: null },
-    ollama_start: { status: 'pending', error: null },
-    overall_ready: false,
-  });
-
+  const [bState, setBState] = useState({});
   const pollRef = useRef(null);
-  const logsRef = useRef(null);
-  const lastLogRef = useRef('');
+  const logsEndRef = useRef(null);
 
-  useEffect(() => {
-    if (logsRef.current) {
-      logsRef.current.scrollTop = logsRef.current.scrollHeight;
-    }
-  }, [logs]);
+  useEffect(() => { if (logsEndRef.current) logsEndRef.current.scrollIntoView({ behavior: 'smooth' }); }, [logs]);
 
   const startPolling = () => {
     if (pollRef.current) return;
     pollRef.current = setInterval(async () => {
       try {
         const r = await fetch(`${API}/api/bootstrap/status`);
-        if (!r.ok) return;
         const data = await r.json();
         setBState(data);
-
-        // Add current status to logs
-        const currentText = data.packages?.current || '';
-        if (currentText && currentText !== lastLogRef.current) {
-          lastLogRef.current = currentText;
-          setLogs(prev => [...prev.slice(-50), {
-            time: new Date().toLocaleTimeString(),
-            text: currentText,
-            type: 'info'
-          }]);
+        
+        const currentText = data.packages?.current || data.ollama_install?.current || data.ollama_start?.current || '';
+        if (currentText && (!logs.length || logs[logs.length - 1].text !== currentText)) {
+          setLogs(prev => [...prev.slice(-30), { time: new Date().toLocaleTimeString([], { hour12: false }), text: currentText }]);
         }
-
-        const pkgDone = data.packages?.status === 'done' || data.packages?.status === 'skipped';
-        const ollamaDone = data.ollama_install?.status === 'done' || data.ollama_install?.status === 'skipped';
-        const startDone = data.ollama_start?.status === 'done';
-
-        if (pkgDone && ollamaDone && startDone) {
+        
+        if ((data.packages?.status === 'done' || data.packages?.status === 'skipped') &&
+            (data.ollama_install?.status === 'done' || data.ollama_install?.status === 'skipped') &&
+            data.ollama_start?.status === 'done') {
           clearInterval(pollRef.current);
-          pollRef.current = null;
           setAllDone(true);
-          setLogs(prev => [...prev, {
-            time: new Date().toLocaleTimeString(),
-            text: 'Environment setup complete',
-            type: 'success'
-          }]);
-        }
-
-        if ([data.packages?.status, data.ollama_install?.status, data.ollama_start?.status].includes('error')) {
-          clearInterval(pollRef.current);
-          pollRef.current = null;
         }
       } catch (e) {}
     }, 500);
   };
 
   useEffect(() => {
-    (async () => {
-      try {
-        const r = await fetch(`${API}/api/bootstrap/check`);
-        const data = await r.json();
-        if (data.packages_installed && data.ollama_installed && data.ollama_running) {
-          setBState({
-            packages: { status: 'skipped', current: 'Already installed', progress: 100, error: null },
-            ollama_install: { status: 'skipped', progress: 100, error: null },
-            ollama_start: { status: 'done', error: null },
-            overall_ready: true,
-          });
-          setAllDone(true);
-        }
-        setChecked(true);
-      } catch (e) {
-        setChecked(true);
+    fetch(`${API}/api/bootstrap/check`).then(r => r.json()).then(d => {
+      if (d.packages_installed && d.ollama_installed && d.ollama_running) {
+        setAllDone(true);
       }
-    })();
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+      setChecked(true);
+    }).catch(() => setChecked(true));
+    return () => clearInterval(pollRef.current);
   }, []);
 
   const handleStart = async () => {
     setStarted(true);
-    setLogs([{ time: new Date().toLocaleTimeString(), text: 'Initializing environment setup...', type: 'info' }]);
-    try {
-      await fetch(`${API}/api/bootstrap/start`, { method: 'POST' });
-      startPolling();
-    } catch (e) {
-      console.error('Bootstrap start failed:', e);
+    // CRITICAL UX FIX: Tell the user we are verifying immediately.
+    setLogs([{ time: new Date().toLocaleTimeString([], { hour12: false }), text: 'Initializing deployment...' }]);
+    if (allDone) {
+        setLogs(prev => [...prev, { time: new Date().toLocaleTimeString([], { hour12: false }), text: 'Verifying local runtime binaries...' }]);
     }
+    fetch(`${API}/api/bootstrap/start`, { method: 'POST' }).catch(()=>{});
+    startPolling();
   };
 
-  const errorStep = 
-    bState.packages?.status === 'error' ? 'packages' :
-    bState.ollama_install?.status === 'error' ? 'ollama_install' :
-    bState.ollama_start?.status === 'error' ? 'ollama_start' : null;
-
-  const errorMessage = bState.packages?.error || bState.ollama_install?.error || bState.ollama_start?.error || '';
-
-  const steps = [
-    { key: 'packages', label: 'Python Environment', desc: 'AI libraries & runtime', state: bState.packages },
-    { key: 'ollama_install', label: 'Ollama Engine', desc: 'Local LLM runtime', state: bState.ollama_install },
-    { key: 'ollama_start', label: 'System Services', desc: 'Background daemons', state: bState.ollama_start },
-  ];
-
-  const totalProgress = Math.round(
-    ((bState.packages?.progress || 0) + 
-     (bState.ollama_install?.progress || 0) + 
-     (bState.ollama_start?.status === 'done' ? 100 : 0)) / 3
-  );
+  const progress = Math.round(((bState.packages?.progress || 0) + (bState.ollama_install?.progress || 0)) / 2);
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="space-y-2">
-        <div className="flex items-center gap-2">
-          <div className="w-1.5 h-1.5 rounded-full bg-s-accent" />
-          <span className="text-[10px] text-s-accent tracking-[0.2em] font-medium">STEP 4 OF 6</span>
-        </div>
-        <h2 className="text-2xl font-bold text-s-text tracking-tight">Environment Setup</h2>
-        <p className="text-xs text-s-text-3 font-light leading-relaxed max-w-md">
-          Installing local AI components. This happens once and takes 2-5 minutes.
-        </p>
-      </div>
-
-      {/* Overall Progress Bar - Apple-style */}
-      {started && !allDone && !errorStep && (
+    <div className="max-w-4xl grid grid-cols-5 gap-8">
+      <div className="col-span-2 space-y-6">
         <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-medium text-s-text-2">Overall Progress</span>
-            <span className="text-[11px] font-mono text-s-accent">{totalProgress}%</span>
+          <div className="text-[10px] text-white/50 tracking-[0.3em] font-medium uppercase">Step 4 of 6</div>
+          <h2 className="text-[28px] font-bold text-white tracking-tight leading-tight">Environment Deployment</h2>
+          <p className="text-[12px] text-white/50 font-light">Extracting AI models and databases. This ensures offline privacy.</p>
+        </div>
+        <div className="space-y-2">
+          <div className="text-[9px] text-white/30 tracking-[0.25em] font-semibold uppercase mb-2">COMPONENTS</div>
+          <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.05]">
+            <div className="text-[12px] font-semibold text-white mb-1">Python AI Runtime</div>
+            <div className="text-[10px] text-white/40 leading-relaxed">Faster-Whisper STT, ChromaDB Vector DB.</div>
           </div>
-          <div className="h-1 bg-s-border rounded-full overflow-hidden">
-            <div 
-              className="h-full bg-gradient-to-r from-s-accent to-s-accent-h rounded-full transition-all duration-500 ease-out"
-              style={{ width: `${totalProgress}%` }}
-            />
+          <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.05]">
+            <div className="text-[12px] font-semibold text-white mb-1">Ollama Engine</div>
+            <div className="text-[10px] text-white/40 leading-relaxed">Local LLM execution runtime.</div>
           </div>
         </div>
-      )}
-
-      {/* Setup Steps - Minimal cards */}
-      <div className="space-y-2">
-        {steps.map(step => {
-          const status = step.state?.status || 'pending';
-          const isDone = status === 'done' || status === 'skipped';
-          const isRunning = status === 'running';
-          const isError = status === 'error';
-
-          return (
-            <div 
-              key={step.key}
-              className={`px-4 py-3 rounded-xl border transition-all duration-300 ${
-                isError ? 'border-red-500/30 bg-red-500/[0.03]' :
-                isDone ? 'border-s-green/20 bg-s-green/[0.02]' :
-                isRunning ? 'border-s-accent/30 bg-s-accent/[0.03]' :
-                'border-s-border bg-s-card'
-              }`}
-            >
-              <div className="flex items-center gap-3">
-                {/* Status indicator */}
-                <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
-                  isError ? 'bg-red-500/10' :
-                  isDone ? 'bg-s-green/10' :
-                  isRunning ? 'bg-s-accent/10' :
-                  'bg-s-surface'
-                }`}>
-                  {isDone && (
-                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                      <path d="M2.5 7L6 10.5L11.5 4" stroke="#22c55e" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                    </svg>
-                  )}
-                  {isRunning && <div className="w-3 h-3 rounded-full border-2 border-s-accent border-t-transparent animate-spin" />}
-                  {isError && (
-                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                      <path d="M3 3L11 11M11 3L3 11" stroke="#ef4444" strokeWidth="2" strokeLinecap="round"/>
-                    </svg>
-                  )}
-                  {status === 'pending' && <div className="w-2 h-2 rounded-full bg-s-text-4/40" />}
-                </div>
-
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between">
-                    <p className="text-[12px] font-medium text-s-text">{step.label}</p>
-                    {isRunning && step.state?.progress > 0 && (
-                      <span className="text-[10px] font-mono text-s-accent">{step.state.progress}%</span>
-                    )}
-                  </div>
-                  <p className="text-[10px] text-s-text-4 font-light mt-0.5 truncate">
-                    {isRunning && step.state?.current ? step.state.current : step.desc}
-                  </p>
-                  {isRunning && step.state?.progress > 0 && (
-                    <div className="mt-2 h-0.5 bg-s-border rounded-full overflow-hidden">
-                      <div 
-                        className="h-full bg-s-accent rounded-full transition-all duration-500"
-                        style={{ width: `${step.state.progress}%` }}
-                      />
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          );
-        })}
       </div>
 
-      {/* Live Terminal Log */}
-      {started && !errorStep && (
-        <div className="rounded-xl border border-s-border bg-s-card overflow-hidden">
-          <div className="px-4 py-2.5 border-b border-s-border flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div className="flex gap-1">
-                <div className="w-2 h-2 rounded-full bg-red-500/60" />
-                <div className="w-2 h-2 rounded-full bg-yellow-500/60" />
-                <div className="w-2 h-2 rounded-full bg-green-500/60" />
-              </div>
-              <span className="text-[10px] text-s-text-4 font-mono ml-2">install.log</span>
+      <div className="col-span-3 space-y-4">
+        {started && !allDone && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-medium text-white/80">Extraction Progress</span>
+              <span className="text-[11px] font-mono text-white">{progress}%</span>
             </div>
-            <span className="text-[9px] text-s-text-4 font-mono">{logs.length} events</span>
+            <div className="h-1 bg-white/[0.1] rounded-full overflow-hidden">
+              <div className="h-full bg-white transition-all duration-300" style={{ width: `${progress}%` }} />
+            </div>
           </div>
-          <div 
-            ref={logsRef}
-            className="max-h-40 overflow-y-auto p-3 bg-black/20 font-mono text-[10px] scrollbar-thin scrollbar-thumb-s-border scrollbar-track-transparent"
-          >
-            {logs.length === 0 ? (
-              <div className="text-s-text-4">Waiting for output...</div>
-            ) : (
-              logs.map((log, i) => (
-                <div key={i} className="flex gap-2 py-0.5">
-                  <span className="text-s-text-4">{log.time}</span>
-                  <span className={
-                    log.type === 'success' ? 'text-s-green' :
-                    log.type === 'error' ? 'text-red-400' :
-                    'text-s-text-3'
-                  }>
-                    {log.text}
-                  </span>
-                </div>
-              ))
-            )}
+        )}
+
+        <div className="bg-[#09090b] border border-white/[0.08] rounded-xl overflow-hidden flex flex-col h-[320px]">
+          <div className="px-4 py-2.5 border-b border-white/[0.08] flex items-center justify-between bg-white/[0.02]">
+            <div className="text-[10px] font-mono text-white/40 uppercase">deployment.log</div>
+            <div className="text-[10px] font-mono text-white/30">{logs.length} events</div>
+          </div>
+          <div className="flex-1 overflow-y-auto p-4 font-mono text-[11px] bg-black/40 scrollbar-thin">
+            {!started && !allDone && <div className="text-white/30 italic">Awaiting initialization...</div>}
+            {logs.map((l, i) => (
+              <div key={i} className="flex gap-3 py-1">
+                <span className="text-white/30 flex-shrink-0">{l.time}</span>
+                <span className="text-white/70">{l.text}</span>
+              </div>
+            ))}
+            <div ref={logsEndRef} />
           </div>
         </div>
-      )}
 
-      {/* Error panel */}
-      {errorStep && (
-        <div className="px-4 py-3 rounded-xl bg-red-500/[0.05] border border-red-500/20 space-y-2">
-          <p className="text-xs text-red-400 font-medium">Setup encountered an error</p>
-          <p className="text-[11px] text-red-400/70 font-mono break-all">{errorMessage}</p>
-          <p className="text-[10px] text-s-text-4">
-            Check your internet connection. If the issue persists, install Ollama manually from ollama.com/download
-          </p>
+        {bState.ollama_install?.current?.includes("Administrator") && <div className="p-4 bg-white/10 border border-white/20 rounded-xl text-[11px] text-white font-medium">Windows Permission Prompt Active — Please click YES on the shield icon.</div>}
+        {allDone && <div className="p-4 bg-white/[0.05] border border-white/10 rounded-xl text-[12px] font-medium text-white text-center">Environment configuration successful.</div>}
+
+        <div className="flex gap-3 pt-2">
+          <button onClick={back} className="px-6 py-3.5 text-[12px] font-medium text-white/50 border border-white/[0.1] rounded-lg hover:bg-white/[0.05]">Back</button>
+          {!started && !allDone && <button onClick={handleStart} disabled={!checked} className="flex-1 py-3.5 bg-white text-black text-[12px] font-semibold rounded-lg hover:bg-white/90">Initialize Deployment</button>}
+          {started && !allDone && <button disabled className="flex-1 py-3.5 bg-white/10 text-white/50 text-[12px] font-semibold rounded-lg">Deploying...</button>}
+          {allDone && <button onClick={next} className="flex-1 py-3.5 bg-white text-black text-[12px] font-semibold rounded-lg hover:bg-white/90">Continue</button>}
         </div>
-      )}
-
-      {/* Success message */}
-      {allDone && (
-        <div className="px-4 py-3 rounded-xl bg-s-green/[0.05] border border-s-green/20 flex items-center gap-3">
-          <div className="w-8 h-8 rounded-full bg-s-green/10 flex items-center justify-center">
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-              <path d="M2.5 7L6 10.5L11.5 4" stroke="#22c55e" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
-          </div>
-          <div>
-            <p className="text-[12px] font-medium text-s-green">Environment ready</p>
-            <p className="text-[10px] text-s-text-4">All components installed successfully</p>
-          </div>
-        </div>
-      )}
-
-      {/* Actions - Back button ALWAYS enabled */}
-      <div className="flex gap-3 pt-2">
-        <button
-          onClick={back}
-          className="group px-5 py-3 rounded-xl text-sm text-s-text-3 border border-s-border hover:border-s-border-l hover:text-s-text transition-all flex items-center gap-2"
-        >
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-            <path d="M9 3L5 7L9 11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-          </svg>
-          Back
-        </button>
-
-        {!started && !allDone && (
-          <button
-            onClick={handleStart}
-            disabled={!checked}
-            className="group flex-1 py-3 rounded-xl bg-s-accent hover:bg-s-accent-h text-white text-sm font-medium tracking-wide transition-all disabled:opacity-30 flex items-center justify-center gap-2"
-          >
-            {!checked ? 'Checking...' : 'Begin Installation'}
-          </button>
-        )}
-
-        {started && !allDone && !errorStep && (
-          <div className="flex-1 py-3 rounded-xl bg-s-card border border-s-border flex items-center justify-center gap-3">
-            <div className="w-2 h-2 rounded-full bg-s-accent animate-pulse" />
-            <span className="text-sm text-s-text-3">Installing...</span>
-          </div>
-        )}
-
-        {errorStep && (
-          <button
-            onClick={handleStart}
-            className="flex-1 py-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm font-medium hover:bg-red-500/20 transition-all"
-          >
-            Retry Installation
-          </button>
-        )}
-
-        {allDone && (
-          <button
-            onClick={next}
-            className="group flex-1 py-3 rounded-xl bg-s-accent hover:bg-s-accent-h text-white text-sm font-medium tracking-wide transition-all flex items-center justify-center gap-2"
-          >
-            Continue to AI Model
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-              <path d="M5 3L9 7L5 11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
-          </button>
-        )}
       </div>
     </div>
   );
