@@ -76,40 +76,41 @@ def complete_setup(req: SetupCompleteRequest):
     if not success:
         raise HTTPException(status_code=500, detail="Failed to save configuration")
 
+    # Force Registration to Render Backend
+    # Force Registration/Update to Render Backend
     try:
+        import requests
         import telemetry
-        telemetry.save_email(email)
-    except Exception as e:
-        print(f"[SETUP] Email save warning: {e}")
-
-    try:
-        import server_sync
-        import license as license_module
-        device_id = license_module.get_device_id()
-        server_sync.register_device(
-            device_id=device_id,
-            email=email,
-            name=name,
-            referral_code=req.referral_code or None
+        device_id = telemetry.get_device_id()
+        
+        # 1. Register or update the device record
+        resp = requests.post(
+            "https://seven-server-a825.onrender.com/api/register",
+            json={
+                "device_id": device_id,
+                "email": email,
+                "name": name,
+                "country": "Unknown",
+                "referral_code": req.referral_code.strip() if req.referral_code else None
+            },
+            timeout=10
         )
+        
+        # 2. If the API returned a conflict (already registered), we explicitly update the profile
+        if resp.status_code == 409 or resp.status_code == 200:
+            requests.post(
+                "https://seven-server-a825.onrender.com/api/device/update",
+                json={
+                    "device_id": device_id,
+                    "email": email,
+                    "name": name
+                },
+                timeout=10
+            )
+            
+        print(f"[SETUP] Render backend sync successful for {email}")
     except Exception as e:
-        print(f"[SETUP] Server sync warning: {e}")
-
-    if req.referral_code and req.referral_code.strip():
-        try:
-            import server_sync
-            import telemetry as tel
-            device_id = tel.get_device_id()
-            server_sync._post("/api/register", {
-                "device_id":     device_id,
-                "email":         email,
-                "name":          name,
-                "country":       None,
-                "referral_code": req.referral_code.strip()
-            })
-            print(f"[SETUP] Referral code registered: {req.referral_code}")
-        except Exception as e:
-            print(f"[SETUP] Referral register warning: {e}")
+        print(f"[SETUP] Render backend sync failed (non-fatal): {e}")
 
     return {"success": True, "message": f"Welcome to Seven, {name}."}
 
@@ -146,28 +147,9 @@ async def preview_voice(request: Request):
         global _preview_process
         import subprocess as sp, sys as _sys
 
-        here     = os.path.dirname(os.path.abspath(__file__))
-        root     = os.path.dirname(os.path.dirname(here))
-        app_path = os.environ.get("SEVEN_APP_PATH", "")
-
-        speaker_candidates = [
-            os.path.join(app_path, "mouth", "speaker.py"),
-            os.path.join(root,     "mouth", "speaker.py"),
-        ]
-        speaker_path = next((c for c in speaker_candidates if os.path.exists(c)), None)
-        if not speaker_path:
-            print("[PREVIEW] speaker.py not found")
-            return
-
-        # Use pythonw.exe instead of python.exe — prevents a console
-        # window from flashing on screen every time a preview plays.
-        _preview_exe = _sys.executable
-        if _sys.platform == 'win32':
-            _pw = _preview_exe.replace('python.exe', 'pythonw.exe')
-            if os.path.exists(_pw):
-                _preview_exe = _pw
-
-        _si     = None
+        _preview_exe = _sys.executable.replace('python.exe', 'pythonw.exe') if _sys.platform == 'win32' else _sys.executable
+        
+        _si = None
         _cflags = 0
         if _sys.platform == 'win32':
             _si = sp.STARTUPINFO()
@@ -175,28 +157,40 @@ async def preview_voice(request: Request):
             _si.wShowWindow = 0
             _cflags = 0x08000000 | 0x00000008 | 0x00000200
 
-        idx = int(vid) if str(vid).isdigit() else 0
+        try:
+            idx = int(vid) if str(vid).isdigit() else 0
+        except Exception:
+            idx = 0
+
+        # Safely escape the voice ID for the python script string
+        safe_voice_id = str(voice_id).replace("'", "\\'")
+        
+        script = f"""
+import pyttsx3
+import sys
+import time
+try:
+    engine = pyttsx3.init('sapi5')
+    voices = engine.getProperty('voices')
+    # Find exact matching voice ID
+    for v in voices:
+        if v.id == '{safe_voice_id}':
+            engine.setProperty('voice', v.id)
+            break
+    engine.setProperty('rate', 175)
+    engine.setProperty('volume', 1.0)
+    engine.say('{sample_text}')
+    engine.runAndWait()
+    engine.stop()
+    time.sleep(0.2)
+except Exception as e:
+    sys.exit(1)
+"""
         with _preview_lock:
             _preview_process = sp.Popen(
-                [_preview_exe, "-c",
-                 f"""
-import pyttsx3
-import time
-engine = pyttsx3.init('sapi5')
-voices = engine.getProperty('voices')
-idx = {idx}
-if voices and 0 <= idx < len(voices):
-    engine.setProperty('voice', voices[idx].id)
-    print(f'Using voice: {{voices[idx].name}}')
-engine.setProperty('rate', 165)
-engine.setProperty('volume', 1.0)
-engine.say('{sample_text}')
-engine.runAndWait()
-engine.stop()
-time.sleep(0.1)
-"""],
+                [_preview_exe, "-c", script],
                 stdout=sp.PIPE, stderr=sp.PIPE,
-                startupinfo=_si, creationflags=_cflags,
+                startupinfo=_si, creationflags=_cflags
             )
             proc = _preview_process
         proc.wait(timeout=15)
@@ -302,6 +296,7 @@ def get_available_voices():
         {"engine": "piper", "voice_id": "en_IN-maya-medium", "name": "Maya",  "gender": "Female", "language": "Indian English",   "quality": "Natural", "flag": "🇮🇳"},
     ]
 
+    # Load Piper Voices
     try:
         app_path = os.environ.get("SEVEN_APP_PATH", "")
         here     = os.path.dirname(os.path.abspath(__file__))
@@ -328,28 +323,31 @@ def get_available_voices():
     except Exception as e:
         print(f"[VOICES] Piper scan error: {e}")
 
+    # Load SAPI Voices
     try:
         import pyttsx3
-        engine      = pyttsx3.init()
-        sapi_voices = engine.getProperty('voices')
+        engine = pyttsx3.init('sapi5')
+        voices = engine.getProperty('voices')
         engine.stop()
-        female_names = ["zira", "hazel", "helena", "linda", "susan",
-                        "eva", "aria", "jenny", "michelle", "emma"]
-        for i, v in enumerate(sapi_voices or []):
-            raw    = v.name or f"Voice {i}"
-            clean  = raw.replace("Microsoft ", "").split(" Desktop")[0].split(" -")[0].strip()
-            gender = "Female" if any(n in clean.lower() for n in female_names) else "Male"
-            lang   = "English"
-            if "(" in raw and ")" in raw:
-                lang = raw.split("(")[-1].split(")")[0].strip()
+        
+        start_idx = len(result)
+        for i, v in enumerate(voices or []):
+            raw = v.name or f"Voice {i}"
+            clean = raw.replace("Microsoft ", "").split(" Desktop")[0].split(" -")[0].strip()
+            gender = "Female" if any(n in clean.lower() for n in ["zira", "hazel", "helena", "jenny", "aria"]) else "Male"
             result.append({
-                "index": len(result), "engine": "sapi", "voice_id": str(i),
-                "name": clean, "gender": gender, "language": lang,
-                "quality": "Standard", "flag": "🪟", "installed": True,
+                "index": start_idx + i, 
+                "engine": "sapi", 
+                "voice_id": v.id, 
+                "name": clean, 
+                "gender": gender, 
+                "language": "English", 
+                "quality": "Standard", 
+                "installed": True
             })
-    except Exception as e:
+    except Exception as e: 
         print(f"[VOICES] SAPI scan error: {e}")
-
+        
     return {"voices": result, "count": len(result)}
 
 
