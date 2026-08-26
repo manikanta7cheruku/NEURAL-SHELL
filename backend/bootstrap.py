@@ -196,20 +196,115 @@ def check_packages_installed():
     python = get_python_executable()
 
     critical = ['fastapi', 'uvicorn', 'pyttsx3', 'chromadb',
-                'sentence_transformers', 'psutil']
+                'sentence_transformers', 'psutil', 'keyboard', 'pynput']
 
     for pkg in critical:
-        # BULLETPROOF THREADED INSTALL WITH LIVE HEARTBEAT
-        # Prevents pipe buffer deadlock by draining stdout on separate thread
+        result = subprocess.run(
+            [python, '-c', f'import {pkg.replace("-", "_")}'],
+            capture_output=True,
+            creationflags=0x08000000 if platform.system() == 'Windows' else 0
+        )
+        if result.returncode != 0:
+            print(f"[BOOTSTRAP] Missing: {pkg}")
+            return False
+
+    return True
+
+
+def install_packages():
+    """
+    Install all packages from requirements.txt into the correct Python.
+    Shows real-time progress with package name, count, and speed.
+    """
+    _set('packages', status='running', progress=0,
+         current='Preparing...', error=None)
+
+    python_exe = get_python_executable()
+
+    # Force standard python.exe for pip operations (pythonw.exe lacks stdio)
+    if python_exe.lower().endswith('pythonw.exe'):
+        std_python = python_exe[:-5] + '.exe'
+        if os.path.exists(std_python):
+            python_exe = std_python
+
+    # Step 0: Fix ._pth file
+    _fix_pth_file(python_exe)
+
+    # Step 1: Ensure pip exists
+    if not _ensure_pip(python_exe):
+        return False
+
+    # Step 2: Get requirements
+    req_path = get_requirements_path()
+    if not req_path:
+        _set('packages', status='error', error='requirements.txt not found')
+        return False
+
+    # Step 3: Upgrade pip
+    _set('packages', current='Upgrading pip...', progress=2)
+    try:
+        subprocess.run(
+            [python_exe, '-m', 'pip', 'install', '--upgrade', 'pip',
+             '--disable-pip-version-check', '--no-warn-script-location', '--quiet'],
+            capture_output=True,
+            timeout=120,
+            creationflags=0x08000000 if platform.system() == 'Windows' else 0
+        )
+    except Exception:
+        pass
+
+    # Step 4: Read requirements.txt
+    with open(req_path, 'r') as f:
+        lines = f.readlines()
+
+    packages = [
+        l.strip() for l in lines
+        if l.strip() and not l.startswith('#') and not l.startswith('-')
+    ]
+
+    if not packages:
+        _set('packages', status='error', error='No packages in requirements.txt')
+        return False
+
+    critical_first = [
+        "python-multipart", "fastapi", "uvicorn[standard]", "websockets",
+        "requests", "colorama", "psutil", "pyttsx3", "pywin32",
+        "pycaw", "comtypes", "AppOpener", "ddgs", "SpeechRecognition",
+        "pyaudio", "screen-brightness-control", "pyautogui", "keyboard",
+        "pynput", "rapidfuzz"
+    ]
+
+    def _pkg_name(p):
+        return p.split('==')[0].split('>=')[0].split('[')[0].strip().lower()
+
+    critical_set = {c.split('[')[0].lower() for c in critical_first}
+    ordered = [p for p in packages if _pkg_name(p) in critical_set]
+    remaining = [p for p in packages if _pkg_name(p) not in critical_set]
+    install_order = ordered + remaining
+
+    total = len(install_order)
+    optional = {'resemblyzer', 'pyaudio', 'screen-brightness-control'}
+    failed_optional = []
+    install_start = time.time()
+
+    for i, pkg in enumerate(install_order):
+        pkg_display = pkg.split('==')[0].split('>=')[0].strip()
+        is_optional = any(o in pkg.lower() for o in optional)
+        # Fix: Lock progress to prevent UI bouncing. Max package progress is 100.
+        progress    = int(((i + 1) / total) * 100)
+
+        label = f"[{i+1}/{total}] {pkg_display}"
+        if i < len(ordered):
+            label += " (core)"
+
+        _set('packages', current=f'[{i+1}/{total}] Installing {pkg_display}...', progress=progress)
+        pkg_start = time.time()
+
         result_returncode = 1
         stderr_output = ""
-        pkg_last_update = time.time()
-        
-        import threading as _th
-        _stop_heartbeat = _th.Event()
+        _stop_heartbeat = threading.Event()
 
         def _heartbeat_worker():
-            """Update UI every second so it never appears frozen"""
             dots = 0
             while not _stop_heartbeat.is_set():
                 dots = (dots + 1) % 4
@@ -230,18 +325,16 @@ def check_packages_installed():
                 creationflags=0x08000000 if platform.system() == 'Windows' else 0
             )
 
-            # Start heartbeat thread to keep UI alive
-            hb_thread = _th.Thread(target=_heartbeat_worker, daemon=True)
+            hb_thread = threading.Thread(target=_heartbeat_worker, daemon=True)
             hb_thread.start()
 
             try:
-                # Use communicate() to drain stderr and prevent OS pipe buffer deadlocks
                 _, stderr_output = process.communicate(timeout=600)
-                result_returncode = process.returncode
+                result_returncode = process.wait(timeout=600)
             except subprocess.TimeoutExpired:
                 process.kill()
                 _, stderr_output = process.communicate()
-                stderr_output = "Timeout after 10 minutes\n" + (stderr_output or "")
+                stderr_output = "Timeout after 10 minutes"
                 result_returncode = 1
             finally:
                 _stop_heartbeat.set()
@@ -370,7 +463,6 @@ def download_ollama_installer():
     """Download OllamaSetup.exe with unique naming, chunked streaming, and ETA."""
     _set('ollama_install', status='running', progress=0, error=None)
 
-    # Unique name completely prevents Windows Defender "Sharing Violation" locks from previous failed runs
     unique_name = f"OllamaSetup_{int(time.time())}.exe"
     dest = os.path.join(tempfile.gettempdir(), unique_name)
 
@@ -406,14 +498,14 @@ def download_ollama_installer():
                         
                         _set('ollama_install', progress=pct, current=f"{downloaded_mb}/{total_mb} MB  ·  {speed_mb_s} MB/s  ·  {eta_str}")
         
+        response.close() # Explicitly close the connection to prevent hanging
+        
         # Corrupted download check (Ollama is ~180MB. Anything under 50MB is corrupted)
         if os.path.getsize(dest) < 50_000_000:
             raise Exception("Downloaded file is too small (corrupted).")
 
         _set('ollama_install', progress=100, current="Awaiting Windows Defender Scan...")
         print(f"[BOOTSTRAP] Ollama downloaded successfully to {dest}")
-        
-        # Wait 2 seconds for Defender to release the file lock
         time.sleep(2)
         return dest
 
@@ -421,103 +513,53 @@ def download_ollama_installer():
         err_msg = str(e)
         friendly = (
             "Network timeout or file corruption. "
-            "Please install it manually: "
+            "Please install manually: "
             "1. Visit ollama.com/download  "
-            "2. Download & Run OllamaSetup.exe  "
+            "2. Run OllamaSetup.exe  "
             "3. Restart Seven"
         )
         _set('ollama_install', status='error', error=friendly)
         print(f"[BOOTSTRAP] Ollama download failed: {err_msg}")
         return None
 
+
 def install_ollama_silent(installer_path):
-    """
-    Run OllamaSetup.exe silently. Uses ShellExecuteW to prompt UAC.
-    """
+    """Run OllamaSetup.exe silently and prompt UAC."""
     print(f"[BOOTSTRAP] Installing Ollama silently...")
-    _set('ollama_install', current="Waiting for Administrator permission (Please click YES)...")
+    
+    # 1. Instantly trigger the UI banner for UAC
+    _set('ollama_install', 
+         status='running', 
+         progress=100, 
+         current="UAC_PROMPT_ACTIVE")
+         
+    time.sleep(1.5) # Allow frontend to render the banner
+    
     try:
         import ctypes
-
+        # ShellExecuteW blocks until the user clicks Yes or No
         ret = ctypes.windll.shell32.ShellExecuteW(
-            None,       # hwnd
-            "runas",    # verb - requests elevation (Triggers UAC)
-            installer_path,
-            "/S",       # silent install flag
-            None,       # working directory
-            0           # SW_HIDE - no window
+            None, "runas", installer_path, "/S", None, 0
         )
 
         if ret > 32:
-            print("[BOOTSTRAP] Ollama installer launched with elevation")
-            _set('ollama_install', current="Installing Ollama background services...")
-            deadline = time.time() + 180
+            print("[BOOTSTRAP] Ollama installer launched. Awaiting extraction...")
+            _set('ollama_install', current="Extracting and registering services...")
+            
+            # Wait up to 5 minutes for extraction to complete on slow HDDs
+            deadline = time.time() + 300 
             while time.time() < deadline:
                 if is_ollama_installed():
-                    _set('ollama_install', status='done', progress=100, current="Ollama installed successfully")
-                    print("[BOOTSTRAP] Ollama installed successfully")
+                    _set('ollama_install', status='done', progress=100, current="Ollama installed successfully.")
+                    print("[BOOTSTRAP] Ollama verified successfully.")
                     return True
-                time.sleep(3)
-                elapsed  = time.time() - (deadline - 180)
-                progress = min(95, int((elapsed / 180) * 100))
-                _set('ollama_install', progress=progress)
-
-            _set('ollama_install', status='error',
-                 error='Ollama installer ran but was not found after 3 minutes. Try installing manually from ollama.com/download')
+                time.sleep(2)
+                
+            _set('ollama_install', status='error', error='Installation timed out after 5 minutes. Please run OllamaSetup manually.')
             return False
         else:
-            err_msg = f"User denied UAC or sharing violation (Code {ret})."
-            print(f"[BOOTSTRAP] Ollama install failed: {err_msg}")
-            _set('ollama_install', status='error',
-                 error=f'Permission denied. Please click YES on the Windows prompt, or install manually.')
-            return False
-
-    except Exception as e:
-        print(f"[BOOTSTRAP] Ollama install exception: {e}")
-        _set('ollama_install', status='error', error=str(e))
-        return False
-
-def install_ollama_silent(installer_path):
-    """
-    Run OllamaSetup.exe silently.
-    Uses ShellExecuteW to prompt UAC (Required by Windows).
-    """
-    print(f"[BOOTSTRAP] Installing Ollama silently...")
-    _set('ollama_install', current="Waiting for Administrator permission (Please click YES)...")
-    try:
-        import ctypes
-
-        ret = ctypes.windll.shell32.ShellExecuteW(
-            None,       # hwnd
-            "runas",    # verb - requests elevation (Triggers UAC)
-            installer_path,
-            "/S",       # silent install flag
-            None,       # working directory
-            0           # SW_HIDE - no window
-        )
-
-        if ret > 32:
-            print("[BOOTSTRAP] Ollama installer launched with elevation")
-            _set('ollama_install', current="Installing Ollama background services...")
-            deadline = time.time() + 180
-            while time.time() < deadline:
-                if is_ollama_installed():
-                    _set('ollama_install', status='done', progress=100, current="Ollama installed successfully")
-                    print("[BOOTSTRAP] Ollama installed successfully")
-                    return True
-                time.sleep(3)
-                elapsed  = time.time() - (deadline - 180)
-                progress = min(95, int((elapsed / 180) * 100))
-                _set('ollama_install', progress=progress)
-
-            _set('ollama_install', status='error',
-                 error='Ollama installer ran but was not found after 3 minutes. Try installing manually from ollama.com/download')
-            return False
-        else:
-            err_msg = f"User denied UAC or sharing violation (Code {ret})."
-            print(f"[BOOTSTRAP] Ollama install failed: {err_msg}")
-            _set('ollama_install', status='error',
-                 error=f'Permission denied. Please click YES on the Windows prompt, or install manually.')
+            print(f"[BOOTSTRAP] UAC Denied by user (Code {ret})")
+            _set('ollama_install', status='error', error='Permission Denied. You must click YES on the Windows prompt to continue.')
             return False
 
     except Exception as e:
@@ -666,9 +708,13 @@ def pull_model(model_name: str):
 def run_environment_setup(on_complete=None):
     """
     Run full environment setup in background thread.
-    Ollama is optional — if download fails, setup continues.
-    User can install Ollama manually later.
+    Instantly updates shared state so button reacts in 0ms.
     """
+    # INSTANT UPDATE - Button reacts immediately on click
+    _set('packages', status='running', progress=5, current='Initializing environment deployment...')
+    _set('ollama_install', status='pending', progress=0, current='Waiting for package completion...')
+    _set('ollama_start', status='pending', current='Waiting...')
+
     def _run():
         print("[BOOTSTRAP] Starting environment setup...")
 
