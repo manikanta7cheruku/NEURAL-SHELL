@@ -199,129 +199,62 @@ def check_packages_installed():
                 'sentence_transformers', 'psutil']
 
     for pkg in critical:
-        result = subprocess.run(
-            [python, '-c', f'import {pkg.replace("-", "_")}'],
-            capture_output=True,
-            creationflags=0x08000000 if platform.system() == 'Windows' else 0
-        )
-        if result.returncode != 0:
-            print(f"[BOOTSTRAP] Missing: {pkg}")
-            return False
+        # BULLETPROOF THREADED INSTALL WITH LIVE HEARTBEAT
+        # Prevents pipe buffer deadlock by draining stdout on separate thread
+        result_returncode = 1
+        stderr_output = ""
+        pkg_last_update = time.time()
+        
+        import threading as _th
+        _stop_heartbeat = _th.Event()
 
-    return True
+        def _heartbeat_worker():
+            """Update UI every second so it never appears frozen"""
+            dots = 0
+            while not _stop_heartbeat.is_set():
+                dots = (dots + 1) % 4
+                elapsed = int(time.time() - pkg_start)
+                _set('packages',
+                     current=f'[{i+1}/{total}] Installing {pkg_display}{"." * dots}  ({elapsed}s)',
+                     progress=progress)
+                time.sleep(1)
 
-
-def install_packages():
-    """Install all packages with non-blocking threaded output reading to prevent UI freeze."""
-    import threading as _th
-
-    _set('packages', status='running', progress=0, current='Preparing environment...', error=None)
-    python_exe = get_python_executable()
-
-    _fix_pth_file(python_exe)
-    if not _ensure_pip(python_exe):
-        return False
-
-    req_path = get_requirements_path()
-    if not req_path:
-        _set('packages', status='error', error='requirements.txt not found')
-        return False
-
-    _set('packages', current='Upgrading pip...', progress=2)
-    try:
-        subprocess.run(
-            [python_exe, '-m', 'pip', 'install', '--upgrade', 'pip',
-             '--disable-pip-version-check', '--no-warn-script-location', '--quiet'],
-            capture_output=True, timeout=120,
-            creationflags=0x08000000 if platform.system() == 'Windows' else 0
-        )
-    except Exception:
-        pass
-
-    with open(req_path, 'r') as f:
-        packages = [l.strip() for l in f.readlines() if l.strip() and not l.startswith('#') and not l.startswith('-')]
-
-    if not packages:
-        _set('packages', status='error', error='No packages in requirements.txt')
-        return False
-
-    critical_first = [
-        "python-multipart", "fastapi", "uvicorn", "websockets",
-        "requests", "colorama", "psutil", "pyttsx3", "pywin32",
-        "pycaw", "comtypes", "AppOpener", "ddgs", "SpeechRecognition",
-        "pyaudio", "screen-brightness-control", "pyautogui", "keyboard",
-        "pynput", "rapidfuzz",
-    ]
-
-    def _pkg_name(p):
-        return p.split('==')[0].split('>=')[0].split('[')[0].strip().lower()
-
-    critical_set = {c.split('[')[0].lower() for c in critical_first}
-    ordered = [p for p in packages if _pkg_name(p) in critical_set]
-    remaining = [p for p in packages if _pkg_name(p) not in critical_set]
-    install_order = ordered + remaining
-
-    total = len(install_order)
-    optional = {'resemblyzer'}
-    install_start = time.time()
-
-    for i, pkg in enumerate(install_order):
-        pkg_display = pkg.split('==')[0].split('>=')[0].strip()
-        is_optional = any(o in pkg.lower() for o in optional)
-        progress    = int(((i) / total) * 95)
-
-        label = f"[{i+1}/{total}] {pkg_display}"
-        if i < len(ordered):
-            label += " (core)"
-
-        _set('packages', current=f'[{i+1}/{total}] Installing {pkg_display}...', progress=progress)
-        pkg_start = time.time()
-        print(f"[BOOTSTRAP] {label}")
-
-        success = False
         try:
-            import threading as _th
-            # DEVNULL for stdout prevents Windows pipe buffer deadlock on massive packages
             process = subprocess.Popen(
                 [python_exe, '-m', 'pip', 'install', pkg,
                  '--no-warn-script-location', '--disable-pip-version-check',
-                 '--retries', '3', '--timeout', '60', '--progress-bar', 'off'],
+                 '--retries', '5', '--timeout', '90', '--progress-bar', 'off'],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
                 text=True,
                 creationflags=0x08000000 if platform.system() == 'Windows' else 0
             )
 
-            # Heartbeat thread keeps UI updated and prevents frozen appearance
-            stop_hb = _th.Event()
-            def _heartbeat():
-                dots = 0
-                while not stop_hb.is_set():
-                    dots = (dots + 1) % 4
-                    elapsed = int(time.time() - pkg_start)
-                    _set('packages', current=f'[{i+1}/{total}] Installing {pkg_display}{"." * dots} ({elapsed}s)', progress=progress)
-                    time.sleep(1)
-
-            hb_thread = _th.Thread(target=_heartbeat, daemon=True)
+            # Start heartbeat thread to keep UI alive
+            hb_thread = _th.Thread(target=_heartbeat_worker, daemon=True)
             hb_thread.start()
 
             try:
-                stderr_output = process.stderr.read()
-                return_code = process.wait(timeout=600)
-                stop_hb.set()
-                hb_thread.join(timeout=2)
-                success = (return_code == 0)
+                # Use communicate() to drain stderr and prevent OS pipe buffer deadlocks
+                _, stderr_output = process.communicate(timeout=600)
+                result_returncode = process.returncode
             except subprocess.TimeoutExpired:
-                stop_hb.set()
                 process.kill()
-                stderr_output = "Timeout expired"
+                _, stderr_output = process.communicate()
+                stderr_output = "Timeout after 10 minutes\n" + (stderr_output or "")
+                result_returncode = 1
+            finally:
+                _stop_heartbeat.set()
+                hb_thread.join(timeout=2)
 
-        except Exception as e:
-            stderr_output = str(e)
+        except Exception as _e:
+            stderr_output = str(_e)
+            result_returncode = 1
+            _stop_heartbeat.set()
 
         pkg_elapsed = round(time.time() - pkg_start, 1)
 
-        if success:
+        if result_returncode == 0:
             print(f"[BOOTSTRAP]   done in {pkg_elapsed}s")
         else:
             if is_optional:
@@ -585,77 +518,6 @@ def install_ollama_silent(installer_path):
             print(f"[BOOTSTRAP] Ollama install failed: {err_msg}")
             _set('ollama_install', status='error',
                  error=f'Permission denied. Please click YES on the Windows prompt, or install manually.')
-            return False
-
-    except Exception as e:
-        print(f"[BOOTSTRAP] Ollama install exception: {e}")
-        _set('ollama_install', status='error', error=str(e))
-        return False
-
-
-def install_ollama_silent(installer_path):
-    """
-    Run OllamaSetup.exe silently.
-    Uses ShellExecute with runas verb to request elevation properly.
-    Silent /S flag works correctly when elevated.
-    """
-    print(f"[BOOTSTRAP] Installing Ollama silently...")
-    try:
-        import ctypes
-
-        # Use ShellExecute with runas to properly elevate
-        # This is the correct way to run installers on Windows
-        # subprocess.run() cannot request UAC elevation
-        ret = ctypes.windll.shell32.ShellExecuteW(
-            None,       # hwnd
-            "runas",    # verb - requests elevation
-            installer_path,
-            "/S",       # silent install flag
-            None,       # working directory
-            0           # SW_HIDE - no window
-        )
-
-        # ShellExecute returns > 32 on success
-        if ret > 32:
-            print("[BOOTSTRAP] Ollama installer launched with elevation")
-            # Wait for Ollama to appear - installer runs async
-            deadline = time.time() + 120
-            while time.time() < deadline:
-                if is_ollama_installed():
-                    _set('ollama_install', status='done', progress=100)
-                    print("[BOOTSTRAP] Ollama installed successfully")
-                    return True
-                time.sleep(3)
-                # Update progress while waiting
-                elapsed  = time.time() - (deadline - 120)
-                progress = min(95, int((elapsed / 120) * 100))
-                _set('ollama_install', progress=progress)
-
-            # Check one final time
-            if is_ollama_installed():
-                _set('ollama_install', status='done', progress=100)
-                return True
-
-            _set('ollama_install', status='error',
-                 error='Ollama installer ran but Ollama was not found after 2 minutes. Try installing manually from ollama.com/download')
-            return False
-        else:
-            # User denied UAC or other error
-            err_map = {
-                0:  'Out of memory',
-                2:  'Installer file not found',
-                3:  'Path not found',
-                5:  'User denied the administrator request. Please click Yes when prompted.',
-                8:  'Out of memory',
-                26: 'Sharing violation',
-                27: 'File association incomplete',
-                28: 'DDE timeout',
-                32: 'DDE failed',
-            }
-            err_msg = err_map.get(ret, f'ShellExecute failed with code {ret}')
-            print(f"[BOOTSTRAP] Ollama install failed: {err_msg}")
-            _set('ollama_install', status='error',
-                 error=f'{err_msg}. Please install Ollama manually from ollama.com/download')
             return False
 
     except Exception as e:
