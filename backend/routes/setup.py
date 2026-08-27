@@ -741,6 +741,25 @@ def start_ollama_endpoint():
         return {"success": True, "message": "Starting Ollama"}
     except Exception as e:
         return {"success": False, "message": str(e)}
+
+
+@router.post("/api/bootstrap/retry-uac")
+def retry_uac_endpoint():
+    """
+    Re-trigger the Windows UAC prompt without re-downloading Ollama.
+    Called from the frontend when user clicks 'Grant Permission' after initially declining.
+    """
+    try:
+        try:
+            from backend import bootstrap
+        except ModuleNotFoundError:
+            import sys
+            sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            import bootstrap
+        threading.Thread(target=bootstrap.retrigger_uac_only, daemon=True).start()
+        return {"success": True, "message": "Re-requesting Windows permission"}
+    except Exception as e:
+        return {"success": False, "message": str(e)}
     
     # Add this right after the imports at the top, after "router = APIRouter()"
 _last_whisper_model = None
