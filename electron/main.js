@@ -337,6 +337,13 @@ function createMainWindow() {
     }
   });
 
+  // Suppress harmless Chromium DevTools Autofill warnings
+  mainWindow.webContents.on('console-message', (event, level, message) => {
+    if (message.includes('Autofill.enable') || message.includes('Autofill.setAddresses')) {
+      event.preventDefault();
+    }
+  });
+
   if (isDev) {
     mainWindow.loadURL('http://localhost:5173');
   } else {
