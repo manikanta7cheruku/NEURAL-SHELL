@@ -98,15 +98,15 @@ export default function StepEnvironment() {
           setAllDone(true);
         }
       } catch (e) {
-        // Backend crashed and is restarting — don't reset progress, just wait
+        // Backend is starting up or restarting — this is normal during first 15s.
+        // Don't show scary errors, just wait silently.
         consecutiveErrors++;
-        if (consecutiveErrors <= 15) {
-          // Show reconnection message in log (first time only)
-          if (consecutiveErrors === 1) {
-            setLogs(p => [...p, { time: new Date().toLocaleTimeString([], { hour12: false }), text: 'Reconnecting to backend...' }]);
-          }
-        } else {
-          // After 6 seconds of no connection, try to restart bootstrap
+        if (consecutiveErrors === 5) {
+          // Only show message after 2s of failed polls (5 × 400ms)
+          setLogs(p => [...p, { time: new Date().toLocaleTimeString([], { hour12: false }), text: 'Waiting for backend to start...' }]);
+        }
+        if (consecutiveErrors > 30) {
+          // After 12s of no connection, try to restart bootstrap
           consecutiveErrors = 0;
           fetch(`${API}/api/bootstrap/start`, { method: 'POST' }).catch(() => {});
         }
@@ -115,21 +115,46 @@ export default function StepEnvironment() {
   };
 
   useEffect(() => {
-    const safetyTimer = setTimeout(() => setChecked(true), 2000);
-    fetch(`${API}/api/bootstrap/check`).then(r => r.json()).then(d => {
-      clearTimeout(safetyTimer);
-      if (d.packages_installed && d.ollama_installed) {
-        setAllDone(true);
-        setStarted(true);
-      }
-      setChecked(true);
-    }).catch(() => { clearTimeout(safetyTimer); setChecked(true); });
+    // Backend takes 5-15s to start. Retry gracefully instead of showing errors.
+    const safetyTimer = setTimeout(() => setChecked(true), 3000);
+    let retries = 0;
+    const maxRetries = 10;
+
+    const checkBackend = () => {
+      fetch(`${API}/api/bootstrap/check`, { signal: AbortSignal.timeout(3000) })
+        .then(r => r.json())
+        .then(d => {
+          clearTimeout(safetyTimer);
+          if (d.packages_installed && d.ollama_installed) {
+            setAllDone(true);
+            setStarted(true);
+          }
+          setChecked(true);
+        })
+        .catch(() => {
+          retries++;
+          if (retries < maxRetries) {
+            // Backend not ready yet — retry in 2s (silent, no error shown)
+            setTimeout(checkBackend, 2000);
+          } else {
+            clearTimeout(safetyTimer);
+            setChecked(true);
+          }
+        });
+    };
+
+    checkBackend();
     return () => { clearTimeout(safetyTimer); clearInterval(pollRef.current); };
   }, []);
 
+  const startingRef = useRef(false);
+
   const handleStart = async () => {
+    // Prevent double-click and concurrent requests
+    if (startingRef.current) return;
+    startingRef.current = true;
+
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
-    // Do NOT reset maxProgRef — preserves monotonic progress across backend restarts
     setStarted(true);
     setAllDone(false);
     lastLogRef.current = '';
@@ -139,8 +164,10 @@ export default function StepEnvironment() {
       startPolling();
     } catch (e) {
       setLogs(p => [...p, { time: new Date().toLocaleTimeString([], { hour12: false }), text: 'Could not reach backend. Retrying in 3s...' }]);
-      setTimeout(() => handleStart(), 3000);
+      setTimeout(() => { startingRef.current = false; handleStart(); }, 3000);
+      return;
     }
+    startingRef.current = false;
   };
 
   // Grant Permission: skips download, jumps straight to UAC prompt
