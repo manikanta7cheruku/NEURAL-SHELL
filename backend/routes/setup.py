@@ -43,6 +43,47 @@ def get_existing_identity():
         print(f"[SETUP] Identity check failed: {e}")
         return {"found": False}
 
+@router.post("/api/setup/welcome-greeting")
+def welcome_greeting():
+    """
+    Trigger Seven's first-time welcome greeting after setup completes.
+    Speaks a time-appropriate greeting so the user knows Seven is now live.
+    """
+    try:
+        import config
+        import datetime
+        from backend.api_server import set_state
+
+        name = config.KEY.get("identity", {}).get("user_name", "")
+        hour = datetime.datetime.now().hour
+
+        if hour < 5:
+            time_greet = "Good evening"
+        elif hour < 12:
+            time_greet = "Good morning"
+        elif hour < 17:
+            time_greet = "Good afternoon"
+        elif hour < 21:
+            time_greet = "Good evening"
+        else:
+            time_greet = "Good night"
+
+        message = f"{time_greet}, {name}. Seven is now online and ready. Just say my name to begin." if name else f"{time_greet}. Seven is now online and ready. Just say my name to begin."
+
+        # Speak via mouth module (loaded in full mode)
+        try:
+            import mouth
+            import threading
+            threading.Thread(target=lambda: mouth.speak(message), daemon=True).start()
+        except Exception as _me:
+            print(f"[SETUP] Welcome greeting mouth error: {_me}")
+
+        set_state("seven_text", message)
+        return {"success": True, "message": message}
+    except Exception as e:
+        print(f"[SETUP] Welcome greeting error: {e}")
+        return {"success": False, "error": str(e)}
+
 
 @router.post("/api/setup/complete")
 def complete_setup(req: SetupCompleteRequest):
