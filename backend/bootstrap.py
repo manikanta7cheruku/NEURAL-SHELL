@@ -54,6 +54,8 @@ _bootstrap_state = {
 }
 
 _state_lock = threading.Lock()
+_setup_lock = threading.Lock()  # Prevents concurrent setup runs
+_setup_running = False
 
 # ── Bootstrap persistence file ──
 # Prevents re-running completed steps after a crash/restart
@@ -305,8 +307,16 @@ def check_packages_installed():
     try:
         r = subprocess.run([python, '-c', check_core], capture_output=True, text=True, timeout=10, creationflags=cflags)
         if r.returncode != 0:
-            print(f"[BOOTSTRAP] Missing core: {r.stdout.strip()}")
-            return False
+            missing = r.stdout.strip()
+            print(f"[BOOTSTRAP] Missing core packages: {missing}")
+            # Install ONLY the missing packages instead of all 30+
+            _install_missing_packages(python, missing)
+            # Re-verify after install
+            r2 = subprocess.run([python, '-c', check_core], capture_output=True, text=True, timeout=10, creationflags=cflags)
+            if r2.returncode != 0:
+                print(f"[BOOTSTRAP] Still missing after install: {r2.stdout.strip()}")
+                return False
+            print("[BOOTSTRAP] Missing packages installed successfully.")
     except subprocess.TimeoutExpired:
         print("[BOOTSTRAP] Core check timed out")
         return False
@@ -321,8 +331,10 @@ def check_packages_installed():
         print("[BOOTSTRAP] Heavy package check timed out — assuming installed")
         # Don't fail on timeout — chromadb can take 30s+ on cold HDD start
 
-    print("[BOOTSTRAP] All critical packages verified.")
-    return True
+        print("[BOOTSTRAP] All critical packages verified.")
+        return True
+    finally:
+        _check_lock.release()
 
 
 def _repair_numpy(python_exe):
@@ -390,6 +402,38 @@ def _repair_numpy(python_exe):
     except Exception as e:
         print(f"[BOOTSTRAP] Numpy repair exception: {e}")
         return False
+
+
+def _install_missing_packages(python_exe, missing_csv):
+    """
+    Install only the specific packages that are missing.
+    Much faster and safer than reinstalling all 30+ packages.
+    """
+    missing = [p.strip() for p in missing_csv.split(',') if p.strip()]
+    if not missing:
+        return
+
+    print(f"[BOOTSTRAP] Installing {len(missing)} missing packages: {missing}")
+    _set('packages', status='running', progress=50,
+         current=f'Installing {len(missing)} missing packages...')
+
+    for i, pkg in enumerate(missing):
+        _set('packages', current=f'Installing {pkg}...',
+             progress=50 + int((i / len(missing)) * 45))
+        try:
+            result = subprocess.run(
+                [python_exe, '-m', 'pip', 'install', pkg,
+                 '--no-warn-script-location', '--disable-pip-version-check',
+                 '--timeout', '60', '--progress-bar', 'off'],
+                capture_output=True, text=True, timeout=120,
+                creationflags=0x08000000 if platform.system() == 'Windows' else 0
+            )
+            if result.returncode == 0:
+                print(f"[BOOTSTRAP]   {pkg} installed")
+            else:
+                print(f"[BOOTSTRAP]   {pkg} failed: {result.stderr[-200:]}")
+        except Exception as e:
+            print(f"[BOOTSTRAP]   {pkg} error: {e}")
 
 
 def install_packages():
@@ -1085,14 +1129,33 @@ def run_environment_setup(on_complete=None):
     Run full environment setup in background thread.
     Crash-proof: wraps entire flow in try/except so the API server never dies.
     Resumes from checkpoint if a previous run was interrupted.
+    Thread-safe: only one setup can run at a time.
     """
+    global _setup_running
+
+    # Prevent concurrent setup runs (double-click, retry, etc.)
+    if not _setup_lock.acquire(blocking=False):
+        print("[BOOTSTRAP] Setup already running — ignoring duplicate request")
+        return None
+
+    _setup_running = True
     _set('packages', status='running', progress=5, current='Initializing environment deployment...')
     _set('ollama_install', status='pending', progress=0, current='Waiting for packages...')
     _set('ollama_start', status='pending', current='Waiting...')
 
     def _run():
+        global _setup_running
         try:
             print("[BOOTSTRAP] Starting environment setup...")
+
+            # Wait for the main app's heavy ML modules to finish loading.
+            # sentence-transformers and ChromaDB load in background threads
+            # during startup. If we start downloading Ollama simultaneously,
+            # the concurrent DLL loading can cause 0xC0000005 crashes.
+            # 15 seconds is enough for Whisper + embedding model to initialize.
+            print("[BOOTSTRAP] Waiting for AI modules to stabilize...")
+            time.sleep(15)
+
             checkpoint = _load_bootstrap_checkpoint()
 
             # ── Step 1: Python packages ──
@@ -1151,13 +1214,14 @@ def run_environment_setup(on_complete=None):
                 on_complete(True)
 
         except Exception as e:
-            # CRITICAL: Never let bootstrap crash the API server.
-            # Log the error and set state so the frontend shows a retry button.
             import traceback
             traceback.print_exc()
             print(f"[BOOTSTRAP] Setup crashed (non-fatal): {e}")
             _set('packages', status='error',
                  error=f'Setup interrupted: {str(e)[:200]}. Click Retry to resume.')
+        finally:
+            _setup_running = False
+            _setup_lock.release()
 
     t = threading.Thread(target=_run, daemon=True, name="Bootstrap")
     t.start()
