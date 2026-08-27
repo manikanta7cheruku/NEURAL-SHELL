@@ -307,25 +307,42 @@ def install_packages():
     def _pkg_name(p):
         return p.split('==')[0].split('>=')[0].split('[')[0].strip().lower()
 
+    # Incompatible on Windows without heavy C++ toolchains; Seven uses faster-whisper instead
+    incompatible_win = {
+        'nemo_toolkit', 'nemo-toolkit', 'nemo_toolkit[asr]', 'webrtcvad',
+        'torch-audiomentations', 'pyannote.audio'
+    }
+
+    optional = {
+        'resemblyzer', 'pyaudio', 'screen-brightness-control',
+        'nemo_toolkit', 'nemo-toolkit', 'nemo_toolkit[asr]',
+        'sounddevice', 'coloredlogs'
+    }
+
     critical_set = {c.split('[')[0].lower() for c in critical_first}
-    ordered = [p for p in packages if _pkg_name(p) in critical_set]
-    remaining = [p for p in packages if _pkg_name(p) not in critical_set]
+
+    # Filter out known Linux-only / incompatible packages before pip runs
+    filtered_packages = []
+    for p in packages:
+        name = _pkg_name(p)
+        if name in incompatible_win:
+            print(f"[BOOTSTRAP] Skipping incompatible/non-critical Windows package: {p}")
+            continue
+        filtered_packages.append(p)
+
+    ordered = [p for p in filtered_packages if _pkg_name(p) in critical_set]
+    remaining = [p for p in filtered_packages if _pkg_name(p) not in critical_set]
     install_order = ordered + remaining
 
     total = len(install_order)
-    optional = {'resemblyzer', 'pyaudio', 'screen-brightness-control'}
     failed_optional = []
     install_start = time.time()
 
     for i, pkg in enumerate(install_order):
         pkg_display = pkg.split('==')[0].split('>=')[0].strip()
-        is_optional = any(o in pkg.lower() for o in optional)
-        # Fix: Lock progress to prevent UI bouncing. Max package progress is 100.
-        progress    = int(((i + 1) / total) * 100)
-
-        label = f"[{i+1}/{total}] {pkg_display}"
-        if i < len(ordered):
-            label += " (core)"
+        raw_name = _pkg_name(pkg)
+        is_optional = (raw_name in optional) or (raw_name not in critical_set)
+        progress = int(((i + 1) / total) * 100)
 
         _set('packages', current=f'[{i+1}/{total}] Installing {pkg_display}...', progress=progress)
         pkg_start = time.time()
@@ -348,7 +365,7 @@ def install_packages():
             process = subprocess.Popen(
                 [python_exe, '-m', 'pip', 'install', pkg,
                  '--no-warn-script-location', '--disable-pip-version-check',
-                 '--retries', '5', '--timeout', '90', '--progress-bar', 'off'],
+                 '--retries', '3', '--timeout', '60', '--progress-bar', 'off'],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
                 text=True,
@@ -359,12 +376,12 @@ def install_packages():
             hb_thread.start()
 
             try:
-                _, stderr_output = process.communicate(timeout=600)
-                result_returncode = process.wait(timeout=600)
+                _, stderr_output = process.communicate(timeout=300)
+                result_returncode = process.wait(timeout=300)
             except subprocess.TimeoutExpired:
                 process.kill()
                 _, stderr_output = process.communicate()
-                stderr_output = "Timeout after 10 minutes"
+                stderr_output = "Timeout after 5 minutes"
                 result_returncode = 1
             finally:
                 _stop_heartbeat.set()
@@ -382,12 +399,12 @@ def install_packages():
         else:
             if is_optional:
                 failed_optional.append(pkg_display)
-                print(f"[BOOTSTRAP]   optional skipped ({pkg_elapsed}s)")
+                print(f"[BOOTSTRAP]   non-critical package skipped ({pkg_elapsed}s): {pkg_display}")
                 continue
             err = stderr_output.strip()[-400:] if stderr_output else 'Unknown error'
             print(f"[BOOTSTRAP]   FAILED: {err}")
             _set('packages', status='error',
-                 error=f'{pkg_display} install failed. Check your internet connection.')
+                 error=f'{pkg_display} install failed. Please click Retry.')
             return False
 
     total_elapsed = round(time.time() - install_start, 1)
@@ -489,111 +506,243 @@ def get_ollama_executable():
     return 'ollama'
 
 
+def _find_cached_ollama_installer():
+    """Find a previously downloaded Ollama installer that is complete and valid."""
+    temp_dir = tempfile.gettempdir()
+    cached_path = os.path.join(temp_dir, "OllamaSetup_cached.exe")
+
+    if os.path.exists(cached_path):
+        try:
+            size = os.path.getsize(cached_path)
+            if size > 100_000_000:  # Valid installer is ~200MB
+                print(f"[BOOTSTRAP] Using verified cached installer ({round(size/1024/1024, 1)} MB)")
+                return cached_path
+            else:
+                os.unlink(cached_path)
+        except Exception:
+            pass
+    return None
+
+
+def _safe_rename_with_retry(src, dst, max_attempts=10):
+    """
+    Windows Defender locks files during scan. Retry rename with exponential backoff.
+    This is the industry-standard fix for WinError 32 on freshly-written executables.
+    """
+    import time as _t
+    for attempt in range(max_attempts):
+        try:
+            if os.path.exists(dst):
+                try:
+                    os.unlink(dst)
+                except PermissionError:
+                    _t.sleep(0.5 * (attempt + 1))
+                    continue
+            os.rename(src, dst)
+            return True
+        except (PermissionError, OSError) as e:
+            if attempt == max_attempts - 1:
+                # Last attempt: copy instead of rename (works even if src is locked for read-only)
+                try:
+                    import shutil
+                    shutil.copy2(src, dst)
+                    try:
+                        os.unlink(src)
+                    except Exception:
+                        pass
+                    return True
+                except Exception as copy_err:
+                    raise Exception(f"Rename failed after {max_attempts} attempts: {e}. Copy also failed: {copy_err}")
+            _t.sleep(0.4 * (attempt + 1))
+    return False
+
+
 def download_ollama_installer():
-    """Download OllamaSetup.exe with unique naming, chunked streaming, and ETA."""
-    _set('ollama_install', status='running', progress=0, error=None)
+    """Download OllamaSetup.exe with progress smoothing, defender-safe rename, and cache reuse."""
+    cached = _find_cached_ollama_installer()
+    if cached:
+        _set('ollama_install', status='running', progress=100,
+             current="Installer ready in cache. Requesting Windows permission...")
+        return cached
 
-    unique_name = f"OllamaSetup_{int(time.time())}.exe"
-    dest = os.path.join(tempfile.gettempdir(), unique_name)
+    _set('ollama_install', status='running', progress=0,
+         current="Connecting to Ollama servers...", error=None)
+    temp_dir = tempfile.gettempdir()
+    part_dest = os.path.join(temp_dir, "OllamaSetup_download.tmp")
+    final_dest = os.path.join(temp_dir, "OllamaSetup_cached.exe")
 
-    print("[BOOTSTRAP] Downloading Ollama installer with real-time metrics...")
-    
+    # Clean up leftover partial downloads
+    if os.path.exists(part_dest):
+        try:
+            os.unlink(part_dest)
+        except Exception:
+            pass
+
+    print("[BOOTSTRAP] Starting Ollama download with smoothed progress...")
+
+    # Monotonic progress guard (backend-side) — prevents ANY backward jumps
+    max_pct_sent = [0]
+    max_mb_sent = [0.0]
+
+    # Rolling average for smooth speed display
+    speed_samples = []
+    last_ui_update = [0.0]
+
     try:
         import requests
-        response = requests.get(OLLAMA_DOWNLOAD_URL, stream=True, timeout=15)
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) SEVEN/1.3.1'}
+        response = requests.get(OLLAMA_DOWNLOAD_URL, headers=headers,
+                                stream=True, timeout=60, allow_redirects=True)
         response.raise_for_status()
-        
+
         total_size = int(response.headers.get('content-length', 0))
         downloaded = 0
         start_time = time.time()
-        
-        with open(dest, 'wb') as f:
-            for chunk in response.iter_content(chunk_size=65536):
+        last_downloaded = 0
+        last_sample_time = start_time
+
+        f = open(part_dest, 'wb')
+        try:
+            for chunk in response.iter_content(chunk_size=262144):  # 256 KB
                 if chunk:
                     f.write(chunk)
                     downloaded += len(chunk)
-                    
-                    elapsed = max(time.time() - start_time, 0.001)
-                    speed_bps = downloaded / elapsed
-                    speed_mb_s = round(speed_bps / (1024 * 1024), 2)
-                    
-                    if total_size > 0:
-                        pct = min(int((downloaded / total_size) * 100), 99)
-                        downloaded_mb = round(downloaded / (1024 * 1024), 1)
-                        total_mb = round(total_size / (1024 * 1024), 1)
-                        
-                        bytes_remaining = total_size - downloaded
-                        eta_seconds = bytes_remaining / speed_bps if speed_bps > 0 else 0
-                        eta_str = f"{int(eta_seconds)}s left" if eta_seconds < 60 else f"{int(eta_seconds // 60)}m {int(eta_seconds % 60)}s left"
-                        
-                        _set('ollama_install', progress=pct, current=f"{downloaded_mb}/{total_mb} MB  ·  {speed_mb_s} MB/s  ·  {eta_str}")
-        
-        response.close() # Explicitly close the connection to prevent hanging
-        
-        # Corrupted download check (Ollama is ~180MB. Anything under 50MB is corrupted)
-        if os.path.getsize(dest) < 50_000_000:
-            raise Exception("Downloaded file is too small (corrupted).")
+                    now = time.time()
 
-        _set('ollama_install', progress=100, current="Awaiting Windows Defender Scan...")
-        print(f"[BOOTSTRAP] Ollama downloaded successfully to {dest}")
-        time.sleep(2)
-        return dest
+                    # Rolling speed sample every 0.5s (smoother, more professional)
+                    if now - last_sample_time >= 0.5:
+                        bytes_diff = downloaded - last_downloaded
+                        time_diff = now - last_sample_time
+                        instant_bps = bytes_diff / time_diff if time_diff > 0 else 0
+                        speed_samples.append(instant_bps)
+                        if len(speed_samples) > 8:  # 4-second rolling window
+                            speed_samples.pop(0)
+                        last_downloaded = downloaded
+                        last_sample_time = now
+
+                    # Only push UI updates every 400ms — prevents jitter
+                    if now - last_ui_update[0] >= 0.4:
+                        last_ui_update[0] = now
+                        avg_speed_bps = sum(speed_samples) / len(speed_samples) if speed_samples else 0
+                        speed_mb_s = round(avg_speed_bps / (1024 * 1024), 2)
+
+                        if total_size > 0:
+                            pct = min(int((downloaded / total_size) * 100), 99)
+                            # Backend monotonic guard
+                            if pct < max_pct_sent[0]:
+                                pct = max_pct_sent[0]
+                            else:
+                                max_pct_sent[0] = pct
+
+                            dl_mb = round(downloaded / (1024 * 1024), 1)
+                            if dl_mb < max_mb_sent[0]:
+                                dl_mb = max_mb_sent[0]
+                            else:
+                                max_mb_sent[0] = dl_mb
+
+                            tot_mb = round(total_size / (1024 * 1024), 1)
+                            bytes_rem = total_size - downloaded
+                            eta_sec = bytes_rem / avg_speed_bps if avg_speed_bps > 0 else 0
+
+                            if eta_sec < 60:
+                                eta_str = f"{int(eta_sec)}s left"
+                            elif eta_sec < 3600:
+                                eta_str = f"{int(eta_sec // 60)}m {int(eta_sec % 60)}s left"
+                            else:
+                                eta_str = f"{int(eta_sec // 3600)}h {int((eta_sec % 3600) // 60)}m left"
+
+                            _set('ollama_install',
+                                 progress=pct,
+                                 current=f"Downloading Ollama runtime · {dl_mb} / {tot_mb} MB · {speed_mb_s} MB/s · {eta_str}")
+                        else:
+                            dl_mb = round(downloaded / (1024 * 1024), 1)
+                            _set('ollama_install', progress=50,
+                                 current=f"Downloading Ollama runtime · {dl_mb} MB · {speed_mb_s} MB/s")
+        finally:
+            try:
+                f.flush()
+                os.fsync(f.fileno())
+            except Exception:
+                pass
+            f.close()
+
+        response.close()
+
+        actual_size = os.path.getsize(part_dest)
+        if actual_size < 100_000_000:
+            if os.path.exists(part_dest):
+                os.unlink(part_dest)
+            raise Exception(f"Download incomplete ({round(actual_size / 1024 / 1024, 1)} MB received). Expected ~200MB.")
+
+        _set('ollama_install', progress=100, current="Verifying download integrity...")
+
+        # Wait for Windows Defender to release the file handle before rename
+        # This is what causes WinError 32 without this delay
+        time.sleep(2.0)
+
+        _safe_rename_with_retry(part_dest, final_dest, max_attempts=15)
+
+        _set('ollama_install', progress=100, current="Download complete. Preparing Windows installer...")
+        print(f"[BOOTSTRAP] Ollama download verified and cached: {final_dest}")
+        time.sleep(0.5)
+        return final_dest
 
     except Exception as e:
         err_msg = str(e)
-        friendly = (
-            "Network timeout or file corruption. "
-            "Please install manually: "
-            "1. Visit ollama.com/download  "
-            "2. Run OllamaSetup.exe  "
-            "3. Restart Seven"
-        )
-        _set('ollama_install', status='error', error=friendly)
-        print(f"[BOOTSTRAP] Ollama download failed: {err_msg}")
+        if os.path.exists(part_dest):
+            try:
+                os.unlink(part_dest)
+            except Exception:
+                pass
+
+        _set('ollama_install', status='error',
+             error=f"Download failed: {err_msg}. Click Retry to resume.")
+        print(f"[BOOTSTRAP] Ollama download error: {err_msg}")
         return None
 
 
 def install_ollama_silent(installer_path):
-    """Run OllamaSetup.exe silently and prompt UAC."""
-    print(f"[BOOTSTRAP] Installing Ollama silently...")
-    
-    # 1. Instantly trigger the UI banner for UAC
-    _set('ollama_install', 
-         status='running', 
-         progress=100, 
-         current="UAC_PROMPT_ACTIVE")
-         
-    time.sleep(1.5) # Allow frontend to render the banner
-    
+    """Run OllamaSetup.exe with Inno Setup silent flags and prompt Windows UAC."""
+    print(f"[BOOTSTRAP] Launching Ollama installer: {installer_path}")
+
+    if not os.path.exists(installer_path):
+        _set('ollama_install', status='error', error='Installer missing. Click Retry to download.')
+        return False
+
+    # Notify frontend to display the urgent UAC attention banner
+    _set('ollama_install', status='running', progress=100, current="UAC_PROMPT_ACTIVE")
+    time.sleep(0.5)
+
     try:
         import ctypes
-        # ShellExecuteW blocks until the user clicks Yes or No
+        # Inno Setup standard flags: /VERYSILENT /NORESTART /SP- (Skip prompt)
+        params = "/VERYSILENT /NORESTART /SP-"
         ret = ctypes.windll.shell32.ShellExecuteW(
-            None, "runas", installer_path, "/S", None, 0
+            None, "runas", installer_path, params, None, 1
         )
 
         if ret > 32:
-            print("[BOOTSTRAP] Ollama installer launched. Awaiting extraction...")
-            _set('ollama_install', current="Extracting and registering services...")
-            
-            # Wait up to 5 minutes for extraction to complete on slow HDDs
-            deadline = time.time() + 300 
+            print("[BOOTSTRAP] UAC accepted. Extracting Ollama binaries in background...")
+            _set('ollama_install', status='running', progress=100, current="Extracting and configuring Ollama runtime...")
+
+            deadline = time.time() + 180
             while time.time() < deadline:
                 if is_ollama_installed():
                     _set('ollama_install', status='done', progress=100, current="Ollama installed successfully.")
-                    print("[BOOTSTRAP] Ollama verified successfully.")
+                    print("[BOOTSTRAP] Ollama binary verified.")
                     return True
                 time.sleep(2)
-                
-            _set('ollama_install', status='error', error='Installation timed out after 5 minutes. Please run OllamaSetup manually.')
+
+            _set('ollama_install', status='error', error='Installation took too long. Click Retry to try again.')
             return False
         else:
-            print(f"[BOOTSTRAP] UAC Denied by user (Code {ret})")
-            _set('ollama_install', status='error', error='Permission Denied. You must click YES on the Windows prompt to continue.')
+            print(f"[BOOTSTRAP] Windows UAC prompt was declined by user (error code {ret})")
+            # Keep installer intact so retry requires 0 download time
+            _set('ollama_install', status='error', error='PERMISSION_DENIED')
             return False
 
     except Exception as e:
-        print(f"[BOOTSTRAP] Ollama install exception: {e}")
+        print(f"[BOOTSTRAP] Installation exception: {e}")
         _set('ollama_install', status='error', error=str(e))
         return False
 
@@ -610,6 +759,36 @@ def setup_ollama():
         return False
 
     return install_ollama_silent(installer)
+
+
+def retrigger_uac_only():
+    """
+    Re-open the Windows UAC prompt without re-downloading Ollama.
+    Called when user initially clicked NO but wants to grant permission now.
+    Skips the entire download phase — uses cached installer.
+    """
+    if is_ollama_installed():
+        print("[BOOTSTRAP] Ollama already installed — no UAC needed.")
+        _set('ollama_install', status='done', progress=100,
+             current="Already installed.")
+        with _state_lock:
+            _bootstrap_state['overall_ready'] = True
+        return True
+
+    cached = _find_cached_ollama_installer()
+    if not cached:
+        print("[BOOTSTRAP] No cached installer — falling back to full setup.")
+        return setup_ollama()
+
+    print("[BOOTSTRAP] Re-triggering UAC prompt with cached installer...")
+    _set('ollama_install', status='running', progress=100, error=None,
+         current="Re-requesting Windows permission...")
+
+    ok = install_ollama_silent(cached)
+    if ok:
+        # Also start Ollama immediately after successful install
+        return start_ollama()
+    return False
 
 
 # ============================================================================
