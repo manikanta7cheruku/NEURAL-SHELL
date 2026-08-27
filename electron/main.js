@@ -309,10 +309,16 @@ function waitForBackend() {
 function createMainWindow() {
   if (mainWindow) {
     mainWindow.show();
+    mainWindow.setSkipTaskbar(false);
+    mainWindow.focus();
     return;
   }
 
-  const iconPath = path.join(__dirname, 'icon.ico');
+  // Resolve absolute paths clearly for production setup packages
+  const appSource = getAppSourcePath();
+  const iconPath = path.isAbsolute(__dirname)
+    ? path.join(__dirname, 'icon.ico')
+    : path.join(appSource, 'electron', 'icon.ico');
 
   mainWindow = new BrowserWindow({
     width:           1200,
@@ -320,10 +326,10 @@ function createMainWindow() {
     minWidth:        900,
     minHeight:       600,
     frame:           false,
-    title:           'VII',
+    title:           'SEVEN',
     backgroundColor: '#09090b',
     show:            false,
-    icon:            iconPath,
+    icon:            fs.existsSync(iconPath) ? iconPath : undefined,
     webPreferences: {
       preload:          path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -488,9 +494,13 @@ function showOrbContextMenu() {
 }
 
 function navigateTo(route) {
-  if (!mainWindow) createMainWindow();
-  mainWindow.show();
-  mainWindow.focus();
+  if (!mainWindow) {
+    createMainWindow();
+  } else {
+    mainWindow.show();
+    mainWindow.setSkipTaskbar(false);
+    mainWindow.focus();
+  }
 
   if (mainWindow.webContents.isLoading()) {
     mainWindow.webContents.once('did-finish-load', () => performNavigation(route));
