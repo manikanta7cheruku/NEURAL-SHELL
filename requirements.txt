@@ -4,12 +4,14 @@
 # =============================================================================
 
 # --- Core ---
+# CRITICAL: numpy MUST be pinned below 2.0. numpy 2.x breaks torch, faster-whisper,
+# ctranslate2, chromadb, and sentence_transformers. Do not remove the version cap.
+numpy>=1.26.0,<2.0.0
+
 requests
 colorama
 setuptools
 psutil
-
-numpy>=1.26.0,<2.0.0
 
 # --- Voice ---
 pyttsx3
@@ -26,9 +28,9 @@ chromadb==1.5.8
 sentence-transformers
 
 # --- Voice Recognition ---
-torchaudio
+# torch/torchaudio installed by bootstrap.py separately (CPU or GPU)
 onnxruntime
-nemo_toolkit[asr]
+# nemo_toolkit removed - Linux-only, Seven uses faster-whisper for STT
 
 # --- Web Search ---
 ddgs
