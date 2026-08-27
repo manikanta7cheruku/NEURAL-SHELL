@@ -38,22 +38,39 @@ for _noisy_logger in [
 ]:
     _early_logging.getLogger(_noisy_logger).setLevel(_early_logging.ERROR)
 
-# numpy 2.x compatibility patch
-# Must happen before any ML library imports numpy
+# numpy compatibility patch
+# Must happen before any ML library imports numpy.
+# numpy 1.26.x: np.bool/np.int/np.float exist but are deprecated (FutureWarning).
+# numpy 2.x:    np.bool/np.int/np.float/np.iterable removed entirely.
+# This patch handles BOTH versions safely without triggering warnings.
 try:
+    import warnings as _np_warnings
     import numpy as _np_patch
-    if not hasattr(_np_patch, 'iterable'):
-        _np_patch.iterable = lambda obj: hasattr(obj, '__iter__')
-        print("[SYSTEM] numpy.iterable patched for numpy 2.x compatibility")
-    # Also patch deprecated numpy types used by older packages
-    if not hasattr(_np_patch, 'complex'):
-        _np_patch.complex  = complex
-    if not hasattr(_np_patch, 'float'):
-        _np_patch.float    = float
-    if not hasattr(_np_patch, 'int'):
-        _np_patch.int      = int
-    if not hasattr(_np_patch, 'bool'):
-        _np_patch.bool     = bool
+
+    _np_major = int(_np_patch.__version__.split('.')[0])
+
+    if _np_major >= 2:
+        # numpy 2.x: these attributes were removed, restore them for older ML libs
+        if not hasattr(_np_patch, 'iterable'):
+            _np_patch.iterable = lambda obj: hasattr(obj, '__iter__')
+        if not hasattr(_np_patch, 'complex'):
+            _np_patch.complex = complex
+        if not hasattr(_np_patch, 'float'):
+            _np_patch.float = float
+        if not hasattr(_np_patch, 'int'):
+            _np_patch.int = int
+        if not hasattr(_np_patch, 'bool'):
+            _np_patch.bool = bool
+        print("[SYSTEM] numpy 2.x compatibility patches applied")
+    else:
+        # numpy 1.x: attributes exist but trigger FutureWarning on access.
+        # Suppress the warnings so downstream libraries don't spam the console.
+        _np_warnings.filterwarnings('ignore', category=FutureWarning, module='numpy')
+        _np_warnings.filterwarnings('ignore', message='.*np\\.bool.*')
+        _np_warnings.filterwarnings('ignore', message='.*np\\.int.*')
+        _np_warnings.filterwarnings('ignore', message='.*np\\.float.*')
+        _np_warnings.filterwarnings('ignore', message='.*np\\.complex.*')
+        # No patches needed — 1.26.x has everything torch/whisper/chromadb needs
 except Exception:
     pass
 
