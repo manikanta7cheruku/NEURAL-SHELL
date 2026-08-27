@@ -192,19 +192,26 @@ def _fix_pth_file(python_exe):
 # ============================================================================
 
 def check_packages_installed():
-    """Check if core packages are installed in the correct Python (single subprocess)."""
+    """Check if core packages are installed AND numpy is the correct version."""
     python = get_python_executable()
 
-    # Ensure ._pth file is correct BEFORE checking — without this,
-    # embedded Python can't see site-packages and returns false negatives
-    # even when every package is already installed.
     _fix_pth_file(python)
 
-    # Single subprocess checks ALL packages at once.
-    # Old code spawned 8 separate Python processes (10-30s on cold start).
-    # This runs in ~1-2s regardless of machine speed.
+    # Verifies numpy is 1.x AND has working ndarray attribute (catches broken installs).
+    # If numpy is 2.x or corrupted, we force a reinstall — this prevents the entire
+    # voice/memory stack from silently failing at runtime.
     check_script = (
         "import sys\n"
+        "try:\n"
+        "    import numpy as np\n"
+        "    _ = np.ndarray\n"
+        "    import numpy.typing\n"
+        "    if np.__version__.startswith('2.'):\n"
+        "        print('numpy_wrong_version')\n"
+        "        sys.exit(1)\n"
+        "except Exception as e:\n"
+        "    print('numpy_broken')\n"
+        "    sys.exit(1)\n"
         "pkgs = ['fastapi','uvicorn','pyttsx3','chromadb',"
         "'sentence_transformers','psutil','keyboard','pynput']\n"
         "missing = []\n"
@@ -230,14 +237,89 @@ def check_packages_installed():
         if result.returncode == 0:
             print("[BOOTSTRAP] All critical packages verified.")
             return True
-        missing = result.stdout.strip()
-        print(f"[BOOTSTRAP] Missing packages: {missing}")
+
+        output = result.stdout.strip()
+
+        # numpy is broken or wrong version — auto-fix
+        if output in ("numpy_broken", "numpy_wrong_version"):
+            print(f"[BOOTSTRAP] Numpy issue detected: {output}. Auto-fixing...")
+            _repair_numpy(python)
+            return False
+
+        print(f"[BOOTSTRAP] Missing packages: {output}")
         return False
     except subprocess.TimeoutExpired:
         print("[BOOTSTRAP] Package check timed out after 15s")
         return False
     except Exception as e:
         print(f"[BOOTSTRAP] Package check failed: {e}")
+        return False
+
+
+def _repair_numpy(python_exe):
+    """
+    Force reinstall numpy 1.26.x when broken or upgraded to 2.x.
+    Handles the 'no RECORD file' corruption case by manually deleting the folder
+    before reinstall — pip cannot uninstall packages without RECORD metadata.
+    """
+    print("[BOOTSTRAP] Repairing numpy installation...")
+
+    # Find site-packages dir for this Python
+    try:
+        result = subprocess.run(
+            [python_exe, '-c',
+             'import sys, os; print([p for p in sys.path if p.endswith("site-packages")][0])'],
+            capture_output=True, text=True, timeout=10,
+            creationflags=0x08000000 if platform.system() == 'Windows' else 0
+        )
+        site_packages = result.stdout.strip()
+        if site_packages and os.path.isdir(site_packages):
+            # Nuke corrupted numpy folders manually — pip can't uninstall broken ones
+            import shutil
+            for name in os.listdir(site_packages):
+                lower = name.lower()
+                if lower == 'numpy' or lower.startswith('numpy-') or lower.startswith('~umpy'):
+                    target = os.path.join(site_packages, name)
+                    try:
+                        if os.path.isdir(target):
+                            shutil.rmtree(target, ignore_errors=True)
+                            print(f"[BOOTSTRAP] Removed corrupted: {name}")
+                        else:
+                            os.unlink(target)
+                    except Exception as _e:
+                        print(f"[BOOTSTRAP] Could not remove {name}: {_e}")
+    except Exception as e:
+        print(f"[BOOTSTRAP] Site-packages scan failed: {e}")
+
+    # Now do a clean install with --no-deps to avoid pulling numpy 2.x from deps
+    try:
+        result = subprocess.run(
+            [python_exe, '-m', 'pip', 'install',
+             '--no-cache-dir', '--no-deps', '--force-reinstall',
+             'numpy==1.26.4'],
+            capture_output=True, text=True, timeout=180,
+            creationflags=0x08000000 if platform.system() == 'Windows' else 0
+        )
+
+        if result.returncode == 0:
+            # Verify the repair worked
+            verify = subprocess.run(
+                [python_exe, '-c',
+                 'import numpy as np; assert np.__version__.startswith("1."); _ = np.ndarray; import numpy.typing'],
+                capture_output=True, timeout=10,
+                creationflags=0x08000000 if platform.system() == 'Windows' else 0
+            )
+            if verify.returncode == 0:
+                print("[BOOTSTRAP] Numpy 1.26.4 verified working.")
+                return True
+            else:
+                print("[BOOTSTRAP] Numpy installed but still broken.")
+                return False
+        else:
+            print(f"[BOOTSTRAP] Numpy repair failed: {result.stderr[-300:]}")
+            return False
+    except Exception as e:
+        print(f"[BOOTSTRAP] Numpy repair exception: {e}")
         return False
 
 
@@ -296,7 +378,11 @@ def install_packages():
         _set('packages', status='error', error='No packages in requirements.txt')
         return False
 
+    # CRITICAL: numpy 1.26.x MUST install first and pinned.
+    # numpy 2.x breaks torch, faster-whisper, ctranslate2, chromadb, and sentence_transformers
+    # This is enforced at installer level to prevent the entire voice/memory stack from failing.
     critical_first = [
+        "numpy>=1.26.0,<2.0.0",
         "python-multipart", "fastapi", "uvicorn[standard]", "websockets",
         "requests", "colorama", "psutil", "pyttsx3", "pywin32",
         "pycaw", "comtypes", "AppOpener", "ddgs", "SpeechRecognition",
