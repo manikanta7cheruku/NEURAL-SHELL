@@ -237,10 +237,10 @@ def check_packages_installed():
 
     _fix_pth_file(python)
 
-    # Verifies numpy is 1.x AND has working ndarray attribute (catches broken installs).
-    # If numpy is 2.x or corrupted, we force a reinstall — this prevents the entire
-    # voice/memory stack from silently failing at runtime.
-    check_script = (
+    # Split into two fast checks instead of one slow one.
+    # chromadb and sentence_transformers are heavy imports (5-15s on cold start).
+    # Checking them in the same subprocess as numpy causes 15s timeout on first run.
+    check_numpy = (
         "import sys\n"
         "try:\n"
         "    import numpy as np\n"
@@ -249,11 +249,15 @@ def check_packages_installed():
         "    if np.__version__.startswith('2.'):\n"
         "        print('numpy_wrong_version')\n"
         "        sys.exit(1)\n"
-        "except Exception as e:\n"
+        "except Exception:\n"
         "    print('numpy_broken')\n"
         "    sys.exit(1)\n"
-        "pkgs = ['fastapi','uvicorn','pyttsx3','chromadb',"
-        "'sentence_transformers','psutil','keyboard','pynput']\n"
+        "print('OK')\n"
+    )
+
+    check_core = (
+        "import sys\n"
+        "pkgs = ['fastapi','uvicorn','pyttsx3','psutil','keyboard','pynput']\n"
         "missing = []\n"
         "for p in pkgs:\n"
         "    try:\n"
@@ -266,34 +270,59 @@ def check_packages_installed():
         "print('OK')\n"
     )
 
+    # Heavy imports checked separately with longer timeout
+    check_heavy = (
+        "import sys\n"
+        "pkgs = ['chromadb','sentence_transformers']\n"
+        "missing = []\n"
+        "for p in pkgs:\n"
+        "    try:\n"
+        "        __import__(p)\n"
+        "    except ImportError:\n"
+        "        missing.append(p)\n"
+        "if missing:\n"
+        "    print(','.join(missing))\n"
+        "    sys.exit(1)\n"
+        "print('OK')\n"
+    )
+
+    cflags = 0x08000000 if platform.system() == 'Windows' else 0
+
+    # Step 1: Fast numpy check (2s)
     try:
-        result = subprocess.run(
-            [python, '-c', check_script],
-            capture_output=True,
-            text=True,
-            timeout=15,
-            creationflags=0x08000000 if platform.system() == 'Windows' else 0
-        )
-        if result.returncode == 0:
-            print("[BOOTSTRAP] All critical packages verified.")
-            return True
-
-        output = result.stdout.strip()
-
-        # numpy is broken or wrong version — auto-fix
-        if output in ("numpy_broken", "numpy_wrong_version"):
-            print(f"[BOOTSTRAP] Numpy issue detected: {output}. Auto-fixing...")
-            _repair_numpy(python)
+        r = subprocess.run([python, '-c', check_numpy], capture_output=True, text=True, timeout=10, creationflags=cflags)
+        if r.returncode != 0:
+            output = r.stdout.strip()
+            if output in ("numpy_broken", "numpy_wrong_version"):
+                print(f"[BOOTSTRAP] Numpy issue: {output}. Auto-fixing...")
+                _repair_numpy(python)
             return False
-
-        print(f"[BOOTSTRAP] Missing packages: {output}")
-        return False
     except subprocess.TimeoutExpired:
-        print("[BOOTSTRAP] Package check timed out after 15s")
+        print("[BOOTSTRAP] Numpy check timed out")
         return False
-    except Exception as e:
-        print(f"[BOOTSTRAP] Package check failed: {e}")
+
+    # Step 2: Fast core packages check (3s)
+    try:
+        r = subprocess.run([python, '-c', check_core], capture_output=True, text=True, timeout=10, creationflags=cflags)
+        if r.returncode != 0:
+            print(f"[BOOTSTRAP] Missing core: {r.stdout.strip()}")
+            return False
+    except subprocess.TimeoutExpired:
+        print("[BOOTSTRAP] Core check timed out")
         return False
+
+    # Step 3: Heavy imports check (30s — chromadb loads torch + sentence_transformers)
+    try:
+        r = subprocess.run([python, '-c', check_heavy], capture_output=True, text=True, timeout=45, creationflags=cflags)
+        if r.returncode != 0:
+            print(f"[BOOTSTRAP] Missing heavy: {r.stdout.strip()}")
+            return False
+    except subprocess.TimeoutExpired:
+        print("[BOOTSTRAP] Heavy package check timed out — assuming installed")
+        # Don't fail on timeout — chromadb can take 30s+ on cold HDD start
+
+    print("[BOOTSTRAP] All critical packages verified.")
+    return True
 
 
 def _repair_numpy(python_exe):
@@ -710,15 +739,19 @@ def download_ollama_installer():
     last_ui_update = [0.0]
 
     try:
-        import requests
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) SEVEN/1.3.1'}
+        # Use urllib instead of requests for the download.
+        # requests' streaming uses threading internally which conflicts with
+        # torch/numpy memory management and causes access violations (0xC0000005)
+        # when both are active in the same process. urllib is single-threaded and safe.
+        req = urllib.request.Request(
+            OLLAMA_DOWNLOAD_URL,
+            headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) SEVEN/1.3.1'}
+        )
 
-        # Retry up to 3 times on connection drops
+        response = None
         for attempt in range(3):
             try:
-                response = requests.get(OLLAMA_DOWNLOAD_URL, headers=headers,
-                                        stream=True, timeout=60, allow_redirects=True)
-                response.raise_for_status()
+                response = urllib.request.urlopen(req, timeout=60)
                 break
             except Exception as conn_err:
                 if attempt == 2:
@@ -726,71 +759,72 @@ def download_ollama_installer():
                 print(f"[BOOTSTRAP] Connection failed (attempt {attempt+1}/3): {conn_err}")
                 time.sleep(3)
 
-        total_size = int(response.headers.get('content-length', 0))
+        total_size = int(response.headers.get('Content-Length', 0))
         downloaded = 0
         start_time = time.time()
         last_downloaded = 0
         last_sample_time = start_time
+        CHUNK_SIZE = 262144  # 256 KB
 
         f = open(part_dest, 'wb')
         try:
-            for chunk in response.iter_content(chunk_size=262144):
-                if chunk:
-                    f.write(chunk)
-                    downloaded += len(chunk)
-                    now = time.time()
+            while True:
+                chunk = response.read(CHUNK_SIZE)
+                if not chunk:
+                    break
+                f.write(chunk)
+                downloaded += len(chunk)
+                now = time.time()
 
-                    if now - last_sample_time >= 0.5:
-                        bytes_diff = downloaded - last_downloaded
-                        time_diff = now - last_sample_time
-                        instant_bps = bytes_diff / time_diff if time_diff > 0 else 0
-                        speed_samples.append(instant_bps)
-                        if len(speed_samples) > 8:
-                            speed_samples.pop(0)
-                        last_downloaded = downloaded
-                        last_sample_time = now
+                if now - last_sample_time >= 0.5:
+                    bytes_diff = downloaded - last_downloaded
+                    time_diff = now - last_sample_time
+                    instant_bps = bytes_diff / time_diff if time_diff > 0 else 0
+                    speed_samples.append(instant_bps)
+                    if len(speed_samples) > 8:
+                        speed_samples.pop(0)
+                    last_downloaded = downloaded
+                    last_sample_time = now
 
-                    if now - last_ui_update[0] >= 0.4:
-                        last_ui_update[0] = now
-                        avg_speed_bps = sum(speed_samples) / len(speed_samples) if speed_samples else 0
-                        speed_mb_s = round(avg_speed_bps / (1024 * 1024), 2)
+                if now - last_ui_update[0] >= 0.4:
+                    last_ui_update[0] = now
+                    avg_speed_bps = sum(speed_samples) / len(speed_samples) if speed_samples else 0
+                    speed_mb_s = round(avg_speed_bps / (1024 * 1024), 2)
 
-                        if total_size > 0:
-                            pct = min(int((downloaded / total_size) * 100), 99)
-                            dl_mb = round(downloaded / (1024 * 1024), 1)
-                            tot_mb = round(total_size / (1024 * 1024), 1)
+                    if total_size > 0:
+                        pct = min(int((downloaded / total_size) * 100), 99)
+                        dl_mb = round(downloaded / (1024 * 1024), 1)
+                        tot_mb = round(total_size / (1024 * 1024), 1)
 
-                            # GLOBAL monotonic guard — stored in shared state,
-                            # survives function retries and thread restarts
-                            with _state_lock:
-                                prev_pct = _bootstrap_state["ollama_install"].get("max_pct", 0)
-                                prev_mb = _bootstrap_state["ollama_install"].get("max_dl_mb", 0.0)
-                                if pct > prev_pct:
-                                    _bootstrap_state["ollama_install"]["max_pct"] = pct
-                                else:
-                                    pct = prev_pct
-                                if dl_mb > prev_mb:
-                                    _bootstrap_state["ollama_install"]["max_dl_mb"] = dl_mb
-                                else:
-                                    dl_mb = prev_mb
-
-                            bytes_rem = total_size - downloaded
-                            eta_sec = bytes_rem / avg_speed_bps if avg_speed_bps > 0 else 0
-
-                            if eta_sec < 60:
-                                eta_str = f"{int(eta_sec)}s left"
-                            elif eta_sec < 3600:
-                                eta_str = f"{int(eta_sec // 60)}m {int(eta_sec % 60)}s left"
+                        with _state_lock:
+                            prev_pct = _bootstrap_state["ollama_install"].get("max_pct", 0)
+                            prev_mb = _bootstrap_state["ollama_install"].get("max_dl_mb", 0.0)
+                            if pct > prev_pct:
+                                _bootstrap_state["ollama_install"]["max_pct"] = pct
                             else:
-                                eta_str = f"{int(eta_sec // 3600)}h {int((eta_sec % 3600) // 60)}m left"
+                                pct = prev_pct
+                            if dl_mb > prev_mb:
+                                _bootstrap_state["ollama_install"]["max_dl_mb"] = dl_mb
+                            else:
+                                dl_mb = prev_mb
 
-                            _set('ollama_install',
-                                 progress=pct,
-                                 current=f"Downloading Ollama runtime · {dl_mb} / {tot_mb} MB · {speed_mb_s} MB/s · {eta_str}")
+                        bytes_rem = total_size - downloaded
+                        eta_sec = bytes_rem / avg_speed_bps if avg_speed_bps > 0 else 0
+
+                        if eta_sec < 60:
+                            eta_str = f"{int(eta_sec)}s left"
+                        elif eta_sec < 3600:
+                            eta_str = f"{int(eta_sec // 60)}m {int(eta_sec % 60)}s left"
                         else:
-                            dl_mb = round(downloaded / (1024 * 1024), 1)
-                            _set('ollama_install', progress=50,
-                                 current=f"Downloading Ollama runtime · {dl_mb} MB · {speed_mb_s} MB/s")
+                            eta_str = f"{int(eta_sec // 3600)}h {int((eta_sec % 3600) // 60)}m left"
+
+                        _set('ollama_install',
+                             progress=pct,
+                             current=f"Downloading Ollama runtime · {dl_mb} / {tot_mb} MB · {speed_mb_s} MB/s · {eta_str}")
+                    else:
+                        dl_mb = round(downloaded / (1024 * 1024), 1)
+                        _set('ollama_install', progress=50,
+                             current=f"Downloading Ollama runtime · {dl_mb} MB · {speed_mb_s} MB/s")
         finally:
             try:
                 f.flush()
