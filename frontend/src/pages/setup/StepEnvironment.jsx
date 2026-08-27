@@ -5,7 +5,7 @@ const API = 'http://127.0.0.1:7777';
 
 const WHAT_HAPPENS = [
   { num: '01', title: 'Python AI Libraries', desc: 'Installs Faster-Whisper, ChromaDB, and backend dependencies.', size: '2-4 GB' },
-  { num: '02', title: 'Ollama Runtime', desc: 'The core engine required to run Large Language Models locally.', size: '~180 MB' },
+  { num: '02', title: 'Ollama Runtime', desc: 'The core engine required to run Large Language Models locally.', size: '~200 MB' },
   { num: '03', title: 'System Services', desc: 'Registers background daemons for triggers and schedules.', size: 'Instant' },
 ];
 
@@ -15,6 +15,34 @@ const CAPABILITIES = [
   { title: 'Smart Triggers', desc: 'Automate workflows with custom hotkeys.' },
   { title: '100% Offline', desc: 'Absolute privacy for your data.' },
 ];
+
+// Context-aware left panel content for each installation phase
+const PHASE_INFO = {
+  idle: {
+    title: 'One-Time Setup',
+    desc: 'Seven prepares your local AI environment. Everything runs privately on your machine.',
+  },
+  packages: {
+    title: 'Installing Python Libraries',
+    desc: 'These libraries power the speech recognition, memory search, and voice synthesis. Seven uses Faster-Whisper for hearing you, ChromaDB for remembering context, and pyttsx3 for speaking back — all running fully offline for your privacy.',
+  },
+  ollama: {
+    title: 'Downloading Ollama Runtime',
+    desc: 'Ollama is the local AI engine that runs language models on your computer. Unlike ChatGPT or Gemini which send your words to the cloud, Ollama keeps every conversation on your device. It powers Seven\'s reasoning and understanding.',
+  },
+  uac: {
+    title: 'Windows Permission',
+    desc: 'Windows requires administrator approval to install Ollama into Program Files. This is a standard Windows security check. Click YES on the shield prompt to continue — Seven never asks for permissions it doesn\'t need.',
+  },
+  daemons: {
+    title: 'Starting Background Services',
+    desc: 'Seven runs lightweight daemons in the background for hotkey triggers, scheduled reminders, and voice overlays. These use less than 50MB of RAM and shut down cleanly when Seven exits.',
+  },
+  done: {
+    title: 'Environment Ready',
+    desc: 'All components verified and running. Seven is ready to serve you privately and offline.',
+  },
+};
 
 export default function StepEnvironment() {
   const { next, back } = useSetup();
@@ -26,6 +54,7 @@ export default function StepEnvironment() {
   const pollRef = useRef(null);
   const logsEndRef = useRef(null);
   const lastLogRef = useRef('');
+  const maxProgRef = useRef(0);
 
   useEffect(() => { if (logsEndRef.current) logsEndRef.current.scrollIntoView({ behavior: 'smooth' }); }, [logs]);
 
@@ -38,10 +67,23 @@ export default function StepEnvironment() {
         const data = await r.json();
         setBState(data);
 
-        const currentText = data.packages?.current || data.ollama_install?.current || data.ollama_start?.current || '';
+        // Choose the ACTIVE phase's message so logs never regress to older messages
+        let currentText = '';
+        if (data.ollama_start?.status === 'running') {
+          currentText = data.ollama_start?.current || 'Starting Ollama service...';
+        } else if (data.ollama_install?.status === 'running') {
+          currentText = data.ollama_install?.current === 'UAC_PROMPT_ACTIVE'
+            ? 'Waiting for Windows Administrator confirmation...'
+            : (data.ollama_install?.current || 'Preparing Ollama runtime...');
+        } else if (data.packages?.status === 'running') {
+          currentText = data.packages?.current || 'Installing Python packages...';
+        } else {
+          currentText = data.ollama_start?.current || data.ollama_install?.current || data.packages?.current || '';
+        }
+
         if (currentText && currentText !== lastLogRef.current) {
           lastLogRef.current = currentText;
-          setLogs(p => [...p.slice(-40), { time: new Date().toLocaleTimeString([], { hour12: false }), text: currentText }]);
+          setLogs(p => [...p.slice(-50), { time: new Date().toLocaleTimeString([], { hour12: false }), text: currentText }]);
         }
 
         const pkgDone = data.packages?.status === 'done' || data.packages?.status === 'skipped';
@@ -50,6 +92,7 @@ export default function StepEnvironment() {
 
         if (pkgDone && ollamaDone && startDone) {
           clearInterval(pollRef.current);
+          pollRef.current = null;
           setAllDone(true);
         }
       } catch (e) {}
@@ -57,79 +100,105 @@ export default function StepEnvironment() {
   };
 
   useEffect(() => {
-    // Safety net: force button enabled after 2s even if backend is slow.
-    // The old code blocked the button for 10-30s while 8 Python subprocesses ran.
     const safetyTimer = setTimeout(() => setChecked(true), 2000);
     fetch(`${API}/api/bootstrap/check`).then(r => r.json()).then(d => {
       clearTimeout(safetyTimer);
-      if (d.packages_installed && d.ollama_installed && d.ollama_running) setAllDone(true);
+      if (d.packages_installed && d.ollama_installed) {
+        setAllDone(true);
+        setStarted(true);
+      }
       setChecked(true);
     }).catch(() => { clearTimeout(safetyTimer); setChecked(true); });
     return () => { clearTimeout(safetyTimer); clearInterval(pollRef.current); };
   }, []);
 
   const handleStart = async () => {
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+    maxProgRef.current = 0;
     setStarted(true);
+    setAllDone(false);
+    setBState({});
+    lastLogRef.current = '';
     setLogs([{ time: new Date().toLocaleTimeString([], { hour12: false }), text: 'Initializing deployment sequence...' }]);
     try {
       await fetch(`${API}/api/bootstrap/start`, { method: 'POST' });
       startPolling();
     } catch (e) {
-      setLogs(p => [...p, { time: new Date().toLocaleTimeString([], { hour12: false }), text: '⚠ Could not reach backend. Retrying in 3s...' }]);
+      setLogs(p => [...p, { time: new Date().toLocaleTimeString([], { hour12: false }), text: 'Could not reach backend. Retrying in 3s...' }]);
       setTimeout(() => handleStart(), 3000);
     }
   };
 
-  const handleRetry = async () => {
-    // Reset error state and restart deployment.
-    // Backend skips already-completed steps (packages, ollama) automatically.
-    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
-    setAllDone(false);
-    setBState({});
-    lastLogRef.current = '';
-    setStarted(true);
-    setLogs([{ time: new Date().toLocaleTimeString([], { hour12: false }), text: '🔄 Retrying deployment...' }]);
+  // Grant Permission: skips download, jumps straight to UAC prompt
+  const handleGrantPermission = async () => {
+    setLogs(p => [...p, { time: new Date().toLocaleTimeString([], { hour12: false }), text: '🛡️ Re-requesting Windows permission...' }]);
     try {
-      await fetch(`${API}/api/bootstrap/start`, { method: 'POST' });
+      await fetch(`${API}/api/bootstrap/retry-uac`, { method: 'POST' });
       startPolling();
     } catch (e) {
-      setLogs(p => [...p, { time: new Date().toLocaleTimeString([], { hour12: false }), text: '⚠ Backend unreachable. Retrying in 3s...' }]);
-      setTimeout(() => handleRetry(), 3000);
+      setLogs(p => [...p, { time: new Date().toLocaleTimeString([], { hour12: false }), text: 'Backend unreachable. Retrying...' }]);
     }
   };
 
-  // STRICT SEQUENTIAL PROGRESS — NEVER JUMPS BACKWARDS
-  let progress = 0;
+  // ── Monotonic progress with dampening ──
   const pkgStatus = bState.packages?.status;
   const pkgProg = bState.packages?.progress || 0;
   const ollamaStatus = bState.ollama_install?.status;
   const ollamaProg = bState.ollama_install?.progress || 0;
   const startStatus = bState.ollama_start?.status;
 
-  if (startStatus === 'done' || allDone) {
-    progress = 100;
-  } else if (ollamaStatus === 'running' || pkgStatus === 'done' || pkgStatus === 'skipped') {
-    // Packages finished (50%), mapping Ollama progress from 50% to 90%
-    progress = 50 + Math.round((ollamaProg * 40) / 100);
-  } else {
-    // Packages running (0% to 50%)
-    progress = Math.round((pkgProg * 50) / 100);
-  }
+  let computed = 0;
+  if (allDone || startStatus === 'done') computed = 100;
+  else if (ollamaStatus === 'done') computed = 92;
+  else if (ollamaStatus === 'running') computed = 50 + Math.round((ollamaProg * 40) / 100);
+  else if (pkgStatus === 'done' || pkgStatus === 'skipped') computed = 50;
+  else if (pkgStatus === 'running') computed = Math.round((pkgProg * 48) / 100);
 
-  const errorMsg = bState.packages?.error || bState.ollama_install?.error || bState.ollama_start?.error;
-  const showUacBanner = bState.ollama_install?.current === 'UAC_PROMPT_ACTIVE' || (bState.ollama_install?.current && bState.ollama_install.current.includes("Administrator"));
+  if (computed > maxProgRef.current) maxProgRef.current = computed;
+  const progress = maxProgRef.current;
+
+  // ── Error classification ──
+  const rawError = bState.packages?.error || bState.ollama_install?.error || bState.ollama_start?.error;
+  const isUacDenied = rawError === 'PERMISSION_DENIED';
+  const isCorrupted = rawError && rawError.includes('CORRUPTED');
+  const errorMsg = isUacDenied
+    ? 'Windows administrator permission was declined. Seven needs this one-time approval to install the local AI engine on your machine.'
+    : isCorrupted
+    ? 'The installer file was corrupted during download. A fresh copy will be downloaded when you retry.'
+    : rawError;
+
+  // ── Determine current phase for left panel context ──
+  let currentPhase = 'idle';
+  if (allDone) currentPhase = 'done';
+  else if (isUacDenied || bState.ollama_install?.current === 'UAC_PROMPT_ACTIVE') currentPhase = 'uac';
+  else if (startStatus === 'running') currentPhase = 'daemons';
+  else if (ollamaStatus === 'running' || (pkgStatus === 'done' && ollamaStatus !== 'done')) currentPhase = 'ollama';
+  else if (pkgStatus === 'running') currentPhase = 'packages';
+
+  const phaseInfo = PHASE_INFO[currentPhase];
+  const showUacBanner = bState.ollama_install?.current === 'UAC_PROMPT_ACTIVE';
 
   return (
     <div className="max-w-4xl grid grid-cols-5 gap-8">
-      <div className="col-span-2 space-y-6">
+      {/* LEFT PANEL — Always shows context relevant to current phase */}
+      <div className="col-span-2 space-y-5">
         <div className="space-y-3">
           <div className="text-[10px] text-white/40 tracking-[0.3em] font-medium uppercase">Step 4 of 6</div>
           <h2 className="text-[28px] font-bold text-white tracking-tight leading-tight">Environment<br/>Deployment</h2>
-          <p className="text-[12px] text-white/40 font-light">Installing required Local AI binaries. This one-time process takes 5-10 minutes.</p>
+          <p className="text-[12px] text-white/40 font-light">One-time setup of local AI binaries. Takes 5-10 minutes on most machines.</p>
         </div>
 
+        {/* Contextual info card — always visible */}
+        {started && !allDone && (
+          <div className="p-4 rounded-xl bg-white/[0.03] border border-white/10 space-y-2 transition-all">
+            <div className="text-[9px] text-white/40 tracking-[0.2em] font-semibold uppercase">Currently</div>
+            <div className="text-[14px] font-semibold text-white">{phaseInfo.title}</div>
+            <div className="text-[11px] text-white/50 leading-relaxed font-light">{phaseInfo.desc}</div>
+          </div>
+        )}
+
         {!started && !allDone && (
-          <div className="space-y-4">
+          <>
             <div className="space-y-2">
               <div className="text-[9px] text-white/30 tracking-[0.25em] font-semibold uppercase mb-2">COMPONENTS</div>
               {WHAT_HAPPENS.map(item => (
@@ -154,37 +223,81 @@ export default function StepEnvironment() {
                 ))}
               </div>
             </div>
+          </>
+        )}
+
+        {allDone && (
+          <div className="p-4 rounded-xl bg-emerald-500/[0.05] border border-emerald-500/20">
+            <div className="text-[14px] font-semibold text-emerald-300 mb-1">✓ All Systems Ready</div>
+            <div className="text-[11px] text-emerald-200/60 leading-relaxed font-light">
+              Python libraries installed. Ollama AI engine active. Background services running. Seven is ready to serve you privately.
+            </div>
           </div>
         )}
       </div>
 
+      {/* RIGHT PANEL */}
       <div className="col-span-3 space-y-4">
         {started && !allDone && (
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-medium text-white/60">Overall Extraction Progress</span>
-              <span className="text-[11px] font-mono text-white/80">{progress}%</span>
+          <>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-medium text-white/60">Deployment Progress</span>
+                <span className="text-[11px] font-mono text-white/80">{progress}%</span>
+              </div>
+              <div className="h-1.5 bg-white/[0.05] rounded-full overflow-hidden">
+                <div className="h-full bg-white transition-all duration-700 ease-out" style={{ width: `${progress}%` }} />
+              </div>
             </div>
-            <div className="h-1.5 bg-white/[0.05] rounded-full overflow-hidden">
-              <div className="h-full bg-white transition-all duration-300 ease-out" style={{ width: `${progress}%` }} />
+
+            {/* 3-phase indicator */}
+            <div className="grid grid-cols-3 gap-2">
+              <div className={`p-2.5 rounded-lg border text-center transition-all ${
+                pkgStatus === 'done' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' :
+                pkgStatus === 'running' ? 'bg-white/10 border-white/30 text-white' : 'bg-white/[0.02] border-white/5 text-white/30'
+              }`}>
+                <div className="text-[10px] font-mono uppercase font-semibold">1. Python Libs</div>
+                <div className="text-[9px] mt-0.5">{pkgStatus === 'done' ? '✓ Ready' : pkgStatus === 'running' ? 'Installing…' : 'Pending'}</div>
+              </div>
+
+              <div className={`p-2.5 rounded-lg border text-center transition-all ${
+                ollamaStatus === 'done' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' :
+                showUacBanner ? 'bg-amber-500/15 border-amber-400/50 text-amber-200' :
+                ollamaStatus === 'running' ? 'bg-white/10 border-white/30 text-white' : 'bg-white/[0.02] border-white/5 text-white/30'
+              }`}>
+                <div className="text-[10px] font-mono uppercase font-semibold">2. AI Engine</div>
+                <div className="text-[9px] mt-0.5">{
+                  ollamaStatus === 'done' ? '✓ Installed' :
+                  showUacBanner ? '🛡️ Awaiting UAC' :
+                  ollamaStatus === 'running' ? 'Downloading…' : 'Pending'
+                }</div>
+              </div>
+
+              <div className={`p-2.5 rounded-lg border text-center transition-all ${
+                startStatus === 'done' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' :
+                startStatus === 'running' ? 'bg-white/10 border-white/30 text-white' : 'bg-white/[0.02] border-white/5 text-white/30'
+              }`}>
+                <div className="text-[10px] font-mono uppercase font-semibold">3. Services</div>
+                <div className="text-[9px] mt-0.5">{startStatus === 'done' ? '✓ Active' : startStatus === 'running' ? 'Starting…' : 'Pending'}</div>
+              </div>
             </div>
-          </div>
+          </>
         )}
 
-        {/* PROMINENT UAC SHIELD BANNER */}
-        {showUacBanner && (
-          <div className="p-4 rounded-xl bg-white/[0.06] border border-white/20 flex items-start gap-3 shadow-xl animate-[cardReveal_200ms_ease-out]">
-            <div className="text-xl mt-0.5">🛡️</div>
+        {/* ACTIVE UAC PROMPT — high visibility, pulsing */}
+        {showUacBanner && !rawError && (
+          <div className="p-4 rounded-xl bg-amber-500/15 border-2 border-amber-400/60 flex items-start gap-3 shadow-2xl animate-pulse">
+            <div className="text-2xl mt-0.5">🛡️</div>
             <div>
-              <div className="text-[12px] font-semibold text-white mb-1">Administrator Permission Required</div>
-              <div className="text-[11px] text-white/70 leading-relaxed">
-                Windows is requesting permission to install Ollama. <strong className="text-white font-bold">Please click YES on the Windows prompt</strong> (it may be flashing in your taskbar).
+              <div className="text-[13px] font-bold text-amber-200 mb-0.5">Action Required: Click YES on Windows Prompt</div>
+              <div className="text-[11px] text-amber-100/90 leading-relaxed font-medium">
+                Windows is asking for permission. <span className="underline font-bold">Look at your taskbar for the flashing blue &amp; yellow shield</span> and click YES to continue.
               </div>
             </div>
           </div>
         )}
 
-        <div className="bg-[#050505] border border-white/[0.08] rounded-xl overflow-hidden flex flex-col h-[320px]">
+        <div className="bg-[#050505] border border-white/[0.08] rounded-xl overflow-hidden flex flex-col h-[280px]">
           <div className="px-4 py-3 border-b border-white/[0.06] flex items-center justify-between bg-white/[0.02]">
             <div className="text-[10px] font-mono text-white/30 uppercase">deployment.log</div>
             <div className="text-[10px] font-mono text-white/30">{logs.length} events</div>
@@ -201,12 +314,38 @@ export default function StepEnvironment() {
           </div>
         </div>
 
+        {/* ERROR STATE — Contextual retry buttons */}
         {errorMsg && (
-          <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl space-y-3">
-            <div className="text-[11px] text-red-400 font-mono break-all">{errorMsg}</div>
-            <button onClick={handleRetry} className="w-full py-2.5 bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 text-red-300 text-[11px] font-semibold rounded-lg transition-all cursor-pointer">
-              🔄 Retry Installation
-            </button>
+          <div className="p-4 bg-red-500/[0.06] border border-red-500/20 rounded-xl space-y-3">
+            <div className="flex items-center gap-2">
+              <span className="text-[12px] font-semibold text-red-300">
+                {isUacDenied ? '🛡️ Permission Required' : isCorrupted ? '📦 Installer Damaged' : '⚠️ Deployment Notice'}
+              </span>
+            </div>
+            <div className="text-[11px] text-red-300/70 leading-relaxed">{errorMsg}</div>
+
+            {isUacDenied ? (
+              // UAC-specific: Grant Permission (skips download, jumps to UAC)
+              <div className="space-y-2">
+                <button
+                  onClick={handleGrantPermission}
+                  className="w-full py-2.5 bg-amber-500/90 hover:bg-amber-500 text-black text-[12px] font-bold rounded-lg transition-all flex items-center justify-center gap-2"
+                >
+                  🛡️ Grant Permission Now
+                </button>
+                <div className="text-[10px] text-white/40 text-center leading-relaxed">
+                  This will re-open the Windows prompt without re-downloading Ollama.
+                </div>
+              </div>
+            ) : (
+              // Generic retry (re-downloads if corrupted)
+              <button
+                onClick={handleStart}
+                className="w-full py-2.5 bg-white text-black hover:bg-white/90 text-[12px] font-semibold rounded-lg transition-all flex items-center justify-center gap-2"
+              >
+                {isCorrupted ? '📥 Download Fresh Copy & Retry' : '🔄 Retry Installation'}
+              </button>
+            )}
           </div>
         )}
 
@@ -221,8 +360,8 @@ export default function StepEnvironment() {
             Back
           </button>
           {!started && !allDone && !errorMsg && (
-            <button onClick={handleStart} className="flex-1 py-3.5 bg-white text-black text-[12px] font-semibold rounded-lg hover:bg-white/90 transition-all disabled:opacity-40" disabled={!checked}>
-              {checked ? 'Initialize Deployment' : 'Checking environment...'}
+            <button onClick={handleStart} disabled={!checked} className="flex-1 py-3.5 bg-white text-black text-[12px] font-semibold rounded-lg hover:bg-white/90 transition-all disabled:opacity-40">
+              {checked ? 'Initialize Deployment' : 'Verifying system...'}
             </button>
           )}
           {started && !allDone && !errorMsg && (
