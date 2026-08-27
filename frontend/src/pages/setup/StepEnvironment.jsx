@@ -60,11 +60,13 @@ export default function StepEnvironment() {
 
   const startPolling = () => {
     if (pollRef.current) return;
+    let consecutiveErrors = 0;
     pollRef.current = setInterval(async () => {
       try {
         const r = await fetch(`${API}/api/bootstrap/status`);
         if (!r.ok) return;
         const data = await r.json();
+        consecutiveErrors = 0;
         setBState(data);
 
         // Choose the ACTIVE phase's message so logs never regress to older messages
@@ -95,7 +97,20 @@ export default function StepEnvironment() {
           pollRef.current = null;
           setAllDone(true);
         }
-      } catch (e) {}
+      } catch (e) {
+        // Backend crashed and is restarting — don't reset progress, just wait
+        consecutiveErrors++;
+        if (consecutiveErrors <= 15) {
+          // Show reconnection message in log (first time only)
+          if (consecutiveErrors === 1) {
+            setLogs(p => [...p, { time: new Date().toLocaleTimeString([], { hour12: false }), text: 'Reconnecting to backend...' }]);
+          }
+        } else {
+          // After 6 seconds of no connection, try to restart bootstrap
+          consecutiveErrors = 0;
+          fetch(`${API}/api/bootstrap/start`, { method: 'POST' }).catch(() => {});
+        }
+      }
     }, 400);
   };
 
@@ -114,10 +129,9 @@ export default function StepEnvironment() {
 
   const handleStart = async () => {
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
-    maxProgRef.current = 0;
+    // Do NOT reset maxProgRef — preserves monotonic progress across backend restarts
     setStarted(true);
     setAllDone(false);
-    setBState({});
     lastLogRef.current = '';
     setLogs([{ time: new Date().toLocaleTimeString([], { hour12: false }), text: 'Initializing deployment sequence...' }]);
     try {
