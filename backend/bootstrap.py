@@ -32,10 +32,14 @@ _bootstrap_state = {
     "ollama_install": {
         "status": "pending",
         "progress": 0,
-        "error": None
+        "current": "",
+        "error": None,
+        "max_dl_mb": 0.0,   # Monotonic guard: never decreases across retries
+        "max_pct": 0         # Monotonic guard: never decreases across retries
     },
     "ollama_start": {
         "status": "pending",
+        "current": "",
         "error": None
     },
     "model_pull": {
@@ -50,6 +54,42 @@ _bootstrap_state = {
 }
 
 _state_lock = threading.Lock()
+
+# ── Bootstrap persistence file ──
+# Prevents re-running completed steps after a crash/restart
+_BOOTSTRAP_STATE_FILE = os.path.join(
+    os.environ.get('APPDATA', os.path.expanduser('~')),
+    'SEVEN', 'bootstrap_state.json'
+)
+
+
+def _save_bootstrap_checkpoint():
+    """Save completed steps to disk so restarts can skip them."""
+    try:
+        data = {}
+        with _state_lock:
+            data = {
+                "packages_done": _bootstrap_state["packages"]["status"] == "done",
+                "ollama_installed": is_ollama_installed(),
+                "ollama_running": is_ollama_running(),
+                "overall_ready": _bootstrap_state["overall_ready"]
+            }
+        os.makedirs(os.path.dirname(_BOOTSTRAP_STATE_FILE), exist_ok=True)
+        with open(_BOOTSTRAP_STATE_FILE, 'w') as f:
+            json.dump(data, f)
+    except Exception:
+        pass
+
+
+def _load_bootstrap_checkpoint():
+    """Load previous bootstrap progress to skip completed steps."""
+    try:
+        if os.path.exists(_BOOTSTRAP_STATE_FILE):
+            with open(_BOOTSTRAP_STATE_FILE, 'r') as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
 
 
 def get_state():
@@ -644,7 +684,7 @@ def _safe_rename_with_retry(src, dst, max_attempts=10):
 
 
 def download_ollama_installer():
-    """Download OllamaSetup.exe with progress smoothing, defender-safe rename, and cache reuse."""
+    """Download OllamaSetup.exe with monotonic progress, crash recovery, and cache reuse."""
     cached = _find_cached_ollama_installer()
     if cached:
         _set('ollama_install', status='running', progress=100,
@@ -657,18 +697,13 @@ def download_ollama_installer():
     part_dest = os.path.join(temp_dir, "OllamaSetup_download.tmp")
     final_dest = os.path.join(temp_dir, "OllamaSetup_cached.exe")
 
-    # Clean up leftover partial downloads
     if os.path.exists(part_dest):
         try:
             os.unlink(part_dest)
         except Exception:
             pass
 
-    print("[BOOTSTRAP] Starting Ollama download with smoothed progress...")
-
-    # Monotonic progress guard (backend-side) — prevents ANY backward jumps
-    max_pct_sent = [0]
-    max_mb_sent = [0.0]
+    print("[BOOTSTRAP] Starting Ollama download...")
 
     # Rolling average for smooth speed display
     speed_samples = []
@@ -677,9 +712,19 @@ def download_ollama_installer():
     try:
         import requests
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) SEVEN/1.3.1'}
-        response = requests.get(OLLAMA_DOWNLOAD_URL, headers=headers,
-                                stream=True, timeout=60, allow_redirects=True)
-        response.raise_for_status()
+
+        # Retry up to 3 times on connection drops
+        for attempt in range(3):
+            try:
+                response = requests.get(OLLAMA_DOWNLOAD_URL, headers=headers,
+                                        stream=True, timeout=60, allow_redirects=True)
+                response.raise_for_status()
+                break
+            except Exception as conn_err:
+                if attempt == 2:
+                    raise
+                print(f"[BOOTSTRAP] Connection failed (attempt {attempt+1}/3): {conn_err}")
+                time.sleep(3)
 
         total_size = int(response.headers.get('content-length', 0))
         downloaded = 0
@@ -689,24 +734,22 @@ def download_ollama_installer():
 
         f = open(part_dest, 'wb')
         try:
-            for chunk in response.iter_content(chunk_size=262144):  # 256 KB
+            for chunk in response.iter_content(chunk_size=262144):
                 if chunk:
                     f.write(chunk)
                     downloaded += len(chunk)
                     now = time.time()
 
-                    # Rolling speed sample every 0.5s (smoother, more professional)
                     if now - last_sample_time >= 0.5:
                         bytes_diff = downloaded - last_downloaded
                         time_diff = now - last_sample_time
                         instant_bps = bytes_diff / time_diff if time_diff > 0 else 0
                         speed_samples.append(instant_bps)
-                        if len(speed_samples) > 8:  # 4-second rolling window
+                        if len(speed_samples) > 8:
                             speed_samples.pop(0)
                         last_downloaded = downloaded
                         last_sample_time = now
 
-                    # Only push UI updates every 400ms — prevents jitter
                     if now - last_ui_update[0] >= 0.4:
                         last_ui_update[0] = now
                         avg_speed_bps = sum(speed_samples) / len(speed_samples) if speed_samples else 0
@@ -714,19 +757,23 @@ def download_ollama_installer():
 
                         if total_size > 0:
                             pct = min(int((downloaded / total_size) * 100), 99)
-                            # Backend monotonic guard
-                            if pct < max_pct_sent[0]:
-                                pct = max_pct_sent[0]
-                            else:
-                                max_pct_sent[0] = pct
-
                             dl_mb = round(downloaded / (1024 * 1024), 1)
-                            if dl_mb < max_mb_sent[0]:
-                                dl_mb = max_mb_sent[0]
-                            else:
-                                max_mb_sent[0] = dl_mb
-
                             tot_mb = round(total_size / (1024 * 1024), 1)
+
+                            # GLOBAL monotonic guard — stored in shared state,
+                            # survives function retries and thread restarts
+                            with _state_lock:
+                                prev_pct = _bootstrap_state["ollama_install"].get("max_pct", 0)
+                                prev_mb = _bootstrap_state["ollama_install"].get("max_dl_mb", 0.0)
+                                if pct > prev_pct:
+                                    _bootstrap_state["ollama_install"]["max_pct"] = pct
+                                else:
+                                    pct = prev_pct
+                                if dl_mb > prev_mb:
+                                    _bootstrap_state["ollama_install"]["max_dl_mb"] = dl_mb
+                                else:
+                                    dl_mb = prev_mb
+
                             bytes_rem = total_size - downloaded
                             eta_sec = bytes_rem / avg_speed_bps if avg_speed_bps > 0 else 0
 
@@ -758,18 +805,14 @@ def download_ollama_installer():
         if actual_size < 100_000_000:
             if os.path.exists(part_dest):
                 os.unlink(part_dest)
-            raise Exception(f"Download incomplete ({round(actual_size / 1024 / 1024, 1)} MB received). Expected ~200MB.")
+            raise Exception(f"Download incomplete ({round(actual_size / 1024 / 1024, 1)} MB). Expected ~200MB.")
 
-        _set('ollama_install', progress=100, current="Verifying download integrity...")
-
-        # Wait for Windows Defender to release the file handle before rename
-        # This is what causes WinError 32 without this delay
+        _set('ollama_install', progress=100, current="Verifying download...")
         time.sleep(2.0)
-
         _safe_rename_with_retry(part_dest, final_dest, max_attempts=15)
 
-        _set('ollama_install', progress=100, current="Download complete. Preparing Windows installer...")
-        print(f"[BOOTSTRAP] Ollama download verified and cached: {final_dest}")
+        _set('ollama_install', progress=100, current="Download complete. Preparing installer...")
+        print(f"[BOOTSTRAP] Ollama download verified: {final_dest}")
         time.sleep(0.5)
         return final_dest
 
@@ -1003,60 +1046,81 @@ def pull_model(model_name: str):
 def run_environment_setup(on_complete=None):
     """
     Run full environment setup in background thread.
-    Instantly updates shared state so button reacts in 0ms.
+    Crash-proof: wraps entire flow in try/except so the API server never dies.
+    Resumes from checkpoint if a previous run was interrupted.
     """
-    # INSTANT UPDATE - Button reacts immediately on click
     _set('packages', status='running', progress=5, current='Initializing environment deployment...')
-    _set('ollama_install', status='pending', progress=0, current='Waiting for package completion...')
+    _set('ollama_install', status='pending', progress=0, current='Waiting for packages...')
     _set('ollama_start', status='pending', current='Waiting...')
 
     def _run():
-        print("[BOOTSTRAP] Starting environment setup...")
+        try:
+            print("[BOOTSTRAP] Starting environment setup...")
+            checkpoint = _load_bootstrap_checkpoint()
 
-        # ── Step 1: Python packages (required) ──
-        if not check_packages_installed():
-            ok = install_packages()
-            if not ok:
-                print("[BOOTSTRAP] Package install failed — cannot continue")
-                if on_complete:
-                    on_complete(False)
-                return
-        else:
-            print("[BOOTSTRAP] Packages already installed.")
-            _set('packages', status='done', progress=100,
-                 current='Already installed')
-
-        # ── Step 2: Ollama install (REQUIRED) ──
-        ollama_ok = setup_ollama()
-        if not ollama_ok:
-            # Check if user already has Ollama installed manually
-            if is_ollama_installed():
-                print("[BOOTSTRAP] Ollama found via manual install")
-                _set('ollama_install', status='done', progress=100)
+            # ── Step 1: Python packages ──
+            if checkpoint.get("packages_done") and check_packages_installed():
+                print("[BOOTSTRAP] Packages already installed (checkpoint).")
+                _set('packages', status='done', progress=100, current='Already installed')
+            elif check_packages_installed():
+                print("[BOOTSTRAP] Packages already installed (verified).")
+                _set('packages', status='done', progress=100, current='Already installed')
+                _save_bootstrap_checkpoint()
             else:
-                print("[BOOTSTRAP] Ollama install failed")
-                if on_complete:
-                    on_complete(False)
-                return
+                ok = install_packages()
+                if not ok:
+                    print("[BOOTSTRAP] Package install failed — cannot continue")
+                    if on_complete:
+                        on_complete(False)
+                    return
+                _save_bootstrap_checkpoint()
 
-        # ── Step 3: Start Ollama (REQUIRED) ──
-        ok = start_ollama()
-        if not ok:
-            # Try one more time
-            import time
-            time.sleep(3)
-            ok = start_ollama()
-            if not ok:
-                if on_complete:
-                    on_complete(False)
-                return
+            # ── Step 2: Ollama install ──
+            if is_ollama_installed():
+                print("[BOOTSTRAP] Ollama already installed.")
+                _set('ollama_install', status='done', progress=100, current='Already installed')
+            else:
+                ollama_ok = setup_ollama()
+                if not ollama_ok:
+                    if is_ollama_installed():
+                        print("[BOOTSTRAP] Ollama found after install attempt.")
+                        _set('ollama_install', status='done', progress=100)
+                    else:
+                        print("[BOOTSTRAP] Ollama install failed.")
+                        if on_complete:
+                            on_complete(False)
+                        return
 
-        with _state_lock:
-            _bootstrap_state['overall_ready'] = True
+            # ── Step 3: Start Ollama ──
+            if is_ollama_running():
+                print("[BOOTSTRAP] Ollama already running.")
+                _set('ollama_start', status='done')
+            else:
+                ok = start_ollama()
+                if not ok:
+                    time.sleep(3)
+                    ok = start_ollama()
+                    if not ok:
+                        if on_complete:
+                            on_complete(False)
+                        return
 
-        print("[BOOTSTRAP] Environment setup complete.")
-        if on_complete:
-            on_complete(True)
+            with _state_lock:
+                _bootstrap_state['overall_ready'] = True
+
+            _save_bootstrap_checkpoint()
+            print("[BOOTSTRAP] Environment setup complete.")
+            if on_complete:
+                on_complete(True)
+
+        except Exception as e:
+            # CRITICAL: Never let bootstrap crash the API server.
+            # Log the error and set state so the frontend shows a retry button.
+            import traceback
+            traceback.print_exc()
+            print(f"[BOOTSTRAP] Setup crashed (non-fatal): {e}")
+            _set('packages', status='error',
+                 error=f'Setup interrupted: {str(e)[:200]}. Click Retry to resume.')
 
     t = threading.Thread(target=_run, daemon=True, name="Bootstrap")
     t.start()
