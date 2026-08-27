@@ -38,7 +38,11 @@ export default function StepAboutYou() {
           </div>
           <div className="w-full pt-4 border-t border-white/[0.06]">
             <div className="text-[9px] text-white/30 tracking-[0.2em] font-semibold mb-2">SYSTEM GREETING</div>
-            <div className="italic text-[11.5px] text-white/60 leading-relaxed">"Good morning, {firstName || 'friend'}."</div>
+            <div className="italic text-[11.5px] text-white/60 leading-relaxed">"{(() => {
+              const h = new Date().getHours();
+              const g = h < 5 ? 'Good evening' : h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : h < 21 ? 'Good evening' : 'Good night';
+              return `${g}, ${firstName || 'friend'}.`;
+            })()}"</div>
           </div>
         </div>
       </div>
