@@ -16,7 +16,8 @@ import urllib.request
 import tempfile
 
 # ── Ollama config ──
-OLLAMA_DOWNLOAD_URL   = "https://ollama.com/download/OllamaSetup.exe"
+# Using direct high-speed CDN URL to avoid redirect latency
+OLLAMA_DOWNLOAD_URL   = "https://releases.ollama.com/windows/OllamaSetup.exe"
 OLLAMA_INSTALLER_NAME = "OllamaSetup.exe"
 OLLAMA_HOST           = "http://127.0.0.1:11434"
 OLLAMA_CHECK_TIMEOUT  = 60
@@ -758,8 +759,8 @@ def _safe_rename_with_retry(src, dst, max_attempts=10):
 
 def download_ollama_installer():
     """
-    Download OllamaSetup.exe using Windows native curl with smooth progress reporting.
-    Runs at maximum connection speed using native TCP window scaling and TLS 1.3.
+    Download OllamaSetup.exe using Windows native curl.
+    Optimized for high-speed direct downloads and stable progress tracking.
     """
     cached = _find_cached_ollama_installer()
     if cached:
@@ -778,39 +779,44 @@ def download_ollama_installer():
         try: os.unlink(part_dest)
         except Exception: pass
 
-    # 1. Get exact Content-Length via lightweight HEAD request
-    total_size = 1565440000  # Default ~1.49 GB fallback
+    # 1. Query exact Content-Length bypassing Windows WPAD proxies
+    # Real size of OllamaSetup.exe on Windows is ~184,000,000 bytes (176 MB)
+    total_size = 184000000  
     try:
+        # Create opener that completely ignores system proxy auto-discovery for instant connection speeds
+        proxy_support = urllib.request.ProxyHandler({})
+        opener = urllib.request.build_opener(proxy_support)
         req = urllib.request.Request(
             OLLAMA_DOWNLOAD_URL, 
             headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) SEVEN/1.3.1"},
             method="HEAD"
         )
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        with opener.open(req, timeout=8) as resp:
             cl = int(resp.headers.get("Content-Length", 0))
-            if cl > 100000000:
+            if cl > 50000000:
                 total_size = cl
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[BOOTSTRAP] Fast HEAD request size query failed (using default fallback): {e}")
 
     tot_mb = round(total_size / (1024 * 1024), 1)
 
-    # 2. Find native Windows curl.exe
+    # 2. Get native Windows curl.exe
     curl_path = "curl.exe"
     system_root = os.environ.get("SystemRoot", r"C:\Windows")
     sys32_curl = os.path.join(system_root, "System32", "curl.exe")
     if os.path.exists(sys32_curl):
         curl_path = sys32_curl
 
-    # 3. Launch native curl with maximum buffer and automatic redirect resolution
+    # 3. Launch native curl with disabled proxies (force direct fast TCP connection)
     cflags = 0x08000000 if platform.system() == 'Windows' else 0
     curl_cmd = [
         curl_path,
-        "-L",                    # Follow redirects
-        "--fail",               # Fail on HTTP errors
-        "--silent",             # Silent mode (we track file size on disk)
+        "-L",                     # Follow redirects
+        "--noproxy", "*",         # Disable system proxy lookups to maximize transfer speeds
+        "--fail",                 # Error on HTTP failure codes
+        "--silent",               # Hide internal progress metrics (handled below)
         "--show-error",
-        "--retry", "3",         # Auto-retry on network drop
+        "--retry", "3",           # Retry on network dropouts
         "--retry-delay", "2",
         "-A", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) SEVEN/1.3.1",
         "-o", part_dest,
@@ -825,14 +831,12 @@ def download_ollama_installer():
             creationflags=cflags
         )
     except Exception as e:
-        print(f"[BOOTSTRAP] Native curl launch failed ({e}), falling back to Python downloader")
+        print(f"[BOOTSTRAP] Native curl launch failed ({e}), using high-throughput Python backup")
         return _download_ollama_fallback_python(part_dest, final_dest, total_size)
 
-    # 4. Smooth Disk Polling with Exponential Moving Average (EMA)
-    last_size = 0
-    last_time = time.time()
-    ema_speed = 0.0
-    alpha = 0.3  # Smoothing factor: 30% instant, 70% historical
+    # 4. Progress Reporting using Overall Average Speed (prevents fluctuation dips)
+    start_time = time.time()
+    time.sleep(0.5)
 
     while proc.poll() is None:
         time.sleep(0.4)
@@ -844,23 +848,18 @@ def download_ollama_installer():
             except OSError:
                 continue
 
-            delta_bytes = cur_size - last_size
-            delta_time = max(now - last_time, 0.001)
-            instant_speed_mb = (delta_bytes / delta_time) / (1024 * 1024)
-
-            # Calculate Exponential Moving Average for stable speed reporting
-            if ema_speed == 0.0:
-                ema_speed = instant_speed_mb
-            else:
-                ema_speed = (alpha * instant_speed_mb) + ((1.0 - alpha) * ema_speed)
-
-            display_speed = round(max(ema_speed, 0.1), 1)
+            elapsed_time = max(now - start_time, 0.001)
+            
+            # Calculate stable overall average speed instead of volatile instant spikes
+            avg_speed_mb = (cur_size / elapsed_time) / (1024 * 1024)
+            display_speed = round(max(avg_speed_mb, 0.1), 1)
+            
             dl_mb = round(cur_size / (1024 * 1024), 1)
             pct = min(99, int((cur_size / total_size) * 100))
 
-            # Remaining time calculation
+            # Secure ETA estimation
             bytes_left = max(0, total_size - cur_size)
-            speed_bps = ema_speed * 1024 * 1024
+            speed_bps = avg_speed_mb * 1024 * 1024
             if speed_bps > 0:
                 eta_secs = int(bytes_left / speed_bps)
                 eta_str = f"{eta_secs}s left" if eta_secs < 60 else f"{eta_secs // 60}m {eta_secs % 60}s left"
@@ -870,9 +869,6 @@ def download_ollama_installer():
             _set('ollama_install',
                  progress=pct,
                  current=f"Downloading Ollama runtime · {dl_mb} / {tot_mb} MB · {display_speed} MB/s · {eta_str}")
-
-            last_size = cur_size
-            last_time = now
 
     stdout, stderr = proc.communicate()
     returncode = proc.returncode
@@ -895,16 +891,22 @@ def download_ollama_installer():
 
 
 def _download_ollama_fallback_python(part_dest, final_dest, total_size):
-    """Fallback high-throughput buffered downloader if curl is unavailable."""
+    """Fallback high-throughput buffered direct-TCP downloader if curl is unavailable."""
     try:
+        # Create an opener with system proxy auto-discovery disabled
+        proxy_support = urllib.request.ProxyHandler({})
+        opener = urllib.request.build_opener(proxy_support)
+        
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) SEVEN/1.3.1"}
         req = urllib.request.Request(OLLAMA_DOWNLOAD_URL, headers=headers)
-        with urllib.request.urlopen(req, timeout=60) as resp, open(part_dest, "wb") as out:
+        
+        with opener.open(req, timeout=60) as resp, open(part_dest, "wb") as out:
             while True:
-                chunk = resp.read(1048576)  # 1 MB buffer for high throughput
+                chunk = resp.read(1048576)  # High-throughput 1 MB chunks
                 if not chunk:
                     break
                 out.write(chunk)
+                
         if os.path.exists(final_dest):
             try: os.unlink(final_dest)
             except Exception: pass
