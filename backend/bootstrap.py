@@ -53,8 +53,9 @@ _bootstrap_state = {
     "overall_ready": False
 }
 
-_state_lock = threading.Lock()
-_setup_lock = threading.Lock()  # Prevents concurrent setup runs
+_state_lock    = threading.Lock()
+_setup_lock    = threading.Lock()   # Prevents concurrent setup runs
+_check_lock    = threading.Lock()   # Prevents concurrent subprocess storms during package check
 _setup_running = False
 
 # ── Bootstrap persistence file ──
@@ -234,105 +235,104 @@ def _fix_pth_file(python_exe):
 # ============================================================================
 
 def check_packages_installed():
-    """Check if core packages are installed AND numpy is the correct version."""
-    python = get_python_executable()
+    """Check if core packages are installed AND numpy is the correct version.
+    Thread-safe: acquires _check_lock to prevent concurrent subprocess storms."""
+    if not _check_lock.acquire(blocking=True, timeout=30):
+        print("[BOOTSTRAP] Package check busy — assuming packages ready")
+        return True
 
-    _fix_pth_file(python)
-
-    # Split into two fast checks instead of one slow one.
-    # chromadb and sentence_transformers are heavy imports (5-15s on cold start).
-    # Checking them in the same subprocess as numpy causes 15s timeout on first run.
-    check_numpy = (
-        "import sys\n"
-        "try:\n"
-        "    import numpy as np\n"
-        "    _ = np.ndarray\n"
-        "    import numpy.typing\n"
-        "    if np.__version__.startswith('2.'):\n"
-        "        print('numpy_wrong_version')\n"
-        "        sys.exit(1)\n"
-        "except Exception:\n"
-        "    print('numpy_broken')\n"
-        "    sys.exit(1)\n"
-        "print('OK')\n"
-    )
-
-    check_core = (
-        "import sys\n"
-        "pkgs = ['fastapi','uvicorn','pyttsx3','psutil','keyboard','pynput']\n"
-        "missing = []\n"
-        "for p in pkgs:\n"
-        "    try:\n"
-        "        __import__(p)\n"
-        "    except ImportError:\n"
-        "        missing.append(p)\n"
-        "if missing:\n"
-        "    print(','.join(missing))\n"
-        "    sys.exit(1)\n"
-        "print('OK')\n"
-    )
-
-    # Heavy imports checked separately with longer timeout
-    check_heavy = (
-        "import sys\n"
-        "pkgs = ['chromadb','sentence_transformers']\n"
-        "missing = []\n"
-        "for p in pkgs:\n"
-        "    try:\n"
-        "        __import__(p)\n"
-        "    except ImportError:\n"
-        "        missing.append(p)\n"
-        "if missing:\n"
-        "    print(','.join(missing))\n"
-        "    sys.exit(1)\n"
-        "print('OK')\n"
-    )
-
-    cflags = 0x08000000 if platform.system() == 'Windows' else 0
-
-    # Step 1: Fast numpy check (2s)
     try:
-        r = subprocess.run([python, '-c', check_numpy], capture_output=True, text=True, timeout=10, creationflags=cflags)
-        if r.returncode != 0:
-            output = r.stdout.strip()
-            if output in ("numpy_broken", "numpy_wrong_version"):
-                print(f"[BOOTSTRAP] Numpy issue: {output}. Auto-fixing...")
-                _repair_numpy(python)
-            return False
-    except subprocess.TimeoutExpired:
-        print("[BOOTSTRAP] Numpy check timed out")
-        return False
+        python = get_python_executable()
+        _fix_pth_file(python)
 
-    # Step 2: Fast core packages check (3s)
-    try:
-        r = subprocess.run([python, '-c', check_core], capture_output=True, text=True, timeout=10, creationflags=cflags)
-        if r.returncode != 0:
-            missing = r.stdout.strip()
-            print(f"[BOOTSTRAP] Missing core packages: {missing}")
-            # Install ONLY the missing packages instead of all 30+
-            _install_missing_packages(python, missing)
-            # Re-verify after install
-            r2 = subprocess.run([python, '-c', check_core], capture_output=True, text=True, timeout=10, creationflags=cflags)
-            if r2.returncode != 0:
-                print(f"[BOOTSTRAP] Still missing after install: {r2.stdout.strip()}")
+        check_numpy = (
+            "import sys\n"
+            "try:\n"
+            "    import numpy as np\n"
+            "    _ = np.ndarray\n"
+            "    import numpy.typing\n"
+            "    if np.__version__.startswith('2.'):\n"
+            "        print('numpy_wrong_version')\n"
+            "        sys.exit(1)\n"
+            "except Exception:\n"
+            "    print('numpy_broken')\n"
+            "    sys.exit(1)\n"
+            "print('OK')\n"
+        )
+
+        check_core = (
+            "import sys\n"
+            "pkgs = ['fastapi','uvicorn','pyttsx3','psutil','keyboard','pynput']\n"
+            "missing = []\n"
+            "for p in pkgs:\n"
+            "    try:\n"
+            "        __import__(p)\n"
+            "    except ImportError:\n"
+            "        missing.append(p)\n"
+            "if missing:\n"
+            "    print(','.join(missing))\n"
+            "    sys.exit(1)\n"
+            "print('OK')\n"
+        )
+
+        check_heavy = (
+            "import sys\n"
+            "pkgs = ['chromadb','sentence_transformers']\n"
+            "missing = []\n"
+            "for p in pkgs:\n"
+            "    try:\n"
+            "        __import__(p)\n"
+            "    except ImportError:\n"
+            "        missing.append(p)\n"
+            "if missing:\n"
+            "    print(','.join(missing))\n"
+            "    sys.exit(1)\n"
+            "print('OK')\n"
+        )
+
+        cflags = 0x08000000 if platform.system() == 'Windows' else 0
+
+        # Step 1: Fast numpy check
+        try:
+            r = subprocess.run([python, '-c', check_numpy], capture_output=True, text=True, timeout=10, creationflags=cflags)
+            if r.returncode != 0:
+                output = r.stdout.strip()
+                if output in ("numpy_broken", "numpy_wrong_version"):
+                    print(f"[BOOTSTRAP] Numpy issue: {output}. Auto-fixing...")
+                    _repair_numpy(python)
                 return False
-            print("[BOOTSTRAP] Missing packages installed successfully.")
-    except subprocess.TimeoutExpired:
-        print("[BOOTSTRAP] Core check timed out")
-        return False
-
-    # Step 3: Heavy imports check (30s — chromadb loads torch + sentence_transformers)
-    try:
-        r = subprocess.run([python, '-c', check_heavy], capture_output=True, text=True, timeout=45, creationflags=cflags)
-        if r.returncode != 0:
-            print(f"[BOOTSTRAP] Missing heavy: {r.stdout.strip()}")
+        except subprocess.TimeoutExpired:
+            print("[BOOTSTRAP] Numpy check timed out")
             return False
-    except subprocess.TimeoutExpired:
-        print("[BOOTSTRAP] Heavy package check timed out — assuming installed")
-        # Don't fail on timeout — chromadb can take 30s+ on cold HDD start
+
+        # Step 2: Fast core packages check
+        try:
+            r = subprocess.run([python, '-c', check_core], capture_output=True, text=True, timeout=10, creationflags=cflags)
+            if r.returncode != 0:
+                missing = r.stdout.strip()
+                print(f"[BOOTSTRAP] Missing core packages: {missing}")
+                _install_missing_packages(python, missing)
+                r2 = subprocess.run([python, '-c', check_core], capture_output=True, text=True, timeout=10, creationflags=cflags)
+                if r2.returncode != 0:
+                    print(f"[BOOTSTRAP] Still missing after install: {r2.stdout.strip()}")
+                    return False
+                print("[BOOTSTRAP] Missing packages installed successfully.")
+        except subprocess.TimeoutExpired:
+            print("[BOOTSTRAP] Core check timed out")
+            return False
+
+        # Step 3: Heavy imports check
+        try:
+            r = subprocess.run([python, '-c', check_heavy], capture_output=True, text=True, timeout=45, creationflags=cflags)
+            if r.returncode != 0:
+                print(f"[BOOTSTRAP] Missing heavy: {r.stdout.strip()}")
+                return False
+        except subprocess.TimeoutExpired:
+            print("[BOOTSTRAP] Heavy package check timed out — assuming installed")
 
         print("[BOOTSTRAP] All critical packages verified.")
         return True
+
     finally:
         _check_lock.release()
 
