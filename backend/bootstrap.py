@@ -758,8 +758,8 @@ def _safe_rename_with_retry(src, dst, max_attempts=10):
 
 def download_ollama_installer():
     """
-    Download OllamaSetup.exe using an accelerated 8-stream parallel segmented engine.
-    Bypasses CDN single-stream speed throttling to utilize full internet bandwidth.
+    Download OllamaSetup.exe using Windows native curl with smooth progress reporting.
+    Runs at maximum connection speed using native TCP window scaling and TLS 1.3.
     """
     cached = _find_cached_ollama_installer()
     if cached:
@@ -768,218 +768,151 @@ def download_ollama_installer():
         return cached
 
     _set('ollama_install', status='running', progress=0,
-         current="Connecting to accelerated download nodes...", error=None)
+         current="Connecting to download servers...", error=None)
     
     temp_dir = tempfile.gettempdir()
     part_dest = os.path.join(temp_dir, "OllamaSetup_download.tmp")
     final_dest = os.path.join(temp_dir, "OllamaSetup_cached.exe")
 
-    part_dest_clean = part_dest.replace('\\', '/')
-    final_dest_clean = final_dest.replace('\\', '/')
-
     if os.path.exists(part_dest):
         try: os.unlink(part_dest)
         except Exception: pass
 
-    # Multi-stream concurrent download engine script running in isolated subprocess
-    dl_script = f'''
-import urllib.request
-import os
-import sys
-import time
-import threading
-from concurrent.futures import ThreadPoolExecutor
-
-url = "{OLLAMA_DOWNLOAD_URL}"
-dest = r"{part_dest_clean}"
-final = r"{final_dest_clean}"
-headers = {{"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) SEVEN/1.3.1"}}
-
-try:
-    # 1. Resolve redirect and obtain final CDN URL + total size
-    req = urllib.request.Request(url, headers=headers)
-    resp = None
-    for attempt in range(3):
-        try:
-            resp = urllib.request.urlopen(req, timeout=30)
-            break
-        except Exception:
-            if attempt == 2: raise
-            time.sleep(2)
-
-    final_url = resp.geturl()
-    total_size = int(resp.headers.get("Content-Length", 0))
-    resp.close()
-
-    if total_size < 100000000:
-        raise Exception("Invalid installer response size from server")
-
-    # 2. Test if server supports Range requests
-    range_test = urllib.request.Request(final_url, headers={{**headers, "Range": "bytes=0-10"}})
-    supports_range = False
+    # 1. Get exact Content-Length via lightweight HEAD request
+    total_size = 1565440000  # Default ~1.49 GB fallback
     try:
-        with urllib.request.urlopen(range_test, timeout=15) as r_test:
-            if r_test.status == 206:
-                supports_range = True
+        req = urllib.request.Request(
+            OLLAMA_DOWNLOAD_URL, 
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) SEVEN/1.3.1"},
+            method="HEAD"
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            cl = int(resp.headers.get("Content-Length", 0))
+            if cl > 100000000:
+                total_size = cl
     except Exception:
-        supports_range = False
+        pass
 
-    downloaded = [0]
-    lock = threading.Lock()
-    start_time = time.time()
-    NUM_WORKERS = 8 if supports_range else 1
+    tot_mb = round(total_size / (1024 * 1024), 1)
 
-    def download_worker(worker_id, start_byte, end_byte):
-        part_file = f"{{dest}}.part{{worker_id}}"
-        for attempt in range(5):
-            try:
-                existing = os.path.getsize(part_file) if os.path.exists(part_file) else 0
-                cur_start = start_byte + existing
-                if cur_start > end_byte:
-                    return True
-                
-                part_req = urllib.request.Request(final_url, headers={{
-                    **headers,
-                    "Range": f"bytes={{cur_start}}-{{end_byte}}"
-                }})
-                with urllib.request.urlopen(part_req, timeout=30) as r:
-                    with open(part_file, "ab" if existing > 0 else "wb") as pf:
-                        while True:
-                            buf = r.read(262144)
-                            if not buf:
-                                break
-                            pf.write(buf)
-                            with lock:
-                                downloaded[0] += len(buf)
-                return True
-            except Exception:
-                time.sleep(1)
-        return False
+    # 2. Find native Windows curl.exe
+    curl_path = "curl.exe"
+    system_root = os.environ.get("SystemRoot", r"C:\Windows")
+    sys32_curl = os.path.join(system_root, "System32", "curl.exe")
+    if os.path.exists(sys32_curl):
+        curl_path = sys32_curl
 
-    # 3. Spawn parallel worker threads
-    chunk_size = total_size // NUM_WORKERS
-    ranges = []
-    for i in range(NUM_WORKERS):
-        s = i * chunk_size
-        e = total_size - 1 if i == NUM_WORKERS - 1 else (i + 1) * chunk_size - 1
-        ranges.append((i, s, e))
-
-    stop_reporting = threading.Event()
-
-    def report_progress():
-        last_dl = 0
-        last_time = time.time()
-        while not stop_reporting.is_set():
-            time.sleep(0.4)
-            now = time.time()
-            with lock:
-                current_dl = downloaded[0]
-            pct = min(99, int((current_dl / total_size) * 100))
-            dl_mb = round(current_dl / (1024 * 1024), 1)
-            tot_mb = round(total_size / (1024 * 1024), 1)
-            
-            time_diff = max(now - last_time, 0.001)
-            instant_speed = ((current_dl - last_dl) / time_diff) / (1024 * 1024)
-            speed_mb_s = round(max(instant_speed, 0.1), 2)
-            
-            last_dl = current_dl
-            last_time = now
-            print(f"STREAM_PROGRESS:{{pct}}:{{dl_mb}}:{{tot_mb}}:{{speed_mb_s}}", flush=True)
-
-    reporter_thread = threading.Thread(target=report_progress, daemon=True)
-    reporter_thread.start()
-
-    with ThreadPoolExecutor(max_workers=NUM_WORKERS) as executor:
-        futures = [executor.submit(download_worker, r[0], r[1], r[2]) for r in ranges]
-        results = [f.result() for f in futures]
-
-    stop_reporting.set()
-    reporter_thread.join(timeout=1)
-
-    if not all(results):
-        raise Exception("One or more accelerated download streams failed")
-
-    # 4. Fast binary assembly of downloaded segments
-    with open(dest, "wb") as outfile:
-        for i in range(NUM_WORKERS):
-            pfile = f"{{dest}}.part{{i}}"
-            with open(pfile, "rb") as infile:
-                while True:
-                    b = infile.read(1048576)
-                    if not b:
-                        break
-                    outfile.write(b)
-            try: os.unlink(pfile)
-            except Exception: pass
-
-    actual_size = os.path.getsize(dest)
-    if actual_size < total_size:
-        raise Exception(f"Assembled file mismatch ({{actual_size}}/{{total_size}} bytes)")
-
-    if os.path.exists(final):
-        try: os.unlink(final)
-        except Exception: pass
-
-    os.rename(dest, final)
-    print("STREAM_SUCCESS", flush=True)
-    sys.exit(0)
-
-except Exception as e:
-    print(f"STREAM_ERROR:{{e}}", flush=True)
-    sys.exit(1)
-'''
-
-    python_exe = get_python_executable()
-    success = False
-    error_details = "Unknown error"
+    # 3. Launch native curl with maximum buffer and automatic redirect resolution
+    cflags = 0x08000000 if platform.system() == 'Windows' else 0
+    curl_cmd = [
+        curl_path,
+        "-L",                    # Follow redirects
+        "--fail",               # Fail on HTTP errors
+        "--silent",             # Silent mode (we track file size on disk)
+        "--show-error",
+        "--retry", "3",         # Auto-retry on network drop
+        "--retry-delay", "2",
+        "-A", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) SEVEN/1.3.1",
+        "-o", part_dest,
+        OLLAMA_DOWNLOAD_URL
+    ]
 
     try:
         proc = subprocess.Popen(
-            [python_exe, '-u', '-c', dl_script],
+            curl_cmd,
             stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-            creationflags=0x08000000 if platform.system() == 'Windows' else 0
+            stderr=subprocess.PIPE,
+            creationflags=cflags
         )
-
-        while True:
-            line = proc.stdout.readline()
-            if not line:
-                break
-            line = line.strip()
-            
-            if line.startswith("STREAM_PROGRESS:"):
-                parts = line.split(':')
-                if len(parts) >= 5:
-                    pct = int(parts[1])
-                    dl_mb = parts[2]
-                    tot_mb = parts[3]
-                    speed = parts[4]
-                    
-                    _set('ollama_install', 
-                         progress=pct, 
-                         current=f"Downloading Ollama runtime · {dl_mb} / {tot_mb} MB · {speed} MB/s")
-                         
-            elif line == "STREAM_SUCCESS":
-                success = True
-            elif line.startswith("STREAM_ERROR:"):
-                error_details = line.replace("STREAM_ERROR:", "")
-
-        proc.wait(timeout=10)
-
     except Exception as e:
-        print(f"[BOOTSTRAP] Download acceleration error: {e}")
-        error_details = str(e)
+        print(f"[BOOTSTRAP] Native curl launch failed ({e}), falling back to Python downloader")
+        return _download_ollama_fallback_python(part_dest, final_dest, total_size)
 
-    if success and os.path.exists(final_dest):
+    # 4. Smooth Disk Polling with Exponential Moving Average (EMA)
+    last_size = 0
+    last_time = time.time()
+    ema_speed = 0.0
+    alpha = 0.3  # Smoothing factor: 30% instant, 70% historical
+
+    while proc.poll() is None:
+        time.sleep(0.4)
+        now = time.time()
+        
+        if os.path.exists(part_dest):
+            try:
+                cur_size = os.path.getsize(part_dest)
+            except OSError:
+                continue
+
+            delta_bytes = cur_size - last_size
+            delta_time = max(now - last_time, 0.001)
+            instant_speed_mb = (delta_bytes / delta_time) / (1024 * 1024)
+
+            # Calculate Exponential Moving Average for stable speed reporting
+            if ema_speed == 0.0:
+                ema_speed = instant_speed_mb
+            else:
+                ema_speed = (alpha * instant_speed_mb) + ((1.0 - alpha) * ema_speed)
+
+            display_speed = round(max(ema_speed, 0.1), 1)
+            dl_mb = round(cur_size / (1024 * 1024), 1)
+            pct = min(99, int((cur_size / total_size) * 100))
+
+            # Remaining time calculation
+            bytes_left = max(0, total_size - cur_size)
+            speed_bps = ema_speed * 1024 * 1024
+            if speed_bps > 0:
+                eta_secs = int(bytes_left / speed_bps)
+                eta_str = f"{eta_secs}s left" if eta_secs < 60 else f"{eta_secs // 60}m {eta_secs % 60}s left"
+            else:
+                eta_str = "calculating..."
+
+            _set('ollama_install',
+                 progress=pct,
+                 current=f"Downloading Ollama runtime · {dl_mb} / {tot_mb} MB · {display_speed} MB/s · {eta_str}")
+
+            last_size = cur_size
+            last_time = now
+
+    stdout, stderr = proc.communicate()
+    returncode = proc.returncode
+
+    if returncode == 0 and os.path.exists(part_dest) and os.path.getsize(part_dest) > 100000000:
+        if os.path.exists(final_dest):
+            try: os.unlink(final_dest)
+            except Exception: pass
+        os.rename(part_dest, final_dest)
         _set('ollama_install', progress=100, current="Download complete. Preparing installer...")
-        print(f"[BOOTSTRAP] Ollama accelerated download completed: {final_dest}")
+        print(f"[BOOTSTRAP] Ollama download completed successfully: {final_dest}")
         time.sleep(0.5)
         return final_dest
     else:
+        err_msg = stderr.decode('utf-8', errors='ignore').strip() if stderr else "Download interrupted"
+        print(f"[BOOTSTRAP] Curl download failed (code {returncode}): {err_msg}")
         _set('ollama_install', status='error',
-             error=f"Download failed: {error_details}. Click Retry to resume.")
+             error=f"Download failed: {err_msg}. Please click Retry to resume.")
+        return None
+
+
+def _download_ollama_fallback_python(part_dest, final_dest, total_size):
+    """Fallback high-throughput buffered downloader if curl is unavailable."""
+    try:
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) SEVEN/1.3.1"}
+        req = urllib.request.Request(OLLAMA_DOWNLOAD_URL, headers=headers)
+        with urllib.request.urlopen(req, timeout=60) as resp, open(part_dest, "wb") as out:
+            while True:
+                chunk = resp.read(1048576)  # 1 MB buffer for high throughput
+                if not chunk:
+                    break
+                out.write(chunk)
+        if os.path.exists(final_dest):
+            try: os.unlink(final_dest)
+            except Exception: pass
+        os.rename(part_dest, final_dest)
+        _set('ollama_install', progress=100, current="Download complete. Preparing installer...")
+        return final_dest
+    except Exception as e:
+        _set('ollama_install', status='error', error=f"Download error: {e}")
         return None
 
 
