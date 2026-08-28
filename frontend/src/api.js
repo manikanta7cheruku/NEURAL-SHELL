@@ -19,14 +19,47 @@ export const apiSlow = axios.create({
   headers: { 'Content-Type': 'application/json' },
 });
 
-apiSlow.interceptors.response.use(
-  r => r,
-  e => { console.error('[API SLOW]', e.message); return Promise.reject(e); }
-);
+// Retry logic for connection refused errors (backend restarting)
+const retryOnConnectionRefused = async (error) => {
+  const config = error.config;
+
+  // Only retry connection errors, not app-level errors
+  const isConnectionError = !error.response && (
+    error.code === 'ECONNREFUSED' ||
+    error.code === 'ERR_NETWORK' ||
+    error.message?.includes('Network Error') ||
+    error.message?.includes('ECONNREFUSED')
+  );
+
+  if (!isConnectionError) return Promise.reject(error);
+
+  config._retryCount = config._retryCount || 0;
+  if (config._retryCount >= 3) return Promise.reject(error);
+
+  config._retryCount++;
+  await new Promise(r => setTimeout(r, 1500 * config._retryCount));
+  return api(config);
+};
 
 api.interceptors.response.use(
   r => r,
-  e => { console.error('[API]', e.message); return Promise.reject(e); }
+  async (e) => {
+    // Silently retry connection errors, log others
+    if (!e.response && (e.code === 'ECONNREFUSED' || e.code === 'ERR_NETWORK')) {
+      try {
+        return await retryOnConnectionRefused(e);
+      } catch (retryErr) {
+        return Promise.reject(retryErr);
+      }
+    }
+    console.error('[API]', e.message);
+    return Promise.reject(e);
+  }
+);
+
+apiSlow.interceptors.response.use(
+  r => r,
+  e => { console.error('[API SLOW]', e.message); return Promise.reject(e); }
 );
 
 export default api;
