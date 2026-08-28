@@ -355,42 +355,17 @@ if not _startup_ok:
 
 print("[STARTUP] All checks passed. Starting Seven...")
 
-# Auto-start Ollama bootstrap on fresh install.
-# Runs in background so it never blocks the API server.
-# StepEnvironment polls /api/bootstrap/status for live progress.
-def _auto_bootstrap():
-    try:
-        from backend.bootstrap import is_ollama_installed, run_environment_setup
-        import json as _bj
-
-        _cfg_path   = os.path.join(
-            os.environ.get('APPDATA', ''), 'SEVEN', 'config.json'
-        )
-        _setup_done = False
-        if os.path.exists(_cfg_path):
-            try:
-                with open(_cfg_path) as _f:
-                    _setup_done = _bj.load(_f).get('setup_complete', False)
-            except Exception:
-                pass
-
-        if not is_ollama_installed():
-            if not _setup_done:
-                print("[STARTUP] Fresh install - auto-starting Ollama bootstrap")
-            else:
-                print("[STARTUP] Ollama missing - auto-starting bootstrap")
-            run_environment_setup()
-        else:
-            print("[STARTUP] Ollama already installed - skipping auto-bootstrap")
-    except Exception as _be:
-        print(f"[STARTUP] Auto-bootstrap skipped: {_be}")
-
-import threading as _bt
-_bt.Thread(
-    target=_auto_bootstrap,
-    daemon=True,
-    name="AutoBootstrap"
-).start()
+# Bootstrap is handled exclusively by the setup wizard (StepEnvironment.jsx).
+# Do NOT auto-start downloads on app launch — it crashes the process if
+# torch/numpy are loading simultaneously.
+try:
+    from backend.bootstrap import is_ollama_installed
+    if is_ollama_installed():
+        print("[STARTUP] Ollama: installed")
+    else:
+        print("[STARTUP] Ollama: not found (setup wizard will handle installation)")
+except Exception:
+    print("[STARTUP] Ollama check skipped")
 
 # ============================================================================
 # FULL STARTUP
@@ -1146,19 +1121,55 @@ def start_app():
         print(Fore.YELLOW + "[SYSTEM] Running in STANDALONE mode")
 
     # ── Step 1: API server FIRST ─────────────────────────────────────────
-    # Electron polls /api/status every second with a 2 min timeout.
-    # The server MUST be up and responding before any heavy module loads.
-    # Heavy modules (ChromaDB, resemblyzer) can take 2-5 min on first run.
     start_api_server(host="127.0.0.1", port=7777)
     logger.info("API server started on port 7777")
     print(Fore.GREEN + "[SYSTEM] API server up on port 7777")
 
-    # Give uvicorn 1.5 seconds to bind the port before anything polls it
     import time as _startup_time
-    _startup_time.sleep(1.5)
+    _startup_time.sleep(0.8)
     print(Fore.GREEN + "[SYSTEM] API server confirmed ready")
 
-    # ── Step 2: Non-blocking services ────────────────────────────────────
+    # ── Step 2: Check if setup is complete ───────────────────────────────
+    import json as _setup_json
+    _appdata = os.environ.get('APPDATA', os.path.expanduser('~'))
+    _cfg_file = os.path.join(_appdata, 'SEVEN', 'config.json')
+    _is_setup_done = False
+    try:
+        if os.path.exists(_cfg_file):
+            with open(_cfg_file, 'r', encoding='utf-8') as _f:
+                _is_setup_done = _setup_json.load(_f).get('setup_complete', False)
+    except Exception:
+        pass
+
+    if not _is_setup_done:
+        # ── ONBOARDING MODE ─────────────────────────────────────────────
+        # Only the API server runs. No voice loop, no ML imports, no daemons.
+        # This prevents 0xC0000005 crashes from concurrent DLL loading.
+        print(Fore.CYAN + "[SYSTEM] Setup not complete — running in Onboarding mode")
+        print(Fore.GREEN + "[SYSTEM] API ready for Setup Wizard on port 7777")
+
+        try:
+            import time
+            while True:
+                time.sleep(1)
+                # Re-read config from disk (in-memory config.KEY may be stale)
+                try:
+                    with open(_cfg_file, 'r', encoding='utf-8') as _f:
+                        _live = _setup_json.load(_f)
+                    if _live.get('setup_complete', False):
+                        print(Fore.GREEN + "[SYSTEM] Setup completed. Restarting into full Seven mode...")
+                        time.sleep(0.8)
+                        os._exit(0)  # Electron will restart Python automatically
+                except Exception:
+                    pass
+        except KeyboardInterrupt:
+            print(Fore.RED + "\n[SYSTEM] Interrupted by user")
+            os._exit(0)
+        return
+
+    # ── FULL MODE (only after setup is complete) ─────────────────────────
+    print(Fore.GREEN + "[SYSTEM] Setup complete. Starting full Seven...")
+
     try:
         telemetry.start_telemetry()
     except Exception as e:
@@ -1169,10 +1180,6 @@ def start_app():
     except Exception as e:
         print(Fore.YELLOW + f"[SYSTEM] Admin server skipped: {e}")
 
-    # ── Step 3: DummyUI + voice logic thread ─────────────────────────────
-    # Voice logic runs in a background thread so it never blocks the
-    # API server. Heavy module loading happens inside seven_logic via
-    # module_loader which also uses background threads for heavy models.
     class DummyUI:
         def update_status(self, text, color):
             try:
