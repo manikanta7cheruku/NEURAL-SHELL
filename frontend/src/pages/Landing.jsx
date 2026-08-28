@@ -326,8 +326,14 @@ export default function Landing() {
   const [drawerVisible, setDrawerVisible] = useState(false);
 
   useEffect(() => {
-    st.fetch();
-    fetchTasks();
+    // Delay initial data load by 3s to let backend fully initialize after restart.
+    // This prevents the flurry of 500 errors on first load after setup completes.
+    const initDelay = setTimeout(() => {
+      st.fetch();
+      fetchTasks();
+      loadData();
+    }, 3000);
+
     const loadData = () => {
       api.get('/schedules').then(r => setScheds(r.data || [])).catch(() => {});
       api.get('/triggers/stats').then(r => setTriggers(r.data?.enabled ?? 0)).catch(() => {});
@@ -335,10 +341,10 @@ export default function Landing() {
       api.get('/speed').then(r => setSpeed(r.data)).catch(() => {});
       api.get('/hardware').then(r => setHw(r.data)).catch(() => {});
     };
-    loadData();
+
     const si = setInterval(st.fetch, 3000);
     const di = setInterval(loadData, 15000);
-    return () => { clearInterval(si); clearInterval(di); };
+    return () => { clearTimeout(initDelay); clearInterval(si); clearInterval(di); };
   }, []);
 
   // Show drawer when there is conversation content
