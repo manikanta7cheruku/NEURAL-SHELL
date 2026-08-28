@@ -758,8 +758,8 @@ def _safe_rename_with_retry(src, dst, max_attempts=10):
 
 def download_ollama_installer():
     """
-    Download OllamaSetup.exe safely using an isolated unbuffered subprocess.
-    Streams real-time metrics back to the main UI to eliminate progress freezes.
+    Download OllamaSetup.exe using an accelerated 8-stream parallel segmented engine.
+    Bypasses CDN single-stream speed throttling to utilize full internet bandwidth.
     """
     cached = _find_cached_ollama_installer()
     if cached:
@@ -768,13 +768,12 @@ def download_ollama_installer():
         return cached
 
     _set('ollama_install', status='running', progress=0,
-         current="Connecting to Ollama download servers...", error=None)
+         current="Connecting to accelerated download nodes...", error=None)
     
     temp_dir = tempfile.gettempdir()
     part_dest = os.path.join(temp_dir, "OllamaSetup_download.tmp")
     final_dest = os.path.join(temp_dir, "OllamaSetup_cached.exe")
 
-    # Safe path translation for string execution in subprocess shell
     part_dest_clean = part_dest.replace('\\', '/')
     final_dest_clean = final_dest.replace('\\', '/')
 
@@ -782,12 +781,14 @@ def download_ollama_installer():
         try: os.unlink(part_dest)
         except Exception: pass
 
-    # Clean unbuffered download script running in sterile environment
+    # Multi-stream concurrent download engine script running in isolated subprocess
     dl_script = f'''
 import urllib.request
 import os
 import sys
 import time
+import threading
+from concurrent.futures import ThreadPoolExecutor
 
 url = "{OLLAMA_DOWNLOAD_URL}"
 dest = r"{part_dest_clean}"
@@ -795,54 +796,130 @@ final = r"{final_dest_clean}"
 headers = {{"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) SEVEN/1.3.1"}}
 
 try:
+    # 1. Resolve redirect and obtain final CDN URL + total size
     req = urllib.request.Request(url, headers=headers)
     resp = None
     for attempt in range(3):
         try:
-            resp = urllib.request.urlopen(req, timeout=45)
+            resp = urllib.request.urlopen(req, timeout=30)
             break
         except Exception:
             if attempt == 2: raise
             time.sleep(2)
 
+    final_url = resp.geturl()
     total_size = int(resp.headers.get("Content-Length", 0))
-    downloaded = 0
-    start_time = time.time()
-    last_update = 0
-    CHUNK_SIZE = 262144
-
-    with open(dest, "wb") as f:
-        while True:
-            chunk = resp.read(CHUNK_SIZE)
-            if not chunk:
-                break
-            f.write(chunk)
-            downloaded += len(chunk)
-            
-            now = time.time()
-            if now - last_update >= 0.5:
-                last_update = now
-                pct = min(99, int((downloaded / total_size) * 100)) if total_size > 0 else 50
-                dl_mb = round(downloaded / (1024 * 1024), 1)
-                tot_mb = round(total_size / (1024 * 1024), 1) if total_size > 0 else 180.0
-                elapsed = max(now - start_time, 0.001)
-                speed_mb_s = round((downloaded / elapsed) / (1024 * 1024), 2)
-                
-                # Format of communication pipeline
-                print(f"STREAM_PROGRESS:{{pct}}:{{dl_mb}}:{{tot_mb}}:{{speed_mb_s}}", flush=True)
-
     resp.close()
-    
+
+    if total_size < 100000000:
+        raise Exception("Invalid installer response size from server")
+
+    # 2. Test if server supports Range requests
+    range_test = urllib.request.Request(final_url, headers={{**headers, "Range": "bytes=0-10"}})
+    supports_range = False
+    try:
+        with urllib.request.urlopen(range_test, timeout=15) as r_test:
+            if r_test.status == 206:
+                supports_range = True
+    except Exception:
+        supports_range = False
+
+    downloaded = [0]
+    lock = threading.Lock()
+    start_time = time.time()
+    NUM_WORKERS = 8 if supports_range else 1
+
+    def download_worker(worker_id, start_byte, end_byte):
+        part_file = f"{{dest}}.part{{worker_id}}"
+        for attempt in range(5):
+            try:
+                existing = os.path.getsize(part_file) if os.path.exists(part_file) else 0
+                cur_start = start_byte + existing
+                if cur_start > end_byte:
+                    return True
+                
+                part_req = urllib.request.Request(final_url, headers={{
+                    **headers,
+                    "Range": f"bytes={{cur_start}}-{{end_byte}}"
+                }})
+                with urllib.request.urlopen(part_req, timeout=30) as r:
+                    with open(part_file, "ab" if existing > 0 else "wb") as pf:
+                        while True:
+                            buf = r.read(262144)
+                            if not buf:
+                                break
+                            pf.write(buf)
+                            with lock:
+                                downloaded[0] += len(buf)
+                return True
+            except Exception:
+                time.sleep(1)
+        return False
+
+    # 3. Spawn parallel worker threads
+    chunk_size = total_size // NUM_WORKERS
+    ranges = []
+    for i in range(NUM_WORKERS):
+        s = i * chunk_size
+        e = total_size - 1 if i == NUM_WORKERS - 1 else (i + 1) * chunk_size - 1
+        ranges.append((i, s, e))
+
+    stop_reporting = threading.Event()
+
+    def report_progress():
+        last_dl = 0
+        last_time = time.time()
+        while not stop_reporting.is_set():
+            time.sleep(0.4)
+            now = time.time()
+            with lock:
+                current_dl = downloaded[0]
+            pct = min(99, int((current_dl / total_size) * 100))
+            dl_mb = round(current_dl / (1024 * 1024), 1)
+            tot_mb = round(total_size / (1024 * 1024), 1)
+            
+            time_diff = max(now - last_time, 0.001)
+            instant_speed = ((current_dl - last_dl) / time_diff) / (1024 * 1024)
+            speed_mb_s = round(max(instant_speed, 0.1), 2)
+            
+            last_dl = current_dl
+            last_time = now
+            print(f"STREAM_PROGRESS:{{pct}}:{{dl_mb}}:{{tot_mb}}:{{speed_mb_s}}", flush=True)
+
+    reporter_thread = threading.Thread(target=report_progress, daemon=True)
+    reporter_thread.start()
+
+    with ThreadPoolExecutor(max_workers=NUM_WORKERS) as executor:
+        futures = [executor.submit(download_worker, r[0], r[1], r[2]) for r in ranges]
+        results = [f.result() for f in futures]
+
+    stop_reporting.set()
+    reporter_thread.join(timeout=1)
+
+    if not all(results):
+        raise Exception("One or more accelerated download streams failed")
+
+    # 4. Fast binary assembly of downloaded segments
+    with open(dest, "wb") as outfile:
+        for i in range(NUM_WORKERS):
+            pfile = f"{{dest}}.part{{i}}"
+            with open(pfile, "rb") as infile:
+                while True:
+                    b = infile.read(1048576)
+                    if not b:
+                        break
+                    outfile.write(b)
+            try: os.unlink(pfile)
+            except Exception: pass
+
     actual_size = os.path.getsize(dest)
-    if actual_size < 100000000:
-        if os.path.exists(dest): os.unlink(dest)
-        print("STREAM_ERROR:Download incomplete", flush=True)
-        sys.exit(1)
+    if actual_size < total_size:
+        raise Exception(f"Assembled file mismatch ({{actual_size}}/{{total_size}} bytes)")
 
     if os.path.exists(final):
         try: os.unlink(final)
         except Exception: pass
-        
+
     os.rename(dest, final)
     print("STREAM_SUCCESS", flush=True)
     sys.exit(0)
@@ -857,7 +934,6 @@ except Exception as e:
     error_details = "Unknown error"
 
     try:
-        # Launch unbuffered process (-u) to flush metrics instantly
         proc = subprocess.Popen(
             [python_exe, '-u', '-c', dl_script],
             stdout=subprocess.PIPE,
@@ -867,7 +943,6 @@ except Exception as e:
             creationflags=0x08000000 if platform.system() == 'Windows' else 0
         )
 
-        # Parse metrics real-time from the stdout pipeline
         while True:
             line = proc.stdout.readline()
             if not line:
@@ -882,7 +957,6 @@ except Exception as e:
                     tot_mb = parts[3]
                     speed = parts[4]
                     
-                    # Update metrics to frontend state directly
                     _set('ollama_install', 
                          progress=pct, 
                          current=f"Downloading Ollama runtime · {dl_mb} / {tot_mb} MB · {speed} MB/s")
@@ -895,17 +969,17 @@ except Exception as e:
         proc.wait(timeout=10)
 
     except Exception as e:
-        print(f"[BOOTSTRAP] Failed to monitor download: {e}")
+        print(f"[BOOTSTRAP] Download acceleration error: {e}")
         error_details = str(e)
 
     if success and os.path.exists(final_dest):
         _set('ollama_install', progress=100, current="Download complete. Preparing installer...")
-        print(f"[BOOTSTRAP] Ollama download completed and verified: {final_dest}")
+        print(f"[BOOTSTRAP] Ollama accelerated download completed: {final_dest}")
         time.sleep(0.5)
         return final_dest
     else:
         _set('ollama_install', status='error',
-             error=f"Download failed: {error_details}. Please click Retry to resume.")
+             error=f"Download failed: {error_details}. Click Retry to resume.")
         return None
 
 
