@@ -16,8 +16,7 @@ import urllib.request
 import tempfile
 
 # ── Ollama config ──
-# Using direct high-speed CDN URL to avoid redirect latency
-OLLAMA_DOWNLOAD_URL   = "https://releases.ollama.com/windows/OllamaSetup.exe"
+OLLAMA_DOWNLOAD_URL   = "https://ollama.com/download/OllamaSetup.exe"
 OLLAMA_INSTALLER_NAME = "OllamaSetup.exe"
 OLLAMA_HOST           = "http://127.0.0.1:11434"
 OLLAMA_CHECK_TIMEOUT  = 60
@@ -759,60 +758,63 @@ def _safe_rename_with_retry(src, dst, max_attempts=10):
 
 def download_ollama_installer():
     """
-    Download OllamaSetup.exe using Windows native curl.
-    Optimized for high-speed direct downloads and stable progress tracking.
+    Download OllamaSetup.exe safely using Windows native curl.
+    Uses unique filenames to bypass Windows file locks and handles DNS routing correctly.
     """
     cached = _find_cached_ollama_installer()
     if cached:
         _set('ollama_install', status='running', progress=100,
-             current="Installer ready in cache. Requesting Windows permission...")
+             current="Installer ready in cache. Requesting Windows permission...", error=None)
         return cached
 
     _set('ollama_install', status='running', progress=0,
          current="Connecting to download servers...", error=None)
     
     temp_dir = tempfile.gettempdir()
-    part_dest = os.path.join(temp_dir, "OllamaSetup_download.tmp")
     final_dest = os.path.join(temp_dir, "OllamaSetup_cached.exe")
 
-    if os.path.exists(part_dest):
-        try: os.unlink(part_dest)
-        except Exception: pass
+    # Generate a unique temp file for this attempt to bypass WinError 32 locks from failed processes
+    unique_suffix = int(time.time())
+    part_dest = os.path.join(temp_dir, f"OllamaSetup_download_{unique_suffix}.tmp")
 
-    # 1. Query exact Content-Length bypassing Windows WPAD proxies
-    # Real size of OllamaSetup.exe on Windows is ~184,000,000 bytes (176 MB)
-    total_size = 184000000  
+    # Clean up old leftovers safely
     try:
-        # Create opener that completely ignores system proxy auto-discovery for instant connection speeds
-        proxy_support = urllib.request.ProxyHandler({})
-        opener = urllib.request.build_opener(proxy_support)
+        for fname in os.listdir(temp_dir):
+            if fname.startswith("OllamaSetup_download_") and fname.endswith(".tmp"):
+                try: os.unlink(os.path.join(temp_dir, fname))
+                except Exception: pass
+    except Exception:
+        pass
+
+    # 1. Query exact Content-Length
+    total_size = 184000000  # Default ~176 MB fallback
+    try:
         req = urllib.request.Request(
             OLLAMA_DOWNLOAD_URL, 
             headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) SEVEN/1.3.1"},
             method="HEAD"
         )
-        with opener.open(req, timeout=8) as resp:
+        with urllib.request.urlopen(req, timeout=8) as resp:
             cl = int(resp.headers.get("Content-Length", 0))
             if cl > 50000000:
                 total_size = cl
     except Exception as e:
-        print(f"[BOOTSTRAP] Fast HEAD request size query failed (using default fallback): {e}")
+        print(f"[BOOTSTRAP] Fast HEAD size query failed (using default fallback): {e}")
 
     tot_mb = round(total_size / (1024 * 1024), 1)
 
-    # 2. Get native Windows curl.exe
+    # 2. Find native Windows curl.exe
     curl_path = "curl.exe"
     system_root = os.environ.get("SystemRoot", r"C:\Windows")
     sys32_curl = os.path.join(system_root, "System32", "curl.exe")
     if os.path.exists(sys32_curl):
         curl_path = sys32_curl
 
-    # 3. Launch native curl with disabled proxies (force direct fast TCP connection)
+    # 3. Launch native curl (no --noproxy argument to allow DNS to resolve correctly on all networks)
     cflags = 0x08000000 if platform.system() == 'Windows' else 0
     curl_cmd = [
         curl_path,
         "-L",                     # Follow redirects
-        "--noproxy", "*",         # Disable system proxy lookups to maximize transfer speeds
         "--fail",                 # Error on HTTP failure codes
         "--silent",               # Hide internal progress metrics (handled below)
         "--show-error",
@@ -1146,9 +1148,10 @@ def run_environment_setup(on_complete=None):
         return None
 
     _setup_running = True
-    _set('packages', status='running', progress=5, current='Initializing environment deployment...')
-    _set('ollama_install', status='pending', progress=0, current='Waiting for packages...')
-    _set('ollama_start', status='pending', current='Waiting...')
+    # Explicitly clear previous errors so error banners disappear on retry
+    _set('packages', status='running', progress=5, current='Initializing environment deployment...', error=None)
+    _set('ollama_install', status='pending', progress=0, current='Waiting for packages...', error=None)
+    _set('ollama_start', status='pending', current='Waiting...', error=None)
 
     def _run():
         global _setup_running
