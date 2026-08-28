@@ -16,7 +16,6 @@ const CAPABILITIES = [
   { title: '100% Offline', desc: 'Absolute privacy for your data.' },
 ];
 
-// Context-aware left panel content for each installation phase
 const PHASE_INFO = {
   idle: {
     title: 'One-Time Setup',
@@ -24,7 +23,7 @@ const PHASE_INFO = {
   },
   packages: {
     title: 'Installing Python Libraries',
-    desc: 'These libraries power the speech recognition, memory search, and voice synthesis. Seven uses Faster-Whisper for hearing you, ChromaDB for remembering context, and pyttsx3 for speaking back — all running fully offline for your privacy.',
+    desc: 'These libraries power the speech recognition, memory search, and voice synthesis. Seven uses Faster-Whisper for hearing you, ChromaDB for remembering context, and pyttsx3 for speaking back, all running fully offline for your privacy.',
   },
   ollama: {
     title: 'Downloading Ollama Runtime',
@@ -32,7 +31,7 @@ const PHASE_INFO = {
   },
   uac: {
     title: 'Windows Permission',
-    desc: 'Windows requires administrator approval to install Ollama into Program Files. This is a standard Windows security check. Click YES on the shield prompt to continue — Seven never asks for permissions it doesn\'t need.',
+    desc: 'Windows requires administrator approval to install Ollama into Program Files. This is a standard Windows security check. Click Yes on the shield prompt to continue. Seven never asks for permissions it does not need.',
   },
   daemons: {
     title: 'Starting Background Services',
@@ -55,6 +54,7 @@ export default function StepEnvironment() {
   const logsEndRef = useRef(null);
   const lastLogRef = useRef('');
   const maxProgRef = useRef(0);
+  const startingRef = useRef(false);
 
   useEffect(() => { if (logsEndRef.current) logsEndRef.current.scrollIntoView({ behavior: 'smooth' }); }, [logs]);
 
@@ -69,7 +69,6 @@ export default function StepEnvironment() {
         consecutiveErrors = 0;
         setBState(data);
 
-        // Choose the ACTIVE phase's message so logs never regress to older messages
         let currentText = '';
         if (data.ollama_start?.status === 'running') {
           currentText = data.ollama_start?.current || 'Starting Ollama service...';
@@ -98,15 +97,11 @@ export default function StepEnvironment() {
           setAllDone(true);
         }
       } catch (e) {
-        // Backend is starting up or restarting — this is normal during first 15s.
-        // Don't show scary errors, just wait silently.
         consecutiveErrors++;
         if (consecutiveErrors === 5) {
-          // Only show message after 2s of failed polls (5 × 400ms)
           setLogs(p => [...p, { time: new Date().toLocaleTimeString([], { hour12: false }), text: 'Waiting for backend to start...' }]);
         }
         if (consecutiveErrors > 30) {
-          // After 12s of no connection, try to restart bootstrap
           consecutiveErrors = 0;
           fetch(`${API}/api/bootstrap/start`, { method: 'POST' }).catch(() => {});
         }
@@ -115,7 +110,6 @@ export default function StepEnvironment() {
   };
 
   useEffect(() => {
-    // Backend takes 5-15s to start. Retry gracefully instead of showing errors.
     const safetyTimer = setTimeout(() => setChecked(true), 3000);
     let retries = 0;
     const maxRetries = 10;
@@ -134,7 +128,6 @@ export default function StepEnvironment() {
         .catch(() => {
           retries++;
           if (retries < maxRetries) {
-            // Backend not ready yet — retry in 2s (silent, no error shown)
             setTimeout(checkBackend, 2000);
           } else {
             clearTimeout(safetyTimer);
@@ -147,10 +140,7 @@ export default function StepEnvironment() {
     return () => { clearTimeout(safetyTimer); clearInterval(pollRef.current); };
   }, []);
 
-  const startingRef = useRef(false);
-
   const handleStart = async () => {
-    // Prevent double-click and concurrent requests
     if (startingRef.current) return;
     startingRef.current = true;
 
@@ -170,9 +160,8 @@ export default function StepEnvironment() {
     startingRef.current = false;
   };
 
-  // Grant Permission: skips download, jumps straight to UAC prompt
   const handleGrantPermission = async () => {
-    setLogs(p => [...p, { time: new Date().toLocaleTimeString([], { hour12: false }), text: '🛡️ Re-requesting Windows permission...' }]);
+    setLogs(p => [...p, { time: new Date().toLocaleTimeString([], { hour12: false }), text: 'Re-requesting Windows administrator permission...' }]);
     try {
       await fetch(`${API}/api/bootstrap/retry-uac`, { method: 'POST' });
       startPolling();
@@ -181,7 +170,6 @@ export default function StepEnvironment() {
     }
   };
 
-  // ── Monotonic progress with dampening ──
   const pkgStatus = bState.packages?.status;
   const pkgProg = bState.packages?.progress || 0;
   const ollamaStatus = bState.ollama_install?.status;
@@ -198,7 +186,6 @@ export default function StepEnvironment() {
   if (computed > maxProgRef.current) maxProgRef.current = computed;
   const progress = maxProgRef.current;
 
-  // ── Error classification ──
   const rawError = bState.packages?.error || bState.ollama_install?.error || bState.ollama_start?.error;
   const isUacDenied = rawError === 'PERMISSION_DENIED';
   const isCorrupted = rawError && rawError.includes('CORRUPTED');
@@ -208,7 +195,6 @@ export default function StepEnvironment() {
     ? 'The installer file was corrupted during download. A fresh copy will be downloaded when you retry.'
     : rawError;
 
-  // ── Determine current phase for left panel context ──
   let currentPhase = 'idle';
   if (allDone) currentPhase = 'done';
   else if (isUacDenied || bState.ollama_install?.current === 'UAC_PROMPT_ACTIVE') currentPhase = 'uac';
@@ -217,11 +203,11 @@ export default function StepEnvironment() {
   else if (pkgStatus === 'running') currentPhase = 'packages';
 
   const phaseInfo = PHASE_INFO[currentPhase];
-  const showUacBanner = bState.ollama_install?.current === 'UAC_PROMPT_ACTIVE';
+  const showUacBanner = bState.ollama_install?.current === 'UAC_PROMPT_ACTIVE' && !rawError;
+  const showPrepBanner = started && !allDone && !rawError && !showUacBanner;
 
   return (
     <div className="max-w-4xl grid grid-cols-5 gap-8">
-      {/* LEFT PANEL — Always shows context relevant to current phase */}
       <div className="col-span-2 space-y-5">
         <div className="space-y-3">
           <div className="text-[10px] text-white/40 tracking-[0.3em] font-medium uppercase">Step 4 of 6</div>
@@ -229,7 +215,6 @@ export default function StepEnvironment() {
           <p className="text-[12px] text-white/40 font-light">One-time setup of local AI binaries. Takes 5-10 minutes on most machines.</p>
         </div>
 
-        {/* Contextual info card — always visible */}
         {started && !allDone && (
           <div className="p-4 rounded-xl bg-white/[0.03] border border-white/10 space-y-2 transition-all">
             <div className="text-[9px] text-white/40 tracking-[0.2em] font-semibold uppercase">Currently</div>
@@ -268,16 +253,15 @@ export default function StepEnvironment() {
         )}
 
         {allDone && (
-          <div className="p-4 rounded-xl bg-emerald-500/[0.05] border border-emerald-500/20">
-            <div className="text-[14px] font-semibold text-emerald-300 mb-1">✓ All Systems Ready</div>
-            <div className="text-[11px] text-emerald-200/60 leading-relaxed font-light">
+          <div className="p-4 rounded-xl bg-white/[0.05] border border-white/15">
+            <div className="text-[14px] font-semibold text-white mb-1">All Systems Ready</div>
+            <div className="text-[11px] text-white/50 leading-relaxed font-light">
               Python libraries installed. Ollama AI engine active. Background services running. Seven is ready to serve you privately.
             </div>
           </div>
         )}
       </div>
 
-      {/* RIGHT PANEL */}
       <div className="col-span-3 space-y-4">
         {started && !allDone && (
           <>
@@ -291,48 +275,59 @@ export default function StepEnvironment() {
               </div>
             </div>
 
-            {/* 3-phase indicator */}
             <div className="grid grid-cols-3 gap-2">
               <div className={`p-2.5 rounded-lg border text-center transition-all ${
-                pkgStatus === 'done' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' :
+                pkgStatus === 'done' ? 'bg-white/[0.08] border-white/25 text-white' :
                 pkgStatus === 'running' ? 'bg-white/10 border-white/30 text-white' : 'bg-white/[0.02] border-white/5 text-white/30'
               }`}>
                 <div className="text-[10px] font-mono uppercase font-semibold">1. Python Libs</div>
-                <div className="text-[9px] mt-0.5">{pkgStatus === 'done' ? '✓ Ready' : pkgStatus === 'running' ? 'Installing…' : 'Pending'}</div>
+                <div className="text-[9px] mt-0.5">{pkgStatus === 'done' ? 'Ready' : pkgStatus === 'running' ? 'Installing' : 'Pending'}</div>
               </div>
 
               <div className={`p-2.5 rounded-lg border text-center transition-all ${
-                ollamaStatus === 'done' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' :
-                showUacBanner ? 'bg-amber-500/15 border-amber-400/50 text-amber-200' :
+                ollamaStatus === 'done' ? 'bg-white/[0.08] border-white/25 text-white' :
+                showUacBanner ? 'bg-amber-500/10 border-amber-400/40 text-amber-200' :
                 ollamaStatus === 'running' ? 'bg-white/10 border-white/30 text-white' : 'bg-white/[0.02] border-white/5 text-white/30'
               }`}>
                 <div className="text-[10px] font-mono uppercase font-semibold">2. AI Engine</div>
                 <div className="text-[9px] mt-0.5">{
-                  ollamaStatus === 'done' ? '✓ Installed' :
-                  showUacBanner ? '🛡️ Awaiting UAC' :
-                  ollamaStatus === 'running' ? 'Downloading…' : 'Pending'
+                  ollamaStatus === 'done' ? 'Installed' :
+                  showUacBanner ? 'Awaiting Permission' :
+                  ollamaStatus === 'running' ? 'Downloading' : 'Pending'
                 }</div>
               </div>
 
               <div className={`p-2.5 rounded-lg border text-center transition-all ${
-                startStatus === 'done' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' :
+                startStatus === 'done' ? 'bg-white/[0.08] border-white/25 text-white' :
                 startStatus === 'running' ? 'bg-white/10 border-white/30 text-white' : 'bg-white/[0.02] border-white/5 text-white/30'
               }`}>
                 <div className="text-[10px] font-mono uppercase font-semibold">3. Services</div>
-                <div className="text-[9px] mt-0.5">{startStatus === 'done' ? '✓ Active' : startStatus === 'running' ? 'Starting…' : 'Pending'}</div>
+                <div className="text-[9px] mt-0.5">{startStatus === 'done' ? 'Active' : startStatus === 'running' ? 'Starting' : 'Pending'}</div>
               </div>
             </div>
           </>
         )}
 
-        {/* ACTIVE UAC PROMPT — high visibility, pulsing */}
-        {showUacBanner && !rawError && (
-          <div className="p-4 rounded-xl bg-amber-500/15 border-2 border-amber-400/60 flex items-start gap-3 shadow-2xl animate-pulse">
-            <div className="text-2xl mt-0.5">🛡️</div>
+        {showPrepBanner && (
+          <div className="p-4 rounded-xl bg-amber-500/[0.05] border border-amber-500/20 flex items-start gap-3">
+            <div className="w-1 h-full bg-amber-400/60 rounded-full flex-shrink-0" style={{ minHeight: '40px' }} />
             <div>
-              <div className="text-[13px] font-bold text-amber-200 mb-0.5">Action Required: Click YES on Windows Prompt</div>
+              <div className="text-[12px] font-semibold text-amber-200/90 mb-0.5">Heads Up: Windows Permission Required</div>
+              <div className="text-[11px] text-amber-200/60 leading-relaxed">
+                Windows will ask for administrator permission to install the local AI engine.
+                <strong className="text-amber-100/80 font-medium"> Please click Yes on the shield prompt</strong> when it appears in your taskbar.
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showUacBanner && (
+          <div className="p-4 rounded-xl bg-amber-500/15 border-2 border-amber-400/60 flex items-start gap-3 shadow-2xl animate-pulse">
+            <div className="w-1 h-full bg-amber-300 rounded-full flex-shrink-0" style={{ minHeight: '40px' }} />
+            <div>
+              <div className="text-[13px] font-bold text-amber-200 mb-0.5">Action Required: Click Yes on Windows Prompt</div>
               <div className="text-[11px] text-amber-100/90 leading-relaxed font-medium">
-                Windows is asking for permission. <span className="underline font-bold">Look at your taskbar for the flashing blue &amp; yellow shield</span> and click YES to continue.
+                Windows is asking for permission. <span className="underline font-bold">Look at your taskbar for the flashing shield icon</span> and click Yes to continue.
               </div>
             </div>
           </div>
@@ -355,36 +350,33 @@ export default function StepEnvironment() {
           </div>
         </div>
 
-        {/* ERROR STATE — Contextual retry buttons */}
         {errorMsg && (
           <div className="p-4 bg-red-500/[0.06] border border-red-500/20 rounded-xl space-y-3">
             <div className="flex items-center gap-2">
               <span className="text-[12px] font-semibold text-red-300">
-                {isUacDenied ? '🛡️ Permission Required' : isCorrupted ? '📦 Installer Damaged' : '⚠️ Deployment Notice'}
+                {isUacDenied ? 'Permission Required' : isCorrupted ? 'Installer Damaged' : 'Deployment Notice'}
               </span>
             </div>
             <div className="text-[11px] text-red-300/70 leading-relaxed">{errorMsg}</div>
 
             {isUacDenied ? (
-              // UAC-specific: Grant Permission (skips download, jumps to UAC)
               <div className="space-y-2">
                 <button
                   onClick={handleGrantPermission}
-                  className="w-full py-2.5 bg-amber-500/90 hover:bg-amber-500 text-black text-[12px] font-bold rounded-lg transition-all flex items-center justify-center gap-2"
+                  className="w-full py-2.5 bg-amber-500 hover:bg-amber-400 text-black text-[12px] font-bold rounded-lg transition-all shadow-lg"
                 >
-                  🛡️ Grant Permission Now
+                  Grant Administrator Permission
                 </button>
                 <div className="text-[10px] text-white/40 text-center leading-relaxed">
-                  This will re-open the Windows prompt without re-downloading Ollama.
+                  Re-opens the Windows security prompt instantly. No re-download needed.
                 </div>
               </div>
             ) : (
-              // Generic retry (re-downloads if corrupted)
               <button
                 onClick={handleStart}
-                className="w-full py-2.5 bg-white text-black hover:bg-white/90 text-[12px] font-semibold rounded-lg transition-all flex items-center justify-center gap-2"
+                className="w-full py-2.5 bg-white text-black hover:bg-white/90 text-[12px] font-semibold rounded-lg transition-all"
               >
-                {isCorrupted ? '📥 Download Fresh Copy & Retry' : '🔄 Retry Installation'}
+                {isCorrupted ? 'Download Fresh Copy and Retry' : 'Retry Installation'}
               </button>
             )}
           </div>
