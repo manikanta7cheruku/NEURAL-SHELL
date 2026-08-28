@@ -756,98 +756,10 @@ def _safe_rename_with_retry(src, dst, max_attempts=10):
     return False
 
 
-def _download_ollama_subprocess(part_dest, final_dest):
-    """
-    Download Ollama in an isolated subprocess to prevent access violations
-    from crashing the main API server. The subprocess has no torch/numpy
-    loaded so there are zero memory conflicts.
-
-    Returns True if download succeeded, False otherwise.
-    """
-    # Write a tiny download script that runs in a clean Python process
-    dl_script = f'''
-import urllib.request
-import os
-import sys
-import time
-
-url = "{OLLAMA_DOWNLOAD_URL}"
-dest = r"{part_dest}"
-final = r"{final_dest}"
-headers = {{"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) SEVEN/1.3.1"}}
-
-try:
-    req = urllib.request.Request(url, headers=headers)
-    resp = None
-    for attempt in range(3):
-        try:
-            resp = urllib.request.urlopen(req, timeout=60)
-            break
-        except Exception:
-            if attempt == 2:
-                raise
-            time.sleep(3)
-
-    total = int(resp.headers.get("Content-Length", 0))
-    downloaded = 0
-    with open(dest, "wb") as f:
-        while True:
-            chunk = resp.read(262144)
-            if not chunk:
-                break
-            f.write(chunk)
-            downloaded += len(chunk)
-    resp.close()
-
-    if os.path.getsize(dest) < 100000000:
-        os.unlink(dest)
-        print("INCOMPLETE")
-        sys.exit(1)
-
-    # Rename to final
-    if os.path.exists(final):
-        try:
-            os.unlink(final)
-        except Exception:
-            pass
-    os.rename(dest, final)
-    print("OK")
-    sys.exit(0)
-
-except Exception as e:
-    print(f"ERROR:{{e}}")
-    if os.path.exists(dest):
-        try:
-            os.unlink(dest)
-        except Exception:
-            pass
-    sys.exit(1)
-'''
-    python_exe = get_python_executable()
-    try:
-        result = subprocess.run(
-            [python_exe, '-c', dl_script],
-            capture_output=True, text=True, timeout=600,
-            creationflags=0x08000000 if platform.system() == 'Windows' else 0
-        )
-        output = result.stdout.strip()
-        if output == "OK":
-            return True
-        print(f"[BOOTSTRAP] Subprocess download result: {output}")
-        return False
-    except subprocess.TimeoutExpired:
-        print("[BOOTSTRAP] Download subprocess timed out after 10 minutes")
-        return False
-    except Exception as e:
-        print(f"[BOOTSTRAP] Download subprocess failed: {e}")
-        return False
-
-
 def download_ollama_installer():
     """
-    Download OllamaSetup.exe in an isolated subprocess.
-    This prevents access violations (0xC0000005) from crashing the main app.
-    The subprocess runs pure urllib with no torch/numpy in memory.
+    Download OllamaSetup.exe safely using an isolated unbuffered subprocess.
+    Streams real-time metrics back to the main UI to eliminate progress freezes.
     """
     cached = _find_cached_ollama_installer()
     if cached:
@@ -855,59 +767,145 @@ def download_ollama_installer():
              current="Installer ready in cache. Requesting Windows permission...")
         return cached
 
-    _set('ollama_install', status='running', progress=5,
-         current="Connecting to Ollama servers...", error=None)
+    _set('ollama_install', status='running', progress=0,
+         current="Connecting to Ollama download servers...", error=None)
+    
     temp_dir = tempfile.gettempdir()
     part_dest = os.path.join(temp_dir, "OllamaSetup_download.tmp")
     final_dest = os.path.join(temp_dir, "OllamaSetup_cached.exe")
 
+    # Safe path translation for string execution in subprocess shell
+    part_dest_clean = part_dest.replace('\\', '/')
+    final_dest_clean = final_dest.replace('\\', '/')
+
     if os.path.exists(part_dest):
+        try: os.unlink(part_dest)
+        except Exception: pass
+
+    # Clean unbuffered download script running in sterile environment
+    dl_script = f'''
+import urllib.request
+import os
+import sys
+import time
+
+url = "{OLLAMA_DOWNLOAD_URL}"
+dest = r"{part_dest_clean}"
+final = r"{final_dest_clean}"
+headers = {{"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) SEVEN/1.3.1"}}
+
+try:
+    req = urllib.request.Request(url, headers=headers)
+    resp = None
+    for attempt in range(3):
         try:
-            os.unlink(part_dest)
+            resp = urllib.request.urlopen(req, timeout=45)
+            break
         except Exception:
-            pass
-
-    print("[BOOTSTRAP] Starting Ollama download in isolated subprocess...")
-
-    # Simulate progress while subprocess downloads.
-    # The subprocess does the real work — we just keep the UI alive.
-    _set('ollama_install', progress=10, current="Downloading Ollama runtime...")
-
-    # Start progress simulation thread
-    stop_sim = threading.Event()
-    def _simulate_progress():
-        pct = 10
-        while not stop_sim.is_set():
+            if attempt == 2: raise
             time.sleep(2)
-            if stop_sim.is_set():
+
+    total_size = int(resp.headers.get("Content-Length", 0))
+    downloaded = 0
+    start_time = time.time()
+    last_update = 0
+    CHUNK_SIZE = 262144
+
+    with open(dest, "wb") as f:
+        while True:
+            chunk = resp.read(CHUNK_SIZE)
+            if not chunk:
                 break
-            # Slowly increment to 85% to show activity
-            if pct < 85:
-                pct += 1
-            with _state_lock:
-                prev = _bootstrap_state["ollama_install"].get("max_pct", 0)
-                if pct > prev:
-                    _bootstrap_state["ollama_install"]["max_pct"] = pct
-            _set('ollama_install', progress=pct,
-                 current=f"Downloading Ollama runtime · {pct}% complete...")
+            f.write(chunk)
+            downloaded += len(chunk)
+            
+            now = time.time()
+            if now - last_update >= 0.5:
+                last_update = now
+                pct = min(99, int((downloaded / total_size) * 100)) if total_size > 0 else 50
+                dl_mb = round(downloaded / (1024 * 1024), 1)
+                tot_mb = round(total_size / (1024 * 1024), 1) if total_size > 0 else 180.0
+                elapsed = max(now - start_time, 0.001)
+                speed_mb_s = round((downloaded / elapsed) / (1024 * 1024), 2)
+                
+                # Format of communication pipeline
+                print(f"STREAM_PROGRESS:{{pct}}:{{dl_mb}}:{{tot_mb}}:{{speed_mb_s}}", flush=True)
 
-    sim_thread = threading.Thread(target=_simulate_progress, daemon=True)
-    sim_thread.start()
+    resp.close()
+    
+    actual_size = os.path.getsize(dest)
+    if actual_size < 100000000:
+        if os.path.exists(dest): os.unlink(dest)
+        print("STREAM_ERROR:Download incomplete", flush=True)
+        sys.exit(1)
 
-    # Run download in isolated subprocess (no torch/numpy = no crash)
-    success = _download_ollama_subprocess(part_dest, final_dest)
-    stop_sim.set()
-    sim_thread.join(timeout=2)
+    if os.path.exists(final):
+        try: os.unlink(final)
+        except Exception: pass
+        
+    os.rename(dest, final)
+    print("STREAM_SUCCESS", flush=True)
+    sys.exit(0)
+
+except Exception as e:
+    print(f"STREAM_ERROR:{{e}}", flush=True)
+    sys.exit(1)
+'''
+
+    python_exe = get_python_executable()
+    success = False
+    error_details = "Unknown error"
+
+    try:
+        # Launch unbuffered process (-u) to flush metrics instantly
+        proc = subprocess.Popen(
+            [python_exe, '-u', '-c', dl_script],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            creationflags=0x08000000 if platform.system() == 'Windows' else 0
+        )
+
+        # Parse metrics real-time from the stdout pipeline
+        while True:
+            line = proc.stdout.readline()
+            if not line:
+                break
+            line = line.strip()
+            
+            if line.startswith("STREAM_PROGRESS:"):
+                parts = line.split(':')
+                if len(parts) >= 5:
+                    pct = int(parts[1])
+                    dl_mb = parts[2]
+                    tot_mb = parts[3]
+                    speed = parts[4]
+                    
+                    # Update metrics to frontend state directly
+                    _set('ollama_install', 
+                         progress=pct, 
+                         current=f"Downloading Ollama runtime · {dl_mb} / {tot_mb} MB · {speed} MB/s")
+                         
+            elif line == "STREAM_SUCCESS":
+                success = True
+            elif line.startswith("STREAM_ERROR:"):
+                error_details = line.replace("STREAM_ERROR:", "")
+
+        proc.wait(timeout=10)
+
+    except Exception as e:
+        print(f"[BOOTSTRAP] Failed to monitor download: {e}")
+        error_details = str(e)
 
     if success and os.path.exists(final_dest):
-        _set('ollama_install', progress=100,
-             current="Download complete. Preparing installer...")
-        print(f"[BOOTSTRAP] Ollama download verified: {final_dest}")
+        _set('ollama_install', progress=100, current="Download complete. Preparing installer...")
+        print(f"[BOOTSTRAP] Ollama download completed and verified: {final_dest}")
         time.sleep(0.5)
         return final_dest
     else:
         _set('ollama_install', status='error',
-             error="Download failed. Click Retry to try again, or install manually at ollama.com/download")
+             error=f"Download failed: {error_details}. Please click Retry to resume.")
         return None
 
 
