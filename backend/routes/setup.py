@@ -22,6 +22,8 @@ class SetupCompleteRequest(BaseModel):
     referral_code: Optional[str] = ""
     wake_word:    Optional[str]  = "seven"
     voice_index:  Optional[int]  = 0
+    voice_id:     Optional[str]  = ""
+    voice_engine: Optional[str]  = ""
     model_name:   Optional[str]  = ""
 
 
@@ -99,6 +101,11 @@ def complete_setup(req: SetupCompleteRequest):
         raise HTTPException(status_code=400, detail="Valid email is required")
 
     wake    = req.wake_word.lower().strip() if req.wake_word else "seven"
+    
+    # Map the selected onboarding voice configuration parameters cleanly
+    voice_engine = req.voice_engine.strip() if req.voice_engine else "sapi"
+    voice_id_val = req.voice_id.strip() if req.voice_id else str(req.voice_index)
+    
     updates = {
         "setup_complete": True,
         "email":          email,
@@ -107,7 +114,12 @@ def complete_setup(req: SetupCompleteRequest):
             "user_name":  name,
             "wake_words": [wake, f"hey {wake}"],
         },
-        "voice": {"voice_index": req.voice_index},
+        "voice": {
+            "engine": voice_engine,
+            "voice_id": voice_id_val,
+            "voice_index": req.voice_index,
+            "speed": 165
+        },
     }
 
     if req.model_name:
