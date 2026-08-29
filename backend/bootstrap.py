@@ -1091,6 +1091,10 @@ def start_ollama():
 
 def pull_model(model_name: str):
     """Pull an Ollama model using the REST API with ETA and MB/s."""
+    # Reset monotonic guards for this new pull
+    pull_model._max_completed = 0
+    pull_model._max_pct = 0
+
     _set('model_pull', status='running', model=model_name,
          progress=0, current="", downloaded_gb=0.0, total_gb=0.0, error=None)
 
@@ -1112,8 +1116,26 @@ def pull_model(model_name: str):
                     if 'total' in data and data['total'] > 0:
                         completed = data.get('completed', 0)
                         total = data['total']
-                        pct = int((completed / total) * 100)
                         now = time.time()
+
+                        # Monotonic guard: Ollama downloads layers in parallel.
+                        # The 'completed' value can decrease when a new layer starts.
+                        # We only allow progress to move forward.
+                        if not hasattr(pull_model, '_max_completed'):
+                            pull_model._max_completed = 0
+                        if not hasattr(pull_model, '_max_pct'):
+                            pull_model._max_pct = 0
+
+                        if completed > pull_model._max_completed:
+                            pull_model._max_completed = completed
+                        else:
+                            completed = pull_model._max_completed
+
+                        pct = min(99, int((completed / total) * 100))
+                        if pct > pull_model._max_pct:
+                            pull_model._max_pct = pct
+                        else:
+                            pct = pull_model._max_pct
                         
                         if now - last_update > 0.5:
                             dl_gb = round(completed / (1024 ** 3), 2)
@@ -1132,7 +1154,6 @@ def pull_model(model_name: str):
                             _set('model_pull', progress=pct, current=current_str, downloaded_gb=dl_gb, total_gb=tot_gb)
                             last_update = now
                     elif 'status' in data and not ('total' in data):
-                        # Catch intermediate statuses like 'pulling manifest'
                         if now - last_update > 0.5:
                             _set('model_pull', current=data['status'])
                             last_update = now
@@ -1258,12 +1279,28 @@ def run_environment_setup(on_complete=None):
     return t
 
 
+_pull_lock = threading.Lock()
+_pull_running = False
+
 def run_model_pull(model_name: str, on_complete=None):
-    """Pull model in background thread."""
+    """Pull model in background thread. Prevents concurrent duplicate pulls."""
+    global _pull_running
+
+    if not _pull_lock.acquire(blocking=False):
+        print(f"[BOOTSTRAP] Model pull already running — ignoring duplicate request for {model_name}")
+        return None
+
+    _pull_running = True
+
     def _run():
-        ok = pull_model(model_name)
-        if on_complete:
-            on_complete(ok)
+        global _pull_running
+        try:
+            ok = pull_model(model_name)
+            if on_complete:
+                on_complete(ok)
+        finally:
+            _pull_running = False
+            _pull_lock.release()
 
     t = threading.Thread(target=_run, daemon=True, name="ModelPull")
     t.start()
