@@ -70,6 +70,49 @@ try:
         _np_warnings.filterwarnings('ignore', message='.*np\\.int.*')
         _np_warnings.filterwarnings('ignore', message='.*np\\.float.*')
         _np_warnings.filterwarnings('ignore', message='.*np\\.complex.*')
+except Exception:
+    pass
+
+# CRITICAL: Monkey-patch HuggingFace modeling_utils to disable low_cpu_mem_usage.
+# PyTorch 2.x on Windows CPU crashes with "Cannot copy out of meta tensor" when 
+# loading SentenceTransformer weights. Forcing low_cpu_mem_usage=False completely 
+# bypasses meta-tensor initialization and loads weights directly into CPU memory.
+try:
+    import transformers.modeling_utils as _mod_utils
+    _orig_from_pretrained = _mod_utils.PreTrainedModel.from_pretrained
+
+    @classmethod
+    def _patched_from_pretrained(cls, *args, **kwargs):
+        if "low_cpu_mem_usage" in kwargs:
+            kwargs["low_cpu_mem_usage"] = False
+        return _orig_from_pretrained(*args, **kwargs)
+
+    _mod_utils.PreTrainedModel.from_pretrained = _patched_from_pretrained
+    print("[SYSTEM] Safetensors meta-tensor loading patch active")
+except Exception as _e:
+    pass
+
+    if _np_major >= 2:
+        # numpy 2.x: these attributes were removed, restore them for older ML libs
+        if not hasattr(_np_patch, 'iterable'):
+            _np_patch.iterable = lambda obj: hasattr(obj, '__iter__')
+        if not hasattr(_np_patch, 'complex'):
+            _np_patch.complex = complex
+        if not hasattr(_np_patch, 'float'):
+            _np_patch.float = float
+        if not hasattr(_np_patch, 'int'):
+            _np_patch.int = int
+        if not hasattr(_np_patch, 'bool'):
+            _np_patch.bool = bool
+        print("[SYSTEM] numpy 2.x compatibility patches applied")
+    else:
+        # numpy 1.x: attributes exist but trigger FutureWarning on access.
+        # Suppress the warnings so downstream libraries don't spam the console.
+        _np_warnings.filterwarnings('ignore', category=FutureWarning, module='numpy')
+        _np_warnings.filterwarnings('ignore', message='.*np\\.bool.*')
+        _np_warnings.filterwarnings('ignore', message='.*np\\.int.*')
+        _np_warnings.filterwarnings('ignore', message='.*np\\.float.*')
+        _np_warnings.filterwarnings('ignore', message='.*np\\.complex.*')
         # No patches needed — 1.26.x has everything torch/whisper/chromadb needs
 except Exception:
     pass
