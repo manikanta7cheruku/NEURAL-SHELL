@@ -8,7 +8,7 @@ const BASE_URL = window.location.protocol === 'file:'
 
 const api = axios.create({
   baseURL: BASE_URL,
-  timeout: 30000,
+  timeout: 90000, // Local LLMs can take 30-60s on cold start
   headers: { 'Content-Type': 'application/json' },
 });
 
