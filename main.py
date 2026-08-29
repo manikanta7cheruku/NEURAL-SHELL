@@ -117,6 +117,23 @@ except Exception as _e:
 except Exception:
     pass
 
+# CRITICAL: Force PyTorch to skip meta-tensor initialization on Windows CPU.
+# Without this, sentence-transformers crashes with
+# "Cannot copy out of meta tensor; no data" every time it loads on cold start.
+# This has to run BEFORE any transformers/torch imports.
+try:
+    import transformers.modeling_utils as _mod_utils
+    _orig_from_pretrained = _mod_utils.PreTrainedModel.from_pretrained.__func__
+
+    def _patched_from_pretrained(cls, *args, **kwargs):
+        kwargs["low_cpu_mem_usage"] = False
+        return _orig_from_pretrained(cls, *args, **kwargs)
+
+    _mod_utils.PreTrainedModel.from_pretrained = classmethod(_patched_from_pretrained)
+    print("[SYSTEM] PyTorch meta-tensor initialization disabled")
+except Exception:
+    pass  # transformers not installed yet during first-run setup — harmless
+
 # ============================================================================
 # PATH SETUP — Must be the very first thing after imports
 # ============================================================================
