@@ -122,14 +122,20 @@ except Exception:
 # "Cannot copy out of meta tensor; no data" every time it loads on cold start.
 # This has to run BEFORE any transformers/torch imports.
 try:
-    import transformers.modeling_utils as _mod_utils
-    _orig_from_pretrained = _mod_utils.PreTrainedModel.from_pretrained.__func__
+    from transformers import modeling_utils as _mod_utils
 
-    def _patched_from_pretrained(cls, *args, **kwargs):
-        kwargs["low_cpu_mem_usage"] = False
-        return _orig_from_pretrained(cls, *args, **kwargs)
+    # Access the raw classmethod descriptor from the class __dict__
+    _raw_descriptor = _mod_utils.PreTrainedModel.__dict__.get('from_pretrained')
+    if _raw_descriptor is not None and hasattr(_raw_descriptor, '__func__'):
+        _inner_fn = _raw_descriptor.__func__
+    else:
+        _inner_fn = _mod_utils.PreTrainedModel.from_pretrained
 
-    _mod_utils.PreTrainedModel.from_pretrained = classmethod(_patched_from_pretrained)
+    def _no_meta_tensor(cls, *args, **kwargs):
+        kwargs['low_cpu_mem_usage'] = False
+        return _inner_fn(cls, *args, **kwargs)
+
+    _mod_utils.PreTrainedModel.from_pretrained = classmethod(_no_meta_tensor)
     print("[SYSTEM] PyTorch meta-tensor initialization disabled")
 except Exception:
     pass  # transformers not installed yet during first-run setup — harmless
