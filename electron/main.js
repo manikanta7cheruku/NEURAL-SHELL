@@ -359,6 +359,15 @@ function createMainWindow() {
     mainWindow.focus();
   });
 
+  // Suppress harmless Chromium Autofill DevTools warnings
+  if (mainWindow.webContents) {
+    mainWindow.webContents.on('console-message', (event, level, message) => {
+      if (message && (message.includes('Autofill') || message.includes('autofill'))) {
+        event.preventDefault();
+      }
+    });
+  }
+
   mainWindow.on('close', (event) => {
     if (!app.isQuitting) {
       event.preventDefault();
