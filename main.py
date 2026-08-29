@@ -396,6 +396,24 @@ def _validate_startup():
             "  Seven cannot save conversations or facts."
         )
 
+    # Check 6: Visual C++ Redistributable (critical for numpy/torch/chromadb)
+    try:
+        import ctypes
+        # Try loading the VC++ 2015-2022 runtime DLL
+        # If this fails, numpy and torch will crash with 0xC0000005
+        _vcr = ctypes.CDLL("msvcp140.dll")
+        print("[STARTUP] Visual C++ Runtime: found")
+    except OSError:
+        errors.append(
+            "CRITICAL: Visual C++ Redistributable (2015-2022) is not installed.\n"
+            "  Seven cannot run AI models without this system library.\n"
+            "  Download and install from:\n"
+            "  https://aka.ms/vs/17/release/vc_redist.x64.exe\n"
+            "  Then restart Seven."
+        )
+    except Exception:
+        pass  # Non-Windows or other issue — skip
+
     return len(errors) == 0, errors, warnings
 
 
