@@ -1249,6 +1249,29 @@ def start_app():
     except Exception:
         pass
 
+    # Also check if critical dependencies are still present.
+    # Users may uninstall Ollama or reinstall Seven — in those cases we must
+    # re-run setup even though config.json says setup is complete.
+    _dependencies_ok = False
+    if _is_setup_done:
+        try:
+            from backend.bootstrap import is_ollama_installed
+            _dependencies_ok = is_ollama_installed()
+            if not _dependencies_ok:
+                print(Fore.YELLOW + "[SYSTEM] Setup was marked complete but Ollama is missing — reverting to setup mode")
+                # Clear the flag so wizard runs again
+                try:
+                    with open(_cfg_file, 'r', encoding='utf-8') as _f:
+                        _cfg_data = _setup_json.load(_f)
+                    _cfg_data['setup_complete'] = False
+                    with open(_cfg_file, 'w', encoding='utf-8') as _f:
+                        _setup_json.dump(_cfg_data, _f, indent=2)
+                    _is_setup_done = False
+                except Exception as _cfg_err:
+                    print(Fore.YELLOW + f"[SYSTEM] Could not update config: {_cfg_err}")
+        except Exception as _dep_err:
+            print(Fore.YELLOW + f"[SYSTEM] Dependency check failed: {_dep_err}")
+
     if not _is_setup_done:
         # ── ONBOARDING MODE ─────────────────────────────────────────────
         # Only the API server runs. No voice loop, no ML imports, no daemons.
