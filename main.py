@@ -121,107 +121,33 @@ for _noisy_logger in [
 ]:
     _early_logging.getLogger(_noisy_logger).setLevel(_early_logging.ERROR)
 
-# numpy compatibility patch
-# Must happen before any ML library imports numpy.
-# numpy 1.26.x: np.bool/np.int/np.float exist but are deprecated (FutureWarning).
-# numpy 2.x:    np.bool/np.int/np.float/np.iterable removed entirely.
-# This patch handles BOTH versions safely without triggering warnings.
+# Safe numpy compatibility patch — completely isolated and crash-proof.
+# Never imports heavy libraries (transformers/torch) at the top level of main.py.
 try:
     import warnings as _np_warnings
     import numpy as _np_patch
-
-    _np_major = int(_np_patch.__version__.split('.')[0])
-
-    if _np_major >= 2:
-        # numpy 2.x: these attributes were removed, restore them for older ML libs
-        if not hasattr(_np_patch, 'iterable'):
-            _np_patch.iterable = lambda obj: hasattr(obj, '__iter__')
-        if not hasattr(_np_patch, 'complex'):
-            _np_patch.complex = complex
-        if not hasattr(_np_patch, 'float'):
-            _np_patch.float = float
-        if not hasattr(_np_patch, 'int'):
-            _np_patch.int = int
-        if not hasattr(_np_patch, 'bool'):
-            _np_patch.bool = bool
-        print("[SYSTEM] numpy 2.x compatibility patches applied")
-    else:
-        # numpy 1.x: attributes exist but trigger FutureWarning on access.
-        # Suppress the warnings so downstream libraries don't spam the console.
-        _np_warnings.filterwarnings('ignore', category=FutureWarning, module='numpy')
-        _np_warnings.filterwarnings('ignore', message='.*np\\.bool.*')
-        _np_warnings.filterwarnings('ignore', message='.*np\\.int.*')
-        _np_warnings.filterwarnings('ignore', message='.*np\\.float.*')
-        _np_warnings.filterwarnings('ignore', message='.*np\\.complex.*')
+    if hasattr(_np_patch, '__version__'):
+        _np_v = str(_np_patch.__version__)
+        if _np_v.startswith('2.'):
+            if not hasattr(_np_patch, 'iterable'):
+                _np_patch.iterable = lambda obj: hasattr(obj, '__iter__')
+            if not hasattr(_np_patch, 'complex'):
+                _np_patch.complex = complex
+            if not hasattr(_np_patch, 'float'):
+                _np_patch.float = float
+            if not hasattr(_np_patch, 'int'):
+                _np_patch.int = int
+            if not hasattr(_np_patch, 'bool'):
+                _np_patch.bool = bool
+            print("[SYSTEM] numpy 2.x compatibility patches applied")
+        else:
+            _np_warnings.filterwarnings('ignore', category=FutureWarning, module='numpy')
+            _np_warnings.filterwarnings('ignore', message='.*np\\.bool.*')
+            _np_warnings.filterwarnings('ignore', message='.*np\\.int.*')
+            _np_warnings.filterwarnings('ignore', message='.*np\\.float.*')
+            _np_warnings.filterwarnings('ignore', message='.*np\\.complex.*')
 except Exception:
     pass
-
-# CRITICAL: Monkey-patch HuggingFace modeling_utils to disable low_cpu_mem_usage.
-# PyTorch 2.x on Windows CPU crashes with "Cannot copy out of meta tensor" when 
-# loading SentenceTransformer weights. Forcing low_cpu_mem_usage=False completely 
-# bypasses meta-tensor initialization and loads weights directly into CPU memory.
-try:
-    import transformers.modeling_utils as _mod_utils
-    _orig_from_pretrained = _mod_utils.PreTrainedModel.from_pretrained
-
-    @classmethod
-    def _patched_from_pretrained(cls, *args, **kwargs):
-        if "low_cpu_mem_usage" in kwargs:
-            kwargs["low_cpu_mem_usage"] = False
-        return _orig_from_pretrained(*args, **kwargs)
-
-    _mod_utils.PreTrainedModel.from_pretrained = _patched_from_pretrained
-    print("[SYSTEM] Safetensors meta-tensor loading patch active")
-except Exception as _e:
-    pass
-
-    if _np_major >= 2:
-        # numpy 2.x: these attributes were removed, restore them for older ML libs
-        if not hasattr(_np_patch, 'iterable'):
-            _np_patch.iterable = lambda obj: hasattr(obj, '__iter__')
-        if not hasattr(_np_patch, 'complex'):
-            _np_patch.complex = complex
-        if not hasattr(_np_patch, 'float'):
-            _np_patch.float = float
-        if not hasattr(_np_patch, 'int'):
-            _np_patch.int = int
-        if not hasattr(_np_patch, 'bool'):
-            _np_patch.bool = bool
-        print("[SYSTEM] numpy 2.x compatibility patches applied")
-    else:
-        # numpy 1.x: attributes exist but trigger FutureWarning on access.
-        # Suppress the warnings so downstream libraries don't spam the console.
-        _np_warnings.filterwarnings('ignore', category=FutureWarning, module='numpy')
-        _np_warnings.filterwarnings('ignore', message='.*np\\.bool.*')
-        _np_warnings.filterwarnings('ignore', message='.*np\\.int.*')
-        _np_warnings.filterwarnings('ignore', message='.*np\\.float.*')
-        _np_warnings.filterwarnings('ignore', message='.*np\\.complex.*')
-        # No patches needed — 1.26.x has everything torch/whisper/chromadb needs
-except Exception:
-    pass
-
-# CRITICAL: Force PyTorch to skip meta-tensor initialization on Windows CPU.
-# Without this, sentence-transformers crashes with
-# "Cannot copy out of meta tensor; no data" every time it loads on cold start.
-# This has to run BEFORE any transformers/torch imports.
-try:
-    from transformers import modeling_utils as _mod_utils
-
-    # Access the raw classmethod descriptor from the class __dict__
-    _raw_descriptor = _mod_utils.PreTrainedModel.__dict__.get('from_pretrained')
-    if _raw_descriptor is not None and hasattr(_raw_descriptor, '__func__'):
-        _inner_fn = _raw_descriptor.__func__
-    else:
-        _inner_fn = _mod_utils.PreTrainedModel.from_pretrained
-
-    def _no_meta_tensor(cls, *args, **kwargs):
-        kwargs['low_cpu_mem_usage'] = False
-        return _inner_fn(cls, *args, **kwargs)
-
-    _mod_utils.PreTrainedModel.from_pretrained = classmethod(_no_meta_tensor)
-    print("[SYSTEM] PyTorch meta-tensor initialization disabled")
-except Exception:
-    pass  # transformers not installed yet during first-run setup — harmless
 
 # ============================================================================
 # PATH SETUP — Must be the very first thing after imports
@@ -296,11 +222,30 @@ def _packages_ready():
     if app_path:
         sp = os.path.join(app_path, 'python', 'Lib', 'site-packages')
         print(f"[SYSTEM] Site-packages exists: {os.path.exists(sp)}")
+
+    cflags = 0x08000000 if sys.platform == 'win32' else 0
+
+    # 1. Verify numpy health explicitly — detects corrupted numpy installs immediately
+    np_test = subprocess.run(
+        [python, '-c', 'import numpy as np; _ = np.__version__; _ = np.ndarray'],
+        capture_output=True,
+        creationflags=cflags
+    )
+    if np_test.returncode != 0:
+        print("[SYSTEM] numpy is corrupted or unimportable — entering pre-setup recovery mode")
+        return False
+
+    # 2. Check core server packages
     for pkg in ['fastapi', 'uvicorn', 'pyttsx3', 'speech_recognition']:
-        result = subprocess.run([python, '-c', f'import {pkg.replace("-","_")}'], capture_output=True)
+        result = subprocess.run(
+            [python, '-c', f'import {pkg.replace("-","_")}'],
+            capture_output=True,
+            creationflags=cflags
+        )
         if result.returncode != 0:
             print(f"[SYSTEM] Missing package: {pkg}")
             return False
+
     print("[SYSTEM] Core packages ready.")
     return True
 
