@@ -141,13 +141,16 @@ def get_facts():
 
 @router.delete("/api/memory/facts/{fact_id}")
 def delete_fact(fact_id: str):
-    """Delete a specific fact."""
-    from memory import seven_memory
+    """Delete a specific fact. Never returns 500."""
     try:
-        seven_memory.user_facts.delete(ids=[fact_id])
-        return {"success": True, "deleted": fact_id}
+        from memory import seven_memory
+        if seven_memory:
+            seven_memory.user_facts.delete(ids=[fact_id])
+            return {"success": True, "deleted": fact_id}
+        else:
+            return {"success": False, "error": "Memory system not initialized"}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        return {"success": False, "error": str(e)}
 
 
 @router.get("/api/memory/conversations", summary="Get conversation history",
@@ -259,13 +262,17 @@ def get_conversations(limit: int = 500, offset: int = 0):
 
 @router.delete("/api/memory/conversations/{conv_id}")
 def delete_conversation(conv_id: str):
-    """Delete a specific conversation."""
-    from memory import seven_memory
+    """Delete a specific conversation. Never returns 500."""
     try:
-        seven_memory.conversations.delete(ids=[conv_id])
-        return {"success": True, "deleted": conv_id}
+        from memory import seven_memory
+        if seven_memory:
+            seven_memory.conversations.delete(ids=[conv_id])
+            return {"success": True, "deleted": conv_id}
+        else:
+            return {"success": False, "error": "Memory system not initialized"}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        # Return error details instead of crashing
+        return {"success": False, "error": str(e)}
 
 
 @router.get("/api/memory/export")
@@ -447,22 +454,22 @@ def export_memory():
 @router.delete("/api/memory/clear", summary="Clear all facts and conversations",
                description="Permanently deletes all stored facts and conversation history from ChromaDB and resets brain session state.")
 def clear_all_memory():
-    """Clear all facts, conversations, and reset brain session state."""
+    """Clear all facts, conversations, and reset brain session state. Never returns 500."""
     try:
         from memory import seven_memory
         if seven_memory:
             seven_memory.clear_all()
-
-        try:
-            import brain
-            brain.reset_session()
-        except Exception as _be:
-            _log.debug(f"[API] Brain session reset skipped: {_be}")
-
-        return {"success": True, "message": "All facts and conversations cleared successfully"}
     except Exception as e:
         _log.error(f"[API] Clear memory error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return {"success": False, "error": str(e)}
+
+    try:
+        import brain
+        brain.reset_session()
+    except Exception:
+        pass
+
+    return {"success": True, "message": "All facts and conversations cleared successfully"}
 
 
 @router.post("/api/memory/import")
