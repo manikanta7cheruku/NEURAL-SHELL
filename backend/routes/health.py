@@ -324,3 +324,138 @@ def production_health():
         result["disk"] = {"error": str(e)}
 
     return result
+
+@router.get("/api/diagnostic",
+            summary="User-friendly diagnostic page",
+            description="Returns a human-readable diagnostic report. Open http://127.0.0.1:7777/api/diagnostic in a browser to see system status.")
+def diagnostic():
+    """
+    Comprehensive diagnostic for remote debugging.
+    Users can open this URL and paste the output to support.
+    """
+    import sys
+    import platform
+    import datetime
+
+    report = {
+        "timestamp": datetime.datetime.now().isoformat(),
+        "seven_version": _get_version(),
+        "python_version": sys.version.split()[0],
+        "platform": platform.platform(),
+        "status": "RUNNING",
+        "checks": {}
+    }
+
+    # 1. Numpy
+    try:
+        import numpy as np
+        report["checks"]["numpy"] = {
+            "status": "OK",
+            "version": np.__version__,
+            "ndarray": hasattr(np, 'ndarray'),
+            "_utils": hasattr(np, '_utils')
+        }
+    except Exception as e:
+        report["checks"]["numpy"] = {"status": "BROKEN", "error": str(e)}
+
+    # 2. Core packages
+    for pkg in ['fastapi', 'uvicorn', 'pyttsx3', 'chromadb', 'sentence_transformers', 'faster_whisper']:
+        try:
+            __import__(pkg.replace('-', '_'))
+            report["checks"][pkg] = {"status": "OK"}
+        except Exception as e:
+            report["checks"][pkg] = {"status": "MISSING", "error": str(e)[:100]}
+
+    # 3. Ollama
+    try:
+        import urllib.request
+        import json as _json
+        with urllib.request.urlopen("http://127.0.0.1:11434/api/tags", timeout=3) as r:
+            data = _json.loads(r.read().decode())
+            models = [m["name"] for m in data.get("models", [])]
+            report["checks"]["ollama"] = {
+                "status": "RUNNING",
+                "models": models,
+                "count": len(models)
+            }
+    except Exception as e:
+        report["checks"]["ollama"] = {"status": "OFFLINE", "error": str(e)[:100]}
+
+    # 4. Config
+    try:
+        import config
+        report["checks"]["config"] = {
+            "status": "OK",
+            "setup_complete": config.KEY.get("setup_complete", False),
+            "model": config.KEY.get("brain", {}).get("model_name", "unknown"),
+            "tier": config.KEY.get("license", {}).get("tier", "free")
+        }
+    except Exception as e:
+        report["checks"]["config"] = {"status": "ERROR", "error": str(e)[:100]}
+
+    # 5. Memory
+    try:
+        from memory import seven_memory
+        if seven_memory:
+            stats = seven_memory.get_stats()
+            report["checks"]["memory"] = {
+                "status": "OK",
+                "conversations": stats.get("total_conversations", 0),
+                "facts": stats.get("total_facts", 0)
+            }
+        else:
+            report["checks"]["memory"] = {"status": "NOT_INITIALIZED"}
+    except Exception as e:
+        report["checks"]["memory"] = {"status": "ERROR", "error": str(e)[:100]}
+
+    # 6. Ports
+    import socket
+    for name, port in [("API", 7777), ("Ollama", 11434), ("Panel", 7778), ("Overlay", 7891)]:
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(1)
+            r = s.connect_ex(("127.0.0.1", port))
+            s.close()
+            report["checks"][f"port_{name}"] = {
+                "port": port,
+                "status": "OPEN" if r == 0 else "CLOSED"
+            }
+        except Exception:
+            report["checks"][f"port_{name}"] = {"port": port, "status": "ERROR"}
+
+    # 7. Daemons
+    import os
+    appdata = os.environ.get('APPDATA', '')
+    for daemon in ['schedule_daemon.py', 'trigger_daemon.py']:
+        path = os.path.join(os.environ.get('SEVEN_APP_PATH', ''), daemon)
+        report["checks"][daemon] = {
+            "exists": os.path.exists(path),
+            "path": path
+        }
+
+    # 8. Disk
+    try:
+        import shutil
+        total, used, free = shutil.disk_usage(appdata or 'C:\\')
+        report["checks"]["disk"] = {
+            "status": "OK" if free > 500 * 1024 * 1024 else "LOW",
+            "free_gb": round(free / (1024**3), 2),
+            "total_gb": round(total / (1024**3), 2)
+        }
+    except Exception as e:
+        report["checks"]["disk"] = {"status": "ERROR", "error": str(e)}
+
+    # 9. VC++ Runtime
+    if sys.platform == 'win32':
+        try:
+            import ctypes
+            ctypes.CDLL("msvcp140.dll")
+            report["checks"]["vcredist"] = {"status": "INSTALLED"}
+        except OSError:
+            report["checks"]["vcredist"] = {"status": "MISSING"}
+
+    # Overall health
+    broken = [k for k, v in report["checks"].items() if v.get("status") in ("BROKEN", "MISSING", "OFFLINE", "ERROR")]
+    report["overall"] = "HEALTHY" if not broken else f"ISSUES: {', '.join(broken)}"
+
+    return report
