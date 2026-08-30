@@ -771,8 +771,24 @@ def seven_logic():
     ctx.config        = config
 
     # Load all AI modules onto ctx
-    if not load_all_modules(ctx):
-        return  # critical load failure
+    if _safe_mode:
+        print(Fore.YELLOW + "[SYSTEM] Safe mode active — ML modules not loaded")
+        # Create minimal stubs so the rest of the code doesn't crash
+        ctx.brain = None
+        ctx.mouth = None
+        ctx.listen = lambda: (None, None)
+    else:
+        if not load_all_modules(ctx):
+            # ML loading failed — create safe mode flag and exit
+            # so next restart tries safe mode
+            try:
+                with open(_safe_mode_file, 'w') as _sf:
+                    _sf.write(str(time.time()))
+                print(Fore.RED + "[SYSTEM] ML loading failed. Safe mode flag created.")
+                print(Fore.RED + "[SYSTEM] Seven will restart in safe mode.")
+            except Exception:
+                pass
+            return  # critical load failure
 
     # Wire speaking state to ears — prevents listen() processing audio
     # while Seven's TTS is playing (self-echo prevention)
@@ -1382,6 +1398,14 @@ def start_app():
         return
 
     # ── FULL MODE (only after setup is complete) ─────────────────────────
+    # Check for safe mode flag (created after repeated crashes)
+    _safe_mode_file = os.path.join(_appdata, 'SEVEN', 'safe_mode.flag')
+    _safe_mode = os.path.exists(_safe_mode_file)
+    if _safe_mode:
+        print(Fore.YELLOW + "[SYSTEM] SAFE MODE: Skipping ML module loading due to previous crashes")
+        print(Fore.YELLOW + "[SYSTEM] Voice and AI features will be unavailable until the issue is resolved")
+        print(Fore.YELLOW + "[SYSTEM] Delete %APPDATA%\\SEVEN\\safe_mode.flag to exit safe mode")
+
     print(Fore.GREEN + "[SYSTEM] Setup complete. Starting full Seven...")
 
     try:
