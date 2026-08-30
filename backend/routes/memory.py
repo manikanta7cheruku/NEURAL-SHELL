@@ -758,15 +758,24 @@ async def import_memory(request: Request):
 @router.get("/api/memory/stats", summary="Memory statistics",
             description="Returns count of stored conversations and facts, storage size in MB, and current license tier. Uses SQLite fallback if ChromaDB unavailable.")
 def get_memory_stats():
-    """Get memory statistics including storage size."""
+    """Get memory statistics including storage size. Never returns 500."""
     stats = {"total_conversations": 0, "total_facts": 0, "storage_path": ""}
 
-    # Try live ChromaDB count via singleton first
     try:
         from memory import seven_memory
-        stats = seven_memory.get_stats()
+        if seven_memory:
+            raw_stats = seven_memory.get_stats()
+            if isinstance(raw_stats, dict):
+                stats = raw_stats
     except Exception as e:
         _log.debug(f"[API] Memory stats via ChromaDB using fallback: {type(e).__name__}")
+
+    # Ensure stats is always a dict (guards against None from lazy proxy)
+    if not isinstance(stats, dict):
+        stats = {"total_conversations": 0, "total_facts": 0, "storage_path": ""}
+
+    # SQLite fallback if counts are zero
+    if stats.get("total_conversations", 0) == 0 and stats.get("total_facts", 0) == 0:
         try:
             import sqlite3 as _sq
             from memory.core import MEMORY_DIR as _mdir
@@ -797,9 +806,8 @@ def get_memory_stats():
                         stats["total_facts"] = _count
                 _conn.close()
                 stats["storage_path"] = _mdir
-                _log.debug(f"[API] Memory stats via SQLite fallback: {stats}")
         except Exception as _sq_err:
-            _log.warning(f"[API] Memory stats SQLite fallback failed: {_sq_err}")
+            _log.debug(f"[API] Memory stats SQLite fallback failed: {_sq_err}")
 
     _appdata    = os.environ.get('APPDATA', os.path.expanduser('~'))
     memory_dir  = os.path.join(_appdata, 'SEVEN', 'seven_data', 'memory')
@@ -816,8 +824,7 @@ def get_memory_stats():
     try:
         import config as _cfg
         stats["tier"] = _cfg.KEY.get("license", {}).get("tier", "free")
-    except Exception as _e:
-        _log.debug(f"Tier read failed, defaulting to free: {_e}")
+    except Exception:
         stats["tier"] = "free"
 
     return stats
