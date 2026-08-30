@@ -15,8 +15,15 @@ router = APIRouter()
 
 
 @router.get("/api/health", summary="System health check",
-            description="Checks all critical systems in parallel: memory DB, tasks DB, triggers DB, Ollama, disk space, config, schedules. Returns structured JSON. Always returns 200 - check the 'healthy' field and individual check statuses.")
+            description="Lightweight liveness probe. Returns 200 if the API server is running. Used by frontend to detect backend availability.")
 def health_check():
+    """Fast liveness check — no heavy imports, no DB queries. Returns in under 5ms."""
+    return {"ok": True, "status": "running", "version": _get_version()}
+
+
+@router.get("/api/health/full", summary="Full system health check",
+            description="Checks all critical systems in parallel. Returns structured JSON.")
+def health_check_full():
     """
     Check health of all Seven subsystems in parallel.
     Returns 200 always - caller reads the individual statuses.
