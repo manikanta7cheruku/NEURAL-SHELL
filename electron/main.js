@@ -287,22 +287,25 @@ function startPython() {
         type: 'error',
         title: 'Seven Cannot Start',
         message: `The backend crashed ${_crashCount} times and cannot recover.`,
-        detail: `Most likely cause: Missing Visual C++ Redistributable.\n\n` +
-                `Step 1: Click "Install Fix" below to download it.\n` +
-                `Step 2: Run the downloaded file and click Install.\n` +
-                `Step 3: Restart Seven.\n\n` +
+        detail: `The AI engine failed to load. This can happen if:\n\n` +
+                `1. Antivirus is blocking Python DLLs\n` +
+                `2. A system restart is needed after installation\n` +
+                `3. The installation was interrupted\n\n` +
                 (crashDetails ? `Crash details:\n${crashDetails}\n\n` : '') +
-                `If the problem persists, check your antivirus settings.`,
-        buttons: ['Install Fix', 'View Crash Log', 'Close'],
+                `Try restarting your computer first. If the problem persists,\n` +
+                `uninstall Seven, delete the folder at:\n` +
+                `%APPDATA%\\SEVEN\n` +
+                `Then reinstall Seven.`,
+        buttons: ['View Crash Log', 'Open Event Viewer', 'Close'],
         defaultId: 0,
       });
 
       if (result === 0) {
-        shell.openExternal('https://aka.ms/vs/17/release/vc_redist.x64.exe');
-      } else if (result === 1) {
         const path = require('node:path');
         const logPath = path.join(process.env.APPDATA || '', 'SEVEN', 'logs', 'python_crash.log');
         shell.openPath(logPath);
+      } else if (result === 1) {
+        shell.openExternal('eventvwr.msc');
       }
       return;
     }
