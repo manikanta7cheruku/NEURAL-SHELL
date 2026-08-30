@@ -1047,15 +1047,21 @@ def is_ollama_running():
 
 def start_ollama():
     """Start Ollama service and wait for it to respond."""
-    _set('ollama_start', status='running', error=None)
+    try:
+        _set('ollama_start', status='running', error=None)
+    except Exception:
+        pass  # Safe if called outside onboarding state
 
     if is_ollama_running():
         print("[BOOTSTRAP] Ollama already running.")
-        _set('ollama_start', status='done')
+        try:
+            _set('ollama_start', status='done')
+        except Exception:
+            pass
         return True
 
     ollama_exe = get_ollama_executable()
-    print(f"[BOOTSTRAP] Starting Ollama: {ollama_exe}")
+    print(f"[BOOTSTRAP] Starting Ollama service: {ollama_exe}")
 
     try:
         subprocess.Popen(
