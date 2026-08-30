@@ -14,6 +14,89 @@ if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
 if sys.stderr and hasattr(sys.stderr, 'reconfigure'):
     sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 
+# ============================================================================
+# CRITICAL: Visual C++ Redistributable Check (MUST run before ALL imports)
+# numpy, torch, chromadb, and faster-whisper all require msvcp140.dll.
+# Fresh Windows machines often lack this DLL, causing silent 0xC0000005 crashes.
+# This check auto-downloads and installs VC++ if missing.
+# ============================================================================
+def _ensure_vcredist():
+    """Check for VC++ 2015-2022 runtime DLLs. Auto-install if missing."""
+    if sys.platform != 'win32':
+        return
+
+    import ctypes
+    import os as _os
+
+    # Check for the two critical DLLs
+    dlls_needed = ["msvcp140.dll", "vcruntime140.dll"]
+    missing = []
+    for dll in dlls_needed:
+        try:
+            ctypes.CDLL(dll)
+        except OSError:
+            missing.append(dll)
+
+    if not missing:
+        return  # All DLLs present
+
+    print(f"[SYSTEM] CRITICAL: Missing Visual C++ runtime DLLs: {missing}")
+    print("[SYSTEM] Downloading Visual C++ Redistributable from Microsoft...")
+
+    import urllib.request
+    import tempfile
+    import subprocess
+
+    vc_url = "https://aka.ms/vs/17/release/vc_redist.x64.exe"
+    vc_installer = _os.path.join(tempfile.gettempdir(), "vc_redist.x64.exe")
+
+    try:
+        # Download VC++ installer
+        req = urllib.request.Request(
+            vc_url,
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+        )
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            with open(vc_installer, "wb") as f:
+                while True:
+                    chunk = resp.read(262144)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+
+        print(f"[SYSTEM] Downloaded VC++ installer ({_os.path.getsize(vc_installer)} bytes)")
+
+        # Install silently — /install /quiet /norestart
+        # This requires admin elevation which ShellExecuteW handles
+        try:
+            ret = ctypes.windll.shell32.ShellExecuteW(
+                None, "runas", vc_installer, "/install /quiet /norestart", None, 0
+            )
+            if ret > 32:
+                print("[SYSTEM] VC++ installation started. Waiting for completion...")
+                import time
+                # Wait up to 2 minutes for installation
+                for _ in range(120):
+                    time.sleep(1)
+                    try:
+                        ctypes.CDLL("msvcp140.dll")
+                        print("[SYSTEM] Visual C++ Redistributable installed successfully.")
+                        return
+                    except OSError:
+                        continue
+                print("[SYSTEM] WARNING: VC++ install may still be in progress.")
+            else:
+                print(f"[SYSTEM] VC++ install declined by user (code {ret}).")
+                print("[SYSTEM] Seven may crash without Visual C++ Redistributable.")
+        except Exception as e:
+            print(f"[SYSTEM] VC++ install error: {e}")
+
+    except Exception as e:
+        print(f"[SYSTEM] Failed to download VC++ Redistributable: {e}")
+        print("[SYSTEM] Please install manually from: https://aka.ms/vs/17/release/vc_redist.x64.exe")
+
+_ensure_vcredist()
+
 # numpy 2.0 removed numpy.iterable.
 # sentence-transformers, faster-whisper, and chromadb embedding functions
 # all call numpy.iterable internally. The embedded Python environment
