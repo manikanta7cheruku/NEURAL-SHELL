@@ -154,7 +154,25 @@ export default function App() {
   useEffect(() => {
     if (!configLoading && config !== null) {
       const done = config.setup_complete === true;
-      setSetupDone(done);
+      // Also verify Ollama is actually installed — config flag alone is not enough
+      if (done) {
+        fetch(`${API_BASE}/api/bootstrap/check`)
+          .then(r => r.json())
+          .then(d => {
+            if (d.ollama_installed && d.packages_installed) {
+              setSetupDone(true);
+            } else {
+              console.log('[APP] Setup flag was true but dependencies missing — re-running setup');
+              setSetupDone(false);
+            }
+          })
+          .catch(() => {
+            // If bootstrap check fails, trust config flag
+            setSetupDone(done);
+          });
+      } else {
+        setSetupDone(false);
+      }
     }
   }, [config, configLoading]);
 
