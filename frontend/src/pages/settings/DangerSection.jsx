@@ -9,10 +9,14 @@ export default function DangerSection() {
     if (!confirmed) return;
 
     try {
-      await api.delete('/memory/clear');
-      alert('Memory cleared successfully.');
-    } catch {
-      alert('Failed to clear memory.');
+      const r = await api.delete('/memory/clear');
+      if (r.data && r.data.success) {
+        alert('Memory cleared successfully.');
+      } else {
+        alert('Failed to clear memory: ' + (r.data?.error || 'Unknown error'));
+      }
+    } catch (e) {
+      alert('Failed to clear memory: ' + (e.message || 'Connection error'));
     }
   };
 
