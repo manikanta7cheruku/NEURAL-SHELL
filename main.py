@@ -1316,11 +1316,36 @@ def start_app():
         except Exception as _dep_err:
             print(Fore.YELLOW + f"[SYSTEM] Dependency check failed: {_dep_err}")
 
-    if not _is_setup_done:
+    # ── ML READINESS CHECK ──────────────────────────────────────────────
+    # Even if setup is marked complete, verify that ML packages actually load.
+    # This catches corrupted numpy, missing DLLs, or broken torch installs.
+    _ml_ready = False
+    if _is_setup_done:
+        try:
+            import subprocess as _sp
+            _ml_test = _sp.run(
+                [sys.executable, '-c',
+                 'import numpy; import numpy._utils; print("OK")'],
+                capture_output=True, text=True, timeout=10,
+                creationflags=0x08000000 if sys.platform == 'win32' else 0
+            )
+            if _ml_test.returncode == 0 and 'OK' in _ml_test.stdout:
+                _ml_ready = True
+                print("[SYSTEM] ML packages verified — entering full mode")
+            else:
+                print(Fore.YELLOW + f"[SYSTEM] ML packages broken: {_ml_test.stderr.strip()[:200]}")
+                print(Fore.YELLOW + "[SYSTEM] Falling back to onboarding mode for repair")
+        except Exception as _ml_err:
+            print(Fore.YELLOW + f"[SYSTEM] ML check failed: {_ml_err}")
+
+    if not _is_setup_done or not _ml_ready:
         # ── ONBOARDING MODE ─────────────────────────────────────────────
         # Only the API server runs. No voice loop, no ML imports, no daemons.
         # This prevents 0xC0000005 crashes from concurrent DLL loading.
-        print(Fore.CYAN + "[SYSTEM] Setup not complete — running in Onboarding mode")
+        if _is_setup_done and not _ml_ready:
+            print(Fore.CYAN + "[SYSTEM] Setup was complete but ML is broken — running in Repair mode")
+        else:
+            print(Fore.CYAN + "[SYSTEM] Setup not complete — running in Onboarding mode")
         print(Fore.GREEN + "[SYSTEM] API ready for Setup Wizard on port 7777")
 
         try:
