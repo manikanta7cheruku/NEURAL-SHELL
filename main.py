@@ -8,11 +8,17 @@ All heavy lifting delegated to main_modules/.
 
 import sys
 import os
+import time
 
 if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 if sys.stderr and hasattr(sys.stderr, 'reconfigure'):
     sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+
+# Module-level paths and state flags
+_appdata = os.environ.get('APPDATA', os.path.expanduser('~'))
+_safe_mode_file = os.path.join(_appdata, 'SEVEN', 'safe_mode.flag')
+_safe_mode = os.path.exists(_safe_mode_file)
 
 # ============================================================================
 # CRITICAL: Visual C++ Redistributable Check (MUST run before ALL imports)
@@ -553,7 +559,7 @@ app_ui = None
 # ============================================================================
 
 def seven_logic():
-    global app_ui
+    global app_ui, _safe_mode
 
     # Build shared context
     ctx = SevenContext()
@@ -561,33 +567,48 @@ def seven_logic():
     ctx.api_set_state = api_set_state
     ctx.config        = config
 
-    # Load all AI modules onto ctx
+    # Check for safe mode flag dynamically
+    _safe_mode = os.path.exists(_safe_mode_file)
+
     if _safe_mode:
         print(Fore.YELLOW + "[SYSTEM] Safe mode active — ML modules not loaded")
-        ctx.brain = None
-        ctx.mouth = None
-        ctx.listen = lambda: (None, None)
-        api_set_state("status_text", "SAFE MODE — Voice disabled")
+        api_set_state("status_text", "SAFE MODE — AI offline")
         api_set_state("status_color", "#ffaa00")
-    else:
+        api_set_state("listening", False)
+        
+        # Start core background services
+        launch_schedule_daemon()
+        launch_panel_server()
         try:
-            api_set_state("status_text", "Loading AI modules...")
-            api_set_state("status_color", "#ffaa00")
+            from main_modules.startup.trigger_daemon_launcher import launch_trigger_daemon, launch_overlay_daemon
+            launch_trigger_daemon()
+            launch_overlay_daemon()
         except Exception:
             pass
+            
+        while True:
+            time.sleep(1)
+        return
 
-        if not load_all_modules(ctx):
-            print(Fore.RED + "[SYSTEM] ML loading failed.")
-            try:
-                api_set_state("status_text", "ERROR: AI modules failed to load")
-                api_set_state("status_color", "#ff0000")
-                api_set_state("listening", False)
-                with open(_safe_mode_file, 'w') as _sf:
-                    _sf.write(str(time.time()))
-                print(Fore.RED + "[SYSTEM] Safe mode flag created. Restart to retry.")
-            except Exception:
-                pass
-            return  # critical load failure
+    # Normal mode — load all AI modules
+    try:
+        api_set_state("status_text", "Starting Seven AI...")
+        api_set_state("status_color", "#ffaa00")
+    except Exception:
+        pass
+
+    if not load_all_modules(ctx):
+        print(Fore.RED + "[SYSTEM] ML loading failed.")
+        try:
+            api_set_state("status_text", "ERROR: AI modules failed to load")
+            api_set_state("status_color", "#ff0000")
+            api_set_state("listening", False)
+            with open(_safe_mode_file, 'w') as _sf:
+                _sf.write(str(time.time()))
+            print(Fore.RED + "[SYSTEM] Safe mode flag created. Restart to retry in safe mode.")
+        except Exception:
+            pass
+        return  # critical load failure
 
     # Wire speaking state to ears — prevents listen() processing audio
     # while Seven's TTS is playing (self-echo prevention)
