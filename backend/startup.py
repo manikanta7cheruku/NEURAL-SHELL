@@ -213,6 +213,9 @@ def _start_fastapi_server(host, port):
             if "voice" not in cfg:
                 cfg["voice"] = {}
             cfg["voice"]["voice_index"] = data.get("voice_index", 0)
+            cfg["voice"]["voice_id"] = data.get("voice_id", "")
+            cfg["voice"]["voice_engine"] = data.get("voice_engine", "sapi")
+            cfg["voice"]["speed"] = 165
             if data.get("model_name"):
                 if "brain" not in cfg:
                     cfg["brain"] = {}
