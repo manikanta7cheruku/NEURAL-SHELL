@@ -65,10 +65,8 @@ def welcome_greeting():
             time_greet = "Good morning"
         elif hour < 17:
             time_greet = "Good afternoon"
-        elif hour < 21:
-            time_greet = "Good evening"
         else:
-            time_greet = "Good night"
+            time_greet = "Good evening"
 
         message = f"{time_greet}, {name}. Seven is now online and ready. Just say my name to begin." if name else f"{time_greet}. Seven is now online and ready. Just say my name to begin."
 
