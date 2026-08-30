@@ -564,19 +564,27 @@ def seven_logic():
     # Load all AI modules onto ctx
     if _safe_mode:
         print(Fore.YELLOW + "[SYSTEM] Safe mode active — ML modules not loaded")
-        # Create minimal stubs so the rest of the code doesn't crash
         ctx.brain = None
         ctx.mouth = None
         ctx.listen = lambda: (None, None)
+        api_set_state("status_text", "SAFE MODE — Voice disabled")
+        api_set_state("status_color", "#ffaa00")
     else:
+        try:
+            api_set_state("status_text", "Loading AI modules...")
+            api_set_state("status_color", "#ffaa00")
+        except Exception:
+            pass
+
         if not load_all_modules(ctx):
-            # ML loading failed — create safe mode flag and exit
-            # so next restart tries safe mode
+            print(Fore.RED + "[SYSTEM] ML loading failed.")
             try:
+                api_set_state("status_text", "ERROR: AI modules failed to load")
+                api_set_state("status_color", "#ff0000")
+                api_set_state("listening", False)
                 with open(_safe_mode_file, 'w') as _sf:
                     _sf.write(str(time.time()))
-                print(Fore.RED + "[SYSTEM] ML loading failed. Safe mode flag created.")
-                print(Fore.RED + "[SYSTEM] Seven will restart in safe mode.")
+                print(Fore.RED + "[SYSTEM] Safe mode flag created. Restart to retry.")
             except Exception:
                 pass
             return  # critical load failure
