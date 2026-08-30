@@ -1273,9 +1273,25 @@ def start_app():
         print(Fore.YELLOW + "[SYSTEM] Running in STANDALONE mode")
 
     # ── Step 1: API server FIRST ─────────────────────────────────────────
-    start_api_server(host="127.0.0.1", port=7777)
-    logger.info("API server started on port 7777")
-    print(Fore.GREEN + "[SYSTEM] API server up on port 7777")
+    # This MUST succeed. If it fails, nothing else matters.
+    try:
+        start_api_server(host="127.0.0.1", port=7777)
+        logger.info("API server started on port 7777")
+        print(Fore.GREEN + "[SYSTEM] API server up on port 7777")
+    except Exception as _api_err:
+        print(Fore.RED + f"[SYSTEM] CRITICAL: API server failed to start: {_api_err}")
+        print(Fore.RED + "[SYSTEM] Retrying in 3 seconds...")
+        import time as _t
+        _t.sleep(3)
+        try:
+            start_api_server(host="127.0.0.1", port=7777)
+            print(Fore.GREEN + "[SYSTEM] API server started on retry")
+        except Exception as _api_err2:
+            print(Fore.RED + f"[SYSTEM] API server retry failed: {_api_err2}")
+            print(Fore.RED + "[SYSTEM] Seven cannot function without the API server.")
+            import time as _t2
+            _t2.sleep(5)
+            os._exit(1)
 
     import time as _startup_time
     _startup_time.sleep(0.8)
@@ -1317,26 +1333,35 @@ def start_app():
             print(Fore.YELLOW + f"[SYSTEM] Dependency check failed: {_dep_err}")
 
     # ── ML READINESS CHECK ──────────────────────────────────────────────
-    # Even if setup is marked complete, verify that ML packages actually load.
-    # This catches corrupted numpy, missing DLLs, or broken torch installs.
     _ml_ready = False
     if _is_setup_done:
         try:
             import subprocess as _sp
+            _test_python = sys.executable
+            # In packaged mode, use the embedded Python for the check
+            if _app_path:
+                _emb = os.path.join(_app_path, 'python', 'python.exe')
+                if os.path.exists(_emb):
+                    _test_python = _emb
             _ml_test = _sp.run(
-                [sys.executable, '-c',
+                [_test_python, '-c',
                  'import numpy; import numpy._utils; print("OK")'],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True, text=True, timeout=15,
                 creationflags=0x08000000 if sys.platform == 'win32' else 0
             )
             if _ml_test.returncode == 0 and 'OK' in _ml_test.stdout:
                 _ml_ready = True
                 print("[SYSTEM] ML packages verified — entering full mode")
             else:
-                print(Fore.YELLOW + f"[SYSTEM] ML packages broken: {_ml_test.stderr.strip()[:200]}")
+                _stderr = _ml_test.stderr.strip()[:200] if _ml_test.stderr else "no output"
+                print(Fore.YELLOW + f"[SYSTEM] ML packages broken: {_stderr}")
                 print(Fore.YELLOW + "[SYSTEM] Falling back to onboarding mode for repair")
         except Exception as _ml_err:
-            print(Fore.YELLOW + f"[SYSTEM] ML check failed: {_ml_err}")
+            # If the check itself crashes, assume ML is fine and let full mode try.
+            # It is better to attempt full mode and fail gracefully than to
+            # incorrectly force setup mode on a working installation.
+            print(Fore.YELLOW + f"[SYSTEM] ML check inconclusive: {_ml_err} — assuming OK")
+            _ml_ready = True
 
     if not _is_setup_done or not _ml_ready:
         # ── ONBOARDING MODE ─────────────────────────────────────────────
