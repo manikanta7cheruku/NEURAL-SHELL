@@ -224,12 +224,22 @@ function startPython() {
 
   pythonProcess.on('error', (err) => {
     console.error(`[PYTHON] Process spawn error: ${err.message}`);
-    // Show user a visible error dialog
-    const { dialog } = require('electron');
-    dialog.showErrorBox(
-      'Seven Backend Failed to Start',
-      `Python process could not start.\n\nError: ${err.message}\n\nPlease check:\n1. Antivirus is not blocking Seven\n2. Visual C++ Redistributable is installed\n3. Restart your computer and try again\n\nLog: %APPDATA%\\SEVEN\\logs\\python_crash.log`
-    );
+    const { dialog, shell } = require('electron');
+    const result = dialog.showMessageBoxSync(mainWindow, {
+      type: 'error',
+      title: 'Seven Cannot Start',
+      message: 'The backend process failed to start.',
+      detail: `Error: ${err.message}\n\nMost likely cause: Missing system dependencies.\n\nClick "Install Fix" to download the required Visual C++ runtime, then restart Seven.`,
+      buttons: ['Install Fix', 'View Log', 'Close'],
+      defaultId: 0,
+    });
+    if (result === 0) { 
+      shell.openExternal('https://aka.ms/vs/17/release/vc_redist.x64.exe');
+    } else if (result === 1) {
+      const path = require('node:path');
+      const logPath = path.join(process.env.APPDATA || '', 'SEVEN', 'logs', 'python_crash.log');
+      shell.openPath(logPath);
+    }
   });
 
   pythonProcess.on('close', (code, signal) => {
@@ -259,12 +269,41 @@ function startPython() {
 
     if (_crashCount > 3) {
       console.error(`[PYTHON] Crashed ${_crashCount} times - stopping restart loop`);
-      // Show user a visible error
-      const { dialog } = require('electron');
-      dialog.showErrorBox(
-        'Seven Cannot Start',
-        `The backend process crashed ${_crashCount} times.\n\nMost common causes:\n1. Missing Visual C++ Redistributable (2015-2022)\n2. Antivirus blocking Python\n3. Corrupted installation\n\nFix: Install VC++ Redistributable from:\nhttps://aka.ms/vs/17/release/vc_redist.x64.exe\n\nThen restart Seven.\n\nCrash log: %APPDATA%\\SEVEN\\logs\\python_crash.log`
-      );
+
+      // Read crash log for diagnostic details
+      let crashDetails = '';
+      try {
+        const fs = require('node:fs');
+        const path = require('node:path');
+        const logPath = path.join(process.env.APPDATA || '', 'SEVEN', 'logs', 'python_crash.log');
+        if (fs.existsSync(logPath)) {
+          const lines = fs.readFileSync(logPath, 'utf-8').split('\n').filter(l => l.trim());
+          crashDetails = lines.slice(-5).join('\n');
+        }
+      } catch {}
+
+      const { dialog, shell } = require('electron');
+      const result = dialog.showMessageBoxSync(mainWindow, {
+        type: 'error',
+        title: 'Seven Cannot Start',
+        message: `The backend crashed ${_crashCount} times and cannot recover.`,
+        detail: `Most likely cause: Missing Visual C++ Redistributable.\n\n` +
+                `Step 1: Click "Install Fix" below to download it.\n` +
+                `Step 2: Run the downloaded file and click Install.\n` +
+                `Step 3: Restart Seven.\n\n` +
+                (crashDetails ? `Crash details:\n${crashDetails}\n\n` : '') +
+                `If the problem persists, check your antivirus settings.`,
+        buttons: ['Install Fix', 'View Crash Log', 'Close'],
+        defaultId: 0,
+      });
+
+      if (result === 0) {
+        shell.openExternal('https://aka.ms/vs/17/release/vc_redist.x64.exe');
+      } else if (result === 1) {
+        const path = require('node:path');
+        const logPath = path.join(process.env.APPDATA || '', 'SEVEN', 'logs', 'python_crash.log');
+        shell.openPath(logPath);
+      }
       return;
     }
 
