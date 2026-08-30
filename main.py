@@ -303,18 +303,27 @@ def _validate_startup():
     warnings = []
 
     # Check 1: Ollama running on port 11434
-    # Non-fatal: Seven starts in degraded mode if Ollama is offline.
-    # Layer 08 handles ConnectionError gracefully at response time.
+    # Auto-starts Ollama service if installed but offline
     try:
         s = socket.create_connection(("127.0.0.1", 11434), timeout=2)
         s.close()
         print("[STARTUP] Ollama: running")
     except Exception:
-        warnings.append(
-            "Ollama is not running. Seven will start in degraded mode.\n"
-            "  LLM responses will not work until Ollama is running.\n"
-            "  Fix: Open the Ollama app or run 'ollama serve' in a terminal."
-        )
+        print("[STARTUP] Ollama offline — checking installation to auto-start...")
+        try:
+            from backend.bootstrap import is_ollama_installed, start_ollama
+            if is_ollama_installed():
+                print("[STARTUP] Ollama is installed — starting service in background...")
+                import threading as _start_thread
+                _bt.Thread(target=start_ollama, daemon=True, name="OllamaBoot").start()
+            else:
+                warnings.append(
+                    "Ollama is not installed. LLM responses will be unavailable.\n"
+                    "  Please complete the environment setup step to install it."
+                )
+        except Exception as _start_err:
+            print(f"[STARTUP] Could not auto-start Ollama: {_start_err}")
+            warnings.append("Ollama is not running. Please launch it manually.")
 
     # Check 2: config.json accessible
     _appdata = os.environ.get('APPDATA', '')
