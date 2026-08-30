@@ -16,14 +16,11 @@ export default function StepDone({ onComplete }) {
 
   const waitForBackend = async () => {
     // Backend will restart after setup completes. Wait for it to come back up.
-    for (let i = 0; i < 30; i++) {
+    // Use /api/health (lightweight) instead of /api/status (heavy) for faster detection.
+    for (let i = 0; i < 90; i++) {
       try {
-        const r = await fetch(`${API}/api/status`, { signal: AbortSignal.timeout(2000) });
-        if (r.ok) {
-          const data = await r.json();
-          // Wait until Seven is actually listening (voice loop started)
-          if (data.listening !== undefined) return true;
-        }
+        const r = await fetch(`${API}/api/health`, { signal: AbortSignal.timeout(2000) });
+        if (r.ok) return true;
       } catch (e) {}
       await new Promise(res => setTimeout(res, 1000));
     }
