@@ -114,9 +114,19 @@ export default function App() {
       try {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 3000);
-        const r = await fetch(`${API_BASE}/api/health`, {
+
+        // Try /api/health first, fall back to /api/status if 404
+        let r = await fetch(`${API_BASE}/api/health`, {
           signal: controller.signal
         });
+
+        // If health endpoint doesn't exist (old server version), try /api/status
+        if (r.status === 404) {
+          r = await fetch(`${API_BASE}/api/status`, {
+            signal: controller.signal
+          });
+        }
+
         clearTimeout(timeout);
 
         if (r.ok && !cancelled) {
