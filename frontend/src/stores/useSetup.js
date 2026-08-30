@@ -13,6 +13,8 @@ const useSetup = create((set, get) => ({
     referralCode: '',
     wakeWord:     'seven',
     voiceIndex:   0,
+    voiceId:      '',
+    voiceEngine:  'sapi',
     modelName:    '',
     modelTier:    '',
   },
@@ -75,6 +77,8 @@ const useSetup = create((set, get) => ({
         referral_code: data.referralCode.trim(),
         wake_word:     data.wakeWord.trim() || 'seven',
         voice_index:   data.voiceIndex,
+        voice_id:      data.voiceId || '',
+        voice_engine:  data.voiceEngine || 'sapi',
         model_name:    data.modelName,
       });
       set({ loading: false });
