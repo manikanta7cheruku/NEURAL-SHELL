@@ -208,13 +208,47 @@ function startPython() {
   pythonProcess.stderr.on('data', (data) => {
     const msg = data.toString().trim();
     if (msg) console.error(`[PYTHON ERR] ${msg}`);
+
+    // Write crash diagnostics to a file the user can send us
+    try {
+      const fs = require('node:fs');
+      const path = require('node:path');
+      const logDir = path.join(process.env.APPDATA || '', 'SEVEN', 'logs');
+      fs.mkdirSync(logDir, { recursive: true });
+      fs.appendFileSync(
+        path.join(logDir, 'python_crash.log'),
+        `[${new Date().toISOString()}] ${msg}\n`
+      );
+    } catch {}
   });
 
-  pythonProcess.on('close', (code) => {
-    console.log(`[PYTHON] Exited with code ${code}`);
+  pythonProcess.on('error', (err) => {
+    console.error(`[PYTHON] Process spawn error: ${err.message}`);
+    // Show user a visible error dialog
+    const { dialog } = require('electron');
+    dialog.showErrorBox(
+      'Seven Backend Failed to Start',
+      `Python process could not start.\n\nError: ${err.message}\n\nPlease check:\n1. Antivirus is not blocking Seven\n2. Visual C++ Redistributable is installed\n3. Restart your computer and try again\n\nLog: %APPDATA%\\SEVEN\\logs\\python_crash.log`
+    );
+  });
+
+  pythonProcess.on('close', (code, signal) => {
+    console.log(`[PYTHON] Exited with code ${code}, signal ${signal}`);
     pythonProcess = null;
 
     if (app.isQuitting) return;
+
+    // Log crash details to file
+    try {
+      const fs = require('node:fs');
+      const path = require('node:path');
+      const logDir = path.join(process.env.APPDATA || '', 'SEVEN', 'logs');
+      fs.mkdirSync(logDir, { recursive: true });
+      fs.appendFileSync(
+        path.join(logDir, 'python_crash.log'),
+        `[${new Date().toISOString()}] EXIT code=${code} signal=${signal} crashCount=${_crashCount}\n`
+      );
+    } catch {}
 
     const now = Date.now();
     if (now - _lastCrashTime > 60000) {
@@ -225,10 +259,17 @@ function startPython() {
 
     if (_crashCount > 3) {
       console.error(`[PYTHON] Crashed ${_crashCount} times - stopping restart loop`);
+      // Show user a visible error
+      const { dialog } = require('electron');
+      dialog.showErrorBox(
+        'Seven Cannot Start',
+        `The backend process crashed ${_crashCount} times.\n\nMost common causes:\n1. Missing Visual C++ Redistributable (2015-2022)\n2. Antivirus blocking Python\n3. Corrupted installation\n\nFix: Install VC++ Redistributable from:\nhttps://aka.ms/vs/17/release/vc_redist.x64.exe\n\nThen restart Seven.\n\nCrash log: %APPDATA%\\SEVEN\\logs\\python_crash.log`
+      );
       return;
     }
 
     const delay = (code === 0) ? 1500 : 5000;
+    console.log(`[PYTHON] Restarting in ${delay}ms (attempt ${_crashCount})`);
     setTimeout(() => {
       if (app.isQuitting) return;
       startPython();
