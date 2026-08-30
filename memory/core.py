@@ -150,22 +150,36 @@ def _load_offline_embedder_standalone(model_name: str):
         print(Fore.GREEN + "[MEMORY] Using ChromaDB native SentenceTransformer embedder")
         return ef
     except Exception as e:
-        if "meta tensor" in str(e).lower() or "to_empty" in str(e).lower():
-            print(Fore.YELLOW + "[MEMORY] Meta tensor detected — loading with empty init")
-            # Fix: use from_pretrained path directly, skip .to() call
+        err_str = str(e).lower()
+        if "meta tensor" in err_str or "to_empty" in err_str:
+            print(Fore.YELLOW + "[MEMORY] Meta tensor detected — loading via torch.no_grad path")
             try:
+                # Correct fix: load model with low_cpu_mem_usage disabled at the
+                # transformers layer. This forces full weight materialization on CPU
+                # instead of the broken meta-device lazy init.
                 import torch
                 from sentence_transformers import SentenceTransformer
-                model = SentenceTransformer(
-                    model_local_path,
-                    device="cpu",
-                    local_files_only=True,
-                )
-                # Force resolve meta tensors
-                for param in model.parameters():
-                    if param.is_meta:
-                        param.data = torch.empty_like(param, device="cpu")
-                print(Fore.GREEN + "[MEMORY] Meta tensor resolved — embedder ready")
+
+                # Patch the transformers auto-model loader to disable meta tensors
+                import transformers.modeling_utils as _mu
+                _prev = _mu.PreTrainedModel.from_pretrained
+                def _forced_load(cls, *args, **kwargs):
+                    kwargs['low_cpu_mem_usage'] = False
+                    kwargs['torch_dtype'] = torch.float32
+                    if hasattr(_prev, '__func__'):
+                        return _prev.__func__(cls, *args, **kwargs)
+                    return _prev(*args, **kwargs)
+                _mu.PreTrainedModel.from_pretrained = classmethod(_forced_load)
+
+                with torch.no_grad():
+                    model = SentenceTransformer(
+                        model_local_path,
+                        device="cpu",
+                    )
+                    # Force full materialization by running a test encode
+                    _ = model.encode(["initialization test"], show_progress_bar=False)
+
+                print(Fore.GREEN + "[MEMORY] Model materialized successfully on CPU")
 
                 class _ResolvedEmbedder:
                     def __init__(self, m):
@@ -180,7 +194,8 @@ def _load_offline_embedder_standalone(model_name: str):
 
                 return _ResolvedEmbedder(model)
             except Exception as inner:
-                print(Fore.YELLOW + f"[MEMORY] Meta resolve failed: {inner} — using fallback")
+                print(Fore.RED + f"[MEMORY] Meta resolve failed: {inner}")
+                raise  # Propagate so _init_failed gets set
         else:
             print(Fore.YELLOW + f"[MEMORY] ChromaDB native embedder failed: {e}")
 
@@ -618,22 +633,50 @@ class SevenMemory:
 
 # =============================================================================
 # LAZY MODULE-LEVEL INSTANCE
-# Loads embedding model only on first actual use — not at import time
+# Loads embedding model only on first actual use — not at import time.
+# Thread-safe: double-checked locking prevents double init when Brain
+# fires memory search and fact extraction simultaneously.
 # =============================================================================
 
+import threading as _mem_threading
+
 _instance = None
+_instance_lock = _mem_threading.Lock()
+_init_failed = False  # Cache failure so we don't reload on every retry
 
 def _get_instance():
-    global _instance
-    if _instance is None:
-        _instance = SevenMemory()
-    return _instance
+    global _instance, _init_failed
+    if _instance is not None:
+        return _instance
+    if _init_failed:
+        return None  # Bail out fast if we already failed
+
+    with _instance_lock:
+        # Re-check inside lock (double-checked locking pattern)
+        if _instance is not None:
+            return _instance
+        if _init_failed:
+            return None
+        try:
+            _instance = SevenMemory()
+            return _instance
+        except Exception as _e:
+            print(Fore.RED + f"[MEMORY] Initialization failed: {_e}")
+            _init_failed = True
+            return None
 
 class _LazyMemory:
-    """Proxy — SevenMemory initializes only on first attribute access."""
+    """Proxy — SevenMemory initializes only on first attribute access.
+    Returns None-safe fallbacks if memory system cannot load."""
     def __getattr__(self, name):
-        return getattr(_get_instance(), name)
+        inst = _get_instance()
+        if inst is None:
+            # Memory unavailable — return safe no-op callable
+            def _noop(*args, **kwargs):
+                return None
+            return _noop
+        return getattr(inst, name)
     def __bool__(self):
-        return True
+        return _get_instance() is not None
 
 seven_memory = _LazyMemory()
