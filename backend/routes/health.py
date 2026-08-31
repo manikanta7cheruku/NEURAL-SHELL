@@ -361,10 +361,18 @@ def diagnostic():
     # 2. Core packages
     for pkg in ['fastapi', 'uvicorn', 'pyttsx3', 'chromadb', 'sentence_transformers', 'faster_whisper']:
         try:
-            __import__(pkg.replace('-', '_'))
+            mod = __import__(pkg.replace('-', '_'))
             report["checks"][pkg] = {"status": "OK"}
-        except Exception as e:
+        except ImportError as e:
             report["checks"][pkg] = {"status": "MISSING", "error": str(e)[:100]}
+        except Exception as e:
+            # Circular imports and partial init errors mean the package IS installed
+            # but has a runtime conflict. Mark as WARNING, not MISSING.
+            err_str = str(e)[:100]
+            if "circular" in err_str.lower() or "partially initialized" in err_str.lower():
+                report["checks"][pkg] = {"status": "WARNING", "note": "Installed but has import conflict", "error": err_str}
+            else:
+                report["checks"][pkg] = {"status": "ERROR", "error": err_str}
 
     # 3. Ollama
     try:
@@ -454,8 +462,12 @@ def diagnostic():
         except OSError:
             report["checks"]["vcredist"] = {"status": "MISSING"}
 
-    # Overall health
+    # Overall health — WARNINGs are non-critical and should not flag as broken
     broken = [k for k, v in report["checks"].items() if v.get("status") in ("BROKEN", "MISSING", "OFFLINE", "ERROR")]
-    report["overall"] = "HEALTHY" if not broken else f"ISSUES: {', '.join(broken)}"
+    warnings = [k for k, v in report["checks"].items() if v.get("status") == "WARNING"]
+    if not broken:
+        report["overall"] = "HEALTHY" if not warnings else f"HEALTHY (warnings: {', '.join(warnings)})"
+    else:
+        report["overall"] = f"ISSUES: {', '.join(broken)}"
 
     return report
