@@ -323,18 +323,21 @@ function stopPython() {
   if (!pythonProcess) return;
   try {
     if (process.platform === 'win32') {
-      // Use full path to taskkill for reliability
       const taskkillPath = process.env.SystemRoot 
         ? path.join(process.env.SystemRoot, 'System32', 'taskkill.exe')
         : 'taskkill.exe';
       
       try {
+        // Kill ONLY the main Python process — do NOT use /t flag.
+        // The /t flag kills the entire process tree including detached
+        // daemon processes (trigger_daemon, schedule_daemon, overlay).
+        // Daemons are spawned with DETACHED_PROCESS and must survive
+        // Seven closing so hotkeys and schedules keep working.
         require('child_process').execFileSync(taskkillPath, 
-          ['/pid', pythonProcess.pid.toString(), '/f', '/t'], 
+          ['/pid', pythonProcess.pid.toString(), '/f'], 
           { windowsHide: true, stdio: 'ignore', timeout: 5000 }
         );
       } catch (e) {
-        // Fallback to process.kill
         try { pythonProcess.kill(); } catch (e2) {}
       }
     } else {
@@ -939,7 +942,10 @@ if (!gotTheLock) {
     globalShortcut.unregisterAll();
     if (statusWindow) { statusWindow.destroy(); statusWindow = null; }
     if (mainWindow)   { mainWindow.destroy();   mainWindow = null;   }
+    // Stop main Python process only — daemons survive independently
     stopPython();
+    // Do NOT kill pythonw.exe processes — they are trigger/schedule daemons
+    // that must keep running for hotkeys and reminders to work when Seven is closed
   });
 
   app.on('activate', () => mainWindow?.show());
