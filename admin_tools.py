@@ -18,6 +18,7 @@ def ensure_db():
         sys.exit(1)
 
 SERVER_URL = "https://seven-server-a825.onrender.com"
+ADMIN_TOKEN = "seven_admin_2025_secure"
 
 
 def generate_license(email: str, tier: str = "ultimate",
@@ -59,6 +60,7 @@ def generate_license(email: str, tier: str = "ultimate",
                 "plan_type":   plan_type,
                 "expires_at":  expires_at
             },
+            headers={"X-Admin-Token": ADMIN_TOKEN},
             timeout=15
         )
         if r.status_code == 200:
@@ -181,18 +183,20 @@ def check_referrals():
     import requests
 
     SERVER_URL = "https://seven-server-a825.onrender.com"
+    ADMIN_TOKEN = "seven_admin_2025_secure"
 
     print("\n" + "=" * 70)
     print("REFERRAL STATUS (from server)")
     print("=" * 70)
 
     try:
+        headers = {"X-Admin-Token": ADMIN_TOKEN}
         # Get all referrals from server
-        r = requests.get(f"{SERVER_URL}/admin/referrals", timeout=10)
+        r = requests.get(f"{SERVER_URL}/admin/referrals", headers=headers, timeout=10)
         refs = r.json()
 
         # Get pending rewards
-        p = requests.get(f"{SERVER_URL}/admin/rewards/pending", timeout=10)
+        p = requests.get(f"{SERVER_URL}/admin/rewards/pending", headers=headers, timeout=10)
         pending_rewards = p.json()
 
         if pending_rewards:
