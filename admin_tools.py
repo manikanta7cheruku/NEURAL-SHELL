@@ -17,7 +17,7 @@ def ensure_db():
         print("❌ No database found. Run Seven first to create it.")
         sys.exit(1)
 
-SERVER_URL = "https://seven-server-u2rp.onrender.com"
+SERVER_URL = "https://seven-server-a825.onrender.com"
 
 
 def generate_license(email: str, tier: str = "ultimate",
@@ -180,7 +180,7 @@ def check_referrals():
     """Check pending and completed referrals from server."""
     import requests
 
-    SERVER_URL = "https://seven-server-u2rp.onrender.com"
+    SERVER_URL = "https://seven-server-a825.onrender.com"
 
     print("\n" + "=" * 70)
     print("REFERRAL STATUS (from server)")
