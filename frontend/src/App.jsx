@@ -98,13 +98,15 @@ export default function App() {
   const [backendReady, setBackendReady] = useState(false);
   const [backendChecking, setBackendChecking] = useState(true);
   const [retryCount, setRetryCount] = useState(0);
+  const [voiceReady, setVoiceReady] = useState(false);
+
   const checkRef = useRef(null);
 
-  // Check if Python backend is reachable
+  // 1. Connection check loop
   useEffect(() => {
     let cancelled = false;
     let attempts = 0;
-    const maxAttempts = 60; // 60 seconds max wait
+    const maxAttempts = 60;
 
     const checkBackend = async () => {
       if (cancelled) return;
@@ -115,12 +117,10 @@ export default function App() {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 3000);
 
-        // Try /api/health first, fall back to /api/status if 404
         let r = await fetch(`${API_BASE}/api/health`, {
           signal: controller.signal
         });
 
-        // If health endpoint doesn't exist (old server version), try /api/status
         if (r.status === 404) {
           r = await fetch(`${API_BASE}/api/status`, {
             signal: controller.signal
@@ -153,7 +153,7 @@ export default function App() {
     };
   }, []);
 
-  // Only fetch config after backend is confirmed reachable
+  // 2. Fetch config after backend connection is verified
   useEffect(() => {
     if (backendReady) {
       fetchConfig();
@@ -161,16 +161,14 @@ export default function App() {
     }
   }, [backendReady]);
 
+  // 3. Monitor setup_complete flag
   useEffect(() => {
     if (!configLoading && config !== null) {
       const done = config.setup_complete === true;
       if (done) {
-        // Only verify dependencies if backend is confirmed reachable.
-        // If backend is down, ALL checks fail — do NOT revert to setup mode.
         fetch(`${API_BASE}/api/health`, { signal: AbortSignal.timeout(3000) })
           .then(r => {
-            if (!r.ok) throw new Error('not ok');
-            // Backend is alive — now check dependencies
+            if (!r.ok) throw new Error('offline');
             return fetch(`${API_BASE}/api/bootstrap/check`, { signal: AbortSignal.timeout(5000) });
           })
           .then(r => r.json())
@@ -178,13 +176,11 @@ export default function App() {
             if (d.ollama_installed && d.packages_installed) {
               setSetupDone(true);
             } else {
-              console.log('[APP] Dependencies missing — re-running setup');
+              console.log('[APP] Dependencies missing — forcing setup repair mode');
               setSetupDone(false);
             }
           })
           .catch(() => {
-            // Backend unreachable or check failed — trust config flag.
-            // Do NOT revert to setup mode just because backend is slow to start.
             setSetupDone(true);
           });
       } else {
@@ -193,7 +189,31 @@ export default function App() {
     }
   }, [config, configLoading]);
 
-  // ── Backend connecting screen ──
+  // 4. Poll voice loop state after first setup launch is executed
+  useEffect(() => {
+    if (isFirstLaunch && setupDone) {
+      let attempts = 0;
+      const checkVoice = setInterval(async () => {
+        attempts++;
+        try {
+          const r = await fetch(`${API_BASE}/api/status`, { signal: AbortSignal.timeout(2000) });
+          if (r.ok) {
+            const data = await r.json();
+            if (data.listening || data.status_text?.includes('ONLINE') || attempts > 30) {
+              clearInterval(checkVoice);
+              setVoiceReady(true);
+            }
+          }
+        } catch {}
+      }, 1000);
+      return () => clearInterval(checkVoice);
+    } else {
+      // If subsequent launch, skip loading layer
+      setVoiceReady(true);
+    }
+  }, [isFirstLaunch, setupDone]);
+
+  // ── Render Case 1: Backend Connecting Screen ──
   if (backendChecking) {
     return (
       <div className="h-screen w-screen bg-s-bg flex flex-col items-center justify-center gap-6">
@@ -230,7 +250,7 @@ export default function App() {
     );
   }
 
-  // ── Backend unreachable screen ──
+  // ── Render Case 2: Backend Unreachable Screen ──
   if (!backendReady) {
     return (
       <div className="h-screen w-screen bg-s-bg flex flex-col items-center justify-center gap-6 px-8">
@@ -252,7 +272,7 @@ export default function App() {
             <div className="text-[10px] text-white/50 font-semibold uppercase tracking-wider">Troubleshooting Steps</div>
             <div className="text-[11px] text-white/60 leading-relaxed space-y-1.5">
               <p>1. Install Visual C++ Redistributable (2015-2022):</p>
-              <p className="text-s-accent font-mono text-[10px] pl-4">https://aka.ms/vs/17/release/vc_redist.x64.exe</p>
+              <p className="text-s-accent font-mono text-[10px] pl-4 font-semibold">https://aka.ms/vs/17/release/vc_redist.x64.exe</p>
               <p>2. Check that antivirus is not blocking Seven</p>
               <p>3. Restart your computer and launch Seven again</p>
               <p>4. Check the crash log at:</p>
@@ -271,7 +291,28 @@ export default function App() {
     );
   }
 
-  // ── Loading config ──
+  // ── Render Case 3: Setup Complete Voice Loading Page ──
+  if (setupDone && isFirstLaunch && !voiceReady) {
+    return (
+      <div className="h-screen w-screen bg-s-bg flex flex-col items-center justify-center gap-6">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-14 h-14 rounded-2xl bg-s-accent/10 border border-s-accent/20 flex items-center justify-center">
+            <div className="w-3.5 h-3.5 rounded-full bg-s-accent animate-pulse" />
+          </div>
+          <div className="text-center">
+            <div className="text-xl font-semibold text-white tracking-widest">SEVEN</div>
+            <div className="text-[10px] text-white/40 font-light tracking-wider mt-1">Starting voice engine...</div>
+          </div>
+        </div>
+        <div className="w-48 h-1 bg-white/5 overflow-hidden rounded-full">
+          <div className="h-full bg-s-accent rounded-full animate-pulse" style={{ width: '70%' }} />
+        </div>
+        <div className="text-[10px] text-white/30 font-light">Loading AI modules and microphone...</div>
+      </div>
+    );
+  }
+
+  // ── Render Case 4: Default Initial Config Fetching ──
   if (setupDone === null) {
     return (
       <div className="h-screen w-screen bg-s-bg flex flex-col items-center justify-center gap-6">
@@ -291,7 +332,7 @@ export default function App() {
     );
   }
 
-  // ── Setup wizard (first launch) ──
+  // ── Render Case 5: Onboarding Wizard (First Launch) ──
   if (!setupDone) {
     return (
       <HashRouter>
@@ -303,7 +344,7 @@ export default function App() {
     );
   }
 
-  // ── Main app ──
+  // ── Render Case 6: Primary Application Layout ──
   return (
     <HashRouter>
       <NavigationHelper />
