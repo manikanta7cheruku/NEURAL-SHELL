@@ -763,29 +763,13 @@ def seven_logic():
 
     app_ui.update_status("SYSTEM ONLINE", "#00ff00")
 
-    # Speak startup greeting so user knows Seven is now active and listening
-    try:
-        import datetime as _dt
-        _hour = _dt.datetime.now().hour
-        if _hour < 5:
-            _time_greet = "Good evening"
-        elif _hour < 12:
-            _time_greet = "Good morning"
-        elif _hour < 17:
-            _time_greet = "Good afternoon"
-        else:
-            _time_greet = "Good evening"
-
-        _user_name = config.KEY.get("identity", {}).get("user_name", "")
-        if _user_name:
-            _startup_msg = f"{_time_greet}, {_user_name}. Seven is online and ready."
-        else:
-            _startup_msg = f"{_time_greet}. Seven is online and ready."
-
-        ctx.mouth.speak(_startup_msg)
-        api_set_state("seven_text", _startup_msg)
-    except Exception as _sg_err:
-        print(Fore.YELLOW + f"[SYSTEM] Startup greeting skipped: {_sg_err}")
+    # Startup greeting is handled by speak_morning_brief() above.
+    # Only speak a fallback if the morning brief was skipped (e.g., safe mode).
+    if _safe_mode:
+        try:
+            ctx.mouth.speak("Seven is online in safe mode. Voice features are limited.")
+        except Exception:
+            pass
 
     # =========================================================================
     # MAIN LOOP
