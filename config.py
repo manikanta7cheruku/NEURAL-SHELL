@@ -294,14 +294,17 @@ def sync_version():
                 continue
             vp = os.path.normpath(vp)
             if os.path.exists(vp):
-                with open(vp, "r", encoding="utf-8") as f:
-                    v = f.read().strip().lstrip("\ufeff")
-                if v:
-                    version_found = v
-                    print("[CONFIG] Version " + v + " from version.txt")
-                    break
+                try:
+                    with open(vp, "r", encoding="utf-8") as f:
+                        v = f.read().strip().lstrip("\ufeff")
+                    if v:
+                        version_found = v
+                        print("[CONFIG] Version " + v + " from version.txt")
+                        break
+                except Exception:
+                    continue
 
-        # Priority 2: package.json (dev mode)
+        # Priority 2: package.json (dev mode or packaged)
         if not version_found:
             pkg_candidates = [
                 os.path.join(app_path, "package.json") if app_path else None,
@@ -313,56 +316,20 @@ def sync_version():
                     continue
                 p = os.path.normpath(p)
                 if os.path.exists(p):
-                    with open(p, "r", encoding="utf-8") as f:
-                        content = f.read().lstrip("\ufeff")
-                        version_found = _json.loads(content).get("version", "")
-                    if version_found:
-                        print("[CONFIG] Version " + version_found + " from package.json")
-                        break
+                    try:
+                        with open(p, "r", encoding="utf-8") as f:
+                            content = f.read().lstrip("\ufeff")
+                            version_found = _json.loads(content).get("version", "")
+                        if version_found:
+                            print("[CONFIG] Version " + version_found + " from package.json")
+                            break
+                    except Exception:
+                        continue
 
         if version_found and version_found != KEY.get("version", ""):
             KEY["version"] = version_found
             save_config()
             print("[CONFIG] Version updated to " + version_found)
-
-    except Exception as e:
-        print("[CONFIG] Version sync error: " + str(e))
-
-
-        sync_version()
-
-        candidates = [
-            # Dev mode — project root
-            os.path.join(base, "package.json"),
-            os.path.join(os.path.dirname(base), "package.json"),
-            # Packaged app — SEVEN_APP_PATH points to resources/app/
-            os.path.join(app_path, "package.json") if app_path else None,
-            os.path.join(app_path, "..", "package.json") if app_path else None,
-            # Packaged app — relative to Python executable
-            os.path.join(os.path.dirname(os.path.abspath(
-                __import__("sys").executable)), "package.json"),
-            os.path.join(os.path.dirname(os.path.abspath(
-                __import__("sys").executable)), "..", "app", "package.json"),
-        ]
-
-        # Remove None entries
-        candidates = [os.path.normpath(c) for c in candidates if c]
-
-        for pkg_path in candidates:
-            if os.path.exists(pkg_path):
-                with open(pkg_path, "r", encoding="utf-8") as f:
-                    content = f.read().lstrip("\ufeff")  # Remove BOM
-                    pkg_version = _json.loads(content).get("version", "")
-                if pkg_version:
-                    if pkg_version != KEY.get("version", ""):
-                        KEY["version"] = pkg_version
-                        save_config()
-                        print("[CONFIG] Version synced to " + pkg_version)
-                    else:
-                        print("[CONFIG] Version already current: " + pkg_version)
-                    return
-
-        print("[CONFIG] package.json not found in any location")
 
     except Exception as e:
         print("[CONFIG] Version sync error: " + str(e))
