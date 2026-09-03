@@ -31,6 +31,24 @@ import chromadb
 import datetime
 from colorama import Fore
 
+# Patch transformers to disable meta-tensor initialization on Windows CPU.
+# Must run before SentenceTransformer is imported.
+try:
+    import transformers.modeling_utils as _mu
+    _raw = _mu.PreTrainedModel.__dict__.get('from_pretrained')
+    if _raw is not None and hasattr(_raw, '__func__'):
+        _orig_fn = _raw.__func__
+    else:
+        _orig_fn = _mu.PreTrainedModel.from_pretrained
+
+    def _no_meta(cls, *args, **kwargs):
+        kwargs['low_cpu_mem_usage'] = False
+        return _orig_fn(cls, *args, **kwargs)
+
+    _mu.PreTrainedModel.from_pretrained = classmethod(_no_meta)
+except Exception:
+    pass
+
 
 # =============================================================================
 # PATH
