@@ -227,11 +227,22 @@ def root():
         "docs":    "http://127.0.0.1:7777/api/docs",
         "endpoints": {
             "status":  "/api/status",
+            "health":  "/api/health",
             "chat":    "/api/chat",
             "license": "/api/license/status",
             "usage":   "/api/usage/stats"
         }
     }
+
+
+@app.get("/api/health")
+def health_liveness():
+    """
+    Guaranteed liveness probe. Registered directly on the app (not via router)
+    so it ALWAYS exists even if router imports fail. Frontend uses this to
+    detect backend availability. Must return 200 in under 5ms.
+    """
+    return {"ok": True, "status": "running"}
 
 
 # =========================================================================
