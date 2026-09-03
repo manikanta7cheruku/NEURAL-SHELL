@@ -199,13 +199,36 @@ async function main() {
   // Install pip
   await installPip();
 
-    // ── Pre-install minimal packages needed for startup server ──
-  log('Pre-installing fastapi and uvicorn into embedded Python...');
-  const pipExe = path.join(PYTHON_DIR, 'Scripts', 'pip.exe');
-  try {
-      // ── Pre-install ALL packages needed for Seven to run ──
+  // ── Pre-install ALL packages needed for Seven to run ──
   log('Pre-installing all required packages into embedded Python...');
   const pipExe = path.join(PYTHON_DIR, 'Scripts', 'pip.exe');
+
+  // CRITICAL: Pin numpy FIRST before any ML packages.
+  // numpy 2.x breaks torch, faster-whisper, ctranslate2, chromadb, and sentence-transformers.
+  // This is the #1 cause of crashes on fresh installs.
+  log('Pinning numpy 1.26.4 (MUST be installed before any ML packages)...');
+  try {
+    execSync(
+      `"${pipExe}" install "numpy==1.26.4" --no-cache-dir --no-warn-script-location`,
+      { stdio: 'inherit', cwd: PYTHON_DIR, timeout: 120000 }
+    );
+    ok('numpy 1.26.4 pinned successfully');
+  } catch (e) {
+    err('CRITICAL: numpy pinning failed — builds will ship with broken numpy');
+    err(e.message);
+  }
+
+  // Verify numpy before continuing
+  try {
+    const npCheck = execSync(
+      `"${pythonExe}" -c "import numpy as np; assert np.__version__.startswith('1.26'); print('numpy OK:', np.__version__)"`,
+      { encoding: 'utf8', cwd: PYTHON_DIR }
+    );
+    ok(npCheck.trim());
+  } catch (e) {
+    err('CRITICAL: numpy verification failed');
+    err(e.message);
+  }
 
   // Install in batches to avoid timeout issues
   // Batch 1: Core API + Web
@@ -220,6 +243,7 @@ async function main() {
   ];
 
   // Batch 3: AI + Memory (large packages)
+  // numpy is already installed — use --no-deps for packages that would upgrade it
   const batch3 = [
     'chromadb', 'sentence-transformers', 'faster-whisper'
   ];
@@ -232,7 +256,7 @@ async function main() {
 
   // Batch 5: App Control + Search
   const batch5 = [
-    'AppOpener', 'ddgs'
+    'AppOpener', 'ddgs', 'keyboard', 'pynput', 'rapidfuzz'
   ];
 
   // Batch 6: Optional (skip on failure)
@@ -254,7 +278,7 @@ async function main() {
     try {
       execSync(
         `"${pipExe}" install ${batch.packages.map(p => `"${p}"`).join(' ')} --quiet --no-warn-script-location`,
-        { stdio: 'inherit', cwd: PYTHON_DIR, timeout: 300000 }
+        { stdio: 'inherit', cwd: PYTHON_DIR, timeout: 600000 }
       );
       ok(`Batch installed: ${batch.name}`);
     } catch (e) {
@@ -267,23 +291,41 @@ async function main() {
     }
   }
 
-  // Install resemblyzer without C deps (avoids webrtcvad compile error)
-  log('Installing resemblyzer (no C deps)...');
+  // CRITICAL: Re-verify numpy after all batches.
+  // Some packages (chromadb, sentence-transformers) may have upgraded numpy to 2.x.
+  log('Re-verifying numpy version after all installs...');
   try {
-    execSync(
-      `"${pipExe}" install resemblyzer --no-deps --quiet --no-warn-script-location`,
-      { stdio: 'inherit', cwd: PYTHON_DIR }
+    const npRecheck = execSync(
+      `"${pythonExe}" -c "import numpy as np; v=np.__version__; print(v); assert v.startswith('1.26'), f'numpy was upgraded to {v}!'"`,
+      { encoding: 'utf8', cwd: PYTHON_DIR }
     );
-    ok('resemblyzer installed (no-deps)');
+    ok(`numpy still pinned: ${npRecheck.trim()}`);
   } catch (e) {
-    warn('resemblyzer skipped: ' + e.message);
+    warn('numpy was upgraded by a dependency — forcing downgrade back to 1.26.4');
+    try {
+      execSync(
+        `"${pipExe}" install "numpy==1.26.4" --force-reinstall --no-deps --no-cache-dir --no-warn-script-location`,
+        { stdio: 'inherit', cwd: PYTHON_DIR, timeout: 120000 }
+      );
+      ok('numpy forced back to 1.26.4');
+    } catch (e2) {
+      err('CRITICAL: Could not restore numpy 1.26.4: ' + e2.message);
+    }
+  }
+
+  // Final verification
+  try {
+    const finalCheck = execSync(
+      `"${pythonExe}" -c "import numpy as np; import numpy._utils; print('FINAL OK:', np.__version__)"`,
+      { encoding: 'utf8', cwd: PYTHON_DIR }
+    );
+    ok(finalCheck.trim());
+  } catch (e) {
+    err('CRITICAL: Final numpy check failed — embedded Python will crash on launch');
+    err(e.message);
   }
 
   ok('All packages pre-installed into embedded Python');
-    ok('fastapi + uvicorn + pyttsx3 pre-installed');
-  } catch (e) {
-    warn('Pre-install failed: ' + e.message);
-  }
 
   // Verify
   const verified = verifyPython();
@@ -295,7 +337,7 @@ async function main() {
   console.log('\n═══════════════════════════════════════');
   ok('Python environment ready at: python-dist/python/');
   console.log('');
-  log('Next: run  npm run build:full  to build the installer');
+  log('Next: run your build script to create the installer');
   console.log('═══════════════════════════════════════\n');
 }
 
