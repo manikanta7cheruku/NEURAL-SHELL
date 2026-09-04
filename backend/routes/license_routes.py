@@ -233,13 +233,20 @@ def get_referral_stats_endpoint():
 
 @router.post("/api/referral/create")
 def create_referral_endpoint(data: dict):
-    """Create a referral code."""
+    """Create a referral code. Returns gracefully if no email is available yet."""
     import telemetry
     import license as license_module
 
     email = data.get("email") or telemetry.get_email()
     if not email or "@" not in email:
-        raise HTTPException(status_code=400, detail="Valid email required")
+        # Don't throw 400 — user hasn't set up email yet.
+        # Return a placeholder so the frontend doesn't spam retries.
+        return {
+            "success": False,
+            "referral_code": None,
+            "referral_link": None,
+            "message": "Email not configured yet. Set your email in Account settings first."
+        }
 
     telemetry.save_email(email)
 
