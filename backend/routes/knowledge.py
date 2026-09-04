@@ -16,12 +16,12 @@ MAX_FILE_MB          = 50
 
 @router.get("/api/knowledge/stats")
 def get_knowledge_stats():
+    """Get knowledge base stats. Returns empty stats if indexer not ready."""
     try:
         from knowledge import get_knowledge_stats as _get_stats
         from knowledge.indexer import get_index_manifest
         stats    = _get_stats()
         manifest = get_index_manifest()
-        # Enrich sources with manifest metadata
         enriched = []
         for src in stats.get("sources", []):
             entry = manifest.get(src, {})
@@ -34,7 +34,15 @@ def get_knowledge_stats():
         stats["source_details"] = enriched
         return stats
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        # Return empty stats instead of 500 — knowledge may not be initialized yet
+        return {
+            "total_chunks": 0,
+            "total_sources": 0,
+            "sources": [],
+            "source_details": [],
+            "storage_mb": 0,    
+            "status": "initializing"
+        }
 
 
 @router.get("/api/knowledge/search")
