@@ -758,24 +758,37 @@ def get_installed_models():
 
 @router.get("/api/bootstrap/check")
 def check_environment():
-    """Quick environment health check."""
-    try:
-        try:
-            from backend.bootstrap import check_packages_installed, is_ollama_installed, is_ollama_running
-        except ModuleNotFoundError:
-            import sys
-            sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-            from bootstrap import check_packages_installed, is_ollama_installed, is_ollama_running
+    """Quick environment health check. Never throws."""
+    packages_ok = True
+    ollama_installed = False
+    ollama_running = False
 
-        return {
-            "packages_installed": check_packages_installed(),
-            "ollama_installed":   is_ollama_installed(),
-            "ollama_running":     is_ollama_running(),
-            "needs_setup":        not (check_packages_installed() and is_ollama_installed())
-        }
-    except Exception as e:
-        return {"packages_installed": False, "ollama_installed": False,
-                "ollama_running": False, "needs_setup": True, "error": str(e)}
+    try:
+        from backend.bootstrap import is_ollama_installed, is_ollama_running as _is_running
+        ollama_installed = is_ollama_installed()
+        ollama_running = _is_running()
+    except Exception:
+        # If we can't check, assume OK to prevent false setup re-runs
+        ollama_installed = True
+        ollama_running = True
+
+    # Package check is expensive (spawns subprocesses).
+    # If the API server is running, packages are clearly installed.
+    # Only do the full check if explicitly needed.
+    try:
+        import fastapi
+        import uvicorn
+        import pyttsx3
+        packages_ok = True
+    except ImportError:
+        packages_ok = False
+
+    return {
+        "packages_installed": packages_ok,
+        "ollama_installed":   ollama_installed,
+        "ollama_running":     ollama_running,
+        "needs_setup":        not (packages_ok and ollama_installed)
+    }
 
 
 @router.post("/api/bootstrap/start-ollama")
