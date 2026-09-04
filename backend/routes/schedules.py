@@ -150,8 +150,14 @@ def cancel_schedule(schedule_id: int):
 
 @router.get("/api/schedule/alert")
 async def get_schedule_alert():
-    """Get current schedule alert state."""
-    return _read_alert_file()
+    """Get current schedule alert state. Never returns 500."""
+    try:
+        result = _read_alert_file()
+        if isinstance(result, dict):
+            return result
+        return {"active": False, "message": "", "type": "", "id": None}
+    except Exception:
+        return {"active": False, "message": "", "type": "", "id": None}
 
 
 @router.post("/api/schedule/alert/dismiss")
