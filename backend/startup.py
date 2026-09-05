@@ -150,7 +150,7 @@ def _start_fastapi_server(host, port):
             return {
                 "gpu": {"available": False}, "ram_gb": 8,
                 "cpu": {}, "os": "Windows",
-                "recommended_model": "tinyllama",
+                "recommended_model": "llama3.2:1b",
                 "recommended_tier": "minimum",
                 "recommendation_reason": str(e),
                 "installed_models": []
@@ -204,10 +204,10 @@ def _start_fastapi_server(host, port):
         try:
             cfg = _load_config()
             cfg["setup_complete"] = True
-            cfg["email"] = data.get("email", "")
+            cfg["email"] = data.get("email", "").strip()
             if "identity" not in cfg:
                 cfg["identity"] = {}
-            cfg["identity"]["user_name"] = data.get("name", "")
+            cfg["identity"]["user_name"] = data.get("name", "").strip()
             wake = data.get("wake_word", "seven").lower().strip()
             cfg["identity"]["wake_words"] = [wake, f"hey {wake}"]
             if "voice" not in cfg:
@@ -225,7 +225,7 @@ def _start_fastapi_server(host, port):
             try:
                 data_dir = _get_data_dir()
                 with open(os.path.join(data_dir, "email.txt"), "w") as f:
-                    f.write(data.get("email", ""))
+                    f.write(data.get("email", "").strip())
             except Exception as e:
                 print(f"[STARTUP] Email file write failed: {e}")
 
@@ -236,15 +236,22 @@ def _start_fastapi_server(host, port):
     # ── Bootstrap endpoints ──
     @app.get("/api/bootstrap/check")
     def bootstrap_check():
-        from backend.bootstrap import (
-            check_packages_installed, is_ollama_installed, is_ollama_running
-        )
-        return {
-            "packages_installed": check_packages_installed(),
-            "ollama_installed":   is_ollama_installed(),
-            "ollama_running":     is_ollama_running(),
-            "needs_setup":        True
-        }
+        """Lightweight check to prevent infinite onboarding loops."""
+        try:
+            from backend.bootstrap import is_ollama_installed, is_ollama_running
+            return {
+                "packages_installed": True,
+                "ollama_installed": is_ollama_installed(),
+                "ollama_running": is_ollama_running(),
+                "needs_setup": not is_ollama_installed()
+            }
+        except Exception:
+            return {
+                "packages_installed": True,
+                "ollama_installed": False,
+                "ollama_running": False,
+                "needs_setup": True
+            }
 
     @app.post("/api/bootstrap/start")
     def bootstrap_start():
@@ -282,7 +289,7 @@ def _start_fastapi_server(host, port):
     def restart_full():
         """Exit cleanly — Electron restarts Python in full mode."""
         def _do_restart():
-            time.sleep(1)
+            time.sleep(1.2)
             print("[STARTUP] Bootstrap complete. Restarting in full mode...")
             sys.stdout.flush()
             os._exit(0)
@@ -316,7 +323,7 @@ def _start_raw_server(host, port):
                 body = json.dumps({
                     "listening": False, "speaking": False,
                     "thinking": False, "mode": "minimal",
-                    "version": "1.1.0"
+                    "version": "1.3.3"
                 }).encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
@@ -380,7 +387,7 @@ def _load_config():
                 return json.load(f)
         except Exception as e:
             print(f"[STARTUP] config.json read failed: {e}")
-    return {"setup_complete": False, "version": "1.1.0"}
+    return {"setup_complete": False, "version": "1.3.3"}
 
 def _save_config(cfg):
     with open(_get_config_path(), 'w') as f:
@@ -392,7 +399,7 @@ def _get_version():
         pkg  = os.path.join(here, 'package.json')
         if os.path.exists(pkg):
             with open(pkg) as f:
-                return json.load(f).get("version", "1.1.0")
+                return json.load(f).get("version", "1.3.3")
     except Exception:
         pass
-    return "1.1.0"
+    return "1.3.3"
