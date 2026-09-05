@@ -17,25 +17,34 @@ router = APIRouter()
 
 @router.get("/api/status")
 def get_status():
-    """Get current Seven system status. Bulletproof — never 500s."""
-    # Import here to avoid circular import
-    from backend.api_server import _state, _start_time
+    """Get current Seven system status. Guaranteed to never return 500."""
+    try:
+        from backend.api_server import _state, _start_time
+    except Exception:
+        return {
+            "listening": False, "speaking": False, "thinking": False,
+            "user_text": "", "seven_text": "", "mood": "neutral",
+            "mood_value": 0.5, "model": "unknown", "streaming": False,
+            "uptime": "0h 0m", "uptime_seconds": 0, "speaker": "default",
+            "version": "1.3.2"
+        }
 
     try:
+        model = "unknown"
+        version = "1.3.2"
         try:
             import config
-            model = config.KEY.get("brain", {}).get("model_name", "unknown")
-            version = config.KEY.get("version", "1.1.4")
-        except Exception as e:
-            print(f"[API] /status config error: {e}")
-            model = "unknown"
-            version = "1.1.4"
+            if hasattr(config, 'KEY') and isinstance(config.KEY, dict):
+                model = config.KEY.get("brain", {}).get("model_name", "unknown")
+                version = config.KEY.get("version", "1.3.2")
+        except Exception:
+            pass
 
         try:
             import telemetry as _tel
             _tel.log_activity()
-        except Exception as e:
-            print(f"[API] /status telemetry error: {e}")
+        except Exception:
+            pass
 
         uptime_secs = int(time.time() - _start_time)
         hours = uptime_secs // 3600
@@ -44,45 +53,39 @@ def get_status():
         mood_label = "neutral"
         mood_value = 0.5
         try:
-            from memory.mood import mood_engine
-            mood_status = mood_engine.get_status()
-            mood_label = mood_status.get("label", "neutral")
-            mood_value = mood_status.get("mood_value", 0.5)
-        except Exception as e:
-            print(f"[API] /status mood error: {e}")
+            import config as _cfg
+            if hasattr(_cfg, 'KEY') and _cfg.KEY.get("setup_complete", False):
+                from memory.mood import mood_engine
+                if mood_engine is not None:
+                    mood_status = mood_engine.get_status()
+                    if isinstance(mood_status, dict):
+                        mood_label = str(mood_status.get("label", "neutral"))
+                        mood_value = float(mood_status.get("mood_value", 0.5))
+        except Exception:
+            pass
 
         return {
-            "listening":      _state.get("listening",  False),
-            "speaking":       _state.get("speaking",   False),
-            "thinking":       _state.get("thinking",   False),
-            "user_text":      _state.get("user_text",  ""),
-            "seven_text":     _state.get("seven_text", ""),
+            "listening":      bool(_state.get("listening", False)),
+            "speaking":       bool(_state.get("speaking",  False)),
+            "thinking":       bool(_state.get("thinking",  False)),
+            "user_text":      str(_state.get("user_text",  "")),
+            "seven_text":     str(_state.get("seven_text", "")),
             "mood":           mood_label,
             "mood_value":     mood_value,
-            "model":          model,
+            "model":          str(model),
             "streaming":      False,
             "uptime":         f"{hours}h {minutes}m",
-            "uptime_seconds": uptime_secs,
-            "speaker":        _state.get("current_speaker", "default"),
-            "version":        version
+            "uptime_seconds": int(uptime_secs),
+            "speaker":        str(_state.get("current_speaker", "default")),
+            "version":        str(version)
         }
-    except Exception as e:
-        import traceback
-        print(f"[API] /status CATASTROPHIC error: {e}")
-        traceback.print_exc()
+    except Exception:
         return {
-            "listening":      False,
-            "speaking":       False,
-            "thinking":       False,
-            "mood":           "neutral",
-            "mood_value":     0.5,
-            "model":          "unknown",
-            "streaming":      False,
-            "uptime":         "0h 0m",
-            "uptime_seconds": 0,
-            "speaker":        "default",
-            "version":        "1.1.4",
-            "error_debug":    str(e)
+            "listening": False, "speaking": False, "thinking": False,
+            "user_text": "", "seven_text": "", "mood": "neutral",
+            "mood_value": 0.5, "model": "unknown", "streaming": False,
+            "uptime": "0h 0m", "uptime_seconds": 0, "speaker": "default",
+            "version": "1.3.2"
         }
 
 @router.post("/api/interrupt")
