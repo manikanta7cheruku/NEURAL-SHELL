@@ -331,26 +331,44 @@ def get_active():
 
 @router.post("/api/triggers/bulk-toggle")
 def bulk_toggle_triggers(data: dict):
-    """Enable or disable all triggers. Respects limits when enabling."""
+    """Enable or disable all triggers at once. Respects plan limits when enabling."""
     enable_all = data.get("enable", False)
     try:
-        from backend.api_server import check_limit
         with _get_conn() as conn:
             if enable_all:
-                # Check limit first
+                # Get plan limit safely
+                try:
+                    from backend.api_server import check_limit
+                    limit_check = check_limit("triggers", 0)
+                    max_allowed = limit_check.get("limit", -1)
+                except Exception:
+                    max_allowed = -1  # No limit if plan check fails
+
                 total_triggers = conn.execute("SELECT COUNT(*) FROM triggers").fetchone()[0]
-                limit_check = check_limit("triggers", total_triggers)
-                if not limit_check["allowed"] and total_triggers > limit_check["limit"]:
-                    # Can only enable up to limit
-                    conn.execute(f"UPDATE triggers SET enabled = 1 WHERE id IN (SELECT id FROM triggers LIMIT {limit_check['limit']})")
-                else:
+
+                if max_allowed == -1 or total_triggers <= max_allowed:
+                    # No limit or under limit — enable everything
                     conn.execute("UPDATE triggers SET enabled = 1")
+                    enabled_count = total_triggers
+                else:
+                    # Free/limited tier — enable only up to the limit (parameterized)
+                    conn.execute("UPDATE triggers SET enabled = 0")
+                    conn.execute(
+                        "UPDATE triggers SET enabled = 1 WHERE id IN (SELECT id FROM triggers ORDER BY created_at ASC LIMIT ?)",
+                        (max_allowed,)
+                    )
+                    enabled_count = max_allowed
             else:
                 conn.execute("UPDATE triggers SET enabled = 0")
+                enabled_count = 0
+
             conn.commit()
-            _signal_daemon_reload()
-        return {"success": True}
+
+        _signal_daemon_reload()
+        return {"success": True, "enabled_count": enabled_count}
+
     except Exception as e:
+        print(Fore.RED + f"[TRIGGERS] bulk toggle error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/api/triggers")
@@ -529,14 +547,27 @@ def update_trigger(trigger_id: int, body: TriggerUpdate):
                 params.append(body.audio_pattern if body.audio_pattern else None)
 
             if body.enabled is not None:
-                # If turning ON, check plan limits
-                if body.enabled:
-                    from backend.api_server import check_limit, plan_limit_error
-                    active_count = conn.execute("SELECT COUNT(*) FROM triggers WHERE enabled = 1").fetchone()[0]
-                    if not existing["enabled"]: # It was off, turning on
+                # Only check plan limit when flipping from disabled to enabled
+                # (not when disabling, editing other fields, or already-enabled toggle)
+                was_enabled = bool(existing["enabled"])
+                will_enable = bool(body.enabled)
+
+                if will_enable and not was_enabled:
+                    try:
+                        from backend.api_server import check_limit, plan_limit_error
+                        # Count OTHER active triggers (excluding this one)
+                        active_count = conn.execute(
+                            "SELECT COUNT(*) FROM triggers WHERE enabled = 1 AND id != ?",
+                            (trigger_id,)
+                        ).fetchone()[0]
                         limit_check = check_limit("triggers", active_count)
                         if not limit_check["allowed"]:
                             raise plan_limit_error("triggers", limit_check)
+                    except HTTPException:
+                        raise
+                    except Exception as _limit_err:
+                        # Never block edits due to plan check crashes
+                        print(Fore.YELLOW + f"[TRIGGERS] Plan check skipped: {_limit_err}")
 
                 updates.append("enabled = ?")
                 params.append(1 if body.enabled else 0)
