@@ -251,15 +251,29 @@ def process(ctx, deps):
 
     except requests.exceptions.ConnectionError:
         print(Fore.RED + "[BRAIN] Cannot connect to Ollama.")
+        # Check if Ollama is installed at all
+        try:
+            from backend.bootstrap import is_ollama_installed
+            if not is_ollama_installed():
+                return LayerResult.stop(
+                    "The AI engine is not installed yet. "
+                    "Please go to Settings, scroll to the bottom, and click Repair Installation to set it up."
+                )
+        except Exception:
+            pass
         return LayerResult.stop(
-            "I can't reach my brain. Run 'ollama serve' in a terminal first."
+            "The AI engine is not running. "
+            "Please open the Ollama app from your Start menu, then try again."
         )
     except requests.exceptions.Timeout:
         print(Fore.RED + "[BRAIN] Ollama timeout.")
-        return LayerResult.stop("My brain took too long. Try again.")
+        return LayerResult.stop(
+            "The AI engine is taking too long to respond. "
+            "It may still be loading the model. Please wait a moment and try again."
+        )
     except Exception as e:
         print(Fore.RED + f"[BRAIN] Unexpected error: {e}")
-        return LayerResult.stop("Something went wrong with my thinking.")
+        return LayerResult.stop("Something went wrong with my thinking. Please try again.")
 
 def _clean_response(text):
     """
