@@ -185,6 +185,18 @@ def _is_overlay_alive() -> bool:
 # TRIGGER DAEMON
 # ─────────────────────────────────────────────────────────────────────────
 
+def _wait_for_api_server():
+    """Wait for FastAPI server on port 7777 to be ready before launching daemon."""
+    for _ in range(15):
+        try:
+            s = socket.create_connection(("127.0.0.1", 7777), timeout=0.5)
+            s.close()
+            return True
+        except Exception:
+            time.sleep(0.5)
+    return False
+
+
 def launch_trigger_daemon():
     """
     Launch trigger_daemon.py as a detached background process.
@@ -198,6 +210,10 @@ def launch_trigger_daemon():
     print(Fore.CYAN + f"[TRIGGER] Root:   {root}")
     print(Fore.CYAN + f"[TRIGGER] Python: {python}")
     print(Fore.CYAN + f"[TRIGGER] Daemon: {daemon}")
+
+    # Wait for the API to be ready so the daemon does not crash with connection refused on boot
+    print(Fore.CYAN + "[TRIGGER] Waiting for API server to stabilize before binding hooks...")
+    _wait_for_api_server()
 
     if not os.path.exists(daemon):
         print(Fore.RED + f"[TRIGGER] trigger_daemon.py not found: {daemon}")
