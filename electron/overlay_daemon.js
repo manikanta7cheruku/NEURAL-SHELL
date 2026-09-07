@@ -98,8 +98,8 @@ function createNotifWindow() {
 
 function createArrangeWindow() {
   const { width: sw } = screen.getPrimaryDisplay().workArea;
-  const W = 400;
-  const H = 220;
+  const W = 460;
+  const H = 380;
 
   arrangeWindow = new BrowserWindow({
     width:              W,
@@ -135,13 +135,14 @@ function createArrangeWindow() {
   arrangeWindow.on('blur', () => {
     if (!arrangeWindow || arrangeWindow.isDestroyed()) return;
     if (!arrangeWindow.isVisible()) return;
+    // Gentle fade-out when user clicks outside the card
     setTimeout(() => {
       if (!arrangeWindow || arrangeWindow.isDestroyed()) return;
       if (arrangeWindow.isFocused()) return;
       arrangeWindow.webContents.executeJavaScript(
         'if (typeof retract === "function") retract();'
       ).catch(() => {});
-    }, 200);
+    }, 150);
   });
 
   const htmlPath = path.join(__dirname, '..', 'seven_overlay', 'arrangement.html');
@@ -302,8 +303,8 @@ function showArrangement(data) {
   try { arrangeWindow.hide(); } catch (e) {}
 
   const { width: sw } = screen.getPrimaryDisplay().workArea;
-  const W = 400;
-  const H = 220;
+  const W = 460;
+  const H = 380;
   try {
     arrangeWindow.setSize(W, H);
     arrangeWindow.setMinimumSize(W, H);
