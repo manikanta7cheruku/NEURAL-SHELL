@@ -75,7 +75,10 @@ function resetOrbPosition() {
     x: x,
     y: y
   });
-  console.log(`[ORB] Position reset manually to collapsed state: x=${x}, y=${y}`);
+  // Clear custom position so default bottom-right is used
+  orbCustomX = -1;
+  orbCustomY = -1;
+  console.log(`[ORB] Position reset to default: x=${x}, y=${y}`);
 }
 
 // ============================================================================
@@ -770,6 +773,11 @@ let orbIsDragging = false;
 let orbDragWidth  = 80;
 let orbDragHeight = 80;
 
+// Track user's custom orb position so set-orb-expanded doesn't
+// snap it back to bottom-right on every state change.
+let orbCustomX = -1;
+let orbCustomY = -1;
+
 ipcMain.on('orb-drag-start', (event, mousePos) => {
   if (!statusWindow || statusWindow.isDestroyed()) return;
   const [winX, winY] = statusWindow.getPosition();
@@ -799,6 +807,12 @@ ipcMain.on('orb-drag-move', (event, mousePos) => {
 
 ipcMain.on('orb-drag-end', () => {
   orbIsDragging = false;
+  // Save the user's dragged position
+  if (statusWindow && !statusWindow.isDestroyed()) {
+    const [cx, cy] = statusWindow.getPosition();
+    orbCustomX = cx;
+    orbCustomY = cy;
+  }
 });
 
 ipcMain.on('toggle-listening', () => {
@@ -824,20 +838,26 @@ ipcMain.on('set-orb-expanded', (event, expanded) => {
   const margin  = 20;
   const totalW  = orbSize + panelW;
 
+  // Use user's dragged position if available, else default bottom-right
+  const baseX = orbCustomX >= 0 ? orbCustomX : (width - orbSize - margin);
+  const baseY = orbCustomY >= 0 ? orbCustomY : (height - orbSize - margin);
+
   if (expanded) {
+    // Expand leftward from the orb's current position
+    const expandX = Math.max(margin, baseX - panelW);
     statusWindow.setBounds({
       width: totalW,
       height: orbSize,
-      x: width - totalW - margin,
-      y: height - orbSize - margin
+      x: expandX,
+      y: baseY
     });
     statusWindow.setIgnoreMouseEvents(false);
   } else {
     statusWindow.setBounds({
       width: orbSize,
       height: orbSize,
-      x: width - orbSize - margin,
-      y: height - orbSize - margin
+      x: baseX,
+      y: baseY
     });
     statusWindow.setIgnoreMouseEvents(false);
   }
