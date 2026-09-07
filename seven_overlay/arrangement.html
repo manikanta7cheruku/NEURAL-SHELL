@@ -11,32 +11,71 @@
   }
 
   html, body {
-    width: 400px;
-    height: 220px;
+    width: 460px;
+    height: 380px;
     background: transparent;
     overflow: hidden;
-    font-family: -apple-system, 'Segoe UI Variable Display', 'SF Pro Display',
+    font-family: -apple-system, 'SF Pro Display', 'Segoe UI Variable Display',
                  'Segoe UI', system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
     text-rendering: optimizeLegibility;
+    user-select: none;
+    cursor: default;
   }
 
+  /* ═══════════════════════════════════════════════════════════════════
+     GLASSMORPHIC CARD — Apple-inspired frosted panel
+  ═══════════════════════════════════════════════════════════════════ */
   .card {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 400px;
-    height: 220px;
-    background: transparent;
-    border-bottom-left-radius: 14px;
-    border-bottom-right-radius: 14px;
-    padding: 12px 14px 14px;
+    position: relative;
+    width: 460px;
+    height: 380px;
+    background: rgba(14, 14, 22, 0.72);
+    backdrop-filter: blur(48px) saturate(160%);
+    -webkit-backdrop-filter: blur(48px) saturate(160%);
+    border-left:   1px solid rgba(255, 255, 255, 0.08);
+    border-right:  1px solid rgba(255, 255, 255, 0.08);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 0 0 22px 22px;
+    padding: 0;
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    transform: translateY(-100%);
+    transform: translateY(-105%);
     opacity: 0;
     will-change: transform, opacity;
+    box-shadow:
+      0 20px 60px rgba(0, 0, 0, 0.45),
+      0 0 0 1px rgba(255, 255, 255, 0.04),
+      inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    overflow: hidden;
+  }
+
+  /* Subtle gradient sheen on top */
+  .card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 60%;
+    background: linear-gradient(180deg,
+      rgba(255, 255, 255, 0.04) 0%,
+      transparent 100%);
+    pointer-events: none;
+    border-radius: 0 0 22px 22px;
+  }
+
+  /* Bottom accent divider glow */
+  .card::after {
+    content: '';
+    position: absolute;
+    left: 22%; right: 22%;
+    bottom: 0;
+    height: 1px;
+    background: linear-gradient(90deg,
+      transparent,
+      rgba(160, 130, 255, 0.35),
+      transparent);
+    pointer-events: none;
   }
 
   .card.show {
@@ -44,265 +83,543 @@
   }
 
   .card.hiding {
-    animation: slideUp 0.22s cubic-bezier(0.65, 0, 0.85, 0.35) forwards;
+    animation: slideUp 0.32s cubic-bezier(0.55, 0, 0.85, 0.35) forwards;
   }
 
   @keyframes slideDown {
-    0%   { transform: translateY(-100%); opacity: 0; }
+    0%   { transform: translateY(-105%); opacity: 0; }
     100% { transform: translateY(0);     opacity: 1; }
   }
 
   @keyframes slideUp {
     0%   { transform: translateY(0);     opacity: 1; }
-    100% { transform: translateY(-100%); opacity: 0; }
+    100% { transform: translateY(-105%); opacity: 0; }
   }
 
-  /* ── Header ── */
+  /* ═══════════════════════════════════════════════════════════════════
+     HEADER
+  ═══════════════════════════════════════════════════════════════════ */
   .header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    flex-shrink: 0;
+    padding: 16px 22px 12px;
+    position: relative;
+    z-index: 2;
   }
 
-  .header-label {
-    font-size: 8.5px;
-    font-weight: 600;
-    color: rgba(255,255,255,0.38);
-    text-transform: uppercase;
-    letter-spacing: 0.13em;
-    text-shadow: 0 1px 2px rgba(0,0,0,0.4);
-  }
-
-  .win-count {
-    font-size: 8.5px;
-    font-weight: 500;
-    color: rgba(180,145,255,0.7);
-    letter-spacing: 0.04em;
-  }
-
-  /* ── Layout grid — scrollable ── */
-  .snap-grid {
+  .header-left {
     display: flex;
-    flex-direction: column;
-    gap: 5px;
-    flex: 1;
-    min-height: 0;
-    overflow-y: auto;
-    overflow-x: hidden;
-    scrollbar-width: none;
-    -ms-overflow-style: none;
-    padding-right: 2px;
+    align-items: center;
+    gap: 10px;
   }
 
-  .snap-grid::-webkit-scrollbar { display: none; }
-
-  .snap-row {
-    display: flex;
+  .brand-badge {
+    display: inline-flex;
+    align-items: center;
     gap: 6px;
-    flex-shrink: 0;
-    height: 46px;
+    padding: 3px 8px;
+    background: rgba(160, 130, 255, 0.14);
+    border: 1px solid rgba(180, 150, 255, 0.28);
+    border-radius: 6px;
+    font-size: 8.5px;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    color: rgba(210, 190, 255, 0.95);
+    text-transform: uppercase;
+    box-shadow: 0 0 12px rgba(160, 130, 255, 0.15);
   }
 
-  /* ── Each layout card ── */
-  .snap-card {
-    flex: 1;
-    border-radius: 8px;
-    background: rgba(255,255,255,0.055);
-    border: 1px solid rgba(255,255,255,0.1);
+  .brand-badge::before {
+    content: '';
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: rgba(180, 150, 255, 0.9);
+    box-shadow: 0 0 6px rgba(180, 150, 255, 0.8);
+    animation: pulse 2s ease-in-out infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 0.6; transform: scale(0.9); }
+    50%      { opacity: 1;   transform: scale(1.1); }
+  }
+
+  .header-title {
+    font-size: 12.5px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.92);
+    letter-spacing: -0.005em;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+  }
+
+  .header-title .sub {
+    color: rgba(255, 255, 255, 0.4);
+    font-weight: 400;
+    margin-left: 6px;
+    font-size: 11px;
+  }
+
+  .btn-close {
+    width: 22px;
+    height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 50%;
+    color: rgba(255, 255, 255, 0.45);
+    font-size: 12px;
+    line-height: 1;
     cursor: pointer;
+    transition: all 0.18s ease;
+    padding: 0;
+    font-weight: 500;
+  }
+
+  .btn-close:hover {
+    background: rgba(255, 100, 100, 0.15);
+    border-color: rgba(255, 120, 120, 0.35);
+    color: rgba(255, 200, 200, 0.9);
+    transform: scale(1.05);
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════
+     PHASES
+  ═══════════════════════════════════════════════════════════════════ */
+  .phase {
+    flex: 1;
+    display: none;
+    flex-direction: column;
+    padding: 0 22px 20px;
+    position: relative;
+    z-index: 2;
+    animation: fadeIn 0.32s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+
+  .phase.active {
+    display: flex;
+  }
+
+  @keyframes fadeIn {
+    0%   { opacity: 0; transform: translateY(4px); }
+    100% { opacity: 1; transform: translateY(0); }
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════
+     PHASE 1 — LAYOUT PICKER
+  ═══════════════════════════════════════════════════════════════════ */
+  .layout-hint {
+    font-size: 9.5px;
+    color: rgba(255, 255, 255, 0.35);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-bottom: 10px;
+    font-weight: 500;
+  }
+
+  .layout-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    flex: 1;
+  }
+
+  .layout-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 12px;
+    padding: 10px 8px 8px;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 4px;
-    padding: 6px 6px 5px;
-    transition:
-      background 0.18s ease,
-      border-color 0.18s ease,
-      transform 0.14s cubic-bezier(0.34, 1.56, 0.64, 1);
+    gap: 6px;
+    cursor: pointer;
+    transition: all 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
     position: relative;
     overflow: hidden;
-    height: 100%;
   }
 
-  .snap-card.full { flex: 1; }
-
-  .snap-card:hover {
-    background: rgba(150, 110, 255, 0.18);
-    border-color: rgba(180, 145, 255, 0.5);
-    transform: translateY(-1px);
+  .layout-card:hover {
+    background: rgba(160, 130, 255, 0.12);
+    border-color: rgba(180, 150, 255, 0.32);
+    transform: translateY(-2px);
+    box-shadow:
+      0 8px 24px rgba(0, 0, 0, 0.3),
+      0 0 20px rgba(160, 130, 255, 0.1);
   }
 
-  .snap-card:active {
-    transform: scale(0.96);
-    transition-duration: 0.07s;
+  .layout-card:active {
+    transform: scale(0.96) translateY(0);
+    transition-duration: 0.08s;
   }
 
-  /* ── Zone preview SVG ── */
-  .snap-preview {
-    width: 100%;
-    flex: 1;
-    display: block;
-    overflow: visible;
-    min-height: 0;
-  }
-
-  .zone {
-    fill: rgba(255,255,255,0.12);
-    transition: fill 0.18s ease;
-  }
-
-  .zone-num {
-    fill: rgba(255,255,255,0.55);
-    font-size: 8px;
-    font-weight: 700;
-    font-family: -apple-system, 'Segoe UI', sans-serif;
-    pointer-events: none;
-    transition: fill 0.18s ease;
-    text-shadow: 0 1px 2px rgba(0,0,0,0.5);
-  }
-
-  .snap-card:hover .zone-num {
-    fill: rgba(255,255,255,0.95);
-  }
-
-  .snap-card:hover .zone {
-    fill: rgba(180, 145, 255, 0.55);
-  }
-
-  .snap-card:hover .zone-accent {
-    fill: rgba(200, 170, 255, 0.85);
-  }
-
-  /* ── Layout name label ── */
-  .snap-label {
-    font-size: 8.5px;
-    font-weight: 500;
-    color: rgba(255,255,255,0.45);
-    letter-spacing: 0.04em;
-    text-shadow: 0 1px 2px rgba(0,0,0,0.35);
-    transition: color 0.18s ease;
-    white-space: nowrap;
-    flex-shrink: 0;
-    line-height: 1;
-  }
-
-  .snap-card:hover .snap-label {
-    color: rgba(210,185,255,0.95);
-  }
-
-  .snap-card::after {
+  .layout-card::after {
     content: '';
     position: absolute;
     inset: 0;
-    border-radius: 8px;
-    background: linear-gradient(
-      135deg,
-      rgba(180,145,255,0.08) 0%,
-      transparent 60%
-    );
+    background: linear-gradient(135deg,
+      rgba(180, 150, 255, 0.08) 0%,
+      transparent 50%);
     opacity: 0;
-    transition: opacity 0.18s ease;
+    transition: opacity 0.22s ease;
     pointer-events: none;
+    border-radius: 12px;
   }
 
-  .snap-card:hover::after { opacity: 1; }
+  .layout-card:hover::after { opacity: 1; }
+
+  .layout-preview {
+    width: 100%;
+    height: 40px;
+  }
+
+  .zone {
+    fill: rgba(255, 255, 255, 0.13);
+    stroke: rgba(255, 255, 255, 0.05);
+    stroke-width: 0.5;
+    transition: all 0.22s ease;
+  }
+
+  .zone-accent {
+    fill: rgba(160, 130, 255, 0.5);
+  }
+
+  .layout-card:hover .zone {
+    fill: rgba(180, 150, 255, 0.5);
+    stroke: rgba(200, 170, 255, 0.3);
+  }
+
+  .layout-card:hover .zone-accent {
+    fill: rgba(200, 170, 255, 0.85);
+  }
+
+  .layout-name {
+    font-size: 10px;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.62);
+    letter-spacing: 0.01em;
+    transition: color 0.22s ease;
+  }
+
+  .layout-card:hover .layout-name {
+    color: rgba(230, 215, 255, 0.98);
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════
+     PHASE 2 — WINDOW ASSIGNMENT
+  ═══════════════════════════════════════════════════════════════════ */
+  .assign-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+  }
+
+  .back-btn {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 10.5px;
+    font-weight: 500;
+    cursor: pointer;
+    padding: 4px 6px;
+    border-radius: 6px;
+    transition: all 0.18s ease;
+    font-family: inherit;
+  }
+
+  .back-btn:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: rgba(255, 255, 255, 0.85);
+  }
+
+  .assign-title {
+    font-size: 10.5px;
+    color: rgba(180, 150, 255, 0.85);
+    font-weight: 600;
+    letter-spacing: 0.02em;
+  }
+
+  .slots-container {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    flex: 1;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+    padding-right: 4px;
+    max-height: 200px;
+  }
+
+  .slots-container::-webkit-scrollbar {
+    width: 4px;
+  }
+
+  .slots-container::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 2px;
+  }
+
+  .slot {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: rgba(255, 255, 255, 0.025);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 10px;
+    padding: 8px 12px;
+    transition: all 0.18s ease;
+  }
+
+  .slot:hover {
+    background: rgba(255, 255, 255, 0.045);
+    border-color: rgba(255, 255, 255, 0.1);
+  }
+
+  .slot-badge {
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg,
+      rgba(160, 130, 255, 0.28) 0%,
+      rgba(120, 90, 220, 0.22) 100%);
+    border: 1px solid rgba(180, 150, 255, 0.3);
+    border-radius: 7px;
+    font-size: 10.5px;
+    font-weight: 700;
+    color: rgba(230, 215, 255, 0.98);
+    flex-shrink: 0;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+  }
+
+  .slot-select {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: rgba(255, 255, 255, 0.85);
+    font-family: inherit;
+    font-size: 11px;
+    font-weight: 500;
+    outline: none;
+    cursor: pointer;
+    padding: 3px 4px;
+    letter-spacing: -0.005em;
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' stroke='rgba(255,255,255,0.4)' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+    background-repeat: no-repeat;
+    background-position: right 4px center;
+    padding-right: 20px;
+  }
+
+  .slot-select option {
+    background: rgba(20, 20, 30, 0.98);
+    color: rgba(255, 255, 255, 0.9);
+    padding: 6px;
+  }
+
+  .slot-select:focus {
+    color: rgba(220, 200, 255, 1);
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════
+     ACTION BAR
+  ═══════════════════════════════════════════════════════════════════ */
+  .action-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 12px;
+    gap: 10px;
+  }
+
+  .action-hint {
+    font-size: 9px;
+    color: rgba(255, 255, 255, 0.28);
+    letter-spacing: 0.03em;
+  }
+
+  .btn-apply {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 18px;
+    background: linear-gradient(135deg,
+      rgba(160, 130, 255, 0.35) 0%,
+      rgba(120, 90, 220, 0.28) 100%);
+    border: 1px solid rgba(180, 150, 255, 0.4);
+    border-radius: 8px;
+    color: rgba(240, 230, 255, 0.98);
+    font-family: inherit;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+    box-shadow:
+      0 4px 12px rgba(120, 90, 220, 0.25),
+      inset 0 1px 0 rgba(255, 255, 255, 0.12);
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+  }
+
+  .btn-apply:hover {
+    background: linear-gradient(135deg,
+      rgba(180, 150, 255, 0.5) 0%,
+      rgba(140, 110, 240, 0.42) 100%);
+    border-color: rgba(200, 170, 255, 0.55);
+    transform: translateY(-1px);
+    box-shadow:
+      0 6px 18px rgba(140, 110, 240, 0.35),
+      inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  }
+
+  .btn-apply:active {
+    transform: translateY(0) scale(0.98);
+    transition-duration: 0.08s;
+  }
+
+  .btn-apply svg {
+    width: 12px;
+    height: 12px;
+  }
 </style>
 </head>
 <body>
 
 <div class="card" id="card">
 
+  <!-- HEADER -->
   <div class="header">
-    <span class="header-label">Arrange Windows</span>
-    <span class="win-count" id="winCount"></span>
+    <div class="header-left">
+      <span class="brand-badge">VII</span>
+      <span class="header-title">
+        Arrange
+        <span class="sub" id="phaseSubtitle">Choose a layout</span>
+      </span>
+    </div>
+    <button class="btn-close" onclick="retract()" title="Close (Esc)">✕</button>
   </div>
 
-  <div class="snap-grid">
-
-    <!-- Row 1: Maximize (full width) -->
-    <div class="snap-row">
-      <div class="snap-card full" onclick="pick('maximize')">
-        <svg class="snap-preview" viewBox="0 0 120 44" xmlns="http://www.w3.org/2000/svg">
-          <rect class="zone zone-accent" x="2" y="2" width="116" height="40" rx="3"/>
+  <!-- PHASE 1: LAYOUT PICKER -->
+  <div class="phase active" id="phase1">
+    <div class="layout-hint">Select an arrangement</div>
+    <div class="layout-grid">
+      <div class="layout-card" onclick="selectLayout('maximize', 1)">
+        <svg class="layout-preview" viewBox="0 0 60 30">
+          <rect class="zone zone-accent" x="1" y="1" width="58" height="28" rx="2.5"/>
         </svg>
-        <span class="snap-label">Maximize</span>
+        <div class="layout-name">Maximize</div>
+      </div>
+
+      <div class="layout-card" onclick="selectLayout('split_vertical', 2)">
+        <svg class="layout-preview" viewBox="0 0 60 30">
+          <rect class="zone" x="1"  y="1" width="28" height="28" rx="2.5"/>
+          <rect class="zone" x="31" y="1" width="28" height="28" rx="2.5"/>
+        </svg>
+        <div class="layout-name">Split ↔</div>
+      </div>
+
+      <div class="layout-card" onclick="selectLayout('split_horizontal', 2)">
+        <svg class="layout-preview" viewBox="0 0 60 30">
+          <rect class="zone" x="1" y="1"  width="58" height="13" rx="2.5"/>
+          <rect class="zone" x="1" y="16" width="58" height="13" rx="2.5"/>
+        </svg>
+        <div class="layout-name">Stack ↕</div>
+      </div>
+
+      <div class="layout-card" onclick="selectLayout('grid', 4)">
+        <svg class="layout-preview" viewBox="0 0 60 30">
+          <rect class="zone" x="1"  y="1"  width="28" height="13" rx="2"/>
+          <rect class="zone" x="31" y="1"  width="28" height="13" rx="2"/>
+          <rect class="zone" x="1"  y="16" width="28" height="13" rx="2"/>
+          <rect class="zone" x="31" y="16" width="28" height="13" rx="2"/>
+        </svg>
+        <div class="layout-name">2×2 Grid</div>
+      </div>
+
+      <div class="layout-card" onclick="selectLayout('stack', 3)">
+        <svg class="layout-preview" viewBox="0 0 60 30">
+          <rect class="zone zone-accent" x="1" y="1" width="28" height="28" rx="2.5"/>
+          <rect class="zone" x="31" y="1"  width="28" height="13" rx="2"/>
+          <rect class="zone" x="31" y="16" width="28" height="13" rx="2"/>
+        </svg>
+        <div class="layout-name">Focus + 2</div>
+      </div>
+
+      <div class="layout-card" onclick="selectLayout('minimize_others', 1)">
+        <svg class="layout-preview" viewBox="0 0 60 30">
+          <rect class="zone zone-accent" x="1" y="1" width="58" height="28" rx="2.5"/>
+          <line x1="8" y1="28" x2="52" y2="28" stroke="rgba(255,255,255,0.3)" stroke-width="1"/>
+        </svg>
+        <div class="layout-name">Solo Focus</div>
       </div>
     </div>
+  </div>
 
-    <!-- Row 2: Split Vertical | Split Horizontal -->
-    <div class="snap-row">
-
-      <div class="snap-card" onclick="pick('split_vertical')">
-        <svg class="snap-preview" viewBox="0 0 120 44" xmlns="http://www.w3.org/2000/svg">
-          <rect class="zone" x="2"  y="2" width="55" height="40" rx="3"/>
-          <rect class="zone" x="63" y="2" width="55" height="40" rx="3"/>
-          <text x="29.5" y="26" text-anchor="middle" class="zone-num">1</text>
-          <text x="90.5" y="26" text-anchor="middle" class="zone-num">2</text>
+  <!-- PHASE 2: WINDOW ASSIGNMENT -->
+  <div class="phase" id="phase2">
+    <div class="assign-header">
+      <button class="back-btn" onclick="backToPhase1()">
+        <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+          <path d="M6.5 2L3.5 5l3 3" stroke="currentColor" stroke-width="1.5"
+                stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
-        <span class="snap-label">Split Vertical</span>
-      </div>
-
-      <div class="snap-card" onclick="pick('split_horizontal')">
-        <svg class="snap-preview" viewBox="0 0 120 44" xmlns="http://www.w3.org/2000/svg">
-          <rect class="zone" x="2" y="2"  width="116" height="18" rx="3"/>
-          <rect class="zone" x="2" y="24" width="116" height="18" rx="3"/>
-          <text x="60" y="14" text-anchor="middle" class="zone-num">1</text>
-          <text x="60" y="36" text-anchor="middle" class="zone-num">2</text>
-        </svg>
-        <span class="snap-label">Split Horizontal</span>
-      </div>
-
+        Back
+      </button>
+      <div class="assign-title" id="assignTitle">Assign windows</div>
     </div>
 
-    <!-- Row 3: Grid | Stack -->
-    <div class="snap-row">
+    <div class="slots-container" id="slotsContainer"></div>
 
-      <div class="snap-card" onclick="pick('grid')">
-        <svg class="snap-preview" viewBox="0 0 120 44" xmlns="http://www.w3.org/2000/svg">
-          <rect class="zone" x="2"  y="2"  width="55" height="18" rx="3"/>
-          <rect class="zone" x="63" y="2"  width="55" height="18" rx="3"/>
-          <rect class="zone" x="2"  y="24" width="55" height="18" rx="3"/>
-          <rect class="zone" x="63" y="24" width="55" height="18" rx="3"/>
-          <text x="29.5" y="14" text-anchor="middle" class="zone-num">1</text>
-          <text x="90.5" y="14" text-anchor="middle" class="zone-num">2</text>
-          <text x="29.5" y="36" text-anchor="middle" class="zone-num">3</text>
-          <text x="90.5" y="36" text-anchor="middle" class="zone-num">4</text>
+    <div class="action-bar">
+      <span class="action-hint" id="actionHint">Choose windows for each zone</span>
+      <button class="btn-apply" onclick="applyArrangement()">
+        <svg viewBox="0 0 12 12" fill="none">
+          <path d="M2 6l3 3 5-6" stroke="currentColor" stroke-width="1.8"
+                stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
-        <span class="snap-label">Grid</span>
-      </div>
-
-      <div class="snap-card" onclick="pick('stack')">
-        <svg class="snap-preview" viewBox="0 0 120 44" xmlns="http://www.w3.org/2000/svg">
-          <rect class="zone" x="2" y="2"  width="116" height="18" rx="3"/>
-          <rect class="zone" x="2" y="24" width="116" height="18" rx="3"/>
-          <text x="60" y="14" text-anchor="middle" class="zone-num">1</text>
-          <text x="60" y="36" text-anchor="middle" class="zone-num">2</text>
-        </svg>
-        <span class="snap-label">Stack</span>
-      </div>
-
+        Apply
+      </button>
     </div>
-
   </div>
 
 </div>
 
 <script>
-  let _windows    = [];
-  let _allWindows = [];
+  let _windows      = [];
+  let _allWindows   = [];
+  let _selectedLayout = null;
+  let _slotCount    = 0;
   let _dismissTimer = null;
+  let _isRetracting = false;
 
+  const LAYOUT_META = {
+    maximize:         { name: 'Maximize',        needsSlots: false },
+    split_vertical:   { name: 'Split Vertical',  needsSlots: true, labels: ['Left', 'Right'] },
+    split_horizontal: { name: 'Split Horizontal',needsSlots: true, labels: ['Top', 'Bottom'] },
+    grid:             { name: '2×2 Grid',        needsSlots: true, labels: ['Top-Left', 'Top-Right', 'Bottom-Left', 'Bottom-Right'] },
+    stack:            { name: 'Focus + Stack',   needsSlots: true, labels: ['Main (Left)', 'Top-Right', 'Bottom-Right'] },
+    minimize_others:  { name: 'Solo Focus',      needsSlots: true, labels: ['Keep Visible'] },
+  };
+
+  // ══════════════════════════════════════════════════════════════════
+  //  DATA INJECTION
+  // ══════════════════════════════════════════════════════════════════
   function applyData(data) {
     _windows    = data.windows    || [];
     _allWindows = data.allWindows || [];
+    _isRetracting = false;
 
-    const total = _windows.length;
-    const countEl = document.getElementById('winCount');
-    countEl.textContent = total > 0
-      ? `${total} window${total !== 1 ? 's' : ''}`
-      : '';
+    resetToPhase1();
 
     const card = document.getElementById('card');
     card.classList.remove('show', 'hiding');
@@ -310,33 +627,166 @@
     card.classList.add('show');
 
     if (_dismissTimer) clearTimeout(_dismissTimer);
-    _dismissTimer = setTimeout(retract, 15000);
+    _dismissTimer = setTimeout(retract, 25000);
   }
 
   window.__applyArrangementData = applyData;
 
-  function pick(layout) {
-    if (_dismissTimer) { clearTimeout(_dismissTimer); _dismissTimer = null; }
+  // ══════════════════════════════════════════════════════════════════
+  //  PHASE SWITCHING
+  // ══════════════════════════════════════════════════════════════════
+  function resetToPhase1() {
+    _selectedLayout = null;
+    _slotCount = 0;
+    document.getElementById('phase1').classList.add('active');
+    document.getElementById('phase2').classList.remove('active');
+    document.getElementById('phaseSubtitle').textContent = 'Choose a layout';
+  }
 
-    const triggered = _windows.filter(w => w.triggered);
-    const hwnd_list = triggered.length > 0
-      ? triggered.map(w => w.hwnd)
-      : _windows.map(w => w.hwnd);
+  function selectLayout(layout, slotCount) {
+    _selectedLayout = layout;
+    _slotCount = slotCount;
 
+    const meta = LAYOUT_META[layout];
+
+    // If layout doesn't need window selection (e.g. Maximize All), apply immediately
+    if (!meta.needsSlots) {
+      const hwnd_list = _windows.map(w => w.hwnd);
+      dispatchLayout(layout, hwnd_list);
+      retract();
+      return;
+    }
+
+    // Move to phase 2
+    document.getElementById('phase1').classList.remove('active');
+    document.getElementById('phase2').classList.add('active');
+    document.getElementById('phaseSubtitle').textContent = meta.name;
+    document.getElementById('assignTitle').textContent = meta.name;
+
+    buildSlots(meta.labels);
+  }
+
+  function backToPhase1() {
+    resetToPhase1();
+  }
+
+  // ══════════════════════════════════════════════════════════════════
+  //  SLOT BUILDER
+  // ══════════════════════════════════════════════════════════════════
+  function cleanTitle(t) {
+    if (!t) return 'Untitled';
+    let title = t.trim();
+
+    // Strip common app suffixes: "Doc - App Name" -> "Doc"
+    // Prefer the largest fragment
+    const parts = title.split(/\s+[-–—|]\s+/);
+    if (parts.length > 1) {
+      // pick the longest fragment that isn't the app name
+      const sorted = [...parts].sort((a, b) => b.length - a.length);
+      title = sorted[0];
+    }
+
+    return title.length > 42 ? title.substring(0, 40) + '…' : title;
+  }
+
+  function buildSlots(labels) {
+    const container = document.getElementById('slotsContainer');
+    container.innerHTML = '';
+
+    // Combine triggered + other windows into a single pool
+    // triggered windows appear first
+    const pool = [
+      ..._windows.map(w => ({ ...w, priority: 1 })),
+      ..._allWindows.map(w => ({ ...w, priority: 0 })),
+    ];
+
+    // Deduplicate by hwnd
+    const seen = new Set();
+    const unique = pool.filter(w => {
+      if (seen.has(w.hwnd)) return false;
+      seen.add(w.hwnd);
+      return true;
+    });
+
+    labels.forEach((label, idx) => {
+      const slot = document.createElement('div');
+      slot.className = 'slot';
+
+      const badge = document.createElement('div');
+      badge.className = 'slot-badge';
+      badge.textContent = String(idx + 1);
+
+      const select = document.createElement('select');
+      select.className = 'slot-select';
+      select.dataset.slotIndex = idx;
+      select.dataset.slotLabel = label;
+
+      // Optional placeholder
+      const noneOpt = document.createElement('option');
+      noneOpt.value = '';
+      noneOpt.textContent = `— ${label} —`;
+      select.appendChild(noneOpt);
+
+      unique.forEach(w => {
+        const opt = document.createElement('option');
+        opt.value = String(w.hwnd);
+        opt.textContent = cleanTitle(w.title || w.exe || 'Window');
+        select.appendChild(opt);
+      });
+
+      // Default: fill first N slots with the first N triggered windows
+      if (idx < _windows.length) {
+        select.value = String(_windows[idx].hwnd);
+      }
+
+      slot.appendChild(badge);
+      slot.appendChild(select);
+      container.appendChild(slot);
+    });
+  }
+
+  // ══════════════════════════════════════════════════════════════════
+  //  APPLY
+  // ══════════════════════════════════════════════════════════════════
+  function applyArrangement() {
+    const selects = document.querySelectorAll('.slot-select');
+    const hwnd_list = [];
+    const usedHwnds = new Set();
+
+    selects.forEach(sel => {
+      const v = sel.value;
+      if (v && !usedHwnds.has(v)) {
+        hwnd_list.push(parseInt(v, 10));
+        usedHwnds.add(v);
+      }
+    });
+
+    if (hwnd_list.length === 0) {
+      // No windows selected — nothing to do
+      const hint = document.getElementById('actionHint');
+      hint.textContent = 'Please assign at least one window';
+      hint.style.color = 'rgba(255, 140, 140, 0.8)';
+      setTimeout(() => {
+        hint.textContent = 'Choose windows for each zone';
+        hint.style.color = '';
+      }, 2200);
+      return;
+    }
+
+    dispatchLayout(_selectedLayout, hwnd_list);
+    retract();
+  }
+
+  function dispatchLayout(layout, hwnd_list) {
+    // Minimize windows NOT in the selected list
     const all = [..._windows, ..._allWindows];
-    const selectedSet = new Set(hwnd_list);
-    const minimize_hwnds = all
-      .map(w => w.hwnd)
-      .filter(h => !selectedSet.has(h));
+    const selectedSet = new Set(hwnd_list.map(Number));
+    const minimize_hwnds = [...new Set(
+      all.map(w => w.hwnd).filter(h => !selectedSet.has(Number(h)))
+    )];
 
-    const payload = {
-      layout,
-      hwnd_list,
-      minimize_hwnds: [...new Set(minimize_hwnds)],
-    };
+    const payload = { layout, hwnd_list, minimize_hwnds };
 
-    // Fire IPC to main process (fire-and-forget). Main handles
-    // routing to backend or spawning Python directly.
     try {
       if (window.electronAPI && window.electronAPI.applyLayout) {
         window.electronAPI.applyLayout(payload);
@@ -344,25 +794,41 @@
     } catch (e) {
       console.error('applyLayout failed:', e);
     }
-
-    // Dismiss instantly — main process handles arrangement in background
-    retract();
   }
 
+  // ══════════════════════════════════════════════════════════════════
+  //  DISMISS / FADE
+  // ══════════════════════════════════════════════════════════════════
   function retract() {
-    if (_dismissTimer) { clearTimeout(_dismissTimer); _dismissTimer = null; }
+    if (_isRetracting) return;
+    _isRetracting = true;
+
+    if (_dismissTimer) {
+      clearTimeout(_dismissTimer);
+      _dismissTimer = null;
+    }
+
     const card = document.getElementById('card');
-    if (card.classList.contains('hiding')) return;
     card.classList.remove('show');
     card.classList.add('hiding');
+
     setTimeout(() => {
       if (window.electronAPI && window.electronAPI.close) {
         window.electronAPI.close();
       }
-    }, 220);
+    }, 340);
   }
 
-  document.addEventListener('keydown', e => {
+  // Click outside card (in transparent area) dismisses
+  document.body.addEventListener('mousedown', (e) => {
+    const card = document.getElementById('card');
+    if (!card.contains(e.target)) {
+      retract();
+    }
+  });
+
+  // Escape key dismisses
+  document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') retract();
   });
 </script>
