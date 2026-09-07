@@ -786,6 +786,33 @@ def _signal_daemon_reload():
         print(Fore.YELLOW + f"[TRIGGERS] Reload signal failed: {e}")
 
 
+# ── Snap Calibration Endpoint ────────────────────────────────────────────
+
+@router.post("/api/triggers/calibrate-snap",
+             summary="Calibrate snap detection",
+             description="User snaps 3 times. Seven measures peaks and saves personal threshold.")
+def calibrate_snap():
+    """
+    Run interactive snap calibration.
+    Blocks for ~10 seconds while user snaps 3 times.
+    Saves calibration to %APPDATA%/SEVEN/audio/snap_calibration.json
+    Signals daemon to reload with new threshold.
+    """
+    try:
+        from ears.audio_triggers import run_calibration
+        result = run_calibration(seconds=8)
+
+        # Signal daemon to reload so it picks up the new calibration
+        if result.get("success"):
+            _signal_daemon_reload()
+
+        return result
+
+    except Exception as e:
+        print(Fore.RED + f"[TRIGGERS] Calibration error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ── Layout endpoint ───────────────────────────────────────────────────────
 
 class LayoutRequest(BaseModel):
