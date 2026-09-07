@@ -290,8 +290,11 @@ def _find_handles(app_names: list) -> list:
             exe = proc.name().lower()
             if exe in _SKIP_EXE:
                 return
-            # Skip Seven itself
-            if exe == "electron.exe" and "seven" in (proc.exe() or "").lower():
+            # Skip Seven itself (dev: electron.exe, prod: SEVEN.exe)
+            _exe_path = (proc.exe() or "").lower()
+            if exe in ("electron.exe", "seven.exe") and "seven" in _exe_path:
+                return
+            if exe in ("python.exe", "pythonw.exe") and "seven" in _exe_path:
                 return
         except Exception:
             return
@@ -348,21 +351,15 @@ def _find_handles(app_names: list) -> list:
 
     # If we found fewer than 2 by name matching,
     # fall back to all visible windows (excluding system)
-    if len(matched) < 2:
+    if len(matched) < 2 and len(all_windows) >= 2:
         print(Fore.YELLOW + "[LAYOUT] Name matching found <2 windows, "
-              "falling back to all visible windows")
+              "falling back to all visible non-Seven windows")
         matched = [
             (hwnd, title) for hwnd, title in all_windows
-            if hwnd not in used_hwnds or True  # include all
+            if hwnd not in used_hwnds
         ]
-        # De-duplicate
-        seen = set()
-        deduped = []
-        for hwnd, title in matched:
-            if hwnd not in seen:
-                seen.add(hwnd)
-                deduped.append((hwnd, title))
-        matched = deduped
+        if len(matched) < 2:
+            matched = list(all_windows)
 
     return matched
 
