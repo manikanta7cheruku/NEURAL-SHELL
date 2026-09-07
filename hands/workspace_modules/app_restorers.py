@@ -34,12 +34,37 @@ def restore_one(cfg):
             _restore_terminal(cfg)
         else:
             _restore_generic(cfg)
+        # Reopen saved documents (Office files, Premiere projects, etc.)
+        open_files = cfg.get("open_files", [])
+        if open_files:
+            import time as _t
+            _t.sleep(1.5)  # Wait for app to finish launching
+            try:
+                from hands.workspace_modules.document_capture import restore_open_files
+                _opened = restore_open_files(open_files)
+                if _opened > 0:
+                    print(Fore.GREEN + f"  [+] {name} (+ {_opened} files)")
+            except Exception as _fe:
+                print(Fore.YELLOW + f"  [~] {name} file restore: {_fe}")
+
         print(Fore.GREEN + f"  [+] {name}")
     except Exception as e:
         print(Fore.RED + f"  [-] {name}: {e}")
 
 
 def _restore_browser(cfg):
+    """
+    Restore browser tabs with deduplication.
+
+    Chrome automatically restores "last session" tabs on launch.
+    Seven ALSO saves tabs. Result: duplicates.
+
+    Fix (Option A+C):
+      1. Check if Chrome is already running for this profile
+      2. If yes → session restore already happened → diff tabs
+      3. If no → launch Chrome → wait 3s for session restore → diff → open missing
+      4. Only open tabs that are genuinely missing
+    """
     tabs         = cfg.get("tabs", [])
     urls         = [t["url"] for t in tabs
                     if t.get("url", "").startswith("http")]
@@ -56,24 +81,90 @@ def _restore_browser(cfg):
         return
 
     import os as _os
+    from hands.workspace_modules.url_matching import normalize_url
+
     chrome_base = _os.path.join(
         _os.environ.get("LOCALAPPDATA", ""),
         "Google", "Chrome", "User Data"
     )
     profile_dir = find_chrome_profile_dir(chrome_base, profile_name)
 
-    if profile_dir:
-        subprocess.Popen(
-            [chrome_exe, f"--profile-directory={profile_dir}", urls[0]]
-        )
-        for url in urls[1:]:
+    # Check if Chrome is already running
+    chrome_already_running = False
+    try:
+        import psutil as _ps
+        for _p in _ps.process_iter(['name']):
+            try:
+                if _p.info['name'] and 'chrome' in _p.info['name'].lower():
+                    chrome_already_running = True
+                    break
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    # Launch Chrome if not running
+    if not chrome_already_running:
+        if profile_dir:
+            subprocess.Popen(
+                [chrome_exe, f"--profile-directory={profile_dir}", urls[0]]
+            )
+        else:
+            subprocess.Popen([chrome_exe, urls[0]])
+
+        # Wait for Chrome to finish session restore (reopens last tabs)
+        time.sleep(3.5)
+
+    # Now diff: query what's actually open vs what we want
+    missing_urls = list(urls)  # start with all, remove already-open
+
+    try:
+        from backend.routes.chrome import get_tabs_by_profile
+        open_tabs = get_tabs_by_profile()
+
+        if open_tabs:
+            # Build set of currently open URLs (normalized)
+            open_url_set = set()
+            for _prof, _tabs in open_tabs.items():
+                # If profile specified, only check that profile
+                if profile_name and _prof.lower() != profile_name.lower():
+                    continue
+                for _t in _tabs:
+                    _u = _t.get("url", "")
+                    if _u:
+                        open_url_set.add(normalize_url(_u))
+
+            # Filter to only truly missing URLs
+            missing_urls = [
+                u for u in urls
+                if normalize_url(u) not in open_url_set
+            ]
+
+            skipped = len(urls) - len(missing_urls)
+            if skipped > 0:
+                print(Fore.CYAN + f"[WORKSPACE] Chrome dedup: "
+                      f"{skipped} tabs already open (session restore), "
+                      f"{len(missing_urls)} missing")
+
+    except Exception as _dedup_err:
+        print(Fore.YELLOW + f"[WORKSPACE] Chrome dedup check failed: "
+              f"{_dedup_err} — opening all tabs")
+        missing_urls = list(urls)
+
+    if not missing_urls:
+        print(Fore.GREEN + f"[WORKSPACE] Chrome '{profile_name}': "
+              f"all tabs already open")
+        return
+
+    # Open only missing tabs
+    for url in missing_urls:
+        if profile_dir:
             subprocess.Popen(
                 [chrome_exe, f"--profile-directory={profile_dir}", url]
             )
-    else:
-        for url in urls:
+        else:
             subprocess.Popen([chrome_exe, url])
-            time.sleep(0.3)
+        time.sleep(0.15)  # minimal delay to avoid Chrome merge
 
 
 def _restore_vscode(cfg):
