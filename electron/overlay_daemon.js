@@ -98,8 +98,8 @@ function createNotifWindow() {
 
 function createArrangeWindow() {
   const { width: sw } = screen.getPrimaryDisplay().workArea;
-  const W = 460;
-  const H = 380;
+  const W = 380;
+  const H = 300;
 
   arrangeWindow = new BrowserWindow({
     width:              W,
@@ -132,18 +132,9 @@ function createArrangeWindow() {
   arrangeWindow.setAlwaysOnTop(true, 'pop-up-menu', 999);
   arrangeWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
 
-  arrangeWindow.on('blur', () => {
-    if (!arrangeWindow || arrangeWindow.isDestroyed()) return;
-    if (!arrangeWindow.isVisible()) return;
-    // Gentle fade-out when user clicks outside the card
-    setTimeout(() => {
-      if (!arrangeWindow || arrangeWindow.isDestroyed()) return;
-      if (arrangeWindow.isFocused()) return;
-      arrangeWindow.webContents.executeJavaScript(
-        'if (typeof retract === "function") retract();'
-      ).catch(() => {});
-    }, 150);
-  });
+  // Blur handler removed intentionally — user controls dismissal via
+  // close button (X), Escape key, or click on transparent area outside card.
+  // This gives users time to think about their layout choice.
 
   const htmlPath = path.join(__dirname, '..', 'seven_overlay', 'arrangement.html');
   arrangeWindow.loadFile(htmlPath);
@@ -303,8 +294,8 @@ function showArrangement(data) {
   try { arrangeWindow.hide(); } catch (e) {}
 
   const { width: sw } = screen.getPrimaryDisplay().workArea;
-  const W = 460;
-  const H = 380;
+  const W = 380;
+  const H = 300;
   try {
     arrangeWindow.setSize(W, H);
     arrangeWindow.setMinimumSize(W, H);
@@ -332,7 +323,7 @@ function showArrangement(data) {
 
   arrangeWindow.showInactive();
   arrangeWindow.focus();
-  scheduleAutoHide(arrangeWindow, 20000);
+  // No auto-hide. User dismisses via close button, Esc, or click-outside.
 }
 
 // Hide handlers (called by HTML after animation completes)
