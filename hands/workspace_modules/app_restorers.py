@@ -258,12 +258,22 @@ def _restore_terminal(cfg):
 
 
 def _restore_generic(cfg):
-    exe  = cfg.get("exe_path", "")
-    name = cfg.get("name", "")
+    exe        = cfg.get("exe_path", "")
+    name       = cfg.get("name", "")
+    open_files = cfg.get("open_files", [])
+    work_dir   = cfg.get("working_dir", "")
 
+    # If document files exist, opening the document automatically opens the app
+    if open_files:
+        from hands.workspace_modules.document_capture import restore_open_files
+        if restore_open_files(open_files) > 0:
+            return
+
+    # Direct launch with working directory
     if exe and os.path.exists(exe):
         try:
-            subprocess.Popen([exe])
+            cwd_arg = work_dir if work_dir and os.path.isdir(work_dir) else None
+            subprocess.Popen([exe], cwd=cwd_arg)
             return
         except Exception:
             pass
