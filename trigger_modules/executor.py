@@ -152,6 +152,7 @@ def _execute_trigger_complete(trigger, name, action_type, action_data,
         elif action_type == "run_command":
             _run_data = dict(action_data)
             _run_data["_fired_key"] = trigger.get("_fired_key", "")
+            _run_data["_had_modifiers"] = trigger.get("_had_modifiers", True)
             _exec_run_command(_run_data)
         elif action_type == "seven_action":
             _exec_seven_action(action_data)
@@ -338,9 +339,26 @@ def _exec_open_workspace(data):
 
 def _exec_run_command(data):
     """
-    Execute a shell command.
-    target=terminal: types/pastes command into focused app.
-    target=background: runs silently in hidden process.
+    Execute a shell command via focused-app text injection.
+
+    Strategy:
+      target=background → run silently in hidden process
+      target=terminal   → paste into whatever app has keyboard focus
+
+    Text injection strategy:
+      1. Release any held modifier keys from the hotkey
+      2. Wait for hotkey release + focus stabilization
+      3. Use CLIPBOARD PASTE (Ctrl+V) for ALL apps — universally reliable
+         Terminals, browsers, text editors, chat apps all support paste
+      4. Restore original clipboard afterwards
+      5. Only press Enter for terminal-class apps (not for chat/URL bars
+         where Enter would send/navigate incorrectly)
+
+    Why paste for everything:
+      - PowerShell's ReadLine host rejects synthesized keyboard input
+      - Chrome's URL bar hijacks focus when window is activated by hotkey
+      - Clipboard paste bypasses input handlers and works in all contexts
+      - No timing issues from per-character typing
     """
     cmd    = data.get("command", "")
     target = data.get("target", "terminal")
@@ -356,19 +374,22 @@ def _exec_run_command(data):
             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-        print(f"[TRIGGER DAEMON] Run command (background): {cmd[:60]}")
+        print(f"[TRIGGER DAEMON] Run (background): {cmd[:60]}")
         return
 
     try:
         import ctypes
-        import pyautogui
 
-        _KEYUP = 0x0002
+        _KEYDOWN = 0x0000
+        _KEYUP   = 0x0002
 
-        # Step 1: Release all held keys
-        for _vk in [0x12, 0x11, 0x10, 0x5B]:
+        # ── STEP 1: Fully release all modifier keys ──
+        # User just fired a hotkey like Ctrl+Shift+F5.
+        # Modifiers may still be physically held — release synthetically.
+        for _vk in [0x11, 0x10, 0x12, 0x5B, 0x5C]:  # Ctrl, Shift, Alt, LWin, RWin
             ctypes.windll.user32.keybd_event(_vk, 0, _KEYUP, 0)
 
+        # ── STEP 2: Release the trigger key ──
         _fired_key = data.get("_fired_key", "")
         if _fired_key:
             _vk_map = {
@@ -377,98 +398,120 @@ def _exec_run_command(data):
                 '`': 0xC0, '-': 0xBD, '=': 0xBB, ' ': 0x20,
             }
             _vk = _vk_map.get(_fired_key)
-            if _vk is None and len(_fired_key) == 1 and _fired_key.isalpha():
-                _vk = ord(_fired_key.upper())
-            elif _vk is None and len(_fired_key) == 1 and _fired_key.isdigit():
-                _vk = ord(_fired_key)
+            if _vk is None and len(_fired_key) == 1:
+                if _fired_key.isalpha():
+                    _vk = ord(_fired_key.upper())
+                elif _fired_key.isdigit():
+                    _vk = ord(_fired_key)
             if _vk:
                 ctypes.windll.user32.keybd_event(_vk, 0, _KEYUP, 0)
 
-        time.sleep(0.3)
+        # ── STEP 3: Wait for focus to stabilize ──
+        # 400ms gives Chrome/PowerShell/Explorer time to clear their
+        # own hotkey handling and return focus to the caret.
+        time.sleep(0.4)
 
-        # Step 2: Detect focused app
+        # ── STEP 4: Detect focused app ──
         try:
-            import win32gui
-            import win32process
-            import psutil
+            import win32gui, win32process, psutil
             _hwnd = win32gui.GetForegroundWindow()
+            _title = (win32gui.GetWindowText(_hwnd) or "").lower()
             _, _pid = win32process.GetWindowThreadProcessId(_hwnd)
             _proc = psutil.Process(_pid).name().lower()
         except Exception:
             _proc = ""
+            _title = ""
 
-        # Step 3: Erase stray trigger char
-        _printable = set('abcdefghijklmnopqrstuvwxyz0123456789`-=[]\\;\',./\'')
-        if _fired_key and _fired_key in _printable:
-            ctypes.windll.user32.keybd_event(0x08, 0, 0, 0)
-            time.sleep(0.02)
-            ctypes.windll.user32.keybd_event(0x08, 0, _KEYUP, 0)
-            time.sleep(0.06)
-
-        # Step 4: Type the command
-        _paste_apps = {
-            "chrome.exe", "msedge.exe", "firefox.exe", "brave.exe",
-            "opera.exe", "electron.exe",
+        # Terminal-class apps where Enter should execute the command
+        _terminal_apps = {
+            "powershell.exe", "pwsh.exe", "cmd.exe",
+            "windowsterminal.exe", "wt.exe", "conhost.exe",
+            "bash.exe", "wsl.exe",
         }
-        _use_paste = _proc in _paste_apps
 
-        if _use_paste:
-            # Clipboard paste for browser apps
-            _old_clip = None
-            try:
-                _cr = subprocess.run(
-                    ['powershell', '-NoProfile', '-Command', 'Get-Clipboard'],
-                    capture_output=True, text=True, timeout=3,
-                    creationflags=0x08000000,
-                )
-                if _cr.returncode == 0:
-                    _old_clip = _cr.stdout.rstrip('\r\n')
-            except Exception:
-                pass
+        # ── STEP 5: Backspace stray trigger char if it typed itself ──
+        # Only for printable single-key hotkeys without modifiers
+        _printable = set('abcdefghijklmnopqrstuvwxyz0123456789`-=[]\\;\',./')
+        _has_modifiers = any(_vk in [0x11, 0x10, 0x12] for _vk in [])  # placeholder
+        # Simpler: only backspace if the hotkey was JUST a printable char
+        # (like "a" or "5"), not a combo (like Ctrl+A)
+        # We detect this by checking if _fired_key is set AND no modifiers were in the combo
+        # For safety, only backspace once
+        _combo_had_modifiers = data.get("_had_modifiers", True)  # default true = don't backspace
+        if _fired_key and _fired_key in _printable and not _combo_had_modifiers:
+            ctypes.windll.user32.keybd_event(0x08, 0, 0, 0)  # Backspace down
+            time.sleep(0.02)
+            ctypes.windll.user32.keybd_event(0x08, 0, _KEYUP, 0)  # Backspace up
+            time.sleep(0.08)
 
+        # ── STEP 6: Save current clipboard content ──
+        _old_clip = None
+        try:
+            _cr = subprocess.run(
+                ['powershell', '-NoProfile', '-Command', 'Get-Clipboard -Raw'],
+                capture_output=True, text=True, timeout=3,
+                creationflags=0x08000000,
+            )
+            if _cr.returncode == 0:
+                _old_clip = _cr.stdout.rstrip('\r\n')
+        except Exception:
+            pass
+
+        # ── STEP 7: Put command into clipboard ──
+        try:
             subprocess.run(
                 ['clip'],
                 input=cmd.encode('utf-8'),
                 creationflags=0x08000000,
-                check=False,
+                check=False, timeout=3,
             )
-            time.sleep(0.1)
+        except Exception as _ce:
+            print(f"[TRIGGER DAEMON] Clipboard failed: {_ce}")
+            return
 
-            ctypes.windll.user32.keybd_event(0x11, 0, 0, 0)
-            time.sleep(0.04)
-            ctypes.windll.user32.keybd_event(0x56, 0, 0, 0)
-            time.sleep(0.04)
-            ctypes.windll.user32.keybd_event(0x56, 0, _KEYUP, 0)
-            time.sleep(0.04)
-            ctypes.windll.user32.keybd_event(0x11, 0, _KEYUP, 0)
+        time.sleep(0.15)  # ensure clipboard is settled
 
-            time.sleep(0.5)
-            if _old_clip is not None and _old_clip:
-                try:
-                    _safe = _old_clip.replace("'", "''")
-                    subprocess.run(
-                        ['powershell', '-NoProfile', '-Command',
-                         f"Set-Clipboard -Value '{_safe}'"],
-                        capture_output=True, timeout=3,
-                        creationflags=0x08000000,
-                    )
-                except Exception:
-                    pass
-            print(f"[TRIGGER DAEMON] Command pasted (browser): {cmd[:60]}")
+        # ── STEP 8: Send Ctrl+V (paste) ──
+        # Uses low-level keybd_event for maximum compatibility
+        _VK_CTRL = 0x11
+        _VK_V    = 0x56
+
+        ctypes.windll.user32.keybd_event(_VK_CTRL, 0, _KEYDOWN, 0)
+        time.sleep(0.03)
+        ctypes.windll.user32.keybd_event(_VK_V, 0, _KEYDOWN, 0)
+        time.sleep(0.05)
+        ctypes.windll.user32.keybd_event(_VK_V, 0, _KEYUP, 0)
+        time.sleep(0.03)
+        ctypes.windll.user32.keybd_event(_VK_CTRL, 0, _KEYUP, 0)
+
+        # Wait for paste to complete
+        time.sleep(0.35)
+
+        # ── STEP 9: Press Enter ONLY for terminal-class apps ──
+        # For Chrome address bar / WhatsApp chat / URL fields, pressing Enter
+        # would navigate or send message. User can press Enter manually if desired.
+        if _proc in _terminal_apps:
+            _VK_ENTER = 0x0D
+            ctypes.windll.user32.keybd_event(_VK_ENTER, 0, _KEYDOWN, 0)
+            time.sleep(0.03)
+            ctypes.windll.user32.keybd_event(_VK_ENTER, 0, _KEYUP, 0)
+            print(f"[TRIGGER DAEMON] Pasted + Enter in terminal: {cmd[:60]}")
         else:
-            # Typing effect for terminals, editors, notepad, etc
-            pyautogui.PAUSE = 0
-            for char in cmd:
-                if char == ' ':
-                    ctypes.windll.user32.keybd_event(0x20, 0, 0, 0)
-                    time.sleep(0.01)
-                    ctypes.windll.user32.keybd_event(0x20, 0, _KEYUP, 0)
-                else:
-                    pyautogui.write(char, interval=0)
-                time.sleep(0.015)
-            print(f"[TRIGGER DAEMON] Command typed: {cmd[:60]}")
+            print(f"[TRIGGER DAEMON] Pasted (no Enter — press manually): {cmd[:60]}")
 
-        print(f"[TRIGGER DAEMON] Command sent: {cmd[:60]}")
+        # ── STEP 10: Restore original clipboard ──
+        time.sleep(0.4)
+        if _old_clip is not None and _old_clip.strip():
+            try:
+                # Use PowerShell to restore multi-line clipboard safely
+                _restore_ps = f"Set-Clipboard -Value @'\n{_old_clip}\n'@"
+                subprocess.run(
+                    ['powershell', '-NoProfile', '-Command', _restore_ps],
+                    capture_output=True, timeout=3,
+                    creationflags=0x08000000,
+                )
+            except Exception:
+                pass
 
     except Exception as e:
         print(f"[TRIGGER DAEMON] Run command error: {e}")
