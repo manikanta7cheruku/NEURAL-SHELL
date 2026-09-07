@@ -71,7 +71,7 @@ const useSetup = create((set, get) => ({
     set({ loading: true, error: null });
     const { data } = get();
     try {
-      await api.post('/setup/complete', {
+      const r = await api.post('/setup/complete', {
         name:          data.name.trim(),
         email:         data.email.trim(),
         referral_code: data.referralCode.trim(),
@@ -82,8 +82,15 @@ const useSetup = create((set, get) => ({
         model_name:    data.modelName,
       });
       set({ loading: false });
-      return true;
+      return r.data?.success !== false;
     } catch (e) {
+      // 502/ERR_CONNECTION_REFUSED during restart is expected — don't treat as failure
+      const isNetworkError = !e.response && (e.code === 'ERR_NETWORK' || e.message?.includes('Network'));
+      const isGatewayError = e.response?.status === 502;
+      if (isNetworkError || isGatewayError) {
+        set({ loading: false });
+        return true; // Setup was saved, server just restarted
+      }
       set({
         loading: false,
         error:   e?.response?.data?.detail || 'Setup failed. Try again.',
