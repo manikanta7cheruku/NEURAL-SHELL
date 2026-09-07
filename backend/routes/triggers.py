@@ -484,7 +484,15 @@ def create_trigger(body: TriggerCreate):
 
 @router.put("/api/triggers/{trigger_id}")
 def update_trigger(trigger_id: int, body: TriggerUpdate):
-    """Update trigger fields (partial update)."""
+    """Update trigger fields (partial update).
+
+    IMPORTANT: A field being explicitly sent as null MUST clear the DB column.
+    We use model_fields_set to distinguish 'sent as null' from 'not sent at all'.
+    """
+    # Fields the frontend explicitly included in the request
+    # (even if the value is null). Pydantic v2 tracks this via model_fields_set.
+    sent_fields = body.model_fields_set if hasattr(body, 'model_fields_set') else set(body.dict(exclude_unset=True).keys())
+
     try:
         with _get_conn() as conn:
             existing = conn.execute(
@@ -495,20 +503,19 @@ def update_trigger(trigger_id: int, body: TriggerUpdate):
                 raise HTTPException(status_code=404, detail=f"Trigger {trigger_id} not found")
 
             # Validation for updated fields
-            if body.action_type is not None:
+            if 'action_type' in sent_fields and body.action_type is not None:
                 _validate_action_type(body.action_type)
 
-            if body.hotkey is not None:
+            if 'hotkey' in sent_fields and body.hotkey:
                 _validate_hotkey_format(body.hotkey)
-                if body.hotkey:
-                    conflict = _check_hotkey_conflict(body.hotkey, exclude_id=trigger_id)
-                    if conflict:
-                        raise HTTPException(
-                            status_code=409,
-                            detail=f"Hotkey '{body.hotkey}' is already used by trigger '{conflict['name']}'"
-                        )
+                conflict = _check_hotkey_conflict(body.hotkey, exclude_id=trigger_id)
+                if conflict:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"Hotkey '{body.hotkey}' is already used by trigger '{conflict['name']}'"
+                    )
 
-            if body.voice_phrase is not None and body.voice_phrase:
+            if 'voice_phrase' in sent_fields and body.voice_phrase:
                 conflict = _check_voice_phrase_conflict(body.voice_phrase, exclude_id=trigger_id)
                 if conflict:
                     raise HTTPException(
@@ -516,35 +523,48 @@ def update_trigger(trigger_id: int, body: TriggerUpdate):
                         detail=f"Voice phrase '{body.voice_phrase}' is already used by trigger '{conflict['name']}'"
                     )
 
-            # Build UPDATE query
+            # Build UPDATE query — use sent_fields to detect explicit clears
             updates = []
             params  = []
 
-            if body.name is not None:
+            if 'name' in sent_fields and body.name is not None:
                 if not body.name.strip():
                     raise HTTPException(status_code=400, detail="Name cannot be empty")
                 updates.append("name = ?")
                 params.append(body.name.strip())
 
-            if body.action_type is not None:
+            if 'action_type' in sent_fields and body.action_type is not None:
                 updates.append("action_type = ?")
                 params.append(body.action_type)
 
-            if body.action_data is not None:
+            if 'action_data' in sent_fields and body.action_data is not None:
                 updates.append("action_data = ?")
                 params.append(json.dumps(body.action_data))
 
-            if body.hotkey is not None:
+            # hotkey: sent means either "set new value" or "clear to null"
+            if 'hotkey' in sent_fields:
                 updates.append("hotkey = ?")
-                params.append(body.hotkey.lower().replace(" ", "") if body.hotkey else None)
+                if body.hotkey:
+                    params.append(_normalize_hotkey(body.hotkey))
+                else:
+                    params.append(None)
 
-            if body.voice_phrase is not None:
+            # voice_phrase: sent means either "set new value" or "clear to null"
+            if 'voice_phrase' in sent_fields:
                 updates.append("voice_phrase = ?")
-                params.append(body.voice_phrase.lower().strip() if body.voice_phrase else None)
+                if body.voice_phrase and body.voice_phrase.strip():
+                    params.append(body.voice_phrase.lower().strip())
+                else:
+                    params.append(None)
 
-            if body.audio_pattern is not None:
+            # audio_pattern: sent means either "set new value" or "clear to null"
+            # THIS WAS THE BUG — is not None check failed when frontend sent null
+            if 'audio_pattern' in sent_fields:
                 updates.append("audio_pattern = ?")
-                params.append(body.audio_pattern if body.audio_pattern else None)
+                if body.audio_pattern and body.audio_pattern.strip():
+                    params.append(body.audio_pattern.strip())
+                else:
+                    params.append(None)
 
             if body.enabled is not None:
                 # Only check plan limit when flipping from disabled to enabled
