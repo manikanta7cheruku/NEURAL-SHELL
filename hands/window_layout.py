@@ -103,6 +103,10 @@ def arrange_specific_windows(hwnd_list: list, layout: str,
         return _do_grid(handles, mx, my, mw, mh)
     elif layout == "stack":
         return _do_stack(handles, mx, my, mw, mh)
+    elif layout in ("minimize_others", "solo", "solo_focus"):
+        # Solo Focus: maximize the selected window(s), everything else
+        # is already minimized by the caller via minimize_hwnds
+        return _do_maximize(handles)
     else:
         print(Fore.RED + f"[LAYOUT] Unknown layout received: '{layout}'")
         return False, f"Unknown layout: {layout}"
