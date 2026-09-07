@@ -30,8 +30,8 @@ LICENSE_DB     = os.path.join(DATA_DIR, "license.db")
 
 # Timing constants
 SESSION_TIMEOUT  = 600   # 10 min idle = session ends
-SAVE_INTERVAL    = 60    # Save to local DB every 60 seconds
-SERVER_INTERVAL  = 120   # Ping server every 2 minutes
+SAVE_INTERVAL    = 300   # Save to local DB every 5 minutes (was 60s — caused log spam)
+SERVER_INTERVAL  = 600   # Ping server every 10 minutes
 
 # Session state
 _session = {
@@ -332,7 +332,9 @@ def _save_usage_time(seconds, sync_server=False):
 
         conn.commit()
         conn.close()
-        print(f"[TELEMETRY] Local DB saved — {_format_time(_get_total_minutes())}")
+        _total_fmt = _format_time(_get_total_minutes())
+        if int(_get_total_minutes()) % 10 < 2 or minutes >= 5:
+            print(f"[TELEMETRY] Local DB saved — {_total_fmt}")
     except Exception as e:
         print(f"[TELEMETRY] local DB error: {e}")
 
