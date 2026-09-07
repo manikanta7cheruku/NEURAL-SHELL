@@ -303,9 +303,6 @@ def _save_usage_time(seconds, sync_server=False):
     now_iso   = datetime.now().isoformat()
     today     = datetime.now().strftime("%Y-%m-%d")
 
-    print(f"[TELEMETRY] Saving {round(minutes, 1)} min for "
-          f"{email or device_id[:8]}...")
-
     # 1. Local telemetry.db
     try:
         init_db()
@@ -332,9 +329,11 @@ def _save_usage_time(seconds, sync_server=False):
 
         conn.commit()
         conn.close()
-        _total_fmt = _format_time(_get_total_minutes())
-        if int(_get_total_minutes()) % 10 < 2 or minutes >= 5:
-            print(f"[TELEMETRY] Local DB saved — {_total_fmt}")
+
+        # Only log periodically to keep dev console clean
+        total_mins = _get_total_minutes()
+        if int(total_mins) % 10 < 5 or sync_server:
+            print(f"[TELEMETRY] Local DB saved — {_format_time(total_mins)}")
     except Exception as e:
         print(f"[TELEMETRY] local DB error: {e}")
 
