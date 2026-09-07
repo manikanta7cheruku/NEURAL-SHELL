@@ -29,6 +29,11 @@ from trigger_modules.window_finder import get_windows_by_workspace_apps
 from trigger_modules.app_launcher import open_app_robust
 from trigger_modules.database import update_fire_stats
 
+# Per-trigger cooldown — prevents double-fire when user mashes hotkey
+# or fires same trigger via voice + hotkey within 5 seconds
+_trigger_cooldowns = {}
+_TRIGGER_COOLDOWN_SEC = 5.0
+
 
 # ─────────────────────────────────────────────────────────────────────────
 # MAIN ENTRY POINT
@@ -42,6 +47,16 @@ def execute_trigger(trigger):
     action_type = trigger.get("action_type", "")
     action_data = trigger.get("action_data", {})
     name        = trigger.get("name", "unnamed")
+    trigger_id  = trigger.get("id", 0)
+
+    # Cooldown check — prevent double-fire within 5 seconds
+    now = time.time()
+    last_fire = _trigger_cooldowns.get(trigger_id, 0)
+    if now - last_fire < _TRIGGER_COOLDOWN_SEC:
+        print(f"[TRIGGER DAEMON] Cooldown active for '{name}' "
+              f"({_TRIGGER_COOLDOWN_SEC - (now - last_fire):.1f}s remaining)")
+        return
+    _trigger_cooldowns[trigger_id] = now
 
     print(f"[TRIGGER DAEMON] Firing: {name} (type={action_type})")
 
