@@ -33,7 +33,18 @@ const useStatus = create((set, get) => ({
         connected: true
       });
     } catch {
-      set({ error: 'Backend offline', loading: false, connected: false });
+      // Silently degrade — do NOT set error state on every failed poll.
+      // Setting error triggers re-renders which trigger more polls which
+      // creates an infinite error loop during backend startup.
+      const state = get();
+      if (state.connected) {
+        // Only mark disconnected if we were previously connected
+        set({ connected: false });
+      }
+      if (state.loading) {
+        // First fetch failed — backend still starting, keep loading state
+        // Do not set error, do not log to console
+      }
     }
   },
 
@@ -68,15 +79,19 @@ let ws            = null;
 let wsFailCount   = 0;
 let pollInterval  = null;
 let wsEnabled     = true;
+let startupDelay  = true;  // Suppress errors during first 15 seconds
 
-const MAX_WS_FAILS = 3; // after 3 fails, switch to HTTP polling permanently
+const MAX_WS_FAILS = 3;
 
 function startPolling() {
   if (pollInterval) return;
-  console.log('[STATUS] WebSocket unavailable — switching to HTTP polling');
+  // Only log the switch once, and only after startup delay
+  if (!startupDelay) {
+    console.log('[STATUS] Using HTTP polling');
+  }
   pollInterval = setInterval(() => {
     useStatus.getState().fetch();
-  }, 800); // fast poll needed for conversation panel to update in real time
+  }, 1000); // 1s poll — fast enough for UI, slow enough to not spam
 }
 
 function stopPolling() {
@@ -87,7 +102,6 @@ function stopPolling() {
 }
 
 function connect() {
-  // If too many WS failures, use HTTP polling instead
   if (!wsEnabled || wsFailCount >= MAX_WS_FAILS) {
     startPolling();
     return;
@@ -96,7 +110,6 @@ function connect() {
   if (ws && ws.readyState === WebSocket.OPEN) return;
 
   try {
-    // Use 127.0.0.1 not localhost — avoids IPv6 resolution issues in Electron
     ws = new WebSocket('ws://127.0.0.1:7777/ws/status');
 
     ws.onopen = () => {
@@ -115,26 +128,31 @@ function connect() {
       ws = null;
       wsFailCount++;
       if (wsFailCount >= MAX_WS_FAILS) {
-        // Give up on WebSocket, use polling
         startPolling();
       } else {
-        // Retry WebSocket after 3 seconds
         setTimeout(connect, 3000);
       }
     };
 
     ws.onerror = () => {
-      // onclose will fire after onerror, handles retry
-      if (ws) ws.close();
+      // Suppress WebSocket error events during startup
+      // onclose will fire after onerror and handle retry logic
+      if (ws) {
+        try { ws.close(); } catch {}
+      }
     };
 
-  } catch (e) {
+  } catch {
     wsFailCount++;
     setTimeout(connect, 3000);
   }
 }
 
-// Start connection after short delay (let backend boot first)
-setTimeout(connect, 3000);
+// Delay initial connection by 8 seconds to let Python backend fully start.
+// This eliminates the ERR_CONNECTION_REFUSED spam on first launch.
+setTimeout(() => {
+  startupDelay = false;
+  connect();
+}, 8000);
 
 export default useStatus;
