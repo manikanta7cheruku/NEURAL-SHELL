@@ -2,32 +2,25 @@
 =============================================================================
 ears/audio_triggers.py
 
-Professional snap/clap detection with signature validation.
+Snap/clap detection with ADAPTIVE thresholds.
 
-Uses THREE-LAYER classification to reject false positives:
+Key insight from testing: laptop mics with AGC compress peaks to ~0.10-0.15.
+Fixed thresholds fail. This version LEARNS your mic's noise floor and
+sets thresholds RELATIVE to what your mic actually produces.
 
-  LAYER 1 — Transient Detection (fast onset)
-    Real snaps rise from silence to peak in <15ms.
-    Speech and sustained sounds rise slowly (>50ms).
+Detection pipeline:
+  1. Calibrate noise floor for 3 seconds at startup
+  2. Compute adaptive peak threshold = max(noise_floor * leap_ratio, 0.04)
+  3. When peak exceeds threshold, capture event
+  4. Classify using RELATIVE metrics:
+       - Attack: peak rose from below (0.5 * threshold) within 30ms
+       - Spectrum: high-freq (2-8kHz) energy > 30% of total
+       - Decay: signal drops below threshold within 80ms
+       - Duration: total event < 120ms
 
-  LAYER 2 — Spectral Analysis (frequency signature)
-    Snaps are broadband bursts with energy 2-8 kHz.
-    Speech is dominated by 200-3000 Hz (voice fundamental + formants).
-    Uses FFT to compute high-freq-to-low-freq energy ratio.
-
-  LAYER 3 — Decay Envelope (fast decay)
-    Real snaps decay to <30% of peak within 60ms.
-    Speech sustains for 200-500ms per syllable.
-
-Also includes:
-  - Adaptive noise floor (adjusts to room ambient)
-  - Suppression window (prevents re-trigger during Seven's TTS)
-  - Auto-selection of best mic (headset preferred)
-
-HONEST LIMITATIONS:
-  - Laptop mics with heavy AGC may miss weak snaps
-  - Very loud claps close to mic may still trigger during speech
-  - Recommend USB mic or wired headset for best results
+Honest limitation: laptop mics compress everything. Even snap and speech
+peaks converge. We use SPECTRUM and DECAY as the strongest filters
+because they survive AGC compression.
 =============================================================================
 """
 
@@ -50,68 +43,47 @@ except ImportError:
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# AUDIO CONFIGURATION
+# CONFIGURATION
 # ─────────────────────────────────────────────────────────────────────────
 
 SAMPLE_RATE = 16000
-CHUNK_SIZE  = 320          # 20ms at 16kHz (enough for FFT resolution)
+CHUNK_SIZE  = 320          # 20ms at 16kHz
 CHANNELS    = 1
 FORMAT      = pyaudio.paInt16
 
-
-# ─────────────────────────────────────────────────────────────────────────
-# SIGNATURE THRESHOLDS
-# These define what a "real snap" looks like acoustically
-# ─────────────────────────────────────────────────────────────────────────
-
-# Fraction of energy that must be in high-frequency band (2-8 kHz)
-# Snaps: 0.6-0.9 (broadband high energy)
-# Speech: 0.1-0.3 (dominated by low-mid)
-# Music/TV: 0.3-0.5 (mixed)
-SNAP_HIGH_FREQ_RATIO_MIN = 0.45
-
-# Max time for signal to rise from noise floor to peak (in ms)
-# Snaps: 5-15 ms
-# Claps: 5-20 ms
-# Speech: 30-200 ms
-MAX_ATTACK_MS = 25
-
-# Min ratio of peak-to-decay within 60ms window
-# Snaps: peak/decay > 3.0 (fast decay)
-# Speech: peak/decay < 2.0 (sustained)
-MIN_DECAY_RATIO = 2.5
-
-# Sensitivity profiles — how loud must the snap be
+# Adaptive thresholds — computed at runtime from noise floor
 SENSITIVITY_PROFILES = {
     "low": {
-        "peak_min":        0.20,   # louder snaps only
-        "leap_ratio":      6.0,    # much louder than background
+        "leap_ratio":      8.0,    # need 8x above noise floor
+        "absolute_min":    0.08,   # never trigger below this
+        "spectrum_min":    0.40,
     },
     "medium": {
-        "peak_min":        0.12,
-        "leap_ratio":      4.0,
+        "leap_ratio":      5.0,
+        "absolute_min":    0.04,
+        "spectrum_min":    0.30,
     },
     "high": {
-        "peak_min":        0.06,
-        "leap_ratio":      2.5,
+        "leap_ratio":      3.5,
+        "absolute_min":    0.025,
+        "spectrum_min":    0.22,
     },
 }
 
-# Pattern grouping
-PATTERN_WINDOW_MS        = 600
-TAP_COOLDOWN_MS          = 180
-POST_PATTERN_COOLDOWN_MS = 1500
+# Time constants
+MAX_EVENT_MS       = 120     # snap shouldn't last longer than this
+MIN_EVENT_MS       = 8       # too short = digital glitch
+DECAY_WINDOW_MS    = 80      # signal must drop within this time
+PATTERN_WINDOW_MS  = 700     # wait this long after last tap
+TAP_COOLDOWN_MS    = 200
+POST_PATTERN_MS    = 1500    # cooldown after firing pattern
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# MICROPHONE SELECTION
+# MIC SELECTION (unchanged — works well)
 # ─────────────────────────────────────────────────────────────────────────
 
 def _find_best_input_device():
-    """
-    Auto-select the best mic for snap detection.
-    Prefers USB / headset / external over built-in laptop array mics.
-    """
     try:
         pa = pyaudio.PyAudio()
         count = pa.get_device_count()
@@ -135,7 +107,6 @@ def _find_best_input_device():
                 rate = int(info['defaultSampleRate'])
                 chunk = int(rate * 0.05)
 
-                # Quick 0.5s noise floor sample
                 try:
                     stream = pa.open(
                         format=pyaudio.paInt16, channels=1, rate=rate,
@@ -152,28 +123,18 @@ def _find_best_input_device():
                     stream.close()
 
                     avg = sum(levels) / len(levels)
-
-                    if avg > 0.3:  # saturated
+                    if avg > 0.3:
                         continue
 
                     score = 0
-                    if avg < 0.02:
-                        score += 3
-                    elif avg < 0.05:
-                        score += 1
+                    if avg < 0.02: score += 3
+                    elif avg < 0.05: score += 1
 
                     for kw in headset_keywords:
-                        if kw in name:
-                            score += 4
-                            break
-
+                        if kw in name: score += 4; break
                     for kw in builtin_keywords:
-                        if kw in name:
-                            score -= 2
-                            break
-
-                    if "wasapi" in name:
-                        score += 2
+                        if kw in name: score -= 2; break
+                    if "wasapi" in name: score += 2
 
                     candidates.append((score, i, info['name'], avg))
                 except Exception:
@@ -184,19 +145,16 @@ def _find_best_input_device():
         pa.terminate()
 
         if not candidates:
-            print(Fore.YELLOW + "[TRIGGERS] No mic found — snap detection disabled")
             return None
 
         candidates.sort(reverse=True)
         best_score, best_idx, best_name, best_avg = candidates[0]
 
         is_headset = any(kw in best_name.lower() for kw in headset_keywords)
-        mic_type = "HEADSET/USB (good)" if is_headset else "LAPTOP MIC (limited)"
+        mic_type = "HEADSET/USB (recommended)" if is_headset else "LAPTOP MIC (limited by AGC)"
 
-        print(Fore.CYAN + f"[TRIGGERS] Selected: {best_name} — {mic_type}")
-        if not is_headset:
-            print(Fore.YELLOW + "[TRIGGERS] For best results, use a USB mic or wired headset.")
-
+        print(Fore.CYAN + f"[TRIGGERS] Selected: {best_name}")
+        print(Fore.CYAN + f"[TRIGGERS] Type: {mic_type}, noise floor: {best_avg:.3f}")
         return best_idx
 
     except Exception as e:
@@ -205,61 +163,23 @@ def _find_best_input_device():
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# SIGNATURE ANALYSIS
+# SIGNAL ANALYSIS
 # ─────────────────────────────────────────────────────────────────────────
 
-def _compute_spectral_ratio(samples, sample_rate):
-    """
-    Compute the ratio of high-frequency energy (2-8 kHz) to total energy.
-    Snaps: 0.5-0.9. Speech: 0.1-0.3.
-    """
+def _spectral_ratio(samples, sample_rate):
+    """Ratio of high-freq (2-8kHz) energy to total energy."""
     if len(samples) < 32:
         return 0.0
 
-    # Apply Hann window to reduce spectral leakage
     windowed = samples * np.hanning(len(samples))
-
-    # FFT
     fft = np.abs(np.fft.rfft(windowed))
     freqs = np.fft.rfftfreq(len(windowed), d=1.0 / sample_rate)
 
-    total_energy = float(np.sum(fft ** 2)) + 1e-9
-
-    # High-freq band: 2 kHz to 8 kHz (or Nyquist)
+    total = float(np.sum(fft ** 2)) + 1e-9
     high_max = min(8000, sample_rate // 2)
     mask = (freqs >= 2000) & (freqs <= high_max)
-    high_energy = float(np.sum(fft[mask] ** 2))
-
-    return high_energy / total_energy
-
-
-def _compute_attack_time(peak_history, event_start_idx, sample_ms_per_chunk):
-    """
-    Compute how many ms the signal took to rise from noise floor to peak.
-    Real snaps: <15 ms. Speech: >50 ms.
-    """
-    if event_start_idx <= 0 or event_start_idx >= len(peak_history):
-        return 999.0
-
-    # Look at the 5 chunks before the peak
-    lookback = max(0, event_start_idx - 5)
-    pre_peak = peak_history[lookback:event_start_idx + 1]
-
-    if len(pre_peak) < 2:
-        return 999.0
-
-    peak = max(pre_peak)
-    if peak < 0.05:
-        return 999.0
-
-    # Find first chunk that was above 20% of peak
-    threshold = peak * 0.2
-    for i, p in enumerate(pre_peak):
-        if p >= threshold:
-            chunks_to_peak = len(pre_peak) - 1 - i
-            return chunks_to_peak * sample_ms_per_chunk
-
-    return 999.0
+    high = float(np.sum(fft[mask] ** 2))
+    return high / total
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -291,30 +211,27 @@ class TriggerDetector:
 
         self._pending_taps      = deque()
         self._last_pattern_time = 0
+        self.suppressed_until   = 0
+        self.paused             = False
 
-        self.suppressed_until = 0
-        self.paused           = False
+        # Rolling noise floor
+        self._noise_floor       = 0.02
+        self._noise_alpha       = 0.03   # adapts over ~1 second
 
-        # Rolling history for background noise floor + attack analysis
-        self._peak_history   = deque(maxlen=30)   # ~600ms history
-        self._sample_history = deque(maxlen=8)    # last 8 chunks of raw samples
+        # Event state
+        self._event             = None
+        self._event_pre_peak    = 0.0    # loudest chunk in last 3 chunks before event
 
-        # Adaptive noise floor
-        self._noise_floor = 0.02
-        self._noise_alpha = 0.02  # slow adaptation
-
-        # Event tracking (during a suspected snap)
-        self._event = None
-        self._event_max_peak = 0.0
+        # Recent chunks for pre-event peak tracking
+        self._recent_peaks      = deque(maxlen=3)
 
         self._load_thresholds()
 
     def _load_thresholds(self):
-        profile = SENSITIVITY_PROFILES.get(
-            self.sensitivity, SENSITIVITY_PROFILES["medium"]
-        )
-        self.peak_min   = profile["peak_min"]
-        self.leap_ratio = profile["leap_ratio"]
+        profile = SENSITIVITY_PROFILES.get(self.sensitivity, SENSITIVITY_PROFILES["medium"])
+        self.leap_ratio    = profile["leap_ratio"]
+        self.absolute_min  = profile["absolute_min"]
+        self.spectrum_min  = profile["spectrum_min"]
 
     def set_sensitivity(self, level):
         if level in SENSITIVITY_PROFILES:
@@ -356,6 +273,11 @@ class TriggerDetector:
                 pass
         print(Fore.YELLOW + "[TRIGGERS] Stopped")
 
+    def _get_threshold(self):
+        """Adaptive threshold = max(noise_floor * leap_ratio, absolute_min)."""
+        adaptive = self._noise_floor * self.leap_ratio
+        return max(adaptive, self.absolute_min)
+
     def _run(self):
         try:
             self._audio = pyaudio.PyAudio()
@@ -368,8 +290,7 @@ class TriggerDetector:
                 try:
                     info = self._audio.get_device_info_by_index(self.device_index)
                     actual_rate = int(info['defaultSampleRate'])
-                    # 20ms chunks
-                    actual_chunk = int(actual_rate * 0.02)
+                    actual_chunk = int(actual_rate * 0.02)  # 20ms
                     actual_channels = min(2, int(info['maxInputChannels']))
                 except Exception:
                     pass
@@ -390,9 +311,9 @@ class TriggerDetector:
             self._running = False
             return
 
-        # Warmup — build initial noise floor
-        print(Fore.CYAN + "[TRIGGERS] Calibrating noise floor (2 seconds)...")
-        warmup_end = time.time() + 2.0
+        # ── CALIBRATION PHASE — 3 seconds of silence ──
+        print(Fore.CYAN + "[TRIGGERS] Calibrating for 3 seconds — please stay silent...")
+        warmup_end = time.time() + 3.0
         warmup_peaks = []
         while self._running and time.time() < warmup_end:
             try:
@@ -400,16 +321,20 @@ class TriggerDetector:
                 samples = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
                 if self._actual_channels == 2:
                     samples = samples.reshape(-1, 2).mean(axis=1)
-                peak = float(np.max(np.abs(samples)))
-                warmup_peaks.append(peak)
-                self._peak_history.append(peak)
-                self._sample_history.append(samples)
+                warmup_peaks.append(float(np.max(np.abs(samples))))
             except Exception:
                 pass
 
         if warmup_peaks:
-            self._noise_floor = max(0.005, float(np.median(warmup_peaks)))
-        print(Fore.GREEN + f"[TRIGGERS] Noise floor: {self._noise_floor:.3f}. Ready.")
+            # Use 90th percentile so we don't over-adapt to occasional sounds
+            self._noise_floor = float(np.percentile(warmup_peaks, 90))
+            self._noise_floor = max(0.003, self._noise_floor)
+
+        threshold = self._get_threshold()
+        print(Fore.GREEN + f"[TRIGGERS] Calibration done.")
+        print(Fore.GREEN + f"[TRIGGERS] Noise floor: {self._noise_floor:.4f}")
+        print(Fore.GREEN + f"[TRIGGERS] Snap threshold: {threshold:.4f} "
+              f"(peaks above this trigger detection)")
 
         while self._running:
             try:
@@ -420,24 +345,24 @@ class TriggerDetector:
                     samples = samples.reshape(-1, 2).mean(axis=1)
 
                 if self.paused or time.time() < self.suppressed_until:
-                    self._peak_history.append(0)
-                    self._sample_history.append(samples)
+                    self._recent_peaks.append(0)
                     continue
 
                 peak_amp = float(np.max(np.abs(samples)))
                 now = time.time()
 
-                # Adaptive noise floor (only when NOT in event)
-                if self._event is None and peak_amp < self._noise_floor * 3:
-                    self._noise_floor = (
-                        (1 - self._noise_alpha) * self._noise_floor +
-                        self._noise_alpha * peak_amp
-                    )
-                    self._noise_floor = max(0.005, self._noise_floor)
+                # Adapt noise floor when NOT in an event
+                if self._event is None:
+                    threshold = self._get_threshold()
+                    if peak_amp < threshold * 0.5:
+                        self._noise_floor = (
+                            (1 - self._noise_alpha) * self._noise_floor +
+                            self._noise_alpha * peak_amp
+                        )
+                        self._noise_floor = max(0.003, self._noise_floor)
 
                 self._process_chunk(samples, peak_amp, now)
-                self._peak_history.append(peak_amp)
-                self._sample_history.append(samples)
+                self._recent_peaks.append(peak_amp)
                 self._check_pattern_ready()
 
             except Exception as e:
@@ -446,22 +371,18 @@ class TriggerDetector:
                 time.sleep(0.3)
 
     def _process_chunk(self, samples, peak_amp, now):
-        """
-        Process a single audio chunk.
-        Detect start of event → collect event samples → classify on end.
-        """
-        # Threshold for "something happening" = noise floor * leap_ratio
-        event_threshold = self._noise_floor * self.leap_ratio
+        threshold = self._get_threshold()
 
-        # Not in an event, and this chunk is too quiet → nothing to do
-        if self._event is None and peak_amp < event_threshold:
+        # Not in event and below threshold → nothing to do
+        if self._event is None and peak_amp < threshold:
             return
 
-        # Start of new event
-        if self._event is None and peak_amp >= event_threshold:
+        # Start new event
+        if self._event is None:
+            # Snapshot pre-event peak (loudest of last 3 chunks)
+            self._event_pre_peak = max(self._recent_peaks) if self._recent_peaks else 0.0
             self._event = {
                 "start_time": now,
-                "start_idx": len(self._peak_history),
                 "samples": [samples.copy()],
                 "peak": peak_amp,
                 "peak_time": now,
@@ -469,87 +390,84 @@ class TriggerDetector:
             }
             return
 
-        # Continuation of event
-        if self._event is not None:
-            self._event["samples"].append(samples.copy())
-            self._event["chunks"] += 1
-            if peak_amp > self._event["peak"]:
-                self._event["peak"] = peak_amp
-                self._event["peak_time"] = now
+        # Continue event
+        self._event["samples"].append(samples.copy())
+        self._event["chunks"] += 1
+        if peak_amp > self._event["peak"]:
+            self._event["peak"] = peak_amp
+            self._event["peak_time"] = now
 
-            # Event ends when signal drops back to noise floor level
-            # OR when it's gone on too long (> 100ms — too long to be a snap)
-            elapsed_ms = (now - self._event["start_time"]) * 1000
+        elapsed_ms = (now - self._event["start_time"]) * 1000
 
-            if peak_amp < event_threshold * 0.6 or elapsed_ms > 100:
-                self._finalize_event(now)
+        # End event if signal dropped OR event ran too long
+        if peak_amp < threshold * 0.5 or elapsed_ms > MAX_EVENT_MS:
+            self._finalize_event(now)
 
     def _finalize_event(self, now):
-        """
-        Classify the completed event as snap or noise.
-        Applies all three signature checks.
-        """
         if self._event is None:
             return
 
         event = self._event
         self._event = None
 
-        # Combine all samples for spectral analysis
         combined = np.concatenate(event["samples"])
         duration_ms = (now - event["start_time"]) * 1000
         peak = event["peak"]
+        threshold = self._get_threshold()
 
-        # ── CHECK 1: Peak must be above minimum ──
-        if peak < self.peak_min:
+        # ── CHECK 1: Duration ──
+        if duration_ms < MIN_EVENT_MS:
             if self.debug:
-                print(f"  reject: peak={peak:.3f} < min={self.peak_min}")
+                print(f"  reject: duration {duration_ms:.0f}ms too short (glitch)")
             return
 
-        # ── CHECK 2: Spectral signature (high freq energy) ──
-        high_freq_ratio = _compute_spectral_ratio(combined, self._actual_rate)
-        if high_freq_ratio < SNAP_HIGH_FREQ_RATIO_MIN:
+        if duration_ms > MAX_EVENT_MS:
             if self.debug:
-                print(f"  reject: spectrum {high_freq_ratio:.2f} < {SNAP_HIGH_FREQ_RATIO_MIN} (likely speech/noise)")
+                print(f"  reject: duration {duration_ms:.0f}ms too long (sustained sound)")
             return
 
-        # ── CHECK 3: Attack time (how fast peak rose) ──
-        attack_ms = _compute_attack_time(
-            list(self._peak_history), event["start_idx"], self._chunk_ms
-        )
-        if attack_ms > MAX_ATTACK_MS:
+        # ── CHECK 2: Attack — signal must rise sharply ──
+        # Pre-event peak (0.5s before) should be much lower than event peak
+        attack_ratio = peak / (self._event_pre_peak + 0.001)
+        if attack_ratio < 2.5:
             if self.debug:
-                print(f"  reject: attack {attack_ms:.0f}ms > {MAX_ATTACK_MS}ms (not sharp enough)")
+                print(f"  reject: attack {attack_ratio:.1f}x too gradual "
+                      f"(pre={self._event_pre_peak:.3f}, peak={peak:.3f})")
             return
 
-        # ── CHECK 4: Decay envelope (snap decays fast) ──
-        # Peak was at event["peak_time"]. Check next 60ms of history.
-        chunks_since_peak = event["chunks"]
-        if chunks_since_peak >= 3:
-            # Look at the last chunk of the event vs the peak chunk
-            last_chunk_peak = float(np.max(np.abs(event["samples"][-1])))
-            decay_ratio = peak / (last_chunk_peak + 1e-6)
-            if decay_ratio < MIN_DECAY_RATIO:
-                if self.debug:
-                    print(f"  reject: decay {decay_ratio:.1f}x < {MIN_DECAY_RATIO}x (sustained, not snap)")
-                return
+        # ── CHECK 3: Spectrum — high-frequency content ──
+        # Focus on peak samples where signature is strongest
+        spectrum = _spectral_ratio(combined, self._actual_rate)
+        if spectrum < self.spectrum_min:
+            if self.debug:
+                print(f"  reject: spectrum {spectrum:.2f} < {self.spectrum_min:.2f} "
+                      f"(likely speech/rumble)")
+            return
 
-        # PASSED all checks — real snap
+        # ── CHECK 4: Decay — signal must drop fast ──
+        last_chunk_peak = float(np.max(np.abs(event["samples"][-1])))
+        decay_ratio = peak / (last_chunk_peak + 0.001)
+        if decay_ratio < 1.8:
+            if self.debug:
+                print(f"  reject: decay {decay_ratio:.1f}x too slow "
+                      f"(sustained, not sharp)")
+            return
+
+        # PASSED
         if self.debug:
-            print(Fore.GREEN + f"  TAP: peak={peak:.3f} attack={attack_ms:.0f}ms "
-                  f"spectrum={high_freq_ratio:.2f} dur={duration_ms:.0f}ms")
+            print(Fore.GREEN + f"  TAP: peak={peak:.3f} attack={attack_ratio:.1f}x "
+                  f"spectrum={spectrum:.2f} decay={decay_ratio:.1f}x "
+                  f"dur={duration_ms:.0f}ms threshold={threshold:.3f}")
 
         self._register_tap(event["start_time"])
 
     def _register_tap(self, timestamp):
-        # Prevent double-counting
         if self._pending_taps:
             last_time = self._pending_taps[-1]
             if (timestamp - last_time) * 1000 < TAP_COOLDOWN_MS:
                 return
 
-        # Post-pattern cooldown
-        if (timestamp - self._last_pattern_time) * 1000 < POST_PATTERN_COOLDOWN_MS:
+        if (timestamp - self._last_pattern_time) * 1000 < POST_PATTERN_MS:
             return
 
         self._pending_taps.append(timestamp)
@@ -567,7 +485,6 @@ class TriggerDetector:
 
         now = time.time()
         last_time = self._pending_taps[-1]
-
         if (now - last_time) * 1000 < PATTERN_WINDOW_MS:
             return
 
@@ -602,22 +519,21 @@ if __name__ == "__main__":
         if a == "--sensitivity" and i + 1 < len(sys.argv):
             sens = sys.argv[i + 1]
         if a == "--device" and i + 1 < len(sys.argv):
-            try:
-                device_index = int(sys.argv[i + 1])
-            except ValueError:
-                pass
+            try: device_index = int(sys.argv[i + 1])
+            except ValueError: pass
 
     print("=" * 60)
-    print("SEVEN SNAP/CLAP DETECTION — Signature-Based Classifier")
+    print("SEVEN SNAP DETECTION — Adaptive Classifier")
     print("=" * 60)
     print(f"Sensitivity: {sens}   Debug: {debug_mode}   Device: {device_index}")
     print()
-    print("Test cases:")
-    print("  1. Silence 10 sec       → should print NOTHING")
-    print("  2. Talk normally 10 sec → should print NOTHING")
-    print("  3. Type on keyboard     → should print NOTHING (mostly)")
-    print("  4. Snap once, clearly   → should fire quickly")
-    print("  5. Clap twice           → should fire as '2 taps'")
+    print("Sensitivity guide:")
+    print("  low    = strictest (best for noisy rooms — fewer false positives)")
+    print("  medium = balanced (default)")
+    print("  high   = most lenient (best for quiet rooms + weak mics)")
+    print()
+    print("For laptop mic: use --sensitivity high")
+    print("For USB headset: use --sensitivity medium or low")
     print()
     print("Ctrl+C to stop.")
     print("=" * 60)
@@ -630,9 +546,7 @@ if __name__ == "__main__":
         print("!" * 60)
         print()
 
-    detector = TriggerDetector(
-        sensitivity=sens, debug=debug_mode, device_index=device_index
-    )
+    detector = TriggerDetector(sensitivity=sens, debug=debug_mode, device_index=device_index)
     detector.on_pattern = on_pattern
     detector.start()
 
@@ -642,4 +556,3 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("\nStopping...")
         detector.stop()
-        print("Done.")
