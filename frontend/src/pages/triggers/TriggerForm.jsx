@@ -436,21 +436,45 @@ export default function TriggerForm({ initial, onSave, onCancel, workspaces }) {
               <div className="flex items-start gap-2 ml-[22px] px-3 py-2 rounded-lg
                               bg-amber-500/[0.03] border border-amber-500/15">
                 <Headphones size={11} className="text-amber-400/60 flex-shrink-0 mt-0.5" />
-                <div>
+                <div className="flex-1">
                   <p className="text-[9px] text-white/55 leading-relaxed">
-                    <span className="text-amber-300/85 font-medium">Recommended: USB mic or wired headset.</span> Laptop
-                    mics use noise suppression that flattens snap sounds — detection may miss or misfire.
+                    <span className="text-amber-300/85 font-medium">Requires USB mic or wired headset.</span> Laptop
+                    mics use noise suppression that flattens snap sounds — detection will not work reliably.
                   </p>
                   <p className="text-[8.5px] text-white/40 mt-1.5">
-                    <span className="text-white/55 font-medium">Snap</span> = sharp burst near mic (fingers, clap, knock)
+                    Seven filters voice/keyboard/rumble using spike ratio, spectral centroid,
+                    and decay envelope. For best accuracy, calibrate to your mic:
                   </p>
-                  <p className="text-[8.5px] text-white/40 mt-0.5">
-                    <span className="text-white/55 font-medium">Voice</span> = spoken command like "Seven Focus" — more reliable
-                  </p>
-                  <p className="text-[8px] text-white/30 mt-1.5 italic">
-                    Speech, keyboard clicks, and door slams are filtered — but not perfectly.
-                    Combine snap with a hotkey for redundancy.
-                  </p>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const btn = event.target;
+                      const originalText = btn.textContent;
+                      btn.textContent = 'Snap 3x in 8s...';
+                      btn.disabled = true;
+                      try {
+                        const res = await fetch('/api/triggers/calibrate-snap', {
+                          method: 'POST',
+                        });
+                        const data = await res.json();
+                        if (data.success) {
+                          btn.textContent = `Calibrated (${data.peak_min})`;
+                          setTimeout(() => { btn.textContent = originalText; btn.disabled = false; }, 3500);
+                        } else {
+                          btn.textContent = data.message || 'Failed — try again';
+                          setTimeout(() => { btn.textContent = originalText; btn.disabled = false; }, 3500);
+                        }
+                      } catch (err) {
+                        btn.textContent = 'Error — try again';
+                        setTimeout(() => { btn.textContent = originalText; btn.disabled = false; }, 3500);
+                      }
+                    }}
+                    className="mt-2 px-3 py-1 rounded-md text-[9px] font-medium
+                               bg-amber-500/15 border border-amber-500/30
+                               text-amber-200 hover:bg-amber-500/25
+                               transition-all disabled:opacity-50 disabled:cursor-wait">
+                    Calibrate My Snap
+                  </button>
                 </div>
               </div>
             </div>
