@@ -11,8 +11,8 @@
   }
 
   html, body {
-    width: 460px;
-    height: 380px;
+    width: 380px;
+    height: 300px;
     background: transparent;
     overflow: hidden;
     font-family: -apple-system, 'SF Pro Display', 'Segoe UI Variable Display',
@@ -24,66 +24,59 @@
     cursor: default;
   }
 
-  /* ═══════════════════════════════════════════════════════════════════
-     GLASSMORPHIC CARD — Apple-inspired frosted panel
-  ═══════════════════════════════════════════════════════════════════ */
   .card {
     position: relative;
-    width: 460px;
-    height: 380px;
-    background: rgba(14, 14, 22, 0.72);
-    backdrop-filter: blur(48px) saturate(160%);
-    -webkit-backdrop-filter: blur(48px) saturate(160%);
+    width: 380px;
+    height: 300px;
+    background: rgba(14, 14, 22, 0.78);
+    backdrop-filter: blur(42px) saturate(160%);
+    -webkit-backdrop-filter: blur(42px) saturate(160%);
     border-left:   1px solid rgba(255, 255, 255, 0.08);
     border-right:  1px solid rgba(255, 255, 255, 0.08);
     border-bottom: 1px solid rgba(255, 255, 255, 0.12);
-    border-radius: 0 0 22px 22px;
-    padding: 0;
+    border-radius: 0 0 18px 18px;
     display: flex;
     flex-direction: column;
     transform: translateY(-105%);
     opacity: 0;
     will-change: transform, opacity;
     box-shadow:
-      0 20px 60px rgba(0, 0, 0, 0.45),
-      0 0 0 1px rgba(255, 255, 255, 0.04),
+      0 16px 48px rgba(0, 0, 0, 0.45),
       inset 0 1px 0 rgba(255, 255, 255, 0.06);
     overflow: hidden;
   }
 
-  /* Subtle gradient sheen on top */
   .card::before {
     content: '';
     position: absolute;
     top: 0; left: 0; right: 0;
-    height: 60%;
+    height: 55%;
     background: linear-gradient(180deg,
       rgba(255, 255, 255, 0.04) 0%,
       transparent 100%);
     pointer-events: none;
-    border-radius: 0 0 22px 22px;
+    border-radius: 0 0 18px 18px;
   }
 
-  /* Bottom accent divider glow */
   .card::after {
     content: '';
     position: absolute;
-    left: 22%; right: 22%;
+    left: 24%; right: 24%;
     bottom: 0;
     height: 1px;
     background: linear-gradient(90deg,
       transparent,
-      rgba(160, 130, 255, 0.35),
+      rgba(160, 130, 255, 0.32),
       transparent);
     pointer-events: none;
   }
 
   .card.show {
-    animation: slideDown 0.55s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    animation: slideDown 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
   }
 
   .card.hiding {
-    animation: slideUp 0.32s cubic-bezier(0.55, 0, 0.85, 0.35) forwards;
+    animation: slideUp 0.3s cubic-bezier(0.55, 0, 0.85, 0.35) forwards;
   }
 
   @keyframes slideDown {
@@ -96,14 +89,12 @@
     100% { transform: translateY(-105%); opacity: 0; }
   }
 
-  /* ═══════════════════════════════════════════════════════════════════
-     HEADER
-  ═══════════════════════════════════════════════════════════════════ */
+  /* ═══════════════════════ HEADER ═══════════════════════ */
   .header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 16px 22px 12px;
+    padding: 11px 16px 8px;
     position: relative;
     z-index: 2;
   }
@@ -111,185 +102,134 @@
   .header-left {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
   }
 
-  .brand-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 3px 8px;
-    background: rgba(160, 130, 255, 0.14);
-    border: 1px solid rgba(180, 150, 255, 0.28);
-    border-radius: 6px;
-    font-size: 8.5px;
-    font-weight: 700;
-    letter-spacing: 0.16em;
-    color: rgba(210, 190, 255, 0.95);
-    text-transform: uppercase;
-    box-shadow: 0 0 12px rgba(160, 130, 255, 0.15);
-  }
-
-  .brand-badge::before {
-    content: '';
-    width: 5px;
-    height: 5px;
+  .brand-dot {
+    width: 6px;
+    height: 6px;
     border-radius: 50%;
     background: rgba(180, 150, 255, 0.9);
-    box-shadow: 0 0 6px rgba(180, 150, 255, 0.8);
-    animation: pulse 2s ease-in-out infinite;
+    box-shadow: 0 0 8px rgba(180, 150, 255, 0.6);
+    animation: pulse 2.4s ease-in-out infinite;
   }
 
   @keyframes pulse {
-    0%, 100% { opacity: 0.6; transform: scale(0.9); }
-    50%      { opacity: 1;   transform: scale(1.1); }
+    0%, 100% { opacity: 0.55; transform: scale(0.9); }
+    50%      { opacity: 1;    transform: scale(1.15); }
   }
 
   .header-title {
-    font-size: 12.5px;
+    font-size: 10.5px;
     font-weight: 600;
-    color: rgba(255, 255, 255, 0.92);
-    letter-spacing: -0.005em;
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+    color: rgba(255, 255, 255, 0.85);
+    letter-spacing: 0.02em;
   }
 
   .header-title .sub {
-    color: rgba(255, 255, 255, 0.4);
+    color: rgba(255, 255, 255, 0.35);
     font-weight: 400;
-    margin-left: 6px;
-    font-size: 11px;
+    margin-left: 5px;
   }
 
   .btn-close {
-    width: 22px;
-    height: 22px;
+    width: 18px;
+    height: 18px;
     display: flex;
     align-items: center;
     justify-content: center;
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.07);
     border-radius: 50%;
-    color: rgba(255, 255, 255, 0.45);
-    font-size: 12px;
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 10px;
     line-height: 1;
     cursor: pointer;
     transition: all 0.18s ease;
     padding: 0;
-    font-weight: 500;
   }
 
   .btn-close:hover {
     background: rgba(255, 100, 100, 0.15);
     border-color: rgba(255, 120, 120, 0.35);
     color: rgba(255, 200, 200, 0.9);
-    transform: scale(1.05);
   }
 
-  /* ═══════════════════════════════════════════════════════════════════
-     PHASES
-  ═══════════════════════════════════════════════════════════════════ */
+  /* ═══════════════════════ PHASES ═══════════════════════ */
   .phase {
     flex: 1;
     display: none;
     flex-direction: column;
-    padding: 0 22px 20px;
+    padding: 0 16px 14px;
     position: relative;
     z-index: 2;
-    animation: fadeIn 0.32s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    min-height: 0;
   }
 
   .phase.active {
     display: flex;
+    animation: fadeIn 0.28s cubic-bezier(0.16, 1, 0.3, 1) forwards;
   }
 
   @keyframes fadeIn {
-    0%   { opacity: 0; transform: translateY(4px); }
+    0%   { opacity: 0; transform: translateY(3px); }
     100% { opacity: 1; transform: translateY(0); }
   }
 
-  /* ═══════════════════════════════════════════════════════════════════
-     PHASE 1 — LAYOUT PICKER
-  ═══════════════════════════════════════════════════════════════════ */
-  .layout-hint {
-    font-size: 9.5px;
-    color: rgba(255, 255, 255, 0.35);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    margin-bottom: 10px;
-    font-weight: 500;
-  }
-
+  /* ═══════════════════════ PHASE 1: LAYOUT PICKER ═══════════════════════ */
   .layout-grid {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
-    gap: 8px;
+    gap: 6px;
     flex: 1;
+    align-content: center;
   }
 
   .layout-card {
     background: rgba(255, 255, 255, 0.03);
     border: 1px solid rgba(255, 255, 255, 0.06);
-    border-radius: 12px;
-    padding: 10px 8px 8px;
+    border-radius: 9px;
+    padding: 8px 6px 6px;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 6px;
+    gap: 5px;
     cursor: pointer;
-    transition: all 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+    transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
     position: relative;
     overflow: hidden;
+    height: 68px;
   }
 
   .layout-card:hover {
     background: rgba(160, 130, 255, 0.12);
     border-color: rgba(180, 150, 255, 0.32);
-    transform: translateY(-2px);
-    box-shadow:
-      0 8px 24px rgba(0, 0, 0, 0.3),
-      0 0 20px rgba(160, 130, 255, 0.1);
+    transform: translateY(-1.5px);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
   }
 
   .layout-card:active {
-    transform: scale(0.96) translateY(0);
+    transform: scale(0.96);
     transition-duration: 0.08s;
   }
 
-  .layout-card::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(135deg,
-      rgba(180, 150, 255, 0.08) 0%,
-      transparent 50%);
-    opacity: 0;
-    transition: opacity 0.22s ease;
-    pointer-events: none;
-    border-radius: 12px;
-  }
-
-  .layout-card:hover::after { opacity: 1; }
-
   .layout-preview {
     width: 100%;
-    height: 40px;
+    height: 30px;
   }
 
   .zone {
-    fill: rgba(255, 255, 255, 0.13);
-    stroke: rgba(255, 255, 255, 0.05);
+    fill: rgba(255, 255, 255, 0.14);
+    stroke: rgba(255, 255, 255, 0.06);
     stroke-width: 0.5;
-    transition: all 0.22s ease;
+    transition: all 0.2s ease;
   }
 
-  .zone-accent {
-    fill: rgba(160, 130, 255, 0.5);
-  }
+  .zone-accent { fill: rgba(160, 130, 255, 0.48); }
 
   .layout-card:hover .zone {
-    fill: rgba(180, 150, 255, 0.5);
-    stroke: rgba(200, 170, 255, 0.3);
+    fill: rgba(180, 150, 255, 0.48);
   }
 
   .layout-card:hover .zone-accent {
@@ -297,39 +237,38 @@
   }
 
   .layout-name {
-    font-size: 10px;
+    font-size: 9px;
     font-weight: 500;
-    color: rgba(255, 255, 255, 0.62);
+    color: rgba(255, 255, 255, 0.6);
     letter-spacing: 0.01em;
-    transition: color 0.22s ease;
+    transition: color 0.2s ease;
+    white-space: nowrap;
   }
 
   .layout-card:hover .layout-name {
     color: rgba(230, 215, 255, 0.98);
   }
 
-  /* ═══════════════════════════════════════════════════════════════════
-     PHASE 2 — WINDOW ASSIGNMENT
-  ═══════════════════════════════════════════════════════════════════ */
-  .assign-header {
+  /* ═══════════════════════ PHASE 2: DRAG ASSIGNMENT ═══════════════════════ */
+  .assign-topbar {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 12px;
+    margin-bottom: 8px;
   }
 
   .back-btn {
     display: flex;
     align-items: center;
-    gap: 5px;
+    gap: 4px;
     background: none;
     border: none;
     color: rgba(255, 255, 255, 0.5);
-    font-size: 10.5px;
+    font-size: 10px;
     font-weight: 500;
     cursor: pointer;
-    padding: 4px 6px;
-    border-radius: 6px;
+    padding: 3px 5px;
+    border-radius: 5px;
     transition: all 0.18s ease;
     font-family: inherit;
   }
@@ -339,157 +278,220 @@
     color: rgba(255, 255, 255, 0.85);
   }
 
-  .assign-title {
-    font-size: 10.5px;
-    color: rgba(180, 150, 255, 0.85);
-    font-weight: 600;
-    letter-spacing: 0.02em;
+  .assign-hint {
+    font-size: 8.5px;
+    color: rgba(180, 150, 255, 0.7);
+    font-weight: 500;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
   }
 
-  .slots-container {
+  /* ── Layout Preview with drop zones ── */
+  .preview-container {
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 8px;
+    padding: 8px;
     display: flex;
-    flex-direction: column;
-    gap: 6px;
-    flex: 1;
+    align-items: center;
+    justify-content: center;
+    height: 90px;
+    margin-bottom: 8px;
+  }
+
+  .preview-grid {
+    display: grid;
+    gap: 4px;
+    width: 100%;
+    height: 100%;
+  }
+
+  .drop-zone {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1.5px dashed rgba(255, 255, 255, 0.15);
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px 6px;
+    font-size: 9px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.35);
+    transition: all 0.2s ease;
+    text-align: center;
+    line-height: 1.15;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+  }
+
+  .drop-zone.assigned {
+    background: linear-gradient(135deg,
+      rgba(160, 130, 255, 0.22) 0%,
+      rgba(120, 90, 220, 0.15) 100%);
+    border: 1.5px solid rgba(180, 150, 255, 0.42);
+    color: rgba(230, 215, 255, 0.98);
+    font-weight: 500;
+  }
+
+  .drop-zone.drag-over {
+    background: rgba(180, 150, 255, 0.28);
+    border: 1.5px solid rgba(200, 170, 255, 0.7);
+    color: rgba(255, 255, 255, 1);
+    transform: scale(1.02);
+  }
+
+  .drop-zone .zone-num {
+    display: inline-block;
+    background: rgba(180, 150, 255, 0.4);
+    color: #fff;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    font-size: 8.5px;
+    font-weight: 700;
+    line-height: 14px;
+    margin-right: 4px;
+    flex-shrink: 0;
+  }
+
+  .drop-zone.assigned .zone-num {
+    background: rgba(180, 150, 255, 0.85);
+  }
+
+  /* ── Draggable window pills ── */
+  .apps-scroll {
+    display: flex;
+    gap: 5px;
+    flex-wrap: wrap;
+    align-content: flex-start;
+    max-height: 60px;
     overflow-y: auto;
+    padding: 2px;
     scrollbar-width: thin;
     scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
-    padding-right: 4px;
-    max-height: 200px;
   }
 
-  .slots-container::-webkit-scrollbar {
-    width: 4px;
+  .apps-scroll::-webkit-scrollbar {
+    width: 3px;
   }
 
-  .slots-container::-webkit-scrollbar-thumb {
+  .apps-scroll::-webkit-scrollbar-thumb {
     background: rgba(255, 255, 255, 0.1);
     border-radius: 2px;
   }
 
-  .slot {
-    display: flex;
+  .app-pill {
+    display: inline-flex;
     align-items: center;
-    gap: 10px;
-    background: rgba(255, 255, 255, 0.025);
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    border-radius: 10px;
-    padding: 8px 12px;
-    transition: all 0.18s ease;
-  }
-
-  .slot:hover {
-    background: rgba(255, 255, 255, 0.045);
-    border-color: rgba(255, 255, 255, 0.1);
-  }
-
-  .slot-badge {
-    width: 24px;
-    height: 24px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: linear-gradient(135deg,
-      rgba(160, 130, 255, 0.28) 0%,
-      rgba(120, 90, 220, 0.22) 100%);
-    border: 1px solid rgba(180, 150, 255, 0.3);
-    border-radius: 7px;
-    font-size: 10.5px;
-    font-weight: 700;
-    color: rgba(230, 215, 255, 0.98);
-    flex-shrink: 0;
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
-  }
-
-  .slot-select {
-    flex: 1;
-    background: transparent;
-    border: none;
-    color: rgba(255, 255, 255, 0.85);
-    font-family: inherit;
-    font-size: 11px;
+    gap: 5px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    padding: 4px 10px;
+    font-size: 10px;
     font-weight: 500;
-    outline: none;
-    cursor: pointer;
-    padding: 3px 4px;
-    letter-spacing: -0.005em;
-    appearance: none;
-    -webkit-appearance: none;
-    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' stroke='rgba(255,255,255,0.4)' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>");
-    background-repeat: no-repeat;
-    background-position: right 4px center;
-    padding-right: 20px;
+    color: rgba(255, 255, 255, 0.75);
+    cursor: grab;
+    transition: all 0.16s ease;
+    white-space: nowrap;
+    max-width: 130px;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
-  .slot-select option {
-    background: rgba(20, 20, 30, 0.98);
-    color: rgba(255, 255, 255, 0.9);
-    padding: 6px;
+  .app-pill:hover {
+    background: rgba(160, 130, 255, 0.14);
+    border-color: rgba(180, 150, 255, 0.3);
+    color: rgba(230, 215, 255, 0.98);
+    transform: translateY(-1px);
   }
 
-  .slot-select:focus {
-    color: rgba(220, 200, 255, 1);
+  .app-pill:active {
+    cursor: grabbing;
+    transform: scale(0.96);
   }
 
-  /* ═══════════════════════════════════════════════════════════════════
-     ACTION BAR
-  ═══════════════════════════════════════════════════════════════════ */
+  .app-pill.dragging {
+    opacity: 0.4;
+    cursor: grabbing;
+  }
+
+  .app-pill.assigned {
+    background: rgba(160, 130, 255, 0.18);
+    border-color: rgba(180, 150, 255, 0.4);
+    color: rgba(230, 215, 255, 1);
+  }
+
+  .app-pill .dot-indicator {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: rgba(180, 150, 255, 0.8);
+    flex-shrink: 0;
+  }
+
+  /* ── Action bar ── */
   .action-bar {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-top: 12px;
-    gap: 10px;
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
   }
 
-  .action-hint {
+  .action-status {
     font-size: 9px;
-    color: rgba(255, 255, 255, 0.28);
-    letter-spacing: 0.03em;
+    color: rgba(255, 255, 255, 0.35);
+    letter-spacing: 0.02em;
   }
 
   .btn-apply {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    padding: 8px 18px;
+    gap: 5px;
+    padding: 6px 14px;
     background: linear-gradient(135deg,
-      rgba(160, 130, 255, 0.35) 0%,
-      rgba(120, 90, 220, 0.28) 100%);
-    border: 1px solid rgba(180, 150, 255, 0.4);
-    border-radius: 8px;
+      rgba(160, 130, 255, 0.32) 0%,
+      rgba(120, 90, 220, 0.26) 100%);
+    border: 1px solid rgba(180, 150, 255, 0.38);
+    border-radius: 7px;
     color: rgba(240, 230, 255, 0.98);
     font-family: inherit;
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 600;
     letter-spacing: 0.01em;
     cursor: pointer;
     transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
     box-shadow:
-      0 4px 12px rgba(120, 90, 220, 0.25),
-      inset 0 1px 0 rgba(255, 255, 255, 0.12);
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+      0 3px 10px rgba(120, 90, 220, 0.22),
+      inset 0 1px 0 rgba(255, 255, 255, 0.1);
   }
 
-  .btn-apply:hover {
+  .btn-apply:hover:not(:disabled) {
     background: linear-gradient(135deg,
-      rgba(180, 150, 255, 0.5) 0%,
-      rgba(140, 110, 240, 0.42) 100%);
+      rgba(180, 150, 255, 0.48) 0%,
+      rgba(140, 110, 240, 0.4) 100%);
     border-color: rgba(200, 170, 255, 0.55);
     transform: translateY(-1px);
-    box-shadow:
-      0 6px 18px rgba(140, 110, 240, 0.35),
-      inset 0 1px 0 rgba(255, 255, 255, 0.18);
+    box-shadow: 0 5px 14px rgba(140, 110, 240, 0.32);
   }
 
-  .btn-apply:active {
-    transform: translateY(0) scale(0.98);
+  .btn-apply:active:not(:disabled) {
+    transform: translateY(0) scale(0.97);
     transition-duration: 0.08s;
   }
 
+  .btn-apply:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+  }
+
   .btn-apply svg {
-    width: 12px;
-    height: 12px;
+    width: 10px;
+    height: 10px;
   }
 </style>
 </head>
@@ -497,21 +499,19 @@
 
 <div class="card" id="card">
 
-  <!-- HEADER -->
   <div class="header">
     <div class="header-left">
-      <span class="brand-badge">VII</span>
+      <span class="brand-dot"></span>
       <span class="header-title">
         Arrange
-        <span class="sub" id="phaseSubtitle">Choose a layout</span>
+        <span class="sub" id="phaseSubtitle">Pick a layout</span>
       </span>
     </div>
     <button class="btn-close" onclick="retract()" title="Close (Esc)">✕</button>
   </div>
 
-  <!-- PHASE 1: LAYOUT PICKER -->
+  <!-- ═══════════ PHASE 1: LAYOUT PICKER ═══════════ -->
   <div class="phase active" id="phase1">
-    <div class="layout-hint">Select an arrangement</div>
     <div class="layout-grid">
       <div class="layout-card" onclick="selectLayout('maximize', 1)">
         <svg class="layout-preview" viewBox="0 0 60 30">
@@ -558,31 +558,34 @@
       <div class="layout-card" onclick="selectLayout('minimize_others', 1)">
         <svg class="layout-preview" viewBox="0 0 60 30">
           <rect class="zone zone-accent" x="1" y="1" width="58" height="28" rx="2.5"/>
-          <line x1="8" y1="28" x2="52" y2="28" stroke="rgba(255,255,255,0.3)" stroke-width="1"/>
         </svg>
         <div class="layout-name">Solo Focus</div>
       </div>
     </div>
   </div>
 
-  <!-- PHASE 2: WINDOW ASSIGNMENT -->
+  <!-- ═══════════ PHASE 2: DRAG ASSIGNMENT ═══════════ -->
   <div class="phase" id="phase2">
-    <div class="assign-header">
+    <div class="assign-topbar">
       <button class="back-btn" onclick="backToPhase1()">
-        <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+        <svg width="9" height="9" viewBox="0 0 10 10" fill="none">
           <path d="M6.5 2L3.5 5l3 3" stroke="currentColor" stroke-width="1.5"
                 stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
         Back
       </button>
-      <div class="assign-title" id="assignTitle">Assign windows</div>
+      <div class="assign-hint">Drag apps into zones</div>
     </div>
 
-    <div class="slots-container" id="slotsContainer"></div>
+    <div class="preview-container">
+      <div class="preview-grid" id="previewGrid"></div>
+    </div>
+
+    <div class="apps-scroll" id="appsScroll"></div>
 
     <div class="action-bar">
-      <span class="action-hint" id="actionHint">Choose windows for each zone</span>
-      <button class="btn-apply" onclick="applyArrangement()">
+      <span class="action-status" id="actionStatus">0 of 0 assigned</span>
+      <button class="btn-apply" id="applyBtn" onclick="applyArrangement()" disabled>
         <svg viewBox="0 0 12 12" fill="none">
           <path d="M2 6l3 3 5-6" stroke="currentColor" stroke-width="1.8"
                 stroke-linecap="round" stroke-linejoin="round"/>
@@ -595,28 +598,26 @@
 </div>
 
 <script>
-  let _windows      = [];
-  let _allWindows   = [];
+  let _windows        = [];
+  let _allWindows     = [];
   let _selectedLayout = null;
-  let _slotCount    = 0;
-  let _dismissTimer = null;
-  let _isRetracting = false;
+  let _slotCount      = 0;
+  let _assignments    = {};   // slotIdx -> hwnd
+  let _isRetracting   = false;
 
   const LAYOUT_META = {
-    maximize:         { name: 'Maximize',        needsSlots: false },
-    split_vertical:   { name: 'Split Vertical',  needsSlots: true, labels: ['Left', 'Right'] },
-    split_horizontal: { name: 'Split Horizontal',needsSlots: true, labels: ['Top', 'Bottom'] },
-    grid:             { name: '2×2 Grid',        needsSlots: true, labels: ['Top-Left', 'Top-Right', 'Bottom-Left', 'Bottom-Right'] },
-    stack:            { name: 'Focus + Stack',   needsSlots: true, labels: ['Main (Left)', 'Top-Right', 'Bottom-Right'] },
-    minimize_others:  { name: 'Solo Focus',      needsSlots: true, labels: ['Keep Visible'] },
+    maximize:         { name: 'Maximize',    grid: [[1]],                              labels: ['All'] },
+    split_vertical:   { name: 'Split ↔',     grid: [[1, 2]],                          labels: ['Left', 'Right'] },
+    split_horizontal: { name: 'Split ↕',     grid: [[1], [2]],                        labels: ['Top', 'Bottom'] },
+    grid:             { name: '2×2 Grid',    grid: [[1, 2], [3, 4]],                  labels: ['↖', '↗', '↙', '↘'] },
+    stack:            { name: 'Focus + 2',   grid: [[1, 2], [1, 3]],                  labels: ['Main', 'Top-R', 'Bot-R'] },
+    minimize_others:  { name: 'Solo Focus',  grid: [[1]],                              labels: ['Keep Open'] },
   };
 
   // ══════════════════════════════════════════════════════════════════
-  //  DATA INJECTION
-  // ══════════════════════════════════════════════════════════════════
   function applyData(data) {
-    _windows    = data.windows    || [];
-    _allWindows = data.allWindows || [];
+    _windows      = data.windows    || [];
+    _allWindows   = data.allWindows || [];
     _isRetracting = false;
 
     resetToPhase1();
@@ -625,45 +626,35 @@
     card.classList.remove('show', 'hiding');
     void card.offsetWidth;
     card.classList.add('show');
-
-    if (_dismissTimer) clearTimeout(_dismissTimer);
-    _dismissTimer = setTimeout(retract, 25000);
   }
 
   window.__applyArrangementData = applyData;
 
   // ══════════════════════════════════════════════════════════════════
-  //  PHASE SWITCHING
-  // ══════════════════════════════════════════════════════════════════
   function resetToPhase1() {
     _selectedLayout = null;
     _slotCount = 0;
+    _assignments = {};
     document.getElementById('phase1').classList.add('active');
     document.getElementById('phase2').classList.remove('active');
-    document.getElementById('phaseSubtitle').textContent = 'Choose a layout';
+    document.getElementById('phaseSubtitle').textContent = 'Pick a layout';
   }
 
   function selectLayout(layout, slotCount) {
     _selectedLayout = layout;
-    _slotCount = slotCount;
+    _slotCount      = slotCount;
+    _assignments    = {};
 
     const meta = LAYOUT_META[layout];
 
-    // If layout doesn't need window selection (e.g. Maximize All), apply immediately
-    if (!meta.needsSlots) {
-      const hwnd_list = _windows.map(w => w.hwnd);
-      dispatchLayout(layout, hwnd_list);
-      retract();
-      return;
-    }
-
-    // Move to phase 2
     document.getElementById('phase1').classList.remove('active');
     document.getElementById('phase2').classList.add('active');
     document.getElementById('phaseSubtitle').textContent = meta.name;
-    document.getElementById('assignTitle').textContent = meta.name;
 
-    buildSlots(meta.labels);
+    buildPreviewGrid(meta);
+    buildAppsPool();
+    autoAssignDefault();
+    updateActionStatus();
   }
 
   function backToPhase1() {
@@ -671,121 +662,228 @@
   }
 
   // ══════════════════════════════════════════════════════════════════
-  //  SLOT BUILDER
-  // ══════════════════════════════════════════════════════════════════
   function cleanTitle(t) {
-    if (!t) return 'Untitled';
+    if (!t) return 'Window';
     let title = t.trim();
 
-    // Strip common app suffixes: "Doc - App Name" -> "Doc"
-    // Prefer the largest fragment
+    // Strip trailing app name after dash
     const parts = title.split(/\s+[-–—|]\s+/);
     if (parts.length > 1) {
-      // pick the longest fragment that isn't the app name
-      const sorted = [...parts].sort((a, b) => b.length - a.length);
-      title = sorted[0];
+      // pick the fragment most likely to be document/window name (longest)
+      title = [...parts].sort((a, b) => b.length - a.length)[0];
     }
 
-    return title.length > 42 ? title.substring(0, 40) + '…' : title;
+    return title.length > 20 ? title.substring(0, 18) + '…' : title;
   }
 
-  function buildSlots(labels) {
-    const container = document.getElementById('slotsContainer');
+  function buildPreviewGrid(meta) {
+    const container = document.getElementById('previewGrid');
     container.innerHTML = '';
 
-    // Combine triggered + other windows into a single pool
-    // triggered windows appear first
-    const pool = [
-      ..._windows.map(w => ({ ...w, priority: 1 })),
-      ..._allWindows.map(w => ({ ...w, priority: 0 })),
-    ];
+    const grid = meta.grid;
+    const rows = grid.length;
+    const cols = Math.max(...grid.map(r => r.length));
 
-    // Deduplicate by hwnd
+    container.style.gridTemplateRows    = `repeat(${rows}, 1fr)`;
+    container.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+
+    // Track cells added to avoid duplicates for spanning zones (e.g. Focus + 2)
+    const placedZones = new Set();
+
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const zoneNum = grid[r][c];
+        if (!zoneNum || placedZones.has(zoneNum)) continue;
+
+        const zoneIdx = zoneNum - 1;
+
+        // Calculate span
+        let rowSpan = 1;
+        let colSpan = 1;
+        for (let rr = r + 1; rr < rows; rr++) {
+          if (grid[rr] && grid[rr][c] === zoneNum) rowSpan++;
+          else break;
+        }
+        for (let cc = c + 1; cc < cols; cc++) {
+          if (grid[r][cc] === zoneNum) colSpan++;
+          else break;
+        }
+
+        const zone = document.createElement('div');
+        zone.className = 'drop-zone';
+        zone.dataset.slotIndex = zoneIdx;
+        zone.style.gridRow    = `${r + 1} / span ${rowSpan}`;
+        zone.style.gridColumn = `${c + 1} / span ${colSpan}`;
+
+        zone.innerHTML = `
+          <span class="zone-num">${zoneNum}</span>
+          <span class="zone-label">${meta.labels[zoneIdx] || ''}</span>
+        `;
+
+        // Drag/drop handlers
+        zone.addEventListener('dragover', (e) => {
+          e.preventDefault();
+          zone.classList.add('drag-over');
+        });
+        zone.addEventListener('dragleave', () => {
+          zone.classList.remove('drag-over');
+        });
+        zone.addEventListener('drop', (e) => {
+          e.preventDefault();
+          zone.classList.remove('drag-over');
+          const hwnd = e.dataTransfer.getData('text/plain');
+          if (hwnd) assignToSlot(zoneIdx, parseInt(hwnd, 10));
+        });
+        // Click to unassign
+        zone.addEventListener('click', () => {
+          if (_assignments[zoneIdx]) {
+            unassignSlot(zoneIdx);
+          }
+        });
+
+        container.appendChild(zone);
+        placedZones.add(zoneNum);
+      }
+    }
+  }
+
+  function buildAppsPool() {
+    const scroll = document.getElementById('appsScroll');
+    scroll.innerHTML = '';
+
+    // Combine triggered + all windows, dedupe
     const seen = new Set();
-    const unique = pool.filter(w => {
-      if (seen.has(w.hwnd)) return false;
-      seen.add(w.hwnd);
-      return true;
+    const pool = [];
+    [..._windows, ..._allWindows].forEach(w => {
+      if (!seen.has(w.hwnd)) {
+        seen.add(w.hwnd);
+        pool.push(w);
+      }
     });
 
-    labels.forEach((label, idx) => {
-      const slot = document.createElement('div');
-      slot.className = 'slot';
+    pool.forEach(w => {
+      const pill = document.createElement('div');
+      pill.className = 'app-pill';
+      pill.draggable = true;
+      pill.dataset.hwnd = w.hwnd;
+      pill.innerHTML = `
+        <span class="dot-indicator"></span>
+        <span>${cleanTitle(w.title || w.exe)}</span>
+      `;
 
-      const badge = document.createElement('div');
-      badge.className = 'slot-badge';
-      badge.textContent = String(idx + 1);
-
-      const select = document.createElement('select');
-      select.className = 'slot-select';
-      select.dataset.slotIndex = idx;
-      select.dataset.slotLabel = label;
-
-      // Optional placeholder
-      const noneOpt = document.createElement('option');
-      noneOpt.value = '';
-      noneOpt.textContent = `— ${label} —`;
-      select.appendChild(noneOpt);
-
-      unique.forEach(w => {
-        const opt = document.createElement('option');
-        opt.value = String(w.hwnd);
-        opt.textContent = cleanTitle(w.title || w.exe || 'Window');
-        select.appendChild(opt);
+      pill.addEventListener('dragstart', (e) => {
+        e.dataTransfer.setData('text/plain', String(w.hwnd));
+        e.dataTransfer.effectAllowed = 'move';
+        pill.classList.add('dragging');
+      });
+      pill.addEventListener('dragend', () => {
+        pill.classList.remove('dragging');
       });
 
-      // Default: fill first N slots with the first N triggered windows
-      if (idx < _windows.length) {
-        select.value = String(_windows[idx].hwnd);
-      }
-
-      slot.appendChild(badge);
-      slot.appendChild(select);
-      container.appendChild(slot);
+      scroll.appendChild(pill);
     });
   }
 
-  // ══════════════════════════════════════════════════════════════════
-  //  APPLY
-  // ══════════════════════════════════════════════════════════════════
-  function applyArrangement() {
-    const selects = document.querySelectorAll('.slot-select');
-    const hwnd_list = [];
-    const usedHwnds = new Set();
-
-    selects.forEach(sel => {
-      const v = sel.value;
-      if (v && !usedHwnds.has(v)) {
-        hwnd_list.push(parseInt(v, 10));
-        usedHwnds.add(v);
+  function autoAssignDefault() {
+    // Pre-fill slots with the first N triggered windows
+    const zones = document.querySelectorAll('.drop-zone');
+    zones.forEach((zone, i) => {
+      if (i < _windows.length) {
+        assignToSlot(i, _windows[i].hwnd);
       }
     });
+  }
 
-    if (hwnd_list.length === 0) {
-      // No windows selected — nothing to do
-      const hint = document.getElementById('actionHint');
-      hint.textContent = 'Please assign at least one window';
-      hint.style.color = 'rgba(255, 140, 140, 0.8)';
-      setTimeout(() => {
-        hint.textContent = 'Choose windows for each zone';
-        hint.style.color = '';
-      }, 2200);
-      return;
+  function assignToSlot(slotIdx, hwnd) {
+    // If this hwnd already assigned elsewhere, remove that first
+    for (const [sIdx, h] of Object.entries(_assignments)) {
+      if (h === hwnd && parseInt(sIdx, 10) !== slotIdx) {
+        unassignSlot(parseInt(sIdx, 10));
+      }
     }
 
-    dispatchLayout(_selectedLayout, hwnd_list);
-    retract();
+    _assignments[slotIdx] = hwnd;
+
+    // Update UI
+    const zone = document.querySelector(`.drop-zone[data-slot-index="${slotIdx}"]`);
+    if (zone) {
+      const win = [..._windows, ..._allWindows].find(w => w.hwnd === hwnd);
+      const label = win ? cleanTitle(win.title || win.exe) : 'Assigned';
+      const meta  = LAYOUT_META[_selectedLayout];
+      const zoneNum = slotIdx + 1;
+
+      zone.classList.add('assigned');
+      zone.innerHTML = `
+        <span class="zone-num">${zoneNum}</span>
+        <span class="zone-label">${label}</span>
+      `;
+    }
+
+    updatePillStates();
+    updateActionStatus();
   }
 
-  function dispatchLayout(layout, hwnd_list) {
-    // Minimize windows NOT in the selected list
+  function unassignSlot(slotIdx) {
+    delete _assignments[slotIdx];
+
+    const zone = document.querySelector(`.drop-zone[data-slot-index="${slotIdx}"]`);
+    if (zone) {
+      const meta = LAYOUT_META[_selectedLayout];
+      const zoneNum = slotIdx + 1;
+      zone.classList.remove('assigned');
+      zone.innerHTML = `
+        <span class="zone-num">${zoneNum}</span>
+        <span class="zone-label">${meta.labels[slotIdx] || ''}</span>
+      `;
+    }
+
+    updatePillStates();
+    updateActionStatus();
+  }
+
+  function updatePillStates() {
+    const assignedHwnds = new Set(Object.values(_assignments));
+    document.querySelectorAll('.app-pill').forEach(pill => {
+      const h = parseInt(pill.dataset.hwnd, 10);
+      if (assignedHwnds.has(h)) {
+        pill.classList.add('assigned');
+      } else {
+        pill.classList.remove('assigned');
+      }
+    });
+  }
+
+  function updateActionStatus() {
+    const count = Object.keys(_assignments).length;
+    const total = _slotCount;
+    document.getElementById('actionStatus').textContent =
+      `${count} of ${total} assigned`;
+    document.getElementById('applyBtn').disabled = (count === 0);
+  }
+
+  // ══════════════════════════════════════════════════════════════════
+  function applyArrangement() {
+    const hwnd_list = [];
+    // Order by slot index
+    for (let i = 0; i < _slotCount; i++) {
+      if (_assignments[i]) {
+        hwnd_list.push(_assignments[i]);
+      }
+    }
+
+    if (hwnd_list.length === 0) return;
+
     const all = [..._windows, ..._allWindows];
     const selectedSet = new Set(hwnd_list.map(Number));
     const minimize_hwnds = [...new Set(
       all.map(w => w.hwnd).filter(h => !selectedSet.has(Number(h)))
     )];
 
-    const payload = { layout, hwnd_list, minimize_hwnds };
+    const payload = {
+      layout: _selectedLayout,
+      hwnd_list,
+      minimize_hwnds
+    };
 
     try {
       if (window.electronAPI && window.electronAPI.applyLayout) {
@@ -794,19 +892,14 @@
     } catch (e) {
       console.error('applyLayout failed:', e);
     }
+
+    retract();
   }
 
-  // ══════════════════════════════════════════════════════════════════
-  //  DISMISS / FADE
   // ══════════════════════════════════════════════════════════════════
   function retract() {
     if (_isRetracting) return;
     _isRetracting = true;
-
-    if (_dismissTimer) {
-      clearTimeout(_dismissTimer);
-      _dismissTimer = null;
-    }
 
     const card = document.getElementById('card');
     card.classList.remove('show');
@@ -816,10 +909,10 @@
       if (window.electronAPI && window.electronAPI.close) {
         window.electronAPI.close();
       }
-    }, 340);
+    }, 320);
   }
 
-  // Click outside card (in transparent area) dismisses
+  // Click on transparent area outside card = dismiss
   document.body.addEventListener('mousedown', (e) => {
     const card = document.getElementById('card');
     if (!card.contains(e.target)) {
