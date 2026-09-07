@@ -434,22 +434,22 @@ export default function TriggerForm({ initial, onSave, onCancel, workspaces }) {
                 </div>
               </div>
               <div className="flex items-start gap-2 ml-[22px] px-3 py-2 rounded-lg
-                              bg-[#0a0a0c] border border-white/5">
-                <Headphones size={11} className="text-white/25 flex-shrink-0 mt-0.5" />
+                              bg-amber-500/[0.03] border border-amber-500/15">
+                <Headphones size={11} className="text-amber-400/60 flex-shrink-0 mt-0.5" />
                 <div>
-                  <p className="text-[9px] text-white/40 leading-relaxed">
-                    <span className="text-white/60 font-medium">Snap or clap</span> to trigger actions.
-                    Works with <span className="text-white/60 font-medium">USB microphones, wired headsets,
-                    or wireless earbuds</span>.
+                  <p className="text-[9px] text-white/55 leading-relaxed">
+                    <span className="text-amber-300/85 font-medium">Recommended: USB mic or wired headset.</span> Laptop
+                    mics use noise suppression that flattens snap sounds — detection may miss or misfire.
                   </p>
-                  <p className="text-[8.5px] text-white/35 mt-1.5">
-                    <span className="text-white/50 font-medium">Audio</span> = physical sound detection (snap/clap near mic)
+                  <p className="text-[8.5px] text-white/40 mt-1.5">
+                    <span className="text-white/55 font-medium">Snap</span> = sharp burst near mic (fingers, clap, knock)
                   </p>
-                  <p className="text-[8.5px] text-white/35 mt-0.5">
-                    <span className="text-white/50 font-medium">Voice</span> = spoken command ("Seven Focus")
+                  <p className="text-[8.5px] text-white/40 mt-0.5">
+                    <span className="text-white/55 font-medium">Voice</span> = spoken command like "Seven Focus" — more reliable
                   </p>
-                  <p className="text-[8px] text-white/20 mt-1.5 italic">
-                    Built-in laptop mic support coming soon. For now, plug in any headset.
+                  <p className="text-[8px] text-white/30 mt-1.5 italic">
+                    Speech, keyboard clicks, and door slams are filtered — but not perfectly.
+                    Combine snap with a hotkey for redundancy.
                   </p>
                 </div>
               </div>
