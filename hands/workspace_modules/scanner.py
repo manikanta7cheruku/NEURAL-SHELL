@@ -118,6 +118,13 @@ def scan_current():
     except Exception:
         enrich_explorer(apps)
 
+    # Enrich with open document paths (Office COM + title parsing)
+    try:
+        from hands.workspace_modules.document_capture import capture_open_documents
+        apps = capture_open_documents(apps)
+    except Exception as _doc_err:
+        print(Fore.YELLOW + f"[WORKSPACE] Document capture skipped: {_doc_err}")
+
     elapsed = int((time.time() - t0) * 1000)
     print(Fore.GREEN + f"[WORKSPACE] Scanned {len(apps)} apps in {elapsed}ms")
     return apps
