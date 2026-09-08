@@ -77,7 +77,8 @@ def get_status():
             "uptime":         f"{hours}h {minutes}m",
             "uptime_seconds": int(uptime_secs),
             "speaker":        str(_state.get("current_speaker", "default")),
-            "version":        str(version)
+            "version":        str(version),
+            "admin_message":  _state.get("admin_message", None)
         }
     except Exception:
         return {
