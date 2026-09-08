@@ -17,26 +17,84 @@ from hands.workspace_modules.helpers import (
 
 
 def restore_one(cfg):
-    """Dispatch to the correct restorer based on app type."""
+    """
+    Type-agnostic app restoration.
+
+    Instead of hardcoded if/elif chains, we detect CAPABILITIES from the
+    config data itself. Any app that Seven captured — including apps that
+    don't exist yet (Cursor, new AI tools, custom software) — goes through
+    the generic restorer which reads whatever data is present:
+      - exe_path         → launch executable
+      - working_dir      → set cwd (for terminals and dev tools)
+      - open_files       → reopen documents (universal)
+      - tabs             → Chrome extension knows how (only Chrome/Edge)
+      - workspace_path   → VS Code / editor project (only VS Code)
+      - folder_path      → File Explorer navigation (only explorer.exe)
+      - protocol         → UWP app URI (only UWP apps)
+
+    Specialized restorers are OPT-IN only when we have data to exploit:
+      - Chrome/Edge tabs need extension deduplication → _restore_browser
+      - VS Code workspace needs `code` CLI → _restore_vscode
+      - Explorer folder needs explorer.exe folder arg → _restore_explorer
+      - UWP needs URI protocol → _restore_uwp
+
+    Everything else — Notepad, Word, Excel, terminals, Cursor, Notion,
+    Figma, Photoshop, whatever the user installs next year — flows
+    through _restore_generic which uses exe_path + open_files + working_dir.
+    """
     t    = (cfg.get("type") or "").lower()
     name = cfg.get("name", "?")
+    tabs = cfg.get("tabs", [])
+    ws   = cfg.get("workspace_path", "")
+    fld  = cfg.get("folder_path", "")
+    prot = cfg.get("protocol", "")
+
     try:
-        if t in ("chrome", "edge", "brave", "firefox"):
+        # ── SPECIALIZED RESTORERS (opt-in based on data present) ──
+        # Chrome/Edge with tab data → use browser restorer for dedup
+        if tabs and t in ("chrome", "edge", "brave", "firefox"):
             _restore_browser(cfg)
-        elif t == "vscode":
+        # VS Code with workspace path → use `code` CLI
+        elif ws and t == "vscode":
             _restore_vscode(cfg)
+        # File Explorer with folder path → use explorer.exe with folder arg
         elif t == "explorer":
             _restore_explorer(cfg)
-        elif t in ("notepad", "notepad++", "sublime"):
-            _restore_editor(cfg)
-        elif t in ("excel", "word", "powerpoint"):
-            _restore_office(cfg)
-        elif t == "uwp":
+        # UWP app with protocol URI → use os.startfile(protocol)
+        elif prot and t == "uwp":
             _restore_uwp(cfg)
-        elif t in ("powershell", "cmd", "terminal"):
+        # Terminals with working_dir need CREATE_NEW_CONSOLE flag
+        elif t in ("powershell", "cmd", "terminal", "pwsh"):
             _restore_terminal(cfg)
+        # Everything else — Notepad, Word, Cursor, Notion, ANY app —
+        # uses the generic restorer which reads exe_path + open_files
         else:
             _restore_generic(cfg)
+
+        # ── Universal document reopen (all app types) ──
+        # If the app had open documents that weren't handled by the
+        # specialized restorer, reopen them via os.startfile()
+        # which uses the file's default program association.
+        open_files = cfg.get("open_files", [])
+        if open_files and t not in ("chrome", "edge", "brave", "firefox"):
+            # Skip if generic restorer already handled files
+            if t not in ("app", ""):
+                time.sleep(1.2)
+                try:
+                    from hands.workspace_modules.document_capture import restore_open_files
+                    _opened = restore_open_files(open_files)
+                    if _opened > 0:
+                        print(Fore.GREEN + f"  [+] {name} (+ {_opened} files)")
+                except Exception as _fe:
+                    print(Fore.YELLOW + f"  [~] {name} file restore: {_fe}")
+
+        # ── Universal window geometry restore ──
+        # Works for ANY app since it uses Win32 SetWindowPos on the HWND
+        _restore_window_geometry(cfg, name)
+
+        print(Fore.GREEN + f"  [+] {name}")
+    except Exception as e:
+        print(Fore.RED + f"  [-] {name}: {e}")
 
         # Reopen saved document files for non-generic apps if captured
         open_files = cfg.get("open_files", [])
@@ -90,12 +148,16 @@ def _wait_and_position_window(cfg, app_name, x, y, w, h):
     """
     Wait for the app's window to appear (up to 8s),
     then move it to the saved position using SetWindowPos.
+
+    Multi-monitor safe: if saved coordinates are on a monitor that no
+    longer exists (disconnected/rearranged), clamps to nearest monitor.
     """
     import time as _t
     try:
         import win32gui
         import win32con
         import win32process
+        import win32api
         import psutil
     except ImportError:
         return
@@ -103,7 +165,9 @@ def _wait_and_position_window(cfg, app_name, x, y, w, h):
     exe_path = (cfg.get("exe_path") or "").lower()
     exe_name = os.path.basename(exe_path).lower() if exe_path else ""
     saved_title = (cfg.get("window", {}).get("title") or "").lower().strip()
-    app_type = (cfg.get("type") or "").lower()
+
+    # ── Multi-monitor safety: clamp coordinates to valid screen space ──
+    x, y, w, h = _clamp_to_visible_monitor(x, y, w, h)
 
     # Poll for the window every 400ms for up to 8 seconds
     end_time = _t.time() + 8.0
@@ -132,7 +196,6 @@ def _wait_and_position_window(cfg, app_name, x, y, w, h):
                 if any(m in proc_exe for m in ["mk-projects\\seven", "\\seven\\"]):
                     return
 
-                # Match by exe path (strongest)
                 match_score = 0
                 if exe_path and proc_exe == exe_path:
                     match_score = 10
@@ -156,7 +219,6 @@ def _wait_and_position_window(cfg, app_name, x, y, w, h):
             pass
 
         if candidates:
-            # Pick highest score
             candidates.sort(reverse=True)
             _, target_hwnd, matched_title = candidates[0]
             print(Fore.CYAN + f"  [POS] Found '{app_name}' → '{matched_title}' "
@@ -168,7 +230,7 @@ def _wait_and_position_window(cfg, app_name, x, y, w, h):
               f"within 8s — skipping position restore")
         return
 
-    # Restore window if minimized/maximized so SetWindowPos works
+    # Restore window if minimized
     try:
         placement = win32gui.GetWindowPlacement(target_hwnd)
         if placement[1] in (win32con.SW_SHOWMINIMIZED, win32con.SW_MINIMIZE):
@@ -177,7 +239,7 @@ def _wait_and_position_window(cfg, app_name, x, y, w, h):
     except Exception:
         pass
 
-    # Apply the saved geometry
+    # Apply the (clamped) saved geometry
     try:
         win32gui.SetWindowPos(
             target_hwnd,
@@ -189,6 +251,62 @@ def _wait_and_position_window(cfg, app_name, x, y, w, h):
               f"({x}, {y}) {w}×{h}")
     except Exception as e:
         print(Fore.YELLOW + f"  [POS] Position failed for '{app_name}': {e}")
+
+
+def _clamp_to_visible_monitor(x, y, w, h):
+    """
+    Multi-monitor safety: if saved coordinates are on a disconnected or
+    rearranged monitor, clamp to the nearest available monitor.
+
+    Uses Win32 MonitorFromPoint to find which monitor the saved position
+    belongs to. If none, falls back to primary monitor.
+
+    Returns (clamped_x, clamped_y, clamped_w, clamped_h).
+    """
+    try:
+        import win32api
+        import win32con
+
+        # Check if the saved (x, y) point is on any current monitor
+        # MonitorFromPoint returns HMONITOR or primary if outside all
+        # MONITOR_DEFAULTTONULL = 0 → returns 0 if point is off-screen
+        point = (x + w // 2, y + h // 2)  # test window center
+
+        monitors = win32api.EnumDisplayMonitors()
+        target_monitor = None
+
+        for hmon, _, rect in monitors:
+            mx1, my1, mx2, my2 = rect
+            if mx1 <= point[0] <= mx2 and my1 <= point[1] <= my2:
+                target_monitor = (mx1, my1, mx2, my2)
+                break
+
+        # Saved position is on a valid monitor → use as-is
+        if target_monitor:
+            return x, y, w, h
+
+        # Saved position is off-screen → clamp to primary monitor
+        primary = win32api.GetMonitorInfo(
+            win32api.MonitorFromPoint((0, 0), win32con.MONITOR_DEFAULTTOPRIMARY)
+        )
+        work_area = primary['Work']  # (left, top, right, bottom)
+        pw = work_area[2] - work_area[0]
+        ph = work_area[3] - work_area[1]
+
+        # Clamp size to fit primary monitor
+        new_w = min(w, pw - 40)
+        new_h = min(h, ph - 40)
+        # Center on primary monitor
+        new_x = work_area[0] + (pw - new_w) // 2
+        new_y = work_area[1] + (ph - new_h) // 2
+
+        print(Fore.YELLOW + f"  [POS] Off-screen position ({x},{y}) — "
+              f"clamped to primary monitor ({new_x},{new_y})")
+        return new_x, new_y, new_w, new_h
+
+    except Exception:
+        # If clamping fails, use original coordinates
+        return x, y, w, h
 
 
 def _restore_browser(cfg):
@@ -408,29 +526,51 @@ def _restore_terminal(cfg):
 
 
 def _restore_generic(cfg):
+    """
+    Universal restorer — works for ANY app past, present, or future.
+
+    Priority chain (each step returns True if it worked):
+      1. Reopen saved documents (they launch the associated app)
+      2. Launch exe_path directly with saved working_dir
+      3. Try hands.core.open_app (uses fast launch table + AppOpener)
+      4. Fall back to AppOpener alone
+
+    No app type detection. No hardcoded lists. Just data-driven launch.
+    """
     exe        = cfg.get("exe_path", "")
     name       = cfg.get("name", "")
     open_files = cfg.get("open_files", [])
     work_dir   = cfg.get("working_dir", "")
 
-    # If document files exist, opening the document automatically opens the associated app
+    # ── Priority 1: Open saved documents ──
+    # os.startfile() reads current disk contents so if user edited the file
+    # after scanning, the LATEST version opens. Windows opens it in whatever
+    # app is currently associated with that extension.
     if open_files:
         try:
             from hands.workspace_modules.document_capture import restore_open_files
-            if restore_open_files(open_files) > 0:
+            opened = restore_open_files(open_files)
+            if opened > 0:
+                # Document opened — the associated app launches automatically
+                # Still try to restore working directory context if terminal-like
                 return
         except Exception:
             pass
 
-    # Direct launch with working directory
+    # ── Priority 2: Direct exe launch with working directory ──
+    # This handles ANY app: Cursor, Notion, Figma, custom .exe files,
+    # dev tools installed in AppData, portable apps in D:\Tools\, etc.
     if exe and os.path.exists(exe):
         try:
             cwd_arg = work_dir if work_dir and os.path.isdir(work_dir) else None
             subprocess.Popen([exe], cwd=cwd_arg)
             return
-        except Exception:
-            pass
+        except Exception as e:
+            print(Fore.YELLOW + f"  [~] Direct launch failed for {name}: {e}")
 
+    # ── Priority 3: hands.core (fast launch table + Windows URI) ──
+    # Handles apps by name using system integrations for:
+    # Camera, Settings, Store apps, Calculator, etc.
     clean = name.split(" - ")[-1].strip() if " - " in name else name
     if not clean:
         return
@@ -442,6 +582,8 @@ def _restore_generic(cfg):
     except Exception:
         pass
 
+    # ── Priority 4: AppOpener (last resort) ──
+    # Scans Start Menu for closest name match. Works for installed apps.
     try:
         import AppOpener
         AppOpener.open(clean)
