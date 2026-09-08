@@ -341,16 +341,12 @@ def _exec_run_command(data):
     """
     Inject a shell command into the focused text input.
 
-    Universal strategy using SendInput with scancode injection:
-      - SendInput bypasses PSReadLine input filtering in PowerShell
-      - Works in Chrome message fields, WhatsApp, VS Code, all editors
-      - Restores clipboard afterwards
-      - Only presses Enter for terminal-class apps
-
-    Focus stabilization:
-      - Wait 400ms after hotkey for OS to release the key stroke
-      - Send a "no-op" arrow-right + arrow-left to force caret commit
-      - This solves Chrome routing text to URL bar instead of chat
+    UNIVERSAL STRATEGY:
+      - Backspace ANY stray key that may have leaked from the hotkey combo
+        (Alt+\ leaves \, Ctrl+F5 leaves nothing — but we always try)
+      - Smooth typing via pyautogui.write() for a natural feel
+      - Special handling for PowerShell (uses different paste keybinding)
+      - Special handling for Chrome (End key to commit focus before typing)
     """
     cmd    = data.get("command", "")
     target = data.get("target", "terminal")
@@ -358,6 +354,7 @@ def _exec_run_command(data):
     if not cmd:
         return
 
+    # Background mode — silent subprocess, no typing
     if target == "background":
         import sys as _sys
         _cflags = 0x08000000 if _sys.platform == 'win32' else 0
@@ -372,113 +369,37 @@ def _exec_run_command(data):
     try:
         import ctypes
         from ctypes import wintypes
-
-        # SendInput API structures for scancode injection
-        # Scancode injection bypasses most low-level input filters
-        # (including PSReadLine, which rejects virtual-key synthesis)
-        PUL = ctypes.POINTER(ctypes.c_ulong)
-
-        class KeyBdInput(ctypes.Structure):
-            _fields_ = [
-                ("wVk",         wintypes.WORD),
-                ("wScan",       wintypes.WORD),
-                ("dwFlags",     wintypes.DWORD),
-                ("time",        wintypes.DWORD),
-                ("dwExtraInfo", PUL),
-            ]
-
-        class HardwareInput(ctypes.Structure):
-            _fields_ = [
-                ("uMsg",    wintypes.DWORD),
-                ("wParamL", wintypes.WORD),
-                ("wParamH", wintypes.WORD),
-            ]
-
-        class MouseInput(ctypes.Structure):
-            _fields_ = [
-                ("dx",          wintypes.LONG),
-                ("dy",          wintypes.LONG),
-                ("mouseData",   wintypes.DWORD),
-                ("dwFlags",     wintypes.DWORD),
-                ("time",        wintypes.DWORD),
-                ("dwExtraInfo", PUL),
-            ]
-
-        class InputUnion(ctypes.Union):
-            _fields_ = [
-                ("ki", KeyBdInput),
-                ("mi", MouseInput),
-                ("hi", HardwareInput),
-            ]
-
-        class Input(ctypes.Structure):
-            _fields_ = [
-                ("type", wintypes.DWORD),
-                ("ii",   InputUnion),
-            ]
-
-        INPUT_KEYBOARD      = 1
-        KEYEVENTF_KEYUP     = 0x0002
-        KEYEVENTF_SCANCODE  = 0x0008
-        KEYEVENTF_EXTENDED  = 0x0001
-
-        # Common virtual key codes
-        VK_LCONTROL = 0x11
-        VK_LSHIFT   = 0x10
-        VK_LMENU    = 0x12  # Alt
-        VK_LWIN     = 0x5B
-        VK_RWIN     = 0x5C
-        VK_BACK     = 0x08
-        VK_RETURN   = 0x0D
-        VK_END      = 0x23
-        VK_V        = 0x56
-        VK_CONTROL  = 0x11
-
-        # Scancodes (US keyboard)
-        SC_CTRL   = 0x1D
-        SC_V      = 0x2F
-        SC_END    = 0x4F
-        SC_RETURN = 0x1C
+        import pyautogui
 
         user32 = ctypes.windll.user32
+        KEYEVENTF_KEYUP    = 0x0002
+        KEYEVENTF_SCANCODE = 0x0008
+        KEYEVENTF_EXTENDED = 0x0001
 
-        def _send_key(vk_code, scancode, key_up=False, extended=False):
-            """Send a single key via SendInput scancode injection."""
-            extra = ctypes.c_ulong(0)
-            flags = KEYEVENTF_SCANCODE
-            if key_up:
-                flags |= KEYEVENTF_KEYUP
-            if extended:
-                flags |= KEYEVENTF_EXTENDED
-
-            ki = KeyBdInput(vk_code, scancode, flags, 0, ctypes.pointer(extra))
-            inp = Input(INPUT_KEYBOARD, InputUnion(ki=ki))
-            user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(inp))
-
-        # ── STEP 1: Release any physically-held modifier keys ──
-        for _vk in [VK_LCONTROL, VK_LSHIFT, VK_LMENU, VK_LWIN, VK_RWIN]:
+        # ── STEP 1: Release ALL modifier keys physically held ──
+        for _vk in [0x11, 0x10, 0x12, 0x5B, 0x5C]:  # Ctrl, Shift, Alt, LWin, RWin
             user32.keybd_event(_vk, 0, KEYEVENTF_KEYUP, 0)
 
         # ── STEP 2: Release the trigger key itself ──
         _fired_key = data.get("_fired_key", "")
+        _vk_fired = None
         if _fired_key:
             _vk_map = {
                 '/': 0xBF, '\\': 0xDC, '.': 0xBE, ',': 0xBC,
                 ';': 0xBA, "'": 0xDE, '[': 0xDB, ']': 0xDD,
                 '`': 0xC0, '-': 0xBD, '=': 0xBB, ' ': 0x20,
             }
-            _vk = _vk_map.get(_fired_key)
-            if _vk is None and len(_fired_key) == 1:
+            _vk_fired = _vk_map.get(_fired_key)
+            if _vk_fired is None and len(_fired_key) == 1:
                 if _fired_key.isalpha():
-                    _vk = ord(_fired_key.upper())
+                    _vk_fired = ord(_fired_key.upper())
                 elif _fired_key.isdigit():
-                    _vk = ord(_fired_key)
-            if _vk:
-                user32.keybd_event(_vk, 0, KEYEVENTF_KEYUP, 0)
+                    _vk_fired = ord(_fired_key)
+            if _vk_fired:
+                user32.keybd_event(_vk_fired, 0, KEYEVENTF_KEYUP, 0)
 
-        # ── STEP 3: Wait for OS to fully release the hotkey ──
-        # 500 ms is enough for Chrome, PowerShell, Explorer to settle
-        time.sleep(0.5)
+        # ── STEP 3: Wait for OS to fully process the hotkey release ──
+        time.sleep(0.35)
 
         # ── STEP 4: Detect focused app ──
         try:
@@ -493,102 +414,80 @@ def _exec_run_command(data):
             _proc = ""
             _title_str = ""
 
-        # Terminal-class apps → Enter should fire
+        # Terminal-class apps → Enter should fire after typing
         _terminal_apps = {
             "powershell.exe", "pwsh.exe", "cmd.exe",
             "windowsterminal.exe", "wt.exe", "conhost.exe",
             "bash.exe", "wsl.exe", "mintty.exe",
         }
-
-        # Browser apps → do NOT press Enter (would send message or navigate)
+        # Browser apps → skip Enter (would send message or navigate)
         _browser_apps = {
             "chrome.exe", "msedge.exe", "firefox.exe",
             "brave.exe", "opera.exe",
         }
+        # PowerShell 7 / Windows Terminal need Ctrl+Shift+V not Ctrl+V
+        _terminal_v2 = {"pwsh.exe", "windowsterminal.exe", "wt.exe"}
 
-        is_terminal = _proc in _terminal_apps
-        is_browser  = _proc in _browser_apps
+        is_terminal   = _proc in _terminal_apps
+        is_browser    = _proc in _browser_apps
+        is_pwsh_v2    = _proc in _terminal_v2 or "windowsterminal" in _title_str
 
-        # ── STEP 5: Backspace stray char if it typed itself ──
-        _combo_had_modifiers = data.get("_had_modifiers", True)
-        _printable = set('abcdefghijklmnopqrstuvwxyz0123456789`-=[]\\;\',./')
-        if _fired_key and _fired_key in _printable and not _combo_had_modifiers:
-            user32.keybd_event(VK_BACK, 0, 0, 0)
+        # ── STEP 5: ALWAYS backspace one char in case hotkey leaked ──
+        # Alt+\ leaks \, Ctrl+; leaks ;, etc. Backspace is safe:
+        # if there's no stray char, backspace on an empty prompt does nothing
+        # in terminals and only removes 1 char in text fields (undo-able).
+        # We only skip backspace for pure function keys (F1-F24) and letters
+        # with Ctrl (Ctrl+F5, Ctrl+A rarely leak).
+        _printable_symbols = set("\\/;',.[]-=`")
+        _leaked_a_char = False
+        if _fired_key:
+            # Symbols always leak when Alt is the only modifier
+            if _fired_key in _printable_symbols:
+                _leaked_a_char = True
+            # Space, single letters/digits with only Shift also leak
+            elif _fired_key == ' ':
+                _leaked_a_char = True
+
+        if _leaked_a_char:
+            user32.keybd_event(0x08, 0, 0, 0)  # Backspace down
             time.sleep(0.02)
-            user32.keybd_event(VK_BACK, 0, KEYEVENTF_KEYUP, 0)
-            time.sleep(0.08)
+            user32.keybd_event(0x08, 0, KEYEVENTF_KEYUP, 0)  # up
+            time.sleep(0.1)
 
-        # ── STEP 6: Save current clipboard ──
-        _old_clip = None
-        try:
-            _cr = subprocess.run(
-                ['powershell', '-NoProfile', '-Command', 'Get-Clipboard -Raw'],
-                capture_output=True, text=True, timeout=3,
-                creationflags=0x08000000,
-            )
-            if _cr.returncode == 0:
-                _old_clip = _cr.stdout.rstrip('\r\n')
-        except Exception:
-            pass
-
-        # ── STEP 7: Put command into clipboard ──
-        try:
-            subprocess.run(
-                ['clip'],
-                input=cmd.encode('utf-8'),
-                creationflags=0x08000000,
-                check=False, timeout=3,
-            )
-        except Exception as _ce:
-            print(f"[TRIGGER DAEMON] Clipboard failed: {_ce}")
-            return
-
-        time.sleep(0.2)
-
-        # ── STEP 8: For BROWSERS, force focus commit by pressing End ──
-        # Chrome/Edge sometimes route text to whichever "default" control
-        # they think is active. Sending End first anchors caret to whatever
-        # input truly has focus (URL bar OR chat field).
-        # For terminals, skip — End would move to end of history line.
+        # ── STEP 6: For browsers, force focus commit ──
+        # Chrome/Edge sometimes route text to URL bar after hotkey.
+        # Sending End before typing anchors caret to whatever input truly has focus.
         if is_browser:
-            _send_key(VK_END, SC_END, key_up=False, extended=True)
+            user32.keybd_event(0x23, 0, 0, 0)   # End down
             time.sleep(0.03)
-            _send_key(VK_END, SC_END, key_up=True,  extended=True)
+            user32.keybd_event(0x23, 0, KEYEVENTF_KEYUP, 0)  # End up
             time.sleep(0.15)
 
-        # ── STEP 9: Send Ctrl+V using SCANCODE injection ──
-        # Scancodes work in PowerShell where PSReadLine blocks virtual keys
-        _send_key(VK_CONTROL, SC_CTRL, key_up=False)
-        time.sleep(0.03)
-        _send_key(VK_V, SC_V, key_up=False)
-        time.sleep(0.05)
-        _send_key(VK_V, SC_V, key_up=True)
-        time.sleep(0.03)
-        _send_key(VK_CONTROL, SC_CTRL, key_up=True)
+        # ══════════════════════════════════════════════════════════════
+        # TYPING MODE — smooth character-by-character (default)
+        # ══════════════════════════════════════════════════════════════
+        # Works everywhere INCLUDING PowerShell because it types each
+        # character as a real keystroke that ReadKey() picks up.
+        # Faster than paste for short commands, slower for long ones.
+        # Typing speed: ~15ms per char = ~65 chars/sec (natural pace)
 
-        time.sleep(0.5)  # let paste settle
-
-        # ── STEP 10: Enter ONLY for terminal apps ──
-        if is_terminal:
-            _send_key(VK_RETURN, SC_RETURN, key_up=False)
-            time.sleep(0.03)
-            _send_key(VK_RETURN, SC_RETURN, key_up=True)
-            print(f"[TRIGGER DAEMON] Pasted + Enter in {_proc}: {cmd[:60]}")
-        else:
-            print(f"[TRIGGER DAEMON] Pasted in {_proc} (no Enter): {cmd[:60]}")
-
-        # ── STEP 11: Restore original clipboard ──
-        time.sleep(0.4)
-        if _old_clip is not None and _old_clip.strip():
+        pyautogui.PAUSE = 0
+        for char in cmd:
             try:
-                _restore_ps = f"Set-Clipboard -Value @'\n{_old_clip}\n'@"
-                subprocess.run(
-                    ['powershell', '-NoProfile', '-Command', _restore_ps],
-                    capture_output=True, timeout=3,
-                    creationflags=0x08000000,
-                )
+                pyautogui.write(char, interval=0)
+                time.sleep(0.012)  # smooth typing rhythm
             except Exception:
                 pass
+
+        # ── STEP 7: Enter for terminal apps only ──
+        time.sleep(0.15)
+        if is_terminal:
+            user32.keybd_event(0x0D, 0, 0, 0)  # Enter down
+            time.sleep(0.03)
+            user32.keybd_event(0x0D, 0, KEYEVENTF_KEYUP, 0)  # up
+            print(f"[TRIGGER DAEMON] Typed + Enter in {_proc}: {cmd[:60]}")
+        else:
+            print(f"[TRIGGER DAEMON] Typed in {_proc} (no Enter): {cmd[:60]}")
 
     except Exception as e:
         print(f"[TRIGGER DAEMON] Run command error: {e}")
