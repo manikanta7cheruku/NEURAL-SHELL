@@ -1,15 +1,18 @@
 """
 hands/workspace_modules/app_restorers.py
 Individual app-type restore functions.
-Each handles one category: browser, editor, terminal, etc.
+Handles browsers (with Chrome profile pinning + tab deduplication),
+editors, office, explorer, terminals, and generic/custom apps.
 """
+
 import os
 import subprocess
 import time
 from colorama import Fore
 
 from hands.workspace_modules.helpers import (
-    find_chrome_exe, find_chrome_profile_dir
+    find_chrome_exe,
+    find_chrome_profile_dir,
 )
 
 
@@ -34,11 +37,11 @@ def restore_one(cfg):
             _restore_terminal(cfg)
         else:
             _restore_generic(cfg)
-        # Reopen saved documents (Office files, Premiere projects, etc.)
+
+        # Reopen saved document files for non-generic apps if captured
         open_files = cfg.get("open_files", [])
-        if open_files:
-            import time as _t
-            _t.sleep(1.5)  # Wait for app to finish launching
+        if open_files and t not in ("chrome", "edge", "brave", "firefox", "app"):
+            time.sleep(1.2)
             try:
                 from hands.workspace_modules.document_capture import restore_open_files
                 _opened = restore_open_files(open_files)
@@ -47,27 +50,154 @@ def restore_one(cfg):
             except Exception as _fe:
                 print(Fore.YELLOW + f"  [~] {name} file restore: {_fe}")
 
+        # ── Restore saved window geometry (position + size) ──
+        _restore_window_geometry(cfg, name)
+
         print(Fore.GREEN + f"  [+] {name}")
     except Exception as e:
         print(Fore.RED + f"  [-] {name}: {e}")
 
 
+def _restore_window_geometry(cfg, app_name):
+    """
+    Move the app's window to its saved x/y/width/height position.
+    Runs in a background thread so it doesn't block other restores.
+    Waits up to 8 seconds for the window to appear.
+    """
+    win_info = cfg.get("window") or {}
+    x = win_info.get("x")
+    y = win_info.get("y")
+    w = win_info.get("width")
+    h = win_info.get("height")
+
+    # No geometry saved — nothing to do
+    if x is None or y is None or w is None or h is None:
+        return
+
+    # Skip if geometry is invalid or default (windows we never captured)
+    if w < 100 or h < 100:
+        return
+
+    import threading as _th
+    _th.Thread(
+        target=_wait_and_position_window,
+        args=(cfg, app_name, int(x), int(y), int(w), int(h)),
+        daemon=True
+    ).start()
+
+
+def _wait_and_position_window(cfg, app_name, x, y, w, h):
+    """
+    Wait for the app's window to appear (up to 8s),
+    then move it to the saved position using SetWindowPos.
+    """
+    import time as _t
+    try:
+        import win32gui
+        import win32con
+        import win32process
+        import psutil
+    except ImportError:
+        return
+
+    exe_path = (cfg.get("exe_path") or "").lower()
+    exe_name = os.path.basename(exe_path).lower() if exe_path else ""
+    saved_title = (cfg.get("window", {}).get("title") or "").lower().strip()
+    app_type = (cfg.get("type") or "").lower()
+
+    # Poll for the window every 400ms for up to 8 seconds
+    end_time = _t.time() + 8.0
+    target_hwnd = None
+
+    while _t.time() < end_time and target_hwnd is None:
+        _t.sleep(0.4)
+
+        candidates = []
+
+        def _enum_cb(hwnd, _):
+            if not win32gui.IsWindowVisible(hwnd):
+                return
+            try:
+                title = win32gui.GetWindowText(hwnd)
+                if not title:
+                    return
+                _, pid = win32process.GetWindowThreadProcessId(hwnd)
+                try:
+                    proc = psutil.Process(pid)
+                    proc_exe = (proc.exe() or "").lower()
+                    proc_name = proc.name().lower()
+                except Exception:
+                    return
+                # Skip Seven's own windows
+                if any(m in proc_exe for m in ["mk-projects\\seven", "\\seven\\"]):
+                    return
+
+                # Match by exe path (strongest)
+                match_score = 0
+                if exe_path and proc_exe == exe_path:
+                    match_score = 10
+                elif exe_name and proc_name == exe_name:
+                    match_score = 8
+                elif saved_title:
+                    title_lower = title.lower()
+                    if title_lower == saved_title:
+                        match_score = 6
+                    elif saved_title in title_lower or title_lower in saved_title:
+                        match_score = 4
+
+                if match_score > 0:
+                    candidates.append((match_score, hwnd, title))
+            except Exception:
+                pass
+
+        try:
+            win32gui.EnumWindows(_enum_cb, None)
+        except Exception:
+            pass
+
+        if candidates:
+            # Pick highest score
+            candidates.sort(reverse=True)
+            _, target_hwnd, matched_title = candidates[0]
+            print(Fore.CYAN + f"  [POS] Found '{app_name}' → '{matched_title}' "
+                  f"(hwnd={target_hwnd})")
+            break
+
+    if target_hwnd is None:
+        print(Fore.YELLOW + f"  [POS] Could not find window for '{app_name}' "
+              f"within 8s — skipping position restore")
+        return
+
+    # Restore window if minimized/maximized so SetWindowPos works
+    try:
+        placement = win32gui.GetWindowPlacement(target_hwnd)
+        if placement[1] in (win32con.SW_SHOWMINIMIZED, win32con.SW_MINIMIZE):
+            win32gui.ShowWindow(target_hwnd, win32con.SW_RESTORE)
+            _t.sleep(0.15)
+    except Exception:
+        pass
+
+    # Apply the saved geometry
+    try:
+        win32gui.SetWindowPos(
+            target_hwnd,
+            win32con.HWND_TOP,
+            x, y, w, h,
+            win32con.SWP_SHOWWINDOW | win32con.SWP_NOACTIVATE,
+        )
+        print(Fore.GREEN + f"  [POS] Positioned '{app_name}' at "
+              f"({x}, {y}) {w}×{h}")
+    except Exception as e:
+        print(Fore.YELLOW + f"  [POS] Position failed for '{app_name}': {e}")
+
+
 def _restore_browser(cfg):
     """
-    Restore browser tabs with deduplication.
-
-    Chrome automatically restores "last session" tabs on launch.
-    Seven ALSO saves tabs. Result: duplicates.
-
-    Fix (Option A+C):
-      1. Check if Chrome is already running for this profile
-      2. If yes → session restore already happened → diff tabs
-      3. If no → launch Chrome → wait 3s for session restore → diff → open missing
-      4. Only open tabs that are genuinely missing
+    Restore browser tabs with profile-pinning and URL deduplication.
+    Never launches tabs that are already active in that profile.
     """
     tabs         = cfg.get("tabs", [])
-    urls         = [t["url"] for t in tabs
-                    if t.get("url", "").startswith("http")]
+    urls         = [t["url"] for t in tabs if t.get("url", "").startswith("http")]
     profile_name = cfg.get("profile_name", "")
     chrome_exe   = find_chrome_exe()
 
@@ -77,94 +207,42 @@ def _restore_browser(cfg):
     if not chrome_exe:
         for url in urls:
             subprocess.Popen(f'start chrome "{url}"', shell=True)
-            time.sleep(0.3)
+            time.sleep(0.2)
         return
 
-    import os as _os
-    from hands.workspace_modules.url_matching import normalize_url
-
-    chrome_base = _os.path.join(
-        _os.environ.get("LOCALAPPDATA", ""),
+    chrome_base = os.path.join(
+        os.environ.get("LOCALAPPDATA", ""),
         "Google", "Chrome", "User Data"
     )
-    profile_dir = find_chrome_profile_dir(chrome_base, profile_name)
+    profile_dir = find_chrome_profile_dir(chrome_base, profile_name) or "Default"
 
-    # Check if Chrome is already running
-    chrome_already_running = False
+    # Query currently active tabs for this profile to prevent duplication
+    from hands.workspace_modules.url_matching import normalize_url
+    from backend.routes.chrome import get_tabs_by_profile
+
+    open_urls_in_profile = set()
     try:
-        import psutil as _ps
-        for _p in _ps.process_iter(['name']):
-            try:
-                if _p.info['name'] and 'chrome' in _p.info['name'].lower():
-                    chrome_already_running = True
-                    break
-            except Exception:
-                pass
+        current_profile_tabs = get_tabs_by_profile()
+        for prof_key, tab_list in current_profile_tabs.items():
+            if prof_key.lower() == profile_name.lower() or prof_key.lower() == profile_dir.lower():
+                for t in tab_list:
+                    u = t.get("url", "")
+                    if u:
+                        open_urls_in_profile.add(normalize_url(u))
     except Exception:
         pass
 
-    # Launch Chrome if not running
-    if not chrome_already_running:
-        if profile_dir:
-            subprocess.Popen(
-                [chrome_exe, f"--profile-directory={profile_dir}", urls[0]]
-            )
-        else:
-            subprocess.Popen([chrome_exe, urls[0]])
-
-        # Wait for Chrome to finish session restore (reopens last tabs)
-        time.sleep(3.5)
-
-    # Now diff: query what's actually open vs what we want
-    missing_urls = list(urls)  # start with all, remove already-open
-
-    try:
-        from backend.routes.chrome import get_tabs_by_profile
-        open_tabs = get_tabs_by_profile()
-
-        if open_tabs:
-            # Build set of currently open URLs (normalized)
-            open_url_set = set()
-            for _prof, _tabs in open_tabs.items():
-                # If profile specified, only check that profile
-                if profile_name and _prof.lower() != profile_name.lower():
-                    continue
-                for _t in _tabs:
-                    _u = _t.get("url", "")
-                    if _u:
-                        open_url_set.add(normalize_url(_u))
-
-            # Filter to only truly missing URLs
-            missing_urls = [
-                u for u in urls
-                if normalize_url(u) not in open_url_set
-            ]
-
-            skipped = len(urls) - len(missing_urls)
-            if skipped > 0:
-                print(Fore.CYAN + f"[WORKSPACE] Chrome dedup: "
-                      f"{skipped} tabs already open (session restore), "
-                      f"{len(missing_urls)} missing")
-
-    except Exception as _dedup_err:
-        print(Fore.YELLOW + f"[WORKSPACE] Chrome dedup check failed: "
-              f"{_dedup_err} — opening all tabs")
-        missing_urls = list(urls)
+    # Filter out tabs already open
+    missing_urls = [u for u in urls if normalize_url(u) not in open_urls_in_profile] if open_urls_in_profile else list(urls)
 
     if not missing_urls:
-        print(Fore.GREEN + f"[WORKSPACE] Chrome '{profile_name}': "
-              f"all tabs already open")
+        print(Fore.CYAN + f"[WORKSPACE] Chrome ({profile_name}): All {len(urls)} tabs already open — skipping launch.")
         return
 
-    # Open only missing tabs
-    for url in missing_urls:
-        if profile_dir:
-            subprocess.Popen(
-                [chrome_exe, f"--profile-directory={profile_dir}", url]
-            )
-        else:
-            subprocess.Popen([chrome_exe, url])
-        time.sleep(0.15)  # minimal delay to avoid Chrome merge
+    print(Fore.GREEN + f"[WORKSPACE] Chrome ({profile_name}): Opening {len(missing_urls)} missing tab(s) in profile '{profile_dir}'")
+    for u in missing_urls:
+        subprocess.Popen([chrome_exe, f"--profile-directory={profile_dir}", u])
+        time.sleep(0.12)
 
 
 def _restore_vscode(cfg):
@@ -201,8 +279,7 @@ def _restore_explorer(cfg):
 
     if name:
         clean = name
-        for prefix in ("File Explorer: ", "File Explorer — ",
-                       "File Explorer - "):
+        for prefix in ("File Explorer: ", "File Explorer — ", "File Explorer - "):
             if name.startswith(prefix):
                 clean = name[len(prefix):]
                 break
@@ -248,8 +325,7 @@ def _restore_uwp(cfg):
 def _restore_terminal(cfg):
     cwd      = cfg.get("working_dir", "")
     app_type = (cfg.get("type") or "").lower()
-    exe      = "powershell" if app_type in ("powershell", "terminal") \
-               else "cmd"
+    exe      = "powershell" if app_type in ("powershell", "terminal") else "cmd"
     flags    = subprocess.CREATE_NEW_CONSOLE
     if cwd and os.path.exists(cwd):
         subprocess.Popen([exe], cwd=cwd, creationflags=flags)
@@ -263,11 +339,14 @@ def _restore_generic(cfg):
     open_files = cfg.get("open_files", [])
     work_dir   = cfg.get("working_dir", "")
 
-    # If document files exist, opening the document automatically opens the app
+    # If document files exist, opening the document automatically opens the associated app
     if open_files:
-        from hands.workspace_modules.document_capture import restore_open_files
-        if restore_open_files(open_files) > 0:
-            return
+        try:
+            from hands.workspace_modules.document_capture import restore_open_files
+            if restore_open_files(open_files) > 0:
+                return
+        except Exception:
+            pass
 
     # Direct launch with working directory
     if exe and os.path.exists(exe):
