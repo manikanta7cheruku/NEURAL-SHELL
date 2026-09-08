@@ -423,6 +423,52 @@ def get_active_minutes():
     """Get current session accumulated minutes (not yet saved)."""
     return _session["accumulated_seconds"] / 60.0
 
+
+def _check_server_messages():
+    """Poll the Render server for admin messages and store in API state."""
+    try:
+        import server_sync
+        import config as _cfg
+
+        tier = _cfg.KEY.get("license", {}).get("tier", "free")
+        result = server_sync._post("/api/messages/latest", {
+            "tier": tier,
+            "since": "2025-01-01"
+        })
+
+        # The endpoint returns a list via GET, but _post sends POST.
+        # Use direct GET instead.
+        import requests as _req
+        r = _req.get(
+            f"{server_sync.SERVER_URL}/api/messages/latest",
+            params={"tier": tier, "since": "2025-01-01"},
+            timeout=5
+        )
+        if r.status_code == 200:
+            messages = r.json()
+            if messages and len(messages) > 0:
+                # Store the most recent message in API state
+                latest = messages[0]
+                try:
+                    from backend.api_server import set_state
+                    set_state("admin_message", {
+                        "id": latest.get("id"),
+                        "title": latest.get("title", ""),
+                        "body": latest.get("body", ""),
+                        "priority": latest.get("priority", "info")
+                    })
+                    print(f"[TELEMETRY] Admin message received: {latest.get('title')}")
+                except Exception:
+                    pass
+            else:
+                try:
+                    from backend.api_server import set_state
+                    set_state("admin_message", None)
+                except Exception:
+                    pass
+    except Exception as e:
+        print(f"[TELEMETRY] Message check failed (ok): {e}")
+
 # =============================================================================
 # BACKGROUND TELEMETRY
 # =============================================================================
@@ -654,6 +700,10 @@ def start_telemetry():
                         print(f"[TELEMETRY] First-tick sync failed: {e}")
 
                 send_ping()
+
+                # Check for admin messages every 10 ticks (10 minutes)
+                if tick_count % 10 == 0:
+                    _check_server_messages()
 
             except Exception as e:
                 print(f"[TELEMETRY] _ping_loop error: {e}")
