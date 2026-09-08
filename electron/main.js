@@ -108,6 +108,12 @@ function launchPanelHost() {
   const appSource = getAppSourcePath();
   const APPDATA = process.env.APPDATA || require('os').homedir();
   const panelUserData = path.join(APPDATA, 'SEVEN', 'panel_user_data');
+  const panelHostScript = path.join(appSource, 'electron', 'panel_host.js');
+
+  if (!fs.existsSync(panelHostScript)) {
+    console.warn('[PANEL] panel_host.js not found:', panelHostScript);
+    return;
+  }
 
   console.log('[PANEL] Spawning detached panel host...');
   try {
