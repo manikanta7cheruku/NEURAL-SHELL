@@ -181,10 +181,21 @@ def smart_restore(apps_config):
                     missing.append(cfg)
 
             elif t == "explorer":
+                # Check 1: exact folder path match
                 if fld and fld in open_folders:
                     already_open += 1
+                    print(Fore.CYAN + f"[WORKSPACE] Already open (folder): {name}")
+                # Check 2: Explorer title match (handles "Home", "This PC", custom libraries)
+                elif any(app.get("type") == "explorer" and (name.lower() in (app.get("name") or "").lower() or (app.get("name") or "").lower() in name.lower()) for app in current):
+                    already_open += 1
+                    print(Fore.CYAN + f"[WORKSPACE] Already open (explorer title): {name}")
+                # Check 3: If no specific folder was requested and an Explorer window is already visible
+                elif not fld and ("explorer" in open_types or any(app.get("type") == "explorer" for app in current)):
+                    already_open += 1
+                    print(Fore.CYAN + f"[WORKSPACE] Already open (generic explorer): {name}")
                 else:
                     missing.append(cfg)
+                    print(Fore.YELLOW + f"[WORKSPACE] Missing explorer: {name}")
 
             elif t == "uwp":
                 if (prot and prot in open_uwp) or \
