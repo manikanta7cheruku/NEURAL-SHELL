@@ -200,7 +200,8 @@ def _execute_trigger_complete(trigger, name, action_type, action_data,
                     "holdMs":   2500,
                 },
             })
-            time.sleep(0.8)
+            # Wait for windows to be visible, then show arrangement
+            time.sleep(1.2)
             fire_arrangement_card(workspace_apps, get_windows_by_workspace_apps)
 
         elif opened > 0 and skipped > 0:
@@ -213,16 +214,19 @@ def _execute_trigger_complete(trigger, name, action_type, action_data,
                     "holdMs":   2200,
                 },
             })
-            time.sleep(1.5)
+            # Give newly-opened apps 3 seconds to appear on screen
+            # (Notepad, Word, Chrome all take 1-2s to render window)
+            time.sleep(3.0)
             fire_arrangement_card(workspace_apps, get_windows_by_workspace_apps)
 
         elif opened > 0:
-            time.sleep(1.8)
+            # Longer wait — all apps were newly launched
+            time.sleep(3.5)
             fire_arrangement_card(workspace_apps, get_windows_by_workspace_apps)
 
     elif action_type == "open_app" and not trigger.get("silent", False):
         if len(workspace_apps) >= 2:
-            time.sleep(1.5)
+            time.sleep(2.5)
             fire_arrangement_card(workspace_apps, get_windows_by_workspace_apps)
 
     # Step 5: Update fire stats
@@ -452,27 +456,36 @@ def _exec_run_command(data):
         is_browser    = _proc in _browser_apps
         is_pwsh_v2    = _proc in _terminal_v2 or "windowsterminal" in _title_str
 
-        # ── STEP 5: ALWAYS backspace one char in case hotkey leaked ──
-        # Alt+\ leaks \, Ctrl+; leaks ;, etc. Backspace is safe:
-        # if there's no stray char, backspace on an empty prompt does nothing
-        # in terminals and only removes 1 char in text fields (undo-able).
-        # We only skip backspace for pure function keys (F1-F24) and letters
-        # with Ctrl (Ctrl+F5, Ctrl+A rarely leak).
-        _printable_symbols = set("\\/;',.[]-=`")
-        _leaked_a_char = False
-        if _fired_key:
-            # Symbols always leak when Alt is the only modifier
-            if _fired_key in _printable_symbols:
-                _leaked_a_char = True
-            # Space, single letters/digits with only Shift also leak
-            elif _fired_key == ' ':
-                _leaked_a_char = True
+        # ── STEP 5: Backspace stray char that leaked from the hotkey ──
+        # Alt+G leaks 'g', Alt+D leaks 'd', Alt+\ leaks '\', Alt+; leaks ';'
+        # Even Ctrl+letter can leak in some apps.
+        #
+        # We backspace whenever the trigger key was ANY printable character
+        # (letter, digit, symbol, space). We only skip backspace for:
+        #   - Function keys (F1-F24)
+        #   - Navigation keys (Home, End, arrows, PgUp, PgDn, Insert, Delete)
+        #   - No trigger key at all (shouldn't happen but safe fallback)
+        #
+        # Backspace is safe: on empty terminal prompt it's a no-op,
+        # in text fields it just removes 1 char which the user can Ctrl+Z.
 
-        if _leaked_a_char:
+        _navigation_keys = {
+            'home', 'end', 'pageup', 'pagedown', 'up', 'down',
+            'left', 'right', 'insert', 'delete', 'tab', 'esc',
+            'enter', 'backspace', 'capslock', 'numlock'
+        }
+        _is_function_key = _fired_key and _fired_key.startswith('f') and \
+                           _fired_key[1:].isdigit()
+        _is_navigation  = _fired_key in _navigation_keys
+        _is_printable   = bool(_fired_key) and not _is_function_key and \
+                          not _is_navigation and len(_fired_key) == 1
+
+        # Any single printable char can leak — backspace to be safe
+        if _is_printable:
             user32.keybd_event(0x08, 0, 0, 0)  # Backspace down
-            time.sleep(0.02)
+            time.sleep(0.03)
             user32.keybd_event(0x08, 0, KEYEVENTF_KEYUP, 0)  # up
-            time.sleep(0.1)
+            time.sleep(0.12)
 
         # ── STEP 6: For browsers, force focus commit ──
         # Chrome/Edge sometimes route text to URL bar after hotkey.
