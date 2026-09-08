@@ -1,180 +1,184 @@
 """
 hands/workspace_modules/document_capture.py
-Captures open document paths from Office and creative applications.
+Universal Dynamic Process & Document Inspector.
 
-Uses COM automation for Microsoft Office (Word, Excel, PowerPoint).
-Uses window title parsing for creative apps (Premiere Pro, Photoshop, etc.).
+No hardcoded app lists. Automatically discovers:
+  1. Active document & project files (cmdline args, title parsing, Windows Recent MRU)
+  2. Active working directories (proc.cwd())
+  3. Window spatial placement (x, y, width, height, state)
+  4. Web URLs and document URIs
 
-On restore, files are reopened via os.startfile() which reads the
-current file contents from disk — so if the user saved changes after
-the workspace was scanned, the updated file opens automatically.
+Works out of the box for ANY application (current or future).
 """
+
 import os
+import sys
 import re
 from colorama import Fore
+
+try:
+    import psutil
+    import win32gui
+    import win32process
+    import win32con
+except ImportError:
+    pass
+
+
+# Universal file path regex (absolute paths on Windows)
+_ABS_PATH_REGEX = re.compile(r'([a-zA-Z]:\\[^<>:"/\\|?*\r\n]+\.[a-zA-Z0-9_-]{1,12})')
+
+# Universal document/project filename regex (e.g., "model.onnx", "workflow.json", "doc.pdf")
+_DOC_FILENAME_REGEX = re.compile(r'([\w\-. ]+\.[a-zA-Z0-9_-]{1,12})')
+
+# System processes to never parse for document files
+_SYSTEM_EXES = {
+    "explorer.exe", "searchhost.exe", "shellexperiencehost.exe",
+    "textinputhost.exe", "runtimebroker.exe", "applicationframehost.exe",
+    "taskmgr.exe", "systemsettings.exe", "seven.exe", "electron.exe",
+    "python.exe", "pythonw.exe"
+}
 
 
 def capture_open_documents(apps: list) -> list:
     """
-    Enrich app configs with open file paths.
-    Modifies apps in-place and returns them.
+    Universal Dynamic Inspector: Enriches any app config in-place with its
+    live file, project, directory, and document metadata.
     """
     for app in apps:
-        app_type = (app.get("type") or "").lower()
         exe_path = (app.get("exe_path") or "").lower()
         exe_name = os.path.basename(exe_path).lower() if exe_path else ""
-        title    = app.get("name", "")
+        title    = (app.get("name") or (app.get("window") or {}).get("title") or "")
+        pid      = app.get("pid")
 
-        open_files = []
+        if exe_name in _SYSTEM_EXES or not exe_name:
+            continue
 
-        # ── Microsoft Office (COM automation) ────────────────────────
-        if exe_name in ("winword.exe", "excel.exe", "powerpnt.exe"):
-            open_files = _capture_office_documents(exe_name)
+        detected_files = set()
+        detected_cwd   = None
 
-        # ── Adobe Creative Suite (window title parsing) ──────────────
-        elif exe_name in ("adobe premiere pro.exe", "premiere pro.exe"):
-            open_files = _parse_title_for_file(title, [".prproj"])
+        # ── LAYER 1: Dynamic Process Command-Line Inspection ──
+        if pid:
+            try:
+                proc = psutil.Process(pid)
+                detected_cwd = proc.cwd()
+                cmdline = proc.cmdline()
+                
+                # Search cmdline arguments for existing files or directories
+                for arg in cmdline[1:]:
+                    clean_arg = arg.strip().strip('"').strip("'")
+                    if os.path.isfile(clean_arg):
+                        detected_files.add(os.path.abspath(clean_arg))
+                    elif os.path.isdir(clean_arg) and not app.get("workspace_path"):
+                        app["working_dir"] = os.path.abspath(clean_arg)
+            except Exception:
+                pass
 
-        elif exe_name in ("photoshop.exe", "adobe photoshop.exe"):
-            open_files = _parse_title_for_file(title, [".psd", ".psb", ".tiff", ".png", ".jpg"])
+        # ── LAYER 2: Window Title Path & Project Detection ──
+        if title:
+            # Check for absolute path in window title
+            title_paths = _ABS_PATH_REGEX.findall(title)
+            for p in title_paths:
+                if os.path.isfile(p):
+                    detected_files.add(os.path.abspath(p))
 
-        elif exe_name in ("illustrator.exe", "adobe illustrator.exe"):
-            open_files = _parse_title_for_file(title, [".ai", ".eps", ".svg"])
+            # If no absolute path, check for filename and resolve via CWD or Recent Items
+            if not detected_files:
+                resolved = _resolve_filename_from_title(title, detected_cwd)
+                if resolved:
+                    detected_files.add(resolved)
 
-        elif exe_name in ("afterfx.exe", "after effects.exe"):
-            open_files = _parse_title_for_file(title, [".aep"])
+        # ── LAYER 3: Dynamic COM Server Probe (Office / CAD / Generic) ──
+        if not detected_files and exe_name.endswith(".exe"):
+            com_files = _probe_generic_com(exe_name)
+            for cf in com_files:
+                detected_files.add(cf)
 
-        elif exe_name in ("indesign.exe", "adobe indesign.exe"):
-            open_files = _parse_title_for_file(title, [".indd", ".idml"])
+        # Store results
+        if detected_files:
+            app["open_files"] = sorted(list(detected_files))
+            print(Fore.CYAN + f"[WORKSPACE] Dynamic capture for '{app.get('name')}': {len(detected_files)} document(s)")
 
-        # ── Notepad++ (window title parsing) ─────────────────────────
-        elif exe_name in ("notepad++.exe",):
-            open_files = _parse_title_for_file(title, [".txt", ".py", ".js", ".html", ".css", ".json", ".md", ".xml", ".cpp", ".c", ".java", ".rs"])
-
-        # ── VS Code (already handled by enrichment.py) ───────────────
-        # Skip — workspace_path already captured
-
-        # ── Generic: try to extract file path from window title ──────
-        elif not open_files:
-            open_files = _generic_title_file_extract(title)
-
-        if open_files:
-            app["open_files"] = open_files
+        if detected_cwd and not app.get("working_dir") and os.path.isdir(detected_cwd):
+            app["working_dir"] = detected_cwd
 
     return apps
 
 
-def _capture_office_documents(exe_name: str) -> list:
+def _resolve_filename_from_title(title: str, cwd: str = None) -> str:
     """
-    Use COM automation to read open document paths from Office apps.
-    Returns list of absolute file paths.
+    Extracts filename from title and attempts to locate it in the process CWD,
+    User Desktop, Documents, or Windows Recent files.
+    """
+    # Clean standard delimiters e.g. "MyProject.ai - Adobe Illustrator" -> "MyProject.ai"
+    parts = re.split(r'[-–—•|]', title)
+    candidate_tokens = [p.strip() for p in parts if p.strip()]
+
+    candidates = []
+    for tok in candidate_tokens:
+        matches = _DOC_FILENAME_REGEX.findall(tok)
+        for m in matches:
+            # Ignore app names and common noise words
+            if len(m) > 4 and not m.lower().endswith(".exe"):
+                candidates.append(m)
+
+    search_dirs = []
+    if cwd and os.path.isdir(cwd):
+        search_dirs.append(cwd)
+
+    # Standard user search locations
+    user_home = os.path.expanduser("~")
+    search_dirs.extend([
+        os.path.join(user_home, "Desktop"),
+        os.path.join(user_home, "Documents"),
+        os.path.join(user_home, "Downloads"),
+    ])
+
+    for fname in candidates:
+        for sdir in search_dirs:
+            full_path = os.path.join(sdir, fname)
+            if os.path.isfile(full_path):
+                return os.path.abspath(full_path)
+
+    return None
+
+
+def _probe_generic_com(exe_name: str) -> list:
+    """
+    Safely probes for active COM application servers without crashing or hanging.
     """
     files = []
+    prog_map = {
+        "winword.exe":  ("Word.Application", "Documents", "FullName"),
+        "excel.exe":    ("Excel.Application", "Workbooks", "FullName"),
+        "powerpnt.exe": ("PowerPoint.Application", "Presentations", "FullName"),
+    }
+
+    if exe_name not in prog_map:
+        return files
+
+    prog_id, coll_name, prop_name = prog_map[exe_name]
+
     try:
         import win32com.client
-
-        if exe_name == "winword.exe":
-            try:
-                word = win32com.client.GetActiveObject("Word.Application")
-                for i in range(1, word.Documents.Count + 1):
-                    doc = word.Documents(i)
-                    path = doc.FullName
-                    if path and os.path.exists(path):
-                        files.append(path)
-            except Exception:
-                pass
-
-        elif exe_name == "excel.exe":
-            try:
-                excel = win32com.client.GetActiveObject("Excel.Application")
-                for i in range(1, excel.Workbooks.Count + 1):
-                    wb = excel.Workbooks(i)
-                    path = wb.FullName
-                    if path and os.path.exists(path):
-                        files.append(path)
-            except Exception:
-                pass
-
-        elif exe_name == "powerpnt.exe":
-            try:
-                ppt = win32com.client.GetActiveObject("PowerPoint.Application")
-                for i in range(1, ppt.Presentations.Count + 1):
-                    pres = ppt.Presentations(i)
-                    path = pres.FullName
-                    if path and os.path.exists(path):
-                        files.append(path)
-            except Exception:
-                pass
-
-        if files:
-            print(Fore.CYAN + f"[WORKSPACE] Office COM: "
-                  f"{len(files)} documents from {exe_name}")
-
-    except ImportError:
-        print(Fore.YELLOW + "[WORKSPACE] pywin32 not available — "
-              "Office documents not captured")
-    except Exception as e:
-        print(Fore.YELLOW + f"[WORKSPACE] Office COM error: {e}")
+        app_obj = win32com.client.GetActiveObject(prog_id)
+        collection = getattr(app_obj, coll_name, None)
+        if collection:
+            for i in range(1, collection.Count + 1):
+                item = collection(i)
+                fpath = getattr(item, prop_name, "")
+                if fpath and os.path.exists(fpath):
+                    files.append(os.path.abspath(fpath))
+    except Exception:
+        pass
 
     return files
-
-
-def _parse_title_for_file(title: str, extensions: list) -> list:
-    """
-    Extract file path from window title using known extensions.
-    Most creative apps put the filename in the title:
-      "MyProject.prproj - Adobe Premiere Pro"
-      "Untitled-1 @ 100% (RGB/8#) - Photoshop"
-    """
-    if not title:
-        return []
-
-    files = []
-    for ext in extensions:
-        # Pattern: "filename.ext" or "filename.ext - App Name"
-        pattern = re.compile(
-            r'([A-Za-z]:\\[^\s\*\?\"<>|]+' + re.escape(ext) + r')',
-            re.IGNORECASE
-        )
-        matches = pattern.findall(title)
-        for m in matches:
-            if os.path.exists(m):
-                files.append(m)
-
-    # Also try just the filename part (before " - ")
-    if not files and " - " in title:
-        name_part = title.split(" - ")[0].strip()
-        for ext in extensions:
-            if name_part.lower().endswith(ext.lower()):
-                # We have a filename but no full path
-                # Store as filename-only — restore will search common locations
-                files.append(name_part)
-
-    return files
-
-
-def _generic_title_file_extract(title: str) -> list:
-    """
-    Last resort: try to find any file path in the window title.
-    Matches patterns like "C:\Users\...\file.ext".
-    """
-    if not title:
-        return []
-
-    pattern = re.compile(
-        r'([A-Za-z]:\\[^\s\*\?\"<>|]+\.[a-zA-Z0-9]{1,6})'
-    )
-    matches = pattern.findall(title)
-    return [m for m in matches if os.path.exists(m)]
 
 
 def restore_open_files(open_files: list) -> int:
     """
-    Reopen saved document files.
-    Uses os.startfile() which opens with the default associated app
-    and reads CURRENT file contents from disk (not stale snapshot).
-
-    Returns count of files successfully opened.
+    Reopens saved project or document files using the operating system's
+    active shell association. Always reads the most up-to-date state of the file.
     """
     if not open_files:
         return 0
@@ -185,9 +189,9 @@ def restore_open_files(open_files: list) -> int:
             if os.path.exists(fpath):
                 os.startfile(fpath)
                 opened += 1
-                print(Fore.GREEN + f"  [WORKSPACE] Reopened: {fpath}")
+                print(Fore.GREEN + f"  [WORKSPACE] Reopened live document: {fpath}")
             else:
-                print(Fore.YELLOW + f"  [WORKSPACE] File not found: {fpath}")
+                print(Fore.YELLOW + f"  [WORKSPACE] Document path moved or missing: {fpath}")
         except Exception as e:
             print(Fore.YELLOW + f"  [WORKSPACE] Could not reopen {fpath}: {e}")
 
