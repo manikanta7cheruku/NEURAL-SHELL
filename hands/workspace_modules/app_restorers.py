@@ -194,7 +194,18 @@ def _wait_and_position_window(cfg, app_name, x, y, w, h):
 def _restore_browser(cfg):
     """
     Restore browser tabs with profile-pinning and URL deduplication.
-    Never launches tabs that are already active in that profile.
+
+    Chrome has its own session restore that reopens last tabs on launch.
+    The Seven Chrome extension syncs tab data every 3 seconds.
+
+    Race condition fix:
+      1. Check if Chrome is already running with this profile
+      2. If NOT running → launch Chrome → wait up to 6s for extension sync
+      3. If already running → extension data should be fresh
+      4. Diff saved URLs against extension-reported open URLs
+      5. Only open truly missing tabs
+
+    This prevents the "3 tabs become 6" duplication bug.
     """
     tabs         = cfg.get("tabs", [])
     urls         = [t["url"] for t in tabs if t.get("url", "").startswith("http")]
@@ -210,39 +221,102 @@ def _restore_browser(cfg):
             time.sleep(0.2)
         return
 
+    from hands.workspace_modules.url_matching import normalize_url
+    from backend.routes.chrome import get_tabs_by_profile
+
     chrome_base = os.path.join(
         os.environ.get("LOCALAPPDATA", ""),
         "Google", "Chrome", "User Data"
     )
     profile_dir = find_chrome_profile_dir(chrome_base, profile_name) or "Default"
 
-    # Query currently active tabs for this profile to prevent duplication
-    from hands.workspace_modules.url_matching import normalize_url
-    from backend.routes.chrome import get_tabs_by_profile
-
-    open_urls_in_profile = set()
+    # ── STEP 1: Check if Chrome is already running ──
+    chrome_was_running = False
     try:
-        current_profile_tabs = get_tabs_by_profile()
-        for prof_key, tab_list in current_profile_tabs.items():
-            if prof_key.lower() == profile_name.lower() or prof_key.lower() == profile_dir.lower():
-                for t in tab_list:
-                    u = t.get("url", "")
-                    if u:
-                        open_urls_in_profile.add(normalize_url(u))
+        import psutil as _ps
+        for _p in _ps.process_iter(['name']):
+            try:
+                if _p.info['name'] and 'chrome' in _p.info['name'].lower():
+                    chrome_was_running = True
+                    break
+            except Exception:
+                pass
     except Exception:
         pass
 
-    # Filter out tabs already open
-    missing_urls = [u for u in urls if normalize_url(u) not in open_urls_in_profile] if open_urls_in_profile else list(urls)
+    # ── STEP 2: Launch Chrome if not running ──
+    if not chrome_was_running:
+        print(Fore.CYAN + f"[WORKSPACE] Chrome not running — launching "
+              f"profile '{profile_dir}'")
+        subprocess.Popen([chrome_exe, f"--profile-directory={profile_dir}"])
+        # Wait for Chrome to finish its own session restore
+        time.sleep(3.0)
+
+    # ── STEP 3: Poll extension for tab data ──
+    # The extension sends tab data every 3 seconds. After Chrome launches,
+    # it takes 2-5 seconds for the extension to initialize and first sync.
+    # We poll up to 6 seconds to get fresh tab data.
+    open_urls_in_profile = set()
+    max_wait = 6.0 if not chrome_was_running else 2.0
+    poll_interval = 1.0
+    elapsed = 0.0
+
+    while elapsed < max_wait:
+        try:
+            current_profile_tabs = get_tabs_by_profile()
+            for prof_key, tab_list in current_profile_tabs.items():
+                # Match by profile name, directory, or email prefix
+                pk = prof_key.lower()
+                pn = profile_name.lower()
+                pd = profile_dir.lower()
+                if pk == pn or pk == pd or pn in pk or pk in pn:
+                    for t in tab_list:
+                        u = t.get("url", "")
+                        if u:
+                            open_urls_in_profile.add(normalize_url(u))
+
+            # If we found tabs for this profile, stop polling
+            if open_urls_in_profile:
+                print(Fore.CYAN + f"[WORKSPACE] Extension synced: "
+                      f"{len(open_urls_in_profile)} tabs found for "
+                      f"'{profile_name}' after {elapsed:.0f}s")
+                break
+        except Exception:
+            pass
+
+        time.sleep(poll_interval)
+        elapsed += poll_interval
+
+    # ── STEP 4: Diff and open only missing tabs ──
+    if open_urls_in_profile:
+        missing_urls = [
+            u for u in urls
+            if normalize_url(u) not in open_urls_in_profile
+        ]
+        skipped = len(urls) - len(missing_urls)
+        if skipped > 0:
+            print(Fore.CYAN + f"[WORKSPACE] Chrome ({profile_name}): "
+                  f"{skipped} tab(s) already open (session restore), "
+                  f"{len(missing_urls)} missing")
+    else:
+        # Extension never synced — fall back to opening all tabs
+        # This is better than opening zero tabs
+        print(Fore.YELLOW + f"[WORKSPACE] Chrome ({profile_name}): "
+              f"Extension not synced after {max_wait}s — "
+              f"opening all {len(urls)} tabs (may duplicate)")
+        missing_urls = list(urls)
 
     if not missing_urls:
-        print(Fore.CYAN + f"[WORKSPACE] Chrome ({profile_name}): All {len(urls)} tabs already open — skipping launch.")
+        print(Fore.GREEN + f"[WORKSPACE] Chrome ({profile_name}): "
+              f"All {len(urls)} tabs already open — nothing to do")
         return
 
-    print(Fore.GREEN + f"[WORKSPACE] Chrome ({profile_name}): Opening {len(missing_urls)} missing tab(s) in profile '{profile_dir}'")
+    # ── STEP 5: Open only the missing tabs ──
+    print(Fore.GREEN + f"[WORKSPACE] Chrome ({profile_name}): "
+          f"Opening {len(missing_urls)} missing tab(s) in '{profile_dir}'")
     for u in missing_urls:
         subprocess.Popen([chrome_exe, f"--profile-directory={profile_dir}", u])
-        time.sleep(0.12)
+        time.sleep(0.15)
 
 
 def _restore_vscode(cfg):
