@@ -442,15 +442,15 @@ export default function TriggerForm({ initial, onSave, onCancel, workspaces }) {
                     mics use noise suppression that flattens snap sounds — detection will not work reliably.
                   </p>
                   <p className="text-[8.5px] text-white/40 mt-1.5">
-                    Seven filters voice/keyboard/rumble using spike ratio, spectral centroid,
-                    and decay envelope. For best accuracy, calibrate to your mic:
+                    Works out of the box with headsets. Only calibrate if snap
+                    isn't triggering reliably or misfires on voice:
                   </p>
                   <button
                     type="button"
-                    onClick={async () => {
-                      const btn = event.target;
+                    onClick={async (e) => {
+                      const btn = e.target;
                       const originalText = btn.textContent;
-                      btn.textContent = 'Snap 3x in 8s...';
+                      btn.textContent = 'Snap 3x now (10s)...';
                       btn.disabled = true;
                       try {
                         const res = await fetch('/api/triggers/calibrate-snap', {
@@ -458,22 +458,22 @@ export default function TriggerForm({ initial, onSave, onCancel, workspaces }) {
                         });
                         const data = await res.json();
                         if (data.success) {
-                          btn.textContent = `Calibrated (${data.peak_min})`;
-                          setTimeout(() => { btn.textContent = originalText; btn.disabled = false; }, 3500);
+                          btn.textContent = `✓ Threshold: ${data.peak_min}`;
+                          setTimeout(() => { btn.textContent = originalText; btn.disabled = false; }, 4500);
                         } else {
-                          btn.textContent = data.message || 'Failed — try again';
-                          setTimeout(() => { btn.textContent = originalText; btn.disabled = false; }, 3500);
+                          btn.textContent = data.message?.slice(0, 40) || 'Try again';
+                          setTimeout(() => { btn.textContent = originalText; btn.disabled = false; }, 4500);
                         }
                       } catch (err) {
                         btn.textContent = 'Error — try again';
-                        setTimeout(() => { btn.textContent = originalText; btn.disabled = false; }, 3500);
+                        setTimeout(() => { btn.textContent = originalText; btn.disabled = false; }, 4500);
                       }
                     }}
                     className="mt-2 px-3 py-1 rounded-md text-[9px] font-medium
-                               bg-amber-500/15 border border-amber-500/30
-                               text-amber-200 hover:bg-amber-500/25
+                               bg-amber-500/10 border border-amber-500/25
+                               text-amber-200/85 hover:bg-amber-500/20
                                transition-all disabled:opacity-50 disabled:cursor-wait">
-                    Calibrate My Snap
+                    Optional: Calibrate My Snap
                   </button>
                 </div>
               </div>
