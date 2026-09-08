@@ -597,8 +597,21 @@ def launch_overlay_daemon():
     # Register for auto-start at login
     _register_overlay_startup(electron, daemon_js)
 
+    # MUST pass --overlay-daemon flag so main.js script router catches it.
+    # Without this flag, Electron tries to load daemon_js as a normal app
+    # entry point and fails silently (port 7891 never opens).
+    # Also need --user-data-dir to avoid single-instance lock conflict
+    # with the main SEVEN window.
+    import tempfile
+    overlay_user_data = os.path.join(
+        os.environ.get('APPDATA', os.path.expanduser('~')),
+        'SEVEN', 'overlay_user_data'
+    )
+    os.makedirs(overlay_user_data, exist_ok=True)
+
     pid = _spawn_detached(
-        [electron, daemon_js],
+        [electron, f"--user-data-dir={overlay_user_data}",
+         "--", daemon_js, "--overlay-daemon"],
         cwd=root
     )
     print(Fore.CYAN + f"[OVERLAY] Spawned PID {pid}")
