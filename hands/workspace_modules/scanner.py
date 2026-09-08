@@ -97,6 +97,7 @@ def scan_current():
 
             cfg = _classify(exe_name, exe_path, title, win_info, proc)
             if cfg:
+                cfg["pid"] = pid  # Passed to document capture inspector
                 apps.append(cfg)
 
         except Exception:
