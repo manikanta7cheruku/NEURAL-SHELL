@@ -8,58 +8,60 @@ const BASE_URL = window.location.protocol === 'file:'
 
 const api = axios.create({
   baseURL: BASE_URL,
-  timeout: 90000, // Local LLMs can take 30-60s on cold start
+  timeout: 90000,
   headers: { 'Content-Type': 'application/json' },
 });
 
 // Separate instance for slow endpoints like workspace scan
 export const apiSlow = axios.create({
   baseURL: BASE_URL,
-  timeout: 60000,
+  timeout: 120000,
   headers: { 'Content-Type': 'application/json' },
 });
 
-// Retry logic for connection refused errors (backend restarting)
-const retryOnConnectionRefused = async (error) => {
-  const config = error.config;
+// Retry logic for connection errors (backend starting up, network suspended, etc.)
+const MAX_RETRIES = 3;
+const RETRY_DELAY_MS = 2000;
 
-  // Only retry connection errors, not app-level errors
-  const isConnectionError = !error.response && (
-    error.code === 'ECONNREFUSED' ||
-    error.code === 'ERR_NETWORK' ||
-    error.message?.includes('Network Error') ||
-    error.message?.includes('ECONNREFUSED')
+const shouldRetry = (error) => {
+  if (!error.config) return false;
+  if (error.config._retryCount >= MAX_RETRIES) return false;
+  const code = error.code || '';
+  const msg = error.message || '';
+  return (
+    code === 'ECONNREFUSED' ||
+    code === 'ERR_NETWORK' ||
+    code === 'ERR_NETWORK_IO_SUSPENDED' ||
+    code === 'ECONNRESET' ||
+    msg.includes('Network Error') ||
+    msg.includes('ECONNREFUSED') ||
+    msg.includes('ERR_NETWORK_IO_SUSPENDED')
   );
+};
 
-  if (!isConnectionError) return Promise.reject(error);
+const retryInterceptor = async (error) => {
+  if (!shouldRetry(error)) {
+    return Promise.reject(error);
+  }
 
-  config._retryCount = config._retryCount || 0;
-  if (config._retryCount >= 3) return Promise.reject(error);
+  const config = error.config;
+  config._retryCount = (config._retryCount || 0) + 1;
 
-  config._retryCount++;
-  await new Promise(r => setTimeout(r, 1500 * config._retryCount));
+  // Exponential backoff: 2s, 4s, 6s
+  const delay = RETRY_DELAY_MS * config._retryCount;
+  await new Promise(resolve => setTimeout(resolve, delay));
+
   return api(config);
 };
 
 api.interceptors.response.use(
   r => r,
-  async (e) => {
-    // Silently retry connection errors, log others
-    if (!e.response && (e.code === 'ECONNREFUSED' || e.code === 'ERR_NETWORK')) {
-      try {
-        return await retryOnConnectionRefused(e);
-      } catch (retryErr) {
-        return Promise.reject(retryErr);
-      }
-    }
-    console.error('[API]', e.message);
-    return Promise.reject(e);
-  }
+  retryInterceptor
 );
 
 apiSlow.interceptors.response.use(
   r => r,
-  e => { console.error('[API SLOW]', e.message); return Promise.reject(e); }
+  retryInterceptor
 );
 
 export default api;
