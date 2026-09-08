@@ -191,9 +191,13 @@ class HotkeyListener:
             _trigger_key = next(
                 (p for p in _combo_parts if p not in _mods_set), ""
             )
+            # Detect if the combo had any modifiers — used by run_command
+            # to decide whether to backspace the stray typed char
+            _had_modifiers = any(p in _mods_set for p in _combo_parts)
 
             _trigger_with_key = dict(trigger)
             _trigger_with_key["_fired_key"] = _trigger_key
+            _trigger_with_key["_had_modifiers"] = _had_modifiers
 
             threading.Thread(
                 target=execute_trigger,
