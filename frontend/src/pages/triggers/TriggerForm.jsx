@@ -75,6 +75,7 @@ export default function TriggerForm({ initial, onSave, onCancel, workspaces }) {
   const [cmdTarget,  setCmdTarget]  = useState(initData.target || 'terminal');
   const [action,     setAction]     = useState(initData.action || '');
   const [cmdHotkeyWarn, setCmdHotkeyWarn] = useState(false);
+  const [showPreview, setShowPreview]     = useState(initData.show_preview || false);
 
   const handleHotkeyCapture = (e) => {
     if (!recording) return;
@@ -118,6 +119,7 @@ export default function TriggerForm({ initial, onSave, onCancel, workspaces }) {
       case 'open_workspace':
         if (!workspaceId) { setError('Select a workspace.'); return; }
         actionData.workspace_id = parseInt(workspaceId);
+        actionData.show_preview = showPreview;
         const ws = workspaces.find(w => w.id === parseInt(workspaceId));
         if (ws) actionData.workspace_name = ws.name;
         break;
@@ -237,17 +239,34 @@ export default function TriggerForm({ initial, onSave, onCancel, workspaces }) {
                         placeholder="Type full path and press Enter" />
           )}
           {actionType === 'open_workspace' && (
-            <select value={workspaceId} onChange={e => setWorkspaceId(e.target.value)}
-                    className="w-full bg-white/[0.03] border border-white/8 rounded-lg px-3 py-2
-                               text-[11px] text-white/70 outline-none cursor-pointer
-                               focus:border-white/15 transition-colors">
-              <option value="" className="bg-[#111] text-white/50">Select workspace...</option>
-              {workspaces.map(w => (
-                <option key={w.id} value={w.id} className="bg-[#111] text-white/80">
-                  {w.name} ({(w.apps || []).length} apps)
-                </option>
-              ))}
-            </select>
+            <div className="space-y-2">
+              <select value={workspaceId} onChange={e => setWorkspaceId(e.target.value)}
+                      className="w-full bg-white/[0.03] border border-white/8 rounded-lg px-3 py-2
+                                 text-[11px] text-white/70 outline-none cursor-pointer
+                                 focus:border-white/15 transition-colors">
+                <option value="" className="bg-[#111] text-white/50">Select workspace...</option>
+                {workspaces.map(w => (
+                  <option key={w.id} value={w.id} className="bg-[#111] text-white/80">
+                    {w.name} ({(w.apps || []).length} apps)
+                  </option>
+                ))}
+              </select>
+
+              <label className="flex items-center gap-2 px-3 py-2 rounded-lg
+                                bg-white/[0.02] border border-white/6 cursor-pointer
+                                hover:bg-white/[0.04] transition-all">
+                <input type="checkbox"
+                       checked={showPreview}
+                       onChange={e => setShowPreview(e.target.checked)}
+                       className="accent-s-accent" />
+                <div className="flex-1">
+                  <p className="text-[10px] text-white/70 font-medium">Show live preview</p>
+                  <p className="text-[8.5px] text-white/35 mt-0.5">
+                    Preview window shows where each app will land. Drag tiles to reposition before restoring.
+                  </p>
+                </div>
+              </label>
+            </div>
           )}
           {actionType === 'run_command' && (
             <div className="space-y-2">
