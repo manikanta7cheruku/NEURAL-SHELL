@@ -11,9 +11,17 @@ export default defineConfig({
       '/api': {
         target: 'http://127.0.0.1:7777',
         changeOrigin: true,
-        // Silence proxy errors during backend restart (dev experience)
         configure: (proxy) => {
-          proxy.on('error', () => {}); // Suppress console spam
+          // Gracefully absorb connection errors when Python backend is offline or restarting
+          proxy.on('error', (err, req, res) => {
+            if (res && !res.headersSent) {
+              res.writeHead(502, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ status: 'initializing', message: 'Seven is loading...' }));
+            }
+          });
+          proxy.on('proxyReq', (proxyReq) => {
+            proxyReq.setHeader('Connection', 'keep-alive');
+          });
         },
       },
       '/ws': {
@@ -21,7 +29,11 @@ export default defineConfig({
         ws: true,
         changeOrigin: true,
         configure: (proxy) => {
-          proxy.on('error', () => {});
+          proxy.on('error', (err, req, socket) => {
+            if (socket && !socket.destroyed) {
+              socket.destroy();
+            }
+          });
         },
       }
     }
