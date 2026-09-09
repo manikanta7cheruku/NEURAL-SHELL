@@ -886,28 +886,27 @@ if (!gotTheLock) {
     isAppReady = true;
 
     // Purge lingering background processes on startup
+    // Ensures old development daemons are terminated so the new production daemons
+    // can successfully acquire the Single-Instance Lock/Mutex.
     if (process.platform === 'win32') {
       try {
-        const targets = ['trigger_daemon', 'overlay_daemon', 'schedule_daemon', 'panel_server'];
-        targets.forEach(name => {
+        const targets = ['trigger_daemon.py', 'overlay_daemon.js', 'schedule_daemon.py', 'panel_server.py'];
+        targets.forEach(scriptName => {
           try {
-            const result = execSync(
-              `powershell -NoProfile -Command "Get-WmiObject Win32_Process | Where-Object { $_.CommandLine -like '*${name}*' } | Select-Object -ExpandProperty ProcessId"`,
-              { windowsHide: true, encoding: 'utf8', timeout: 5000 }
-            );
-            const pids = result.trim().split('\n').filter(p => p.trim());
-            pids.forEach(pid => {
-              pid = pid.trim();
-              if (pid && parseInt(pid) !== process.pid) {
-                try { 
-                  execSync(`taskkill /pid ${pid} /f /t 2>nul`, { 
-                    windowsHide: true, 
-                    timeout: 3000, 
-                    stdio: 'ignore' 
-                  }); 
-                } catch (e) {}
+            // Find PIDs of any python/electron process executing our script names
+            const cmd = `powershell -NoProfile -Command "Get-WmiObject Win32_Process | Where-Object { $_.CommandLine -like '*${scriptName}*' } | Select-Object -ExpandProperty ProcessId"`;
+            const result = execSync(cmd, { windowsHide: true, encoding: 'utf8', timeout: 4000 });
+            const pids = result.trim().split(/\r?\n/).filter(p => p.trim());
+            
+            pids.forEach(pidStr => {
+              const pid = parseInt(pidStr.trim(), 10);
+              if (pid && pid !== process.pid) {
+                console.log(`[STARTUP] Terminating lingering background daemon: ${scriptName} (PID ${pid})`);
+                try {
+                  execSync(`taskkill /pid ${pid} /f`, { windowsHide: true, timeout: 2000 });
+                } catch (err) {}
               }
-            }); 
+            });
           } catch (e) {}
         });
       } catch (e) {}
