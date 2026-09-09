@@ -23,10 +23,13 @@ import os
 import time
 import threading
 
-# Ensure project root is in path BEFORE importing modules
-_PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
-if _PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, _PROJECT_ROOT)
+# Ensure project root and SEVEN_APP_PATH are at index 0 in sys.path
+_this_dir = os.path.dirname(os.path.abspath(__file__))
+_app_path = os.environ.get("SEVEN_APP_PATH", "")
+
+for _p in [_app_path, _this_dir]:
+    if _p and os.path.exists(_p) and _p not in sys.path:
+        sys.path.insert(0, _p)
 
 # Import config first — triggers logging, console hiding, UTF-8 setup
 from trigger_modules.config import setup_logging, is_seven_running  # noqa
