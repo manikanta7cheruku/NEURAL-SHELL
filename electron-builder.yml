@@ -52,6 +52,8 @@ extraResources:
       - "mouth/**/*"
       - "seven_overlay/**/*"
       - "task_panel/**/*"
+      - "trigger_modules/**/*"
+      - "seven_utils/**/*"
       - "web/**/*"
       - "chrome_extension/**/*"
       - "!**/*.pyc"
