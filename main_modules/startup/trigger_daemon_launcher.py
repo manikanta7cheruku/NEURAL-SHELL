@@ -51,38 +51,59 @@ def _get_project_root() -> str:
 
 
 def _get_venv_python(project_root: str) -> str:
+    r"""
+    Resolve the correct Python executable for daemon spawning.
+
+    Production (.exe installer):
+      SEVEN_APP_PATH = C:/Users/{user}/AppData/Local/Programs/SEVEN/resources/app
+      Embedded Python = {SEVEN_APP_PATH}/python/pythonw.exe
+
+    Dev mode (npm run dev):
+      Venv Python = {project_root}/venv/Scripts/pythonw.exe
+
+    Priority order:
+      1. SEVEN_APP_PATH/python/pythonw.exe (production)
+      2. project_root/python/pythonw.exe (alternate production)
+      3. project_root/venv/Scripts/pythonw.exe (dev)
+      4. sys.executable (last resort)
     """
-    Always prefer the embedded packaged Python.
-    The embedded Python has all pip packages installed.
-    System Python and venv Python do NOT have the packaged packages.
-    Using wrong Python = missing keyboard library = hotkeys broken.
-    """
-    # Check SEVEN_APP_PATH first - most reliable in packaged app
     app_path = os.environ.get('SEVEN_APP_PATH', '')
+
+    # Log all paths for production debugging
+    print(Fore.CYAN + f"[TRIGGER] Resolving Python:")
+    print(Fore.CYAN + f"[TRIGGER]   SEVEN_APP_PATH = {app_path or '(not set)'}")
+    print(Fore.CYAN + f"[TRIGGER]   project_root   = {project_root}")
+    print(Fore.CYAN + f"[TRIGGER]   sys.executable = {sys.executable}")
+
+    # Priority 1: SEVEN_APP_PATH (production .exe)
     if app_path:
         for exe in ['pythonw.exe', 'python.exe']:
             c = os.path.join(app_path, 'python', exe)
-            if os.path.exists(c):
-                print(Fore.CYAN + f"[TRIGGER] Using embedded Python: {c}")
+            exists = os.path.exists(c)
+            print(Fore.CYAN + f"[TRIGGER]   check {c} -> {exists}")
+            if exists:
+                print(Fore.GREEN + f"[TRIGGER] Using embedded Python: {c}")
                 return c
 
-    # Then check project root python folder
+    # Priority 2: project_root\python (alternate production layout)
     for exe in ['pythonw.exe', 'python.exe']:
         c = os.path.join(project_root, 'python', exe)
         if os.path.exists(c):
-            print(Fore.CYAN + f"[TRIGGER] Using root Python: {c}")
+            print(Fore.GREEN + f"[TRIGGER] Using root Python: {c}")
             return c
 
-    # Dev mode only - venv
+    # Priority 3: Dev mode venv
     for c in [
         os.path.join(project_root, "venv", "Scripts", "pythonw.exe"),
         os.path.join(project_root, "venv", "Scripts", "python.exe"),
     ]:
         if os.path.exists(c):
-            print(Fore.YELLOW + f"[TRIGGER] Using venv Python (dev mode): {c}")
+            print(Fore.YELLOW + f"[TRIGGER] Using venv Python (dev): {c}")
             return c
 
-    print(Fore.RED + f"[TRIGGER] No embedded Python found in {project_root}")
+    # Priority 4: Last resort
+    print(Fore.RED + f"[TRIGGER] WARNING: No embedded Python found, "
+          f"falling back to sys.executable: {sys.executable}")
     return sys.executable
 
 
@@ -516,17 +537,10 @@ def _register_trigger_startup_folder(python: str, daemon: str):
 def _get_electron_executable() -> str:
     app_path = os.environ.get('SEVEN_APP_PATH', '')
     if app_path:
-        # SEVEN_APP_PATH = C:\...\Programs\SEVEN\resources\app
-        # resources_dir  = C:\...\Programs\SEVEN\resources
-        # install_root   = C:\...\Programs\SEVEN
-        # SEVEN.exe      = C:\...\Programs\SEVEN\SEVEN.exe
+        # SEVEN_APP_PATH = <install_dir>/resources/app
         resources_dir = os.path.dirname(app_path)
         install_root  = os.path.dirname(resources_dir)
 
-        # SEVEN_APP_PATH = ...Programs\SEVEN\resources\app
-        # resources      = ...Programs\SEVEN\resources
-        # install_root   = ...Programs\SEVEN
-        # SEVEN.exe      = ...Programs\SEVEN\SEVEN.exe
         packaged_candidates = [
             os.path.join(install_root, "SEVEN.exe"),
             os.path.join(install_root, "seven.exe"),
@@ -545,13 +559,7 @@ def _get_electron_executable() -> str:
                 print(Fore.CYAN + f"[OVERLAY] Packaged electron: {c}")
                 return c
 
-        # Nothing found - log all checked paths
-        print(Fore.RED + f"[OVERLAY] SEVEN.exe not found")
-        print(Fore.RED + f"[OVERLAY] app_path:     {app_path}")
-        print(Fore.RED + f"[OVERLAY] resources:    {resources_dir}")
-        print(Fore.RED + f"[OVERLAY] install_root: {install_root}")
-        for c in packaged_candidates:
-            print(Fore.RED + f"[OVERLAY]   tried: {c}")
+        print(Fore.RED + f"[OVERLAY] SEVEN.exe not found in install directory")
     print(Fore.YELLOW + "[OVERLAY] Electron executable not found")
     return ""
 
@@ -561,6 +569,9 @@ def launch_overlay_daemon():
     Launch overlay_daemon.js as a detached Electron process.
     Pre-warms notification and arrangement windows on TCP port 7891.
     Survives Seven closing.
+
+    Production path: SEVEN.exe --user-data-dir=... -- overlay_daemon.js --overlay-daemon
+    Dev path:        electron.exe overlay_daemon.js --overlay-daemon
     """
     root = _get_project_root()
 
@@ -573,22 +584,32 @@ def launch_overlay_daemon():
         print(Fore.YELLOW + "[OVERLAY] Electron not found - overlay disabled")
         return
 
-    daemon_js = os.path.join(root, "electron", "overlay_daemon.js")
+    # Find overlay_daemon.js — check multiple locations
+    daemon_js = None
+    app_path = os.environ.get('SEVEN_APP_PATH', '')
 
-    # In packaged app overlay_daemon.js is inside asar
-    # Check asar path too
-    if not os.path.exists(daemon_js):
-        app_path = os.environ.get('SEVEN_APP_PATH', '')
-        if app_path:
-            resources_dir  = os.path.dirname(app_path)
-            asar_daemon_js = os.path.join(
-                resources_dir, "app.asar", "electron", "overlay_daemon.js"
-            )
-            if os.path.exists(asar_daemon_js):
-                daemon_js = asar_daemon_js
+    # Location 1: project_root/electron/ (dev mode)
+    candidate = os.path.join(root, "electron", "overlay_daemon.js")
+    if os.path.exists(candidate):
+        daemon_js = candidate
 
-    if not os.path.exists(daemon_js):
-        print(Fore.YELLOW + f"[OVERLAY] overlay_daemon.js not found: {daemon_js}")
+    # Location 2: SEVEN_APP_PATH/electron/ (production, asar=false)
+    if not daemon_js and app_path:
+        candidate = os.path.join(app_path, "electron", "overlay_daemon.js")
+        if os.path.exists(candidate):
+            daemon_js = candidate
+
+    # Location 3: resources/app.asar/electron/ (production, asar=true)
+    if not daemon_js and app_path:
+        resources_dir = os.path.dirname(app_path)
+        candidate = os.path.join(resources_dir, "app.asar", "electron", "overlay_daemon.js")
+        if os.path.exists(candidate):
+            daemon_js = candidate
+
+    if not daemon_js:
+        print(Fore.YELLOW + f"[OVERLAY] overlay_daemon.js not found in any location")
+        print(Fore.YELLOW + f"[OVERLAY]   root:     {root}")
+        print(Fore.YELLOW + f"[OVERLAY]   app_path: {app_path}")
         return
 
     print(Fore.CYAN + f"[OVERLAY] Electron: {electron}")
@@ -597,26 +618,34 @@ def launch_overlay_daemon():
     # Register for auto-start at login
     _register_overlay_startup(electron, daemon_js)
 
-    # MUST pass --overlay-daemon flag so main.js script router catches it.
-    # Without this flag, Electron tries to load daemon_js as a normal app
-    # entry point and fails silently (port 7891 never opens).
-    # Also need --user-data-dir to avoid single-instance lock conflict
-    # with the main SEVEN window.
-    import tempfile
-    overlay_user_data = os.path.join(
-        os.environ.get('APPDATA', os.path.expanduser('~')),
-        'SEVEN', 'overlay_user_data'
-    )
-    os.makedirs(overlay_user_data, exist_ok=True)
+    # Build spawn command
+    # In production, SEVEN.exe needs --user-data-dir to avoid single-instance
+    # lock conflict with the main SEVEN window
+    is_production = "SEVEN.exe" in electron or "seven.exe" in electron.lower()
 
-    pid = _spawn_detached(
-        [electron, f"--user-data-dir={overlay_user_data}",
-         "--", daemon_js, "--overlay-daemon"],
-        cwd=root
-    )
+    if is_production:
+        overlay_user_data = os.path.join(
+            os.environ.get('APPDATA', os.path.expanduser('~')),
+            'SEVEN', 'overlay_user_data'
+        )
+        os.makedirs(overlay_user_data, exist_ok=True)
+
+        cmd = [
+            electron,
+            f"--user-data-dir={overlay_user_data}",
+            "--",
+            daemon_js,
+            "--overlay-daemon"
+        ]
+    else:
+        cmd = [electron, daemon_js, "--overlay-daemon"]
+
+    print(Fore.CYAN + f"[OVERLAY] Command: {' '.join(cmd)}")
+
+    pid = _spawn_detached(cmd, cwd=root)
     print(Fore.CYAN + f"[OVERLAY] Spawned PID {pid}")
 
-    time.sleep(1)
+    time.sleep(2)
     if _is_overlay_alive():
         print(Fore.GREEN + f"[OVERLAY] Overlay daemon ready on port 7891 ✓ (PID {pid})")
     else:
