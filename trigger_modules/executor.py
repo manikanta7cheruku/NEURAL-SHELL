@@ -123,20 +123,16 @@ def _execute_trigger_complete(trigger, name, action_type, action_data,
                                app_count, tab_count, app_names,
                                workspace_apps=None):
     """
-    Complete trigger execution in a single thread.
-    Notification → Action → Arrangement → Stats.
-    No concurrent threads to prevent double-execution.
+    Complete trigger execution.
+    Fires notification asynchronously and executes the action immediately.
     """
     workspace_apps = workspace_apps or []
 
-    # Step 1: Ensure overlay is ready
-    ensure_overlay_alive_safe()
-
-    # Step 2: Show notification
+    # Fire visual notification asynchronously (never blocks action execution)
     if not trigger.get("silent", False):
         fire_notification(name, action_type, app_count, tab_count, app_names)
 
-    # Step 3: Execute action
+    # Step 2: Execute action immediately
     result = None
     try:
         if action_type == "open_app":
@@ -166,26 +162,6 @@ def _execute_trigger_complete(trigger, name, action_type, action_data,
         return
 
     # Step 4: Feedback + arrangement card
-    # ── Show preview UI before restoring (if enabled in trigger) ──
-    if action_type == "open_workspace" and not trigger.get("silent", False):
-        _show_preview = action_data.get("show_preview", False)
-        if _show_preview and workspace_apps:
-            try:
-                from trigger_modules.overlay import _send_overlay
-                _send_overlay({
-                    "type": "workspace_preview",
-                    "data": {
-                        "workspace_name": name,
-                        "apps": workspace_apps,
-                    },
-                })
-                # Preview handles its own restore via /api/workspaces/restore-live
-                # Skip the auto-restore flow
-                update_fire_stats(trigger.get("id"))
-                return
-            except Exception as _pe:
-                print(f"[TRIGGER DAEMON] Preview show failed: {_pe}")
-
     if action_type == "open_workspace" and result and not trigger.get("silent", False):
         opened  = result.get("opened", 0)
         skipped = result.get("skipped", 0)
