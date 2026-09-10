@@ -361,7 +361,6 @@ function startTCPServer() {
     socket.on('data', (chunk) => {
       buffer += chunk.toString('utf8');
 
-      // Messages are newline-delimited JSON
       let idx;
       while ((idx = buffer.indexOf('\n')) !== -1) {
         const line = buffer.slice(0, idx).trim();
@@ -374,7 +373,7 @@ function startTCPServer() {
           handleMessage(msg, socket);
         } catch (e) {
           console.error('[OVERLAY DAEMON] Bad message:', line, e.message);
-          socket.write(JSON.stringify({ ok: false, error: e.message }) + '\n');
+          try { socket.write(JSON.stringify({ ok: false, error: e.message }) + '\n'); } catch (err) {}
         }
       }
     });
@@ -384,8 +383,20 @@ function startTCPServer() {
 
   server.on('error', (err) => {
     if (err.code === 'EADDRINUSE') {
-      console.log('[OVERLAY DAEMON] Port', IPC_PORT, 'in use — retrying in 2s');
-      setTimeout(startTCPServer, 2000);
+      console.log('[OVERLAY DAEMON] Port ' + IPC_PORT + ' in use — checking ownership...');
+      try {
+        const { execSync } = require('node:child_process');
+        const stdout = execSync(`powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort ${IPC_PORT} -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess"`).toString();
+        const pids = stdout.trim().split(/\r?\n/).filter(p => p.trim());
+        for (const pidStr of pids) {
+          const pid = parseInt(pidStr.trim(), 10);
+          if (pid && pid !== process.pid) {
+            console.log(`[OVERLAY DAEMON] Liberating port from PID ${pid}`);
+            execSync(`taskkill /pid ${pid} /f`, { windowsHide: true });
+          }
+        }
+      } catch (e) {}
+      setTimeout(startTCPServer, 1200);
     } else {
       console.error('[OVERLAY DAEMON] Server error:', err.message);
     }
@@ -556,12 +567,3 @@ except Exception as e:
 // ─────────────────────────────────────────────────────────────────────────
 // STARTUP
 // ─────────────────────────────────────────────────────────────────────────
-
-app.whenReady().then(() => {
-  console.log('[OVERLAY DAEMON] Starting…');
-  createNotifWindow();
-  createArrangeWindow();
-  createSchedWindow();
-  startTCPServer();
-  console.log('[OVERLAY DAEMON] Ready — overlays pre-warmed');
-});
