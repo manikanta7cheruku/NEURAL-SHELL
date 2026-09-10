@@ -24,19 +24,14 @@ const net  = require('node:net');
 
 const IPC_PORT = 7891;
 
-// CRITICAL: Set a UNIQUE appUserModelId BEFORE requesting the single-instance lock.
-// Without this, Electron derives the lock key from the executable path (SEVEN.exe),
-// which is the SAME as the main window. The lock collides, Electron kills this
-// process instantly, and port 7891 never binds — resulting in zero notifications.
-app.setAppUserModelId('com.sevenlabs.seven.overlay');
+// DO NOT use app.requestSingleInstanceLock() here.
+// On Windows NSIS builds, Electron derives the lock key from the installer appId
+// (com.sevenlabs.seven), which is the SAME for all SEVEN.exe processes.
+// This causes the overlay daemon to be killed instantly by the main window's lock.
+// Instead, we rely on the TCP port 7891 binding as a natural single-instance guard:
+// if another overlay is already running, server.listen() fails with EADDRINUSE.
 app.setName('SevenOverlayDaemon');
-
-const gotLock = app.requestSingleInstanceLock();
-if (!gotLock) {
-  console.log('[OVERLAY DAEMON] Another overlay instance running, exiting');
-  app.quit();
-  process.exit(0);
-}
+app.setAppUserModelId('com.sevenlabs.seven.overlay');
 
 // Don't quit when windows are hidden
 app.on('window-all-closed', () => {});
@@ -491,12 +486,24 @@ function spawnPythonLayout(data) {
 
   return new Promise((resolve, reject) => {
     const projectRoot = path.resolve(path.join(__dirname, '..'));
-    const py  = path.join(projectRoot, 'venv', 'Scripts', 'python.exe');
-    const pyw = path.join(projectRoot, 'venv', 'Scripts', 'pythonw.exe');
-    // Use python.exe not pythonw so we can see stderr
-    const python = fs.existsSync(py) ? py : pyw;
+    
+    // Production-safe Python path resolver
+    const embeddedPy = path.join(projectRoot, 'python', 'python.exe');
+    const devPy      = path.join(projectRoot, 'venv', 'Scripts', 'python.exe');
+    const devPyw     = path.join(projectRoot, 'venv', 'Scripts', 'pythonw.exe');
+    
+    let python = sysExecutable = sysExecutable = '';
+    if (fs.existsSync(embeddedPy)) {
+      python = embeddedPy;
+    } else if (fs.existsSync(devPy)) {
+      python = devPy;
+    } else if (fs.existsSync(devPyw)) {
+      python = devPyw;
+    } else {
+      python = 'python';
+    }
 
-    if (!fs.existsSync(python)) {
+    if (python !== 'python' && !fs.existsSync(python)) {
       return reject(new Error('Python not found at ' + python));
     }
 
@@ -569,3 +576,12 @@ except Exception as e:
 // ─────────────────────────────────────────────────────────────────────────
 // STARTUP
 // ─────────────────────────────────────────────────────────────────────────
+
+app.whenReady().then(() => {
+  console.log('[OVERLAY DAEMON] Starting...');
+  createNotifWindow();
+  createArrangeWindow();
+  createSchedWindow();
+  startTCPServer();
+  console.log('[OVERLAY DAEMON] Ready — overlays pre-warmed');
+});
