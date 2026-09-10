@@ -16,7 +16,8 @@ const fs   = require('node:fs');
 const net  = require('net');
 
 // ============================================================================
-// SCRIPT ROUTER - Must run before app.setName() to bypass single-instance locks
+// SCRIPT ROUTER — Must run BEFORE app.setName() and app.setAppUserModelId()
+// to prevent single-instance lock collisions with sub-processes.
 // ============================================================================
 const _argv = process.argv;
 if (_argv.includes('--panel-host')) {
@@ -31,8 +32,7 @@ if (_argv.includes('--overlay-daemon')) {
 }
 
 // ============================================================================
-// APP IDENTITY — Must be set after script routing to prevent instance collisions
-// This controls the name shown in Task Manager, Alt+Tab, and Volume Mixer
+// APP IDENTITY — Set AFTER script routing so sub-processes never inherit this
 // ============================================================================
 app.setName('SEVEN');
 app.setAppUserModelId('com.sevenlabs.seven');
