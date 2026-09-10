@@ -1075,19 +1075,23 @@ def _fire_schedule(schedule):
             },
         }) + "\n"
         print(Fore.CYAN + "[SCHEDULER] Sending to overlay daemon...")
-        _s = _sock.create_connection(("127.0.0.1", 7891), timeout=2.0)
-        _s.settimeout(2.0)
-        _s.sendall(_msg_payload.encode("utf-8"))
-        _resp = b""
         try:
-            while b"\n" not in _resp:
-                _chunk = _s.recv(1024)
-                if not _chunk:
-                    break
-                _resp += _chunk
-        except Exception:
-            pass
-        _s.close()
+            _s = _sock.create_connection(("127.0.0.1", 7891), timeout=2.0)
+            _s.settimeout(2.0)
+            _s.sendall(_msg_payload.encode("utf-8"))
+            _resp = b""
+            try:
+                while b"\n" not in _resp:
+                    _chunk = _s.recv(1024)
+                    if not _chunk:
+                        break
+                    _resp += _chunk
+            except Exception:
+                pass
+            _s.close()
+        except (TimeoutError, ConnectionRefusedError, OSError) as _conn_err:
+            print(Fore.YELLOW + f"[SCHEDULER] Overlay offline: {_conn_err}")
+            _resp = b""
         if _resp:
             _parsed = _json_notif.loads(_resp.decode("utf-8").strip())
             if _parsed.get("ok"):
