@@ -16,19 +16,7 @@ const fs   = require('node:fs');
 const net  = require('net');
 
 // ============================================================================
-// APP IDENTITY — Must be set before any window creation
-// This controls the name shown in Task Manager, Alt+Tab, and Volume Mixer
-// ============================================================================
-app.setName('SEVEN');
-app.setAppUserModelId('com.sevenlabs.seven');
-
-// ============================================================================
-// ENVIRONMENT DETECTION
-// ============================================================================
-const isDev = !app.isPackaged;
-
-// ============================================================================
-// SCRIPT ROUTER - Must be line 1 to bypass main single-instance locks
+// SCRIPT ROUTER - Must run before app.setName() to bypass single-instance locks
 // ============================================================================
 const _argv = process.argv;
 if (_argv.includes('--panel-host')) {
@@ -41,6 +29,18 @@ if (_argv.includes('--overlay-daemon')) {
   require('./overlay_daemon.js');
   return;
 }
+
+// ============================================================================
+// APP IDENTITY — Must be set after script routing to prevent instance collisions
+// This controls the name shown in Task Manager, Alt+Tab, and Volume Mixer
+// ============================================================================
+app.setName('SEVEN');
+app.setAppUserModelId('com.sevenlabs.seven');
+
+// ============================================================================
+// ENVIRONMENT DETECTION
+// ============================================================================
+const isDev = !app.isPackaged;
 
 // ============================================================================
 // GLOBAL STATE
