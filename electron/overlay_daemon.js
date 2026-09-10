@@ -24,14 +24,16 @@ const net  = require('node:net');
 
 const IPC_PORT = 7891;
 
-// Prevent multiple daemons
-// Use a unique app name for the overlay daemon to get its own instance lock
-// This must be set BEFORE app.requestSingleInstanceLock()
+// CRITICAL: Set a UNIQUE appUserModelId BEFORE requesting the single-instance lock.
+// Without this, Electron derives the lock key from the executable path (SEVEN.exe),
+// which is the SAME as the main window. The lock collides, Electron kills this
+// process instantly, and port 7891 never binds — resulting in zero notifications.
+app.setAppUserModelId('com.sevenlabs.seven.overlay');
 app.setName('SevenOverlayDaemon');
 
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
-  console.log('[OVERLAY DAEMON] Another instance running, exiting');
+  console.log('[OVERLAY DAEMON] Another overlay instance running, exiting');
   app.quit();
   process.exit(0);
 }
