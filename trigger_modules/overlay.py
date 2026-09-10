@@ -152,7 +152,7 @@ def ensure_overlay_alive_safe() -> bool:
 # NOTIFICATION FIRING
 # ─────────────────────────────────────────────────────────────────────────
 def fire_notification(name, action_type, app_count, tab_count, app_names):
-    """Send a notification message to the overlay daemon asynchronously."""
+    """Send notification asynchronously — never blocks trigger execution."""
     subtitle_map = {
         "open_app":       "App launched",
         "open_url":       "URL opened",
@@ -169,10 +169,13 @@ def fire_notification(name, action_type, app_count, tab_count, app_names):
         parts.append(f"{app_count} app{'s' if app_count != 1 else ''}")
     if tab_count > 0:
         parts.append(f"{tab_count} tab{'s' if tab_count != 1 else ''}")
-    detail = "  ·  ".join(parts) if parts else ""
+    detail  = "  ·  ".join(parts) if parts else ""
     hold_ms = 3500 if action_type == "open_workspace" else 4500
 
-    def _async_send():
+    def _async_notif():
+        if not is_overlay_alive():
+            ensure_overlay_alive_safe()
+            time.sleep(0.3)
         _send_overlay({
             "type": "notif",
             "data": {
@@ -181,9 +184,9 @@ def fire_notification(name, action_type, app_count, tab_count, app_names):
                 "detail":   detail,
                 "holdMs":   hold_ms,
             },
-        }, timeout=1.5)
+        }, timeout=2.0)
 
-    threading.Thread(target=_async_send, daemon=True).start()
+    threading.Thread(target=_async_notif, daemon=True).start()
 
 
 # ─────────────────────────────────────────────────────────────────────────
