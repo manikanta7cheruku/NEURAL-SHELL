@@ -128,11 +128,11 @@ def _execute_trigger_complete(trigger, name, action_type, action_data,
     """
     workspace_apps = workspace_apps or []
 
-    # Fire visual notification asynchronously (never blocks action execution)
+    # Fire notification asynchronously (never blocks action execution)
     if not trigger.get("silent", False):
         fire_notification(name, action_type, app_count, tab_count, app_names)
 
-    # Step 2: Execute action immediately
+    # Execute action immediately — no synchronous overlay wait
     result = None
     try:
         if action_type == "open_app":
