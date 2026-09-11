@@ -1,10 +1,157 @@
 import { useEffect, useState, useRef } from 'react';
-import { Plus, Keyboard, Mic, Zap, List, X } from 'lucide-react';
+import { Plus, Keyboard, Mic, Zap, List, X, Settings2, Check } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import useTriggers from '../../stores/useTriggers';
 import TriggerCard from './TriggerCard';
+import api from '../../api';
 import TriggerForm from './TriggerForm';
 import WorkspaceTab from './WorkspaceTab';
+
+/**
+ * Interactive Panel Hotkey Card.
+ * Rendered at the top of the compact trigger list when 'Keys Only' mode is active.
+ * Allows capturing, updating, and validating the global Task Panel hotkey inline.
+ */
+function PanelHotkeyCard() {
+  const [currentHotkey, setCurrentHotkey] = useState('Alt+Shift+T');
+  const [recording, setRecording] = useState(false);
+  const [pending, setPending] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState(null);
+  const cardRef = useRef(null);
+
+  useEffect(() => {
+    fetchHotkey();
+  }, []);
+
+  const fetchHotkey = async () => {
+    try {
+      const r = await api.get('/panel/get-hotkey');
+      if (r.data?.hotkey) {
+        setCurrentHotkey(r.data.hotkey);
+      }
+    } catch {}
+  };
+
+  const handleKeyDown = (e) => {
+    if (!recording) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (e.key === 'Escape') {
+      setRecording(false);
+      setPending('');
+      return;
+    }
+
+    const parts = [];
+    if (e.ctrlKey)  parts.push('ctrl');
+    if (e.shiftKey) parts.push('shift');
+    if (e.altKey)   parts.push('alt');
+    if (e.metaKey)  parts.push('win');
+
+    const key = e.key.toLowerCase();
+    if (!['control', 'shift', 'alt', 'meta'].includes(key)) {
+      parts.push(key === ' ' ? 'space' : key);
+      setPending(parts.join('+'));
+      setRecording(false);
+    }
+  };
+
+  const saveHotkey = async () => {
+    if (!pending) return;
+    setSaving(true);
+    setStatus(null);
+    try {
+      const r = await api.post('/panel/set-hotkey', { hotkey: pending });
+      if (r.data?.success) {
+        setCurrentHotkey(r.data.hotkey);
+        setPending('');
+        setStatus({ ok: true, msg: 'Hotkey updated successfully' });
+        setTimeout(() => setStatus(null), 2500);
+      } else {
+        setStatus({ ok: false, msg: r.data?.detail || 'Update failed' });
+      }
+    } catch (e) {
+      setStatus({ ok: false, msg: e.response?.data?.detail || 'Update failed' });
+    }
+    setSaving(false);
+  };
+
+  const cancel = () => {
+    setPending('');
+    setRecording(false);
+    setStatus(null);
+  };
+
+  const formatDisplay = (hk) => {
+    return hk
+      .split('+')
+      .map(p => p.charAt(0).toUpperCase() + p.slice(1))
+      .join(' + ');
+  };
+
+  return (
+    <div className="flex flex-col gap-2 p-3 bg-s-accent/[0.02] border border-s-accent/15 rounded-xl">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="w-6 h-6 rounded-md bg-s-accent/10 border border-s-accent/20 flex items-center justify-center flex-shrink-0 text-s-accent">
+            <Settings2 size={11} />
+          </div>
+          <div className="min-w-0">
+            <span className="text-[11px] text-white/80 font-semibold block leading-tight">
+              Seven Task Panel Hotkey
+            </span>
+            <span className="text-[8.5px] text-white/35 block mt-0.5">
+              Global shortcut to open the task panel from anywhere
+            </span>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <div
+            ref={cardRef}
+            tabIndex={0}
+            onClick={() => { setRecording(true); cardRef.current?.focus(); }}
+            onKeyDown={handleKeyDown}
+            onBlur={() => setTimeout(() => setRecording(false), 150)}
+            className={`flex items-center gap-1 px-3 py-1 rounded-md border text-[9px] font-mono cursor-pointer transition-all
+              ${recording
+                ? 'bg-s-accent/10 border-s-accent/30 text-s-accent'
+                : pending
+                  ? 'bg-white/[0.05] border-white/20 text-white/90'
+                  : 'bg-white/[0.03] border-white/8 text-white/60 hover:border-white/12'}`}
+          >
+            {recording ? 'Press Keys...' : pending ? `New: ${formatDisplay(pending)}` : formatDisplay(currentHotkey)}
+          </div>
+
+          {pending && !saving && (
+            <div className="flex items-center gap-1">
+              <button onClick={saveHotkey} className="p-1 rounded-md bg-s-accent/10 border border-s-accent/20 text-s-accent hover:bg-s-accent/15 transition-all">
+                <Check size={10} />
+              </button>
+              <button onClick={cancel} className="p-1 rounded-md bg-white/[0.03] border border-white/8 text-white/45 hover:bg-white/[0.05] transition-all">
+                <X size={10} />
+              </button>
+            </div>
+          )}
+
+          {saving && (
+            <div className="w-5 h-5 flex items-center justify-center">
+              <div className="w-3 h-3 border-2 border-white/10 border-t-s-accent rounded-full animate-spin" />
+            </div>
+          )}
+        </div>
+      </div>
+
+      {status && (
+        <p className={`text-[8.5px] font-medium leading-none ${status.ok ? 'text-s-green' : 'text-red-400'}`}>
+          {status.msg}
+        </p>
+      )}
+    </div>
+  );
+}
 
 const TABS = [
   { key: 'triggers',   label: 'Triggers' },
@@ -33,6 +180,7 @@ export default function Triggers() {
   const [editingId,  setEditingId]  = useState(null);
   const [compact,    setCompact]    = useState(false);
   const [reveal,     setReveal]     = useState(false);
+  const [planWarning, setPlanWarning] = useState(null);
   const formRef    = useRef(null);
   const newFormRef = useRef(null);
 
@@ -103,7 +251,11 @@ export default function Triggers() {
   const handleToggle = async (id, en) => {
     setActionError('');
     const r = await updateTrigger(id, { enabled: en });
-    if (!r.ok) setActionError(r.msg);
+    if (r.ok && r.plan_warning) {
+      setPlanWarning(r.plan_warning);
+    } else if (!r.ok) {
+      setActionError(r.msg);
+    }
   };
   
   const handleBulkToggle = async (enable) => {
@@ -276,6 +428,37 @@ export default function Triggers() {
               </div>
             )}
 
+            {/* Professional Plan Warning Banner */}
+            {planWarning && (
+              <div className="mb-4 flex items-start justify-between gap-3 px-4 py-3
+                              bg-amber-500/10 border border-amber-500/20 rounded-xl
+                              animate-[cardReveal_200ms_ease-out] shadow-sm">
+                <div className="flex items-start gap-3">
+                  <div className="flex-shrink-0 w-5 h-5 rounded-full
+                                  bg-amber-500/20 border border-amber-500/30
+                                  flex items-center justify-center text-[10px] text-amber-400 font-bold">
+                    !
+                  </div>
+                  <div>
+                    <p className="text-[11px] font-semibold text-amber-300">Plan limit warning</p>
+                    <p className="text-[10px] text-amber-200/70 mt-0.5">{planWarning.message}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <button onClick={() => window.location.hash = '/plans'}
+                          className="px-3 py-1.5 rounded-lg text-[9px] font-semibold
+                                     bg-amber-500/20 border border-amber-500/35
+                                     text-amber-200 hover:bg-amber-500/30 transition-all whitespace-nowrap">
+                    Upgrade to {planWarning.upgrade_to.toUpperCase()}
+                  </button>
+                  <button onClick={() => setPlanWarning(null)}
+                          className="text-amber-200/40 hover:text-amber-200/80 transition-colors p-1 text-[11px]">
+                    ✕
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* Filters + compact toggle */}
             {!showNew && (
               <div className="flex items-center justify-between mb-4">
@@ -337,10 +520,15 @@ export default function Triggers() {
                 </button>
               </div>
             ) : compact ? (
-              /* Compact list mode */
+              /* Compact list mode with inline form injection */
               <div className="space-y-1.5">
+                
+                {/* ── Render Global Panel Hotkey Configuration Card at the Top ── */}
+                <PanelHotkeyCard />
+                
                 {filtered.map((t, i) => (
-                  <div key={t.id}
+                  <div key={t.id} className="space-y-2">
+                    <div
                        style={{
                          animationDelay: `${i * 35}ms`,
                          animationFillMode: 'both',
@@ -348,16 +536,27 @@ export default function Triggers() {
                        className={`transition-opacity duration-200 ease-out
                                    ${visible ? '' : 'opacity-0'}
                                    ${reveal && visible ? 'animate-[cardReveal_300ms_ease-out]' : ''}`}>
-                    <TriggerCard
-                      trigger={t}
-                      compact
-                      isEditing={t.id === editingId}
-                      onFire={fireTrigger}
-                      onRefresh={fetchTriggers}
-                      onToggle={handleToggle}
-                      onDelete={handleDelete}
-                      onEdit={handleEdit}
-                    />
+                      <TriggerCard
+                        trigger={t}
+                        compact
+                        isEditing={t.id === editingId}
+                        onFire={fireTrigger}
+                        onRefresh={fetchTriggers}
+                        onToggle={handleToggle}
+                        onDelete={handleDelete}
+                        onEdit={handleEdit}
+                      />
+                    </div>
+                    {t.id === editingId && (
+                      <div ref={formRef} className="grid grid-cols-2 gap-3 animate-[formReveal_250ms_ease-out_forwards]">
+                        <TriggerForm
+                          initial={t}
+                          onSave={handleSave}
+                          onCancel={handleCancelEdit}
+                          workspaces={workspaces}
+                        />
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
