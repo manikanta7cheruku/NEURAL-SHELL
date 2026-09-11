@@ -1,0 +1,174 @@
+/* ══════════════════════════════════════════════════════════════
+   TRIGGER CARDS (Compact Panel View)
+══════════════════════════════════════════════════════════════ */
+
+.trigger-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 9px 11px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  transition: all 0.2s ease;
+  animation: cardIn 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
+  cursor: default;
+}
+
+.trigger-card:hover {
+  border-color: var(--border-h);
+  background: var(--card-h);
+}
+
+.trigger-card.disabled {
+  opacity: 0.35;
+}
+
+.trigger-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.trigger-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.trigger-name {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.trigger-meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.trigger-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  font-size: 8px;
+  font-weight: 600;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.trigger-badge.hotkey {
+  background: var(--accent-dim);
+  border-color: rgba(99, 102, 241, 0.15);
+  color: var(--accent);
+}
+
+.trigger-badge svg { flex-shrink: 0; }
+
+.trigger-fire-count {
+  font-size: 7.5px;
+  color: var(--text-4);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+/* Inline Hotkey Editor */
+.hotkey-edit-wrap {
+  display: none;
+  margin-top: 6px;
+  padding: 6px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+}
+
+.hotkey-edit-wrap.visible { display: block; }
+
+.hotkey-edit-input {
+  width: 100%;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  padding: 6px 8px;
+  font-size: 10px;
+  color: var(--text);
+  outline: none;
+  font-family: inherit;
+  text-align: center;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+}
+
+.hotkey-edit-input:focus {
+  border-color: var(--accent-t);
+}
+
+.hotkey-edit-input.recording {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.hotkey-edit-hint {
+  font-size: 8px;
+  color: var(--text-4);
+  text-align: center;
+  margin-top: 4px;
+}
+
+.hotkey-edit-error {
+  font-size: 8px;
+  color: var(--danger);
+  text-align: center;
+  margin-top: 3px;
+  display: none;
+}
+
+.hotkey-edit-error.visible { display: block; }
+
+.trigger-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.trigger-card:hover .trigger-actions { opacity: 1; }
+
+.trigger-action-btn {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-xs);
+  border: none;
+  background: transparent;
+  color: var(--text-4);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.12s ease;
+}
+
+.trigger-action-btn:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-2);
+}
+
+.trigger-action-btn.fire:hover {
+  color: var(--accent);
+  background: var(--accent-dim);
+}
