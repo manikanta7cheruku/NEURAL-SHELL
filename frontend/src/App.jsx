@@ -4,6 +4,7 @@ import Sidebar        from './components/Sidebar';
 import ScheduleAlert  from './components/ScheduleAlert';
 import TitleBar       from './components/TitleBar';
 import UpdateBanner   from './components/UpdateBanner';
+import AdminMessageBanner from './components/AdminMessageBanner';
 import Landing        from './pages/Landing';
 import Home           from './pages/Home';
 import Console        from './pages/Console';
@@ -27,55 +28,6 @@ import useUpdate      from './stores/useUpdate';
 const API_BASE = window.location.protocol === 'file:'
   ? 'http://127.0.0.1:7777'
   : '';
-
-function AdminMessageBanner() {
-  const [message, setMessage] = useState(null);
-  const [dismissed, setDismissed] = useState(false);
-
-  useEffect(() => {
-    const check = async () => {
-      try {
-        const r = await fetch(`${API_BASE}/api/status`, { signal: AbortSignal.timeout(3000) });
-        if (r.ok) {
-          const data = await r.json();
-          if (data.admin_message && !dismissed) {
-            setMessage(data.admin_message);
-          }
-        }
-      } catch {}
-    };
-    check();
-    const interval = setInterval(check, 60000); // Check every minute
-    return () => clearInterval(interval);
-  }, [dismissed]);
-
-  if (!message || dismissed) return null;
-
-  const colors = {
-    info: 'bg-blue-500/10 border-blue-500/30 text-blue-300',
-    warning: 'bg-yellow-500/10 border-yellow-500/30 text-yellow-300',
-    critical: 'bg-red-500/10 border-red-500/30 text-red-300'
-  };
-  const cls = colors[message.priority] || colors.info;
-
-  return (
-    <div className={`px-4 py-2.5 border-b flex items-center justify-between gap-3 ${cls}`}>
-      <div className="flex items-center gap-2 min-w-0 flex-1">
-        <span className="text-[10px] font-bold uppercase tracking-wider whitespace-nowrap">
-          {message.priority === 'critical' ? 'Alert' : message.priority === 'warning' ? 'Notice' : 'Info'}
-        </span>
-        <span className="text-[11px] font-medium truncate">{message.title}</span>
-        <span className="text-[10px] opacity-70 truncate hidden sm:inline">{message.body}</span>
-      </div>
-      <button
-        onClick={() => setDismissed(true)}
-        className="text-[10px] opacity-50 hover:opacity-100 transition-opacity whitespace-nowrap flex-shrink-0"
-      >
-        Dismiss
-      </button>
-    </div>
-  );
-}
 
 function NavigationHelper() {
   const navigate = useNavigate();
