@@ -42,11 +42,12 @@ _state = {
     "status_text":         "SYSTEM ONLINE",
     "status_color":        "#00ff00",
     "file_search_results": None,
-    "task_results":        None,   # Task list pushed by voice pipeline
+    "task_results":        None,
     "pending_enrollment":        None,
     "enrollment_done":           None,
     "enrollment_clips_done":     0,
     "speak_enrollment_welcome":  False,
+    "admin_message":             None,
 }
 
 _start_time = time.time()
@@ -266,6 +267,7 @@ from backend.routes import triggers as triggers_routes
 from backend.routes import workspaces as workspaces_routes
 from backend.routes import chrome as chrome_routes
 from backend.routes import health as health_routes
+from backend.routes import panel_extras as panel_extras_routes
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
@@ -316,6 +318,7 @@ app.include_router(tasks_routes.router)
 app.include_router(triggers_routes.router)
 app.include_router(workspaces_routes.router)
 app.include_router(chrome_routes.router)
+app.include_router(panel_extras_routes.router)
 
 
 # =========================================================================
