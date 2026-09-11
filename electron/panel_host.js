@@ -1,19 +1,13 @@
 /**
  * panel_host.js
  * Independent background Electron host for the Task Panel.
- * 
+ *
  * Runs separately from Seven main app.
  * Stays alive even when Seven is fully closed.
- * Registers global shortcut Alt+Shift+T.
- * Opens slide-in panel window.
- * Polls daemon trigger file every 3 seconds.
+ * Registers user-configured hotkey from settings (fallback: Alt+Shift+T).
+ * Opens floating glassmorphic panel window.
  * Starts panel_server.py on port 7778.
- *
- * ARCHITECTURE:
- *   Seven main app spawns this as a detached child process.
- *   This process stays alive after Seven quits.
- *   Only one instance runs at a time (app.requestSingleInstanceLock).
- *   Registered in Windows startup via main.js on first run.
+ * Reloads hotkey when user changes it in settings.
  */
 
 const {
@@ -26,61 +20,121 @@ const {
   Menu,
   nativeImage,
 } = require('electron');
-const path  = require('node:path');
-const fs    = require('node:fs');
-const http  = require('node:http');
+const path = require('node:path');
+const fs   = require('node:fs');
+const http = require('node:http');
 const { spawn } = require('node:child_process');
 
-// ── Paths ────────────────────────────────────────────────────────────────────
-
-// panel_host.js lives in electron/ folder
-// Project root is one level up
+// ── Paths ────────────────────────────────────────────────────────────────
 const ELECTRON_DIR = __dirname;
 const PROJECT_ROOT = process.env.SEVEN_APP_PATH || path.join(ELECTRON_DIR, '..');
 const APPDATA      = process.env.APPDATA || path.join(require('os').homedir(), 'AppData', 'Roaming');
 const SEVEN_DATA   = path.join(APPDATA, 'SEVEN');
-const TRIGGER_FILE = path.join(SEVEN_DATA, 'panel_trigger.json');
+const CONFIG_FILE  = path.join(SEVEN_DATA, 'config.json');
 const PANEL_HTML   = path.join(PROJECT_ROOT, 'task_panel', 'panel.html');
 const PANEL_SERVER = path.join(PROJECT_ROOT, 'task_panel', 'panel_server.py');
 const ICON_PATH    = path.join(ELECTRON_DIR, 'icon.png');
 
-// ── State ────────────────────────────────────────────────────────────────────
+const DEFAULT_HOTKEY = 'Alt+Shift+T';
 
-let panelWindow   = null;
-let panelServer   = null;
-let tray          = null;
-let triggerPoller = null;
+// ── State ────────────────────────────────────────────────────────────────
+let panelWindow    = null;
+let panelServer    = null;
+let tray           = null;
+let commandServer  = null;
+let currentHotkey  = null;
+let configWatcher  = null;
 
-// ── Single instance lock ─────────────────────────────────────────────────────
-
-// Set unique application name to generate independent system mutex lock
+// ── Single instance ─────────────────────────────────────────────────────
 app.setName('SevenPanelHost');
+app.setAppUserModelId('com.sevenlabs.seven.panel');
 
 const gotLock = app.requestSingleInstanceLock();
-
 if (!gotLock) {
-  console.log('[PANEL HOST] Another instance already running. Exiting.');
+  console.log('[PANEL HOST] Another instance running. Exiting.');
   app.quit();
   process.exit(0);
 }
 
 app.on('second-instance', () => {
-  // Ignore — main.js re-spawns this on every Python restart
-  // Opening panel here causes it to appear randomly
   console.log('[PANEL HOST] Second instance signal ignored');
 });
 
-// ── Prevent default Electron window behavior ─────────────────────────────────
-
-app.on('window-all-closed', (e) => {
-  // Do NOT quit when panel window closes
+app.on('window-all-closed', () => {
   // Host must stay alive
 });
 
-// ── Python panel server ──────────────────────────────────────────────────────
+// ── Read user's panel hotkey from config.json ───────────────────────────
+function readPanelHotkey() {
+  try {
+    if (!fs.existsSync(CONFIG_FILE)) return DEFAULT_HOTKEY;
+    const raw = fs.readFileSync(CONFIG_FILE, 'utf8');
+    const cfg = JSON.parse(raw);
+    const hk = cfg?.panel?.hotkey || cfg?.panel_hotkey || DEFAULT_HOTKEY;
+    return normalizeElectronAccelerator(hk);
+  } catch (e) {
+    return DEFAULT_HOTKEY;
+  }
+}
 
+function normalizeElectronAccelerator(hk) {
+  if (!hk) return DEFAULT_HOTKEY;
+  const parts = hk.split('+').map(p => p.trim());
+  const map = {
+    ctrl:      'CommandOrControl',
+    control:   'CommandOrControl',
+    cmd:       'CommandOrControl',
+    command:   'CommandOrControl',
+    shift:     'Shift',
+    alt:       'Alt',
+    option:    'Alt',
+    win:       'Super',
+    meta:      'Super',
+    super:     'Super',
+    enter:     'Return',
+    esc:       'Escape',
+    space:     'Space',
+    tab:       'Tab',
+    backspace: 'Backspace',
+    delete:    'Delete',
+  };
+  const normalized = parts.map(p => {
+    const low = p.toLowerCase();
+    if (map[low]) return map[low];
+    if (low.length === 1) return low.toUpperCase();
+    if (/^f\d+$/i.test(low)) return low.toUpperCase();
+    return p.charAt(0).toUpperCase() + p.slice(1);
+  });
+  return normalized.join('+');
+}
+
+// ── Config file watcher (reload hotkey on change) ───────────────────────
+function watchConfig() {
+  if (configWatcher) {
+    try { configWatcher.close(); } catch {}
+    configWatcher = null;
+  }
+
+  if (!fs.existsSync(CONFIG_FILE)) return;
+
+  try {
+    configWatcher = fs.watch(CONFIG_FILE, { persistent: false }, (event) => {
+      if (event !== 'change') return;
+      setTimeout(() => {
+        const newHotkey = readPanelHotkey();
+        if (newHotkey !== currentHotkey) {
+          console.log(`[PANEL HOST] Hotkey changed: ${currentHotkey} -> ${newHotkey}`);
+          registerHotkey(newHotkey);
+        }
+      }, 300);
+    });
+  } catch (e) {
+    console.error('[PANEL HOST] Config watcher failed:', e.message);
+  }
+}
+
+// ── Python panel server ─────────────────────────────────────────────────
 function findPython() {
-  // Prefer pythonw.exe (windowless) to prevent terminal flash on Windows
   const embeddedW = path.join(PROJECT_ROOT, 'python', 'pythonw.exe');
   if (fs.existsSync(embeddedW)) return embeddedW;
 
@@ -98,7 +152,6 @@ function findPython() {
 
 function startPanelServer() {
   if (panelServer) return;
-
   if (!fs.existsSync(PANEL_SERVER)) {
     console.warn('[PANEL HOST] panel_server.py not found:', PANEL_SERVER);
     return;
@@ -107,34 +160,33 @@ function startPanelServer() {
   const pythonExe = findPython();
   console.log('[PANEL HOST] Starting panel server with:', pythonExe);
 
+  let outLog, errLog;
+  try {
+    const logDir = path.join(APPDATA, 'SEVEN', 'logs');
+    fs.mkdirSync(logDir, { recursive: true });
+    outLog = fs.openSync(path.join(logDir, 'panel_server_stdout.log'), 'a');
+    errLog = fs.openSync(path.join(logDir, 'panel_server_stderr.log'), 'a');
+  } catch {
+    outLog = 'ignore';
+    errLog = 'ignore';
+  }
+
   panelServer = spawn(pythonExe, [PANEL_SERVER], {
     cwd:         PROJECT_ROOT,
     windowsHide: true,
-    stdio:       ['pipe', 'pipe', 'pipe'],
+    stdio:       ['ignore', outLog, errLog],
     ...(process.platform === 'win32' ? { creationflags: 0x08000000 } : {}),
     env: {
       ...process.env,
-      PYTHONUNBUFFERED:  '1',
-      PYTHONIOENCODING:  'utf-8',
-      SEVEN_APP_PATH:    PROJECT_ROOT,
+      PYTHONUNBUFFERED: '1',
+      PYTHONIOENCODING: 'utf-8',
+      SEVEN_APP_PATH:   PROJECT_ROOT,
     },
-  });
-
-  panelServer.stdout.on('data', (d) => {
-    const msg = d.toString().trim();
-    if (msg) console.log('[PANEL SRV]', msg);
-  });
-
-  panelServer.stderr.on('data', (d) => {
-    const msg = d.toString().trim();
-    if (msg && !msg.includes('WARNING') && !msg.includes('INFO'))
-      console.error('[PANEL SRV ERR]', msg);
   });
 
   panelServer.on('close', (code) => {
     console.log('[PANEL SRV] Exited:', code);
     panelServer = null;
-    // Auto-restart after 3 seconds if not quitting
     if (!app.isQuitting) {
       setTimeout(() => {
         if (!app.isQuitting) startPanelServer();
@@ -153,9 +205,7 @@ function stopPanelServer() {
   try {
     if (process.platform === 'win32') {
       const { execFile: _tk } = require('child_process');
-      _tk('taskkill', ['/pid', panelServer.pid.toString(), '/f', '/t'], {
-        windowsHide: true,
-      });
+      _tk('taskkill', ['/pid', panelServer.pid.toString(), '/f'], { windowsHide: true });
     } else {
       panelServer.kill('SIGTERM');
     }
@@ -165,39 +215,26 @@ function stopPanelServer() {
   panelServer = null;
 }
 
-// ── Wait for panel server to be ready ────────────────────────────────────────
-
 function waitForPanelServer(maxWait = 10000) {
   return new Promise((resolve) => {
     const start = Date.now();
-
     const check = () => {
       const req = http.get('http://127.0.0.1:7778/panel/health', (res) => {
-        if (res.statusCode === 200) {
-          resolve(true);
-        } else {
-          retry();
-        }
+        if (res.statusCode === 200) resolve(true);
+        else retry();
       });
-      req.on('error', () => retry());
+      req.on('error', retry);
       req.setTimeout(1000, () => { req.destroy(); retry(); });
     };
-
     const retry = () => {
-      if (Date.now() - start > maxWait) {
-        console.warn('[PANEL HOST] Server did not start in time');
-        resolve(false);
-      } else {
-        setTimeout(check, 500);
-      }
+      if (Date.now() - start > maxWait) resolve(false);
+      else setTimeout(check, 500);
     };
-
     check();
   });
 }
 
-// ── Panel window ─────────────────────────────────────────────────────────────
-
+// ── Panel window (floating card) ────────────────────────────────────────
 function createPanelWindow() {
   if (panelWindow && !panelWindow.isDestroyed()) {
     panelWindow.show();
@@ -211,32 +248,37 @@ function createPanelWindow() {
   }
 
   const display = screen.getPrimaryDisplay();
-  const { width: sw, height: sh } = display.workArea;
-  const panelW = 380;
+  const workArea = display.workArea;
+  const panelW = 372;
+  const panelH = Math.min(720, workArea.height - 32);
 
   panelWindow = new BrowserWindow({
     width:        panelW,
-    height:       sh,
-    x:            sw - panelW,
-    y:            display.workArea.y,
+    height:       panelH,
+    x:            workArea.x + workArea.width - panelW,
+    y:            workArea.y,
     frame:        false,
-    transparent:  false,
+    transparent:  true,
+    backgroundColor: '#00000000',
     alwaysOnTop:  true,
     skipTaskbar:  true,
     resizable:    false,
     movable:      false,
     minimizable:  false,
     maximizable:  false,
-    hasShadow:    true,
+    hasShadow:    false,
     focusable:    true,
     show:         false,
-    backgroundColor: '#09090b',
     webPreferences: {
-      nodeIntegration:  false,
-      contextIsolation: true,
-      preload: path.join(ELECTRON_DIR, 'panel_preload.js'),
+      nodeIntegration:      false,
+      contextIsolation:     true,
+      preload:              path.join(ELECTRON_DIR, 'panel_preload.js'),
+      backgroundThrottling: false,
     },
   });
+
+  panelWindow.setAlwaysOnTop(true, 'pop-up-menu', 999);
+  panelWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
 
   panelWindow.loadFile(PANEL_HTML);
 
@@ -245,7 +287,6 @@ function createPanelWindow() {
     panelWindow.focus();
   });
 
-  // Close on blur (click outside)
   panelWindow.on('blur', () => {
     setTimeout(() => {
       if (panelWindow && !panelWindow.isDestroyed() && !panelWindow.isFocused()) {
@@ -264,11 +305,10 @@ function createPanelWindow() {
 function closePanelWindow() {
   if (!panelWindow || panelWindow.isDestroyed()) return;
 
-  // Animate out
   panelWindow.webContents.executeJavaScript(`
     (function() {
       var p = document.getElementById('panel');
-      if (p) p.classList.remove('open');
+      if (p) { p.classList.remove('open'); p.classList.add('closing'); }
     })();
   `).catch(() => {});
 
@@ -278,7 +318,7 @@ function closePanelWindow() {
       panelWindow.destroy();
       panelWindow = null;
     }
-  }, 400);
+  }, 340);
 }
 
 function togglePanel() {
@@ -289,60 +329,38 @@ function togglePanel() {
   }
 }
 
-// ── IPC handlers ─────────────────────────────────────────────────────────────
-
-ipcMain.on('panel-close', () => {
-  closePanelWindow();
-});
+// ── IPC ─────────────────────────────────────────────────────────────────
+ipcMain.on('panel-close', () => closePanelWindow());
 
 ipcMain.on('panel-open-seven-tasks', () => {
-  // Try to tell Seven to navigate to /tasks
   try {
     const req = http.request({
-      hostname: '127.0.0.1',
-      port:     7777,
-      path:     '/api/status',
-      method:   'GET',
+      hostname: '127.0.0.1', port: 7777, path: '/api/status', method: 'GET',
     });
     req.on('response', (res) => {
       if (res.statusCode === 200) {
-        // Seven is running — launch it and navigate
-        // We cannot directly control Seven's window from here
-        // but we can use a trigger file
         const navTrigger = path.join(SEVEN_DATA, 'nav_trigger.json');
         fs.writeFileSync(navTrigger, JSON.stringify({ route: '/tasks' }), 'utf8');
       }
     });
     req.on('error', () => {
-      // Seven not running — try to launch it
       const mainPy = path.join(PROJECT_ROOT, 'main.py');
       if (fs.existsSync(mainPy)) {
         const py = findPython();
         spawn(py, [mainPy], {
-          cwd:         PROJECT_ROOT,
-          detached:    true,
-          windowsHide: true,
-          stdio:       'ignore',
-          env: {
-            ...process.env,
-            SEVEN_APP_PATH:     PROJECT_ROOT,
-            SEVEN_ELECTRON_MODE: '1',
-          },
+          cwd: PROJECT_ROOT, detached: true, windowsHide: true, stdio: 'ignore',
+          env: { ...process.env, SEVEN_APP_PATH: PROJECT_ROOT, SEVEN_ELECTRON_MODE: '1' },
         }).unref();
       }
     });
     req.end();
   } catch (e) {
-    console.error('[PANEL HOST] Navigate to Seven failed:', e.message);
+    console.error('[PANEL HOST] Navigate failed:', e.message);
   }
-
   closePanelWindow();
 });
 
-// ── HTTP command server ───────────────────────────────────────────────────────
-
-let commandServer = null;
-
+// ── HTTP command server ─────────────────────────────────────────────────
 function startCommandServer() {
   commandServer = http.createServer((req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -350,26 +368,25 @@ function startCommandServer() {
 
     if (req.method === 'POST' && req.url === '/panel/open') {
       createPanelWindow();
-      res.writeHead(200);
-      res.end(JSON.stringify({ ok: true }));
+      res.writeHead(200); res.end(JSON.stringify({ ok: true }));
       return;
     }
-
     if (req.method === 'POST' && req.url === '/panel/close') {
       closePanelWindow();
-      res.writeHead(200);
-      res.end(JSON.stringify({ ok: true }));
+      res.writeHead(200); res.end(JSON.stringify({ ok: true }));
       return;
     }
-
+    if (req.method === 'POST' && req.url === '/panel/reload-hotkey') {
+      const newHotkey = readPanelHotkey();
+      registerHotkey(newHotkey);
+      res.writeHead(200); res.end(JSON.stringify({ ok: true, hotkey: newHotkey }));
+      return;
+    }
     if (req.method === 'GET' && req.url === '/panel/health') {
-      res.writeHead(200);
-      res.end(JSON.stringify({ ok: true, pid: process.pid }));
+      res.writeHead(200); res.end(JSON.stringify({ ok: true, pid: process.pid, hotkey: currentHotkey }));
       return;
     }
-
-    res.writeHead(404);
-    res.end(JSON.stringify({ ok: false }));
+    res.writeHead(404); res.end(JSON.stringify({ ok: false }));
   });
 
   commandServer.listen(7779, '127.0.0.1', () => {
@@ -377,27 +394,56 @@ function startCommandServer() {
   });
 
   commandServer.on('error', (e) => {
-    console.error('[PANEL HOST] Command server error:', e.message);
+    if (e.code === 'EADDRINUSE') {
+      console.log('[PANEL HOST] Port 7779 busy, retrying...');
+      try {
+        const { execSync } = require('node:child_process');
+        const stdout = execSync(`powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort 7779 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess"`).toString();
+        const pids = stdout.trim().split(/\r?\n/).filter(p => p.trim());
+        for (const pidStr of pids) {
+          const pid = parseInt(pidStr.trim(), 10);
+          if (pid && pid !== process.pid) {
+            execSync(`taskkill /pid ${pid} /f`, { windowsHide: true });
+          }
+        }
+      } catch {}
+      setTimeout(startCommandServer, 1000);
+    } else {
+      console.error('[PANEL HOST] Command server error:', e.message);
+    }
   });
 }
 
-// ── Trigger file polling ─────────────────────────────────────────────────────
+// ── Hotkey registration with runtime reload ─────────────────────────────
+function registerHotkey(newHotkey) {
+  try {
+    globalShortcut.unregisterAll();
+  } catch {}
 
-function startTriggerPolling() {
-  // DISABLED - panel only opens via Alt+Shift+T or tray click
-  // Automatic triggers were causing panel to appear unexpectedly
-  console.log('[PANEL HOST] Trigger polling disabled by design');
-}
+  const targetHotkey = newHotkey || readPanelHotkey();
 
-function stopTriggerPolling() {
-  if (triggerPoller) {
-    clearInterval(triggerPoller);
-    triggerPoller = null;
+  const ok = globalShortcut.register(targetHotkey, () => {
+    console.log(`[PANEL HOST] Hotkey ${targetHotkey} pressed`);
+    togglePanel();
+  });
+
+  if (ok) {
+    currentHotkey = targetHotkey;
+    console.log(`[PANEL HOST] Registered hotkey: ${targetHotkey}`);
+    if (tray) tray.setToolTip(`Seven Panel — ${targetHotkey}`);
+  } else {
+    const fb = globalShortcut.register(DEFAULT_HOTKEY, () => togglePanel());
+    if (fb) {
+      currentHotkey = DEFAULT_HOTKEY;
+      console.log(`[PANEL HOST] Fallback hotkey registered: ${DEFAULT_HOTKEY}`);
+      if (tray) tray.setToolTip(`Seven Panel — ${DEFAULT_HOTKEY}`);
+    } else {
+      console.error('[PANEL HOST] Failed to register any hotkey');
+    }
   }
 }
 
-// ── Tray icon ────────────────────────────────────────────────────────────────
-
+// ── Tray ────────────────────────────────────────────────────────────────
 function createTray() {
   if (tray) return;
 
@@ -405,36 +451,28 @@ function createTray() {
     let icon;
     if (fs.existsSync(ICON_PATH)) {
       icon = nativeImage.createFromPath(ICON_PATH);
-      if (icon.isEmpty()) {
-        console.warn('[PANEL HOST] Icon empty, skipping tray');
-        return;
-      }
+      if (icon.isEmpty()) return;
       icon = icon.resize({ width: 16, height: 16 });
     } else {
-      console.warn('[PANEL HOST] No icon found, skipping tray');
       return;
     }
 
     tray = new Tray(icon);
-
     const menu = Menu.buildFromTemplate([
-      {
-        label: 'Show Tasks (Alt+Shift+T)',
-        click: () => togglePanel(),
-      },
+      { label: `Show Panel (${currentHotkey || DEFAULT_HOTKEY})`, click: () => togglePanel() },
+      { type: 'separator' },
+      { label: 'Open Seven', click: () => ipcMain.emit('panel-open-seven-tasks') },
       { type: 'separator' },
       {
-        label: 'Open Seven',
-        click: () => {
-          ipcMain.emit('panel-open-seven-tasks');
-        },
+        label: 'Reload Hotkey from Settings',
+        click: () => registerHotkey(readPanelHotkey())
       },
       { type: 'separator' },
       {
         label: 'Quit Panel Host',
         click: () => {
           app.isQuitting = true;
-          stopTriggerPolling();
+          if (configWatcher) { try { configWatcher.close(); } catch {} }
           stopPanelServer();
           closePanelWindow();
           if (tray) { tray.destroy(); tray = null; }
@@ -442,74 +480,36 @@ function createTray() {
         },
       },
     ]);
-
     tray.setContextMenu(menu);
-    tray.setToolTip('Seven Tasks — Alt+Shift+T');
-
-    // Tray click does nothing - only right-click menu opens panel
-    // Prevents accidental panel opens
-
+    tray.setToolTip(`Seven Panel — ${currentHotkey || DEFAULT_HOTKEY}`);
     console.log('[PANEL HOST] Tray created');
   } catch (e) {
     console.error('[PANEL HOST] Tray error:', e.message);
   }
 }
 
-// ── App lifecycle ────────────────────────────────────────────────────────────
-
+// ── Startup ─────────────────────────────────────────────────────────────
 app.whenReady().then(async () => {
   console.log('[PANEL HOST] Starting...');
   console.log('[PANEL HOST] PID:', process.pid);
   console.log('[PANEL HOST] Project root:', PROJECT_ROOT);
 
-  // Aggressive cleanup — remove trigger file multiple times to prevent race
-  for (let i = 0; i < 3; i++) {
-    try {
-      if (fs.existsSync(TRIGGER_FILE)) {
-        fs.unlinkSync(TRIGGER_FILE);
-        console.log('[PANEL HOST] Removed trigger file (attempt ' + (i+1) + ')');
-      }
-    } catch (e) {}
-    await new Promise(r => setTimeout(r, 100));
-  }
-
-  // Start panel server
   startPanelServer();
   await waitForPanelServer();
-
-  // Start command server so Python can open panel
   startCommandServer();
 
-  // Register global shortcut — remains active even when SEVEN main app is closed
-  // First unregister any existing binding to avoid conflicts
-  try {
-    globalShortcut.unregister('Alt+Shift+T');
-  } catch (e) {}
-
-  const shortcut = 'Alt+Shift+T';
-  const ok = globalShortcut.register(shortcut, () => {
-    console.log('[PANEL HOST] Shortcut pressed — toggling panel');
-    togglePanel();
-  });
-
-  if (ok) {
-    console.log(`[PANEL HOST] ✓ Shortcut registered: ${shortcut}`);
-  } else {
-    const fb = globalShortcut.register('Ctrl+Alt+T', () => togglePanel());
-    console.log(`[PANEL HOST] ✗ Primary failed, fallback Ctrl+Alt+T: ${fb ? 'OK' : 'FAILED'}`);
-  }
+  const hotkey = readPanelHotkey();
+  registerHotkey(hotkey);
+  watchConfig();
 
   createTray();
-
-  // Trigger polling DISABLED - panel only opens on user shortcut or tray click
-  // This prevents any automatic opening from stale files or other processes
-  console.log('[PANEL HOST] Ready. Press Alt+Shift+T to open tasks.');
+  console.log(`[PANEL HOST] Ready. Press ${currentHotkey} to open panel.`);
 });
 
 app.on('before-quit', () => {
   app.isQuitting = true;
   globalShortcut.unregisterAll();
-  stopTriggerPolling();
+  if (configWatcher) { try { configWatcher.close(); } catch {} }
   stopPanelServer();
   closePanelWindow();
   if (tray) { tray.destroy(); tray = null; }
