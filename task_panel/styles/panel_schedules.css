@@ -1,0 +1,101 @@
+/* ══════════════════════════════════════════════════════════════
+   SCHEDULE CARDS
+══════════════════════════════════════════════════════════════ */
+
+.sched-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 9px 11px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  transition: all 0.2s ease;
+  animation: cardIn 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.sched-card:hover {
+  border-color: var(--border-h);
+  background: var(--card-h);
+}
+
+.sched-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.sched-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.sched-msg {
+  font-size: 10.5px;
+  color: var(--text-2);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sched-time {
+  font-size: 8px;
+  color: var(--text-4);
+  font-variant-numeric: tabular-nums;
+  margin-top: 2px;
+  font-weight: 500;
+}
+
+.sched-remain {
+  font-size: 9px;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  flex-shrink: 0;
+  padding: 3px 7px;
+  background: var(--accent-dim);
+  border: 1px solid rgba(99, 102, 241, 0.12);
+  border-radius: var(--radius-xs);
+}
+
+.sched-remain.urgent {
+  color: var(--warn);
+  background: var(--warn-dim);
+  border-color: rgba(255, 180, 100, 0.15);
+}
+
+.sched-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.sched-card:hover .sched-actions { opacity: 1; }
+
+.sched-action-btn {
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-xs);
+  border: none;
+  background: transparent;
+  color: var(--text-4);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.12s ease;
+}
+
+.sched-action-btn:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-2);
+}
