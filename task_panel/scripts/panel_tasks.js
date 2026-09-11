@@ -1,90 +1,60 @@
 /**
- * panel_tasks.js - Task card rendering and interactions.
+ * panel_tasks.js
+ * Task rendering, completion countdown, inline edit, delete with undo, pin.
  */
 
-const countdowns = {};
+const _countdowns = {};
+const _deleteTimers = {};
 
-function escHtml(str) {
-  if (!str) return '';
-  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
-
-function getDueBadge(task) {
-  if (!task.due_date || task.completed) return null;
-  const now = new Date(); now.setHours(0, 0, 0, 0);
-  const due = new Date(task.due_date + 'T00:00:00');
-  const d = Math.round((due - now) / 86400000);
-  if (d < 0)   return { label: 'Overdue',  color: 'rgba(255,255,255,0.8)',  bg: 'rgba(255,255,255,0.05)', border: 'rgba(255,255,255,0.08)' };
-  if (d === 0) return { label: 'Today',    color: 'rgba(255,255,255,0.75)', bg: 'rgba(255,255,255,0.04)', border: 'rgba(255,255,255,0.07)' };
-  if (d === 1) return { label: 'Tomorrow', color: 'rgba(255,255,255,0.55)', bg: 'rgba(255,255,255,0.03)', border: 'rgba(255,255,255,0.05)' };
-  if (d <= 7) return {
-    label: due.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }),
-    color: 'rgba(255,255,255,0.4)', bg: 'rgba(255,255,255,0.02)', border: 'rgba(255,255,255,0.04)',
-  };
-  return {
-    label: due.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
-    color: 'rgba(255,255,255,0.3)', bg: 'rgba(255,255,255,0.02)', border: 'rgba(255,255,255,0.03)',
-  };
-}
-
-function getDeadline(task) {
-  if (!task.due_date || task.completed) return null;
-  const ds  = task.due_time ? `${task.due_date}T${task.due_time}` : `${task.due_date}T23:59:59`;
-  const due = new Date(ds);
-  const diff = due - new Date();
-  if (diff <= 0) return { text: 'past', urgent: true };
-  const m = Math.floor(diff / 60000);
-  const h = Math.floor(m / 60);
-  const d = Math.floor(h / 24);
-  if (d > 0) return { text: `${d}d ${h % 24}h`, urgent: d <= 1 };
-  if (h > 0) return { text: `${h}h ${m % 60}m`, urgent: h <= 3 };
-  return { text: `${m}m`, urgent: true };
-}
-
-function makeTaskCard(task, index) {
+function renderTaskCard(task, index) {
   const card = document.createElement('div');
   card.className = 'task-card';
   card.id = `card-${task.id}`;
-  card.style.animationDelay = `${index * 40}ms`;
+  card.style.animationDelay = `${index * 30}ms`;
 
   const pri = task.priority || 'medium';
-  const priDot = pri === 'high' ? 'rgba(255,255,255,0.7)' :
-                 pri === 'medium' ? 'rgba(255,255,255,0.35)' :
-                 'rgba(255,255,255,0.15)';
-  const priColor = pri === 'high' ? 'rgba(255,255,255,0.7)' :
-                   pri === 'medium' ? 'rgba(255,255,255,0.45)' :
-                   'rgba(255,255,255,0.25)';
-
   const badge = getDueBadge(task);
   const dl = getDeadline(task);
   const subs = task.subtasks || [];
   const subDone = subs.filter(s => s.completed).length;
   const subPct = subs.length > 0 ? Math.round((subDone / subs.length) * 100) : null;
+  const pinned = task.tags && task.tags.includes('pinned');
 
-  let html = `<div class="card-inner">`;
+  let html = '<div class="card-inner">';
 
-  // Top: title + check button
   html += `
     <div class="card-top">
-      <div class="card-title" id="title-${task.id}">${escHtml(task.text)}</div>
-      <button class="check-btn" id="btn-${task.id}" onclick="startComplete(${task.id})">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linecap="round">
-          <path d="M20 6L9 17l-5-5"/>
-        </svg>
-      </button>
+      <div class="card-title" id="title-${task.id}"
+           ondblclick="startEditTitle(${task.id})">${escHtml(task.text)}</div>
+      <div class="card-actions">
+        <button class="card-action-btn pin ${pinned ? 'pinned' : ''}"
+                onclick="togglePin(${task.id})" title="${pinned ? 'Unpin' : 'Pin'}">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="${pinned ? 'currentColor' : 'none'}"
+               stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 17v5"/><path d="M9 10.76a2 2 0 01-1.11 1.79l-1.78.9A2 2 0 005 15.24V16h14v-.76a2 2 0 00-1.11-1.79l-1.78-.9A2 2 0 0115 10.76V7a1 1 0 011-1 2 2 0 000-4H8a2 2 0 000 4 1 1 0 011 1z"/>
+          </svg>
+        </button>
+        <button class="card-action-btn delete" onclick="startDeleteTask(${task.id})" title="Delete">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="1.8" stroke-linecap="round">
+            <path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/>
+          </svg>
+        </button>
+        <button class="card-action-btn check" id="check-${task.id}"
+                onclick="startComplete(${task.id})" title="Complete">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--accent)"
+               stroke-width="2.5" stroke-linecap="round"><path d="M20 6L9 17l-5-5"/></svg>
+        </button>
+      </div>
     </div>
   `;
 
-  // Description
   if (task.description) {
     html += `<div class="card-desc">${escHtml(task.description)}</div>`;
   }
 
-  // Countdown placeholder
   html += `<div id="countdown-${task.id}" style="display:none"></div>`;
 
-  // Subtasks
   if (subs.length > 0) {
     html += `
       <div class="sub-section">
@@ -94,47 +64,39 @@ function makeTaskCard(task, index) {
         </div>
         <div style="max-height:80px;overflow-y:auto">
     `;
-
     subs.forEach(sub => {
       const done = sub.completed;
       html += `
-        <div class="sub-row" id="sub-${task.id}-${sub.id}" onclick="toggleSub(${task.id},'${sub.id}')">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
+        <div class="sub-row" id="sub-${task.id}-${sub.id}" onclick="toggleSubtask(${task.id},'${sub.id}')">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none"
                stroke="${done ? 'var(--accent)' : 'rgba(255,255,255,0.15)'}"
                stroke-width="2" style="flex-shrink:0">
             ${done
               ? '<circle cx="12" cy="12" r="10"/><path d="M9 12l2 2 4-4"/>'
               : '<circle cx="12" cy="12" r="10"/>'}
           </svg>
-          <span class="sub-text ${done ? 'done' : ''}" style="color:${done ? 'var(--text-4)' : 'var(--text-2)'}">
-            ${escHtml(sub.text)}
-          </span>
+          <span class="sub-text ${done ? 'done' : ''}">${escHtml(sub.text)}</span>
         </div>
       `;
     });
-
-    html += `</div>`;
-
-    // Progress bar
+    html += '</div>';
     html += `
       <div class="progress-track">
         <div class="progress-bar">
           <div class="progress-fill" id="progress-${task.id}"
-               style="width:${subPct}%;background:${subPct === 100 ? 'rgba(255,255,255,0.45)' : 'var(--accent)'}"></div>
+               style="width:${subPct}%;background:${subPct === 100 ? 'var(--success)' : 'var(--accent)'}"></div>
         </div>
         <span class="progress-pct" id="pct-${task.id}">${subPct}%</span>
       </div>
+    </div>
     `;
-
-    html += `</div>`;
   }
 
-  // Meta row
   html += `
     <div class="meta-row">
-      <div style="display:flex;align-items:center;gap:4px">
-        <div class="pri-dot" style="background:${priDot}"></div>
-        <span class="pri-label" style="color:${priColor}">${pri}</span>
+      <div style="display:flex;align-items:center;gap:4px" onclick="cyclePriority(${task.id})">
+        <div class="pri-dot" style="background:${priorityColor(pri)}"></div>
+        <span class="pri-label" style="color:${priorityLabelColor(pri)}">${pri}</span>
       </div>
   `;
 
@@ -146,32 +108,33 @@ function makeTaskCard(task, index) {
     html += `<span class="deadline" style="color:${dl.urgent ? 'rgba(255,255,255,0.65)' : 'rgba(255,255,255,0.3)'}">${dl.text}</span>`;
   }
 
-  html += `</div></div>`;
+  html += '</div></div>';
   card.innerHTML = html;
   return card;
 }
 
+/* ── Complete with 3s countdown ── */
 function startComplete(taskId) {
-  const card  = document.getElementById(`card-${taskId}`);
-  const btn   = document.getElementById(`btn-${taskId}`);
+  const card = document.getElementById(`card-${taskId}`);
+  const check = document.getElementById(`check-${taskId}`);
   const title = document.getElementById(`title-${taskId}`);
   if (!card || card.classList.contains('completing')) return;
 
   title.classList.add('struck');
   card.classList.add('completing');
-  btn.classList.add('checked');
+  check.classList.add('checked');
 
   let secs = 3;
   const cdEl = document.getElementById(`countdown-${taskId}`);
   cdEl.style.display = 'block';
   cdEl.innerHTML = renderCountdown(secs, taskId);
 
-  countdowns[taskId] = setInterval(() => {
+  _countdowns[taskId] = setInterval(() => {
     secs--;
     if (secs <= 0) {
-      clearInterval(countdowns[taskId]);
-      delete countdowns[taskId];
-      doComplete(taskId);
+      clearInterval(_countdowns[taskId]);
+      delete _countdowns[taskId];
+      finishComplete(taskId);
     } else {
       cdEl.innerHTML = renderCountdown(secs, taskId);
     }
@@ -191,35 +154,214 @@ function renderCountdown(secs, taskId) {
 }
 
 function undoComplete(taskId) {
-  if (countdowns[taskId]) {
-    clearInterval(countdowns[taskId]);
-    delete countdowns[taskId];
+  if (_countdowns[taskId]) {
+    clearInterval(_countdowns[taskId]);
+    delete _countdowns[taskId];
   }
   const card = document.getElementById(`card-${taskId}`);
-  const btn = document.getElementById(`btn-${taskId}`);
+  const check = document.getElementById(`check-${taskId}`);
   const title = document.getElementById(`title-${taskId}`);
   if (card) card.classList.remove('completing');
-  if (btn) btn.classList.remove('checked');
+  if (check) check.classList.remove('checked');
   if (title) title.classList.remove('struck');
   const cd = document.getElementById(`countdown-${taskId}`);
   if (cd) { cd.style.display = 'none'; cd.innerHTML = ''; }
 }
 
-async function doComplete(taskId) {
-  try { await completeTask(taskId); } catch {}
-
+async function finishComplete(taskId) {
+  try { await completeTaskAPI(taskId); } catch {}
   const card = document.getElementById(`card-${taskId}`);
   if (card) {
     card.classList.add('done');
     setTimeout(() => {
       card.remove();
-      if (typeof onTaskCompleted === 'function') onTaskCompleted(taskId);
-    }, 450);
+      if (typeof onTaskRemoved === 'function') onTaskRemoved(taskId);
+    }, 400);
   }
 }
 
-async function toggleSub(taskId, subId) {
-  if (typeof onSubtaskToggle === 'function') {
-    onSubtaskToggle(taskId, subId);
+/* ── Delete with 3s undo ── */
+function startDeleteTask(taskId) {
+  const card = document.getElementById(`card-${taskId}`);
+  const title = document.getElementById(`title-${taskId}`);
+  if (!card) return;
+
+  title.classList.add('struck');
+  card.style.opacity = '0.4';
+
+  let secs = 3;
+  const cdEl = document.getElementById(`countdown-${taskId}`);
+  cdEl.style.display = 'block';
+  cdEl.innerHTML = `
+    <div class="countdown" style="background: rgba(255, 120, 120, 0.08); border-color: rgba(255, 120, 120, 0.15);">
+      <div class="cd-left">
+        <span class="cd-num" style="color: var(--danger);">${secs}s</span>
+        <span class="cd-text">deleting</span>
+      </div>
+      <button class="undo-btn" onclick="undoDelete(${taskId})">Undo</button>
+    </div>
+  `;
+
+  _deleteTimers[taskId] = setInterval(() => {
+    secs--;
+    if (secs <= 0) {
+      clearInterval(_deleteTimers[taskId]);
+      delete _deleteTimers[taskId];
+      finishDelete(taskId);
+    } else {
+      const numEl = cdEl.querySelector('.cd-num');
+      if (numEl) numEl.textContent = `${secs}s`;
+    }
+  }, 1000);
+}
+
+function undoDelete(taskId) {
+  if (_deleteTimers[taskId]) {
+    clearInterval(_deleteTimers[taskId]);
+    delete _deleteTimers[taskId];
   }
+  const card = document.getElementById(`card-${taskId}`);
+  const title = document.getElementById(`title-${taskId}`);
+  if (card) card.style.opacity = '';
+  if (title) title.classList.remove('struck');
+  const cd = document.getElementById(`countdown-${taskId}`);
+  if (cd) { cd.style.display = 'none'; cd.innerHTML = ''; }
+}
+
+async function finishDelete(taskId) {
+  try { await deleteTaskAPI(taskId); } catch {}
+  const card = document.getElementById(`card-${taskId}`);
+  if (card) {
+    card.classList.add('done');
+    setTimeout(() => {
+      card.remove();
+      if (typeof onTaskRemoved === 'function') onTaskRemoved(taskId);
+    }, 400);
+  }
+}
+
+/* ── Inline edit title ── */
+function startEditTitle(taskId) {
+  const title = document.getElementById(`title-${taskId}`);
+  if (!title || title.classList.contains('editing')) return;
+
+  const original = title.textContent;
+  title.classList.add('editing');
+  title.contentEditable = 'true';
+  title.focus();
+
+  const range = document.createRange();
+  range.selectNodeContents(title);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+
+  const commit = async () => {
+    title.classList.remove('editing');
+    title.contentEditable = 'false';
+    const newText = title.textContent.trim();
+    if (!newText || newText === original) {
+      title.textContent = original;
+      return;
+    }
+    await updateTaskAPI(taskId, { text: newText });
+  };
+
+  const cancel = () => {
+    title.classList.remove('editing');
+    title.contentEditable = 'false';
+    title.textContent = original;
+  };
+
+  title.addEventListener('blur', commit, { once: true });
+  title.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); title.blur(); }
+    if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+  }, { once: true });
+}
+
+/* ── Cycle priority ── */
+async function cyclePriority(taskId) {
+  if (!window._allTasks) return;
+  const task = window._allTasks.find(t => t.id === taskId);
+  if (!task) return;
+
+  const order = ['low', 'medium', 'high'];
+  const idx = order.indexOf(task.priority || 'medium');
+  const next = order[(idx + 1) % 3];
+
+  task.priority = next;
+  const card = document.getElementById(`card-${taskId}`);
+  if (card) {
+    const dot = card.querySelector('.pri-dot');
+    const lbl = card.querySelector('.pri-label');
+    if (dot) dot.style.background = priorityColor(next);
+    if (lbl) { lbl.style.color = priorityLabelColor(next); lbl.textContent = next; }
+  }
+
+  await updateTaskAPI(taskId, { priority: next });
+}
+
+/* ── Toggle pin ── */
+async function togglePin(taskId) {
+  if (!window._allTasks) return;
+  const task = window._allTasks.find(t => t.id === taskId);
+  if (!task) return;
+
+  const tags = Array.isArray(task.tags) ? [...task.tags] : [];
+  const pinned = tags.includes('pinned');
+
+  if (pinned) {
+    const idx = tags.indexOf('pinned');
+    tags.splice(idx, 1);
+  } else {
+    tags.push('pinned');
+  }
+
+  task.tags = tags;
+  await updateTaskAPI(taskId, { tags: tags.join(',') });
+  if (typeof reloadTasks === 'function') reloadTasks();
+}
+
+/* ── Toggle subtask ── */
+async function toggleSubtask(taskId, subId) {
+  if (!window._allTasks) return;
+  const task = window._allTasks.find(t => t.id === taskId);
+  if (!task || !task.subtasks) return;
+
+  const updated = task.subtasks.map(s =>
+    s.id === subId ? { ...s, completed: !s.completed } : s
+  );
+  task.subtasks = updated;
+
+  const subDone = updated.filter(s => s.completed).length;
+  const subPct = Math.round((subDone / updated.length) * 100);
+
+  const subRow = document.getElementById(`sub-${taskId}-${subId}`);
+  if (subRow) {
+    const sub = updated.find(s => s.id === subId);
+    const svg = subRow.querySelector('svg');
+    const span = subRow.querySelector('.sub-text');
+    if (sub.completed) {
+      svg.setAttribute('stroke', 'var(--accent)');
+      svg.innerHTML = '<circle cx="12" cy="12" r="10"/><path d="M9 12l2 2 4-4"/>';
+      span.classList.add('done');
+    } else {
+      svg.setAttribute('stroke', 'rgba(255,255,255,0.15)');
+      svg.innerHTML = '<circle cx="12" cy="12" r="10"/>';
+      span.classList.remove('done');
+    }
+  }
+
+  const bar = document.getElementById(`progress-${taskId}`);
+  const pct = document.getElementById(`pct-${taskId}`);
+  const cnt = document.getElementById(`sub-count-${taskId}`);
+  if (bar) {
+    bar.style.width = subPct + '%';
+    bar.style.background = subPct === 100 ? 'var(--success)' : 'var(--accent)';
+  }
+  if (pct) pct.textContent = subPct + '%';
+  if (cnt) cnt.textContent = `${subDone}/${updated.length}`;
+
+  try { await updateSubtasksAPI(taskId, updated); } catch {}
 }
