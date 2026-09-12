@@ -1,17 +1,21 @@
 /**
  * panel_triggers.js
- * Trigger list rendering + inline hotkey editing with conflict detection.
+ * Comprehensive Trigger rendering, filtering, active test-firing,
+ * and a premium live Hotkey recording interface.
  */
 
-let _allTriggers = [];
 let _triggerFilter = 'all';
 let _editingTriggerId = null;
-let _recordingKeys = new Set();
 
-function setTriggerFilter(f) {
-  _triggerFilter = f;
+function triggerIdOf(t) {
+  if (!t) return null;
+  return t.id != null ? t.id : (t.trigger_id != null ? t.trigger_id : null);
+}
+
+function setTriggerFilter(filter) {
+  _triggerFilter = filter;
   document.querySelectorAll('#trigger-filters .filter-chip').forEach(c => {
-    c.classList.toggle('active', c.dataset.filter === f);
+    c.classList.toggle('active', c.dataset.filter === filter);
   });
   renderTriggers();
 }
@@ -21,204 +25,244 @@ function renderTriggers() {
   const empty = document.getElementById('trigger-empty');
   if (!list) return;
 
-  let filtered = _allTriggers;
-  if (_triggerFilter === 'hotkey') {
-    filtered = _allTriggers.filter(t => t.hotkey);
-  } else if (_triggerFilter === 'voice') {
-    filtered = _allTriggers.filter(t => t.voice_phrase);
-  } else if (_triggerFilter === 'snap') {
-    filtered = _allTriggers.filter(t => t.audio_pattern);
-  } else if (_triggerFilter === 'workspace') {
-    filtered = _allTriggers.filter(t => t.action_type === 'open_workspace');
+  const triggers = window._allTriggers || [];
+  let filtered = triggers;
+
+  if (_triggerFilter !== 'all') {
+    filtered = triggers.filter(t => {
+      if (!t) return false;
+      const rawType = String(t.type || t.trigger_type || t.kind || t.category || '').toLowerCase();
+      const rawName = String(t.name || '').toLowerCase();
+
+      if (_triggerFilter === 'hotkey') {
+        return rawType.includes('hotkey') || rawType.includes('key') || rawType.includes('shortcut') || Boolean(t.hotkey);
+      }
+      if (_triggerFilter === 'voice') {
+        return rawType.includes('voice') || rawType.includes('speech') || rawType.includes('audio') || rawName.includes('voice');
+      }
+      if (_triggerFilter === 'snap') {
+        return rawType.includes('snap') || rawType.includes('anchor') || rawType.includes('dock') || rawName.includes('snap');
+      }
+      if (_triggerFilter === 'workspace') {
+        return rawType.includes('workspace') || rawType.includes('process') || rawType.includes('app') || rawType.includes('window');
+      }
+      return rawType === _triggerFilter || rawType.includes(_triggerFilter);
+    });
   }
 
   if (filtered.length === 0) {
     list.style.display = 'none';
-    empty.style.display = 'flex';
+    if (empty) empty.style.display = 'flex';
     return;
   }
 
-  empty.style.display = 'none';
+  if (empty) empty.style.display = 'none';
   list.style.display = 'flex';
   list.innerHTML = '';
 
-  filtered.forEach((trigger, i) => {
-    list.appendChild(renderTriggerCard(trigger, i));
+  filtered.forEach((t, i) => {
+    try {
+      list.appendChild(renderTriggerCard(t, i));
+    } catch (err) {
+      console.error('Failed to append trigger card:', t, err);
+    }
   });
 }
 
-function renderTriggerCard(trigger, index) {
+function renderTriggerCard(t, index) {
   const card = document.createElement('div');
-  card.className = `trigger-card ${!trigger.enabled ? 'disabled' : ''}`;
-  card.id = `trig-${trigger.id}`;
-  card.style.animationDelay = `${index * 30}ms`;
+  card.className = `trigger-card ${(t && t.status) === 'disabled' ? 'disabled' : ''}`;
 
-  const iconMap = {
-    open_app: '<path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><path d="M15 3h6v6"/><path d="M10 14L21 3"/>',
-    open_url: '<circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/>',
-    open_file: '<path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/>',
-    open_folder: '<path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/>',
-    open_workspace: '<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>',
-    run_command: '<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>',
-    seven_action: '<circle cx="12" cy="12" r="3"/><path d="M12 1v6m0 6v6M4.22 4.22l4.24 4.24m7.08 7.08l4.24 4.24M1 12h6m6 0h6M4.22 19.78l4.24-4.24m7.08-7.08l4.24-4.24"/>',
-  };
+  try {
+  const id = triggerIdOf(t);
+  if (id == null) throw new Error('trigger missing id/trigger_id');
 
-  const actionIcon = iconMap[trigger.action_type] || iconMap.seven_action;
+  card.id = `trigger-${id}`;
+  card.style.animationDelay = `${index * 25}ms`;
 
-  let methodBadge = '';
-  if (trigger.hotkey) {
-    methodBadge = `
-      <span class="trigger-badge hotkey">
-        <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-          <rect x="2" y="4" width="20" height="16" rx="2"/><path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M8 12h.01M12 12h.01M16 12h.01M7 16h10"/>
-        </svg>
-        ${formatHotkey(trigger.hotkey)}
-      </span>
-    `;
-  } else if (trigger.voice_phrase) {
-    methodBadge = `
-      <span class="trigger-badge">
-        <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-          <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2M12 19v4M8 23h8"/>
-        </svg>
-        "${escHtml(trigger.voice_phrase)}"
-      </span>
-    `;
-  } else if (trigger.audio_pattern) {
-    const count = trigger.audio_pattern.split('_')[0];
-    methodBadge = `
-      <span class="trigger-badge">
-        <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-          <path d="M2 12h3l3-9 4 18 3-9h5"/>
-        </svg>
-        ${count} snap${count > 1 ? 's' : ''}
-      </span>
+  const type = (t.type || 'hotkey').toLowerCase();
+  const icon = getTriggerIcon(type);
+  const isHotkey = type === 'hotkey';
+  const rawBadge = isHotkey
+    ? (typeof formatHotkey === 'function' ? formatHotkey(t.hotkey) : (t.hotkey || 'hotkey'))
+    : (t.type || type);
+  const badgeVal = rawBadge == null ? type : String(rawBadge);
+
+  card.innerHTML = `
+    <div style="display:flex; align-items:center; width:100%; gap:12px;">
+      <div class="trigger-icon">${icon}</div>
+      <div class="trigger-info">
+        <div class="trigger-name">${escHtml(t.name || 'Unnamed Trigger')}</div>
+        <div class="trigger-meta">
+          <span class="trigger-badge ${isHotkey ? 'hotkey' : ''}">${escHtml(badgeVal)}</span>
+          ${t.fire_count ? `<span class="trigger-fire-count">${t.fire_count} fires</span>` : ''}
+        </div>
+      </div>
+      <div class="trigger-actions">
+        ${isHotkey ? `
+          <button class="trigger-action-btn edit" onclick="startHotkeyRecording(${id})" title="Edit Hotkey">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 113 3L12 15l-4 1 1-4 9.5-9.5z"/>
+            </svg>
+          </button>
+        ` : ''}
+        <button class="trigger-action-btn fire" onclick="testFireTrigger(${id}, event)" title="Fire Trigger">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <polygon points="5 3 19 12 5 21 5 3"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <div class="hotkey-edit-wrap" id="hk-wrap-${id}">
+      <input type="text" class="hotkey-edit-input" id="hk-input-${id}"
+             placeholder="Press your hotkey combo..." readonly spellcheck="false" />
+      <div class="hotkey-edit-hint">Press Esc to cancel. Press Enter to save.</div>
+      <div class="hotkey-edit-error" id="hk-error-${id}"></div>
+    </div>
+  `;
+  } catch (err) {
+    console.error('Failed to render trigger:', t, err);
+    const fallbackId = triggerIdOf(t);
+    card.id = fallbackId != null ? `trigger-${fallbackId}` : `trigger-unknown-${index}`;
+    card.innerHTML = `
+      <div style="display:flex;align-items:center;width:100%;gap:12px;">
+        <div class="trigger-info">
+          <div class="trigger-name">${escHtml((t && t.name) || 'Trigger')}</div>
+          <div class="trigger-meta"><span class="trigger-badge">error</span></div>
+        </div>
+      </div>
     `;
   }
 
-  card.innerHTML = `
-    <div class="trigger-icon">
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--text-3)"
-           stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-        ${actionIcon}
-      </svg>
-    </div>
-    <div class="trigger-info">
-      <div class="trigger-name">${escHtml(trigger.name)}</div>
-      <div class="trigger-meta">
-        ${methodBadge}
-        ${trigger.fire_count > 0 ? `<span class="trigger-fire-count">${trigger.fire_count} fires</span>` : ''}
-      </div>
-      <div class="hotkey-edit-wrap" id="edit-${trigger.id}">
-        <input type="text" class="hotkey-edit-input" id="hotkey-input-${trigger.id}"
-               placeholder="Press keys..." readonly>
-        <div class="hotkey-edit-hint">Press key combo to record. Esc to cancel.</div>
-        <div class="hotkey-edit-error" id="hotkey-error-${trigger.id}"></div>
-      </div>
-    </div>
-    <div class="trigger-actions">
-      ${trigger.hotkey ? `
-        <button class="trigger-action-btn" onclick="startEditHotkey(${trigger.id})" title="Edit hotkey">
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-               stroke-width="1.8" stroke-linecap="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-        </button>
-      ` : ''}
-      <button class="trigger-action-btn fire" onclick="fireTriggerPanel(${trigger.id})" title="Test">
-        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-             stroke-width="2" stroke-linecap="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-      </button>
-    </div>
-  `;
   return card;
 }
 
-/* ── Inline hotkey editor ── */
-function startEditHotkey(triggerId) {
-  if (_editingTriggerId && _editingTriggerId !== triggerId) {
-    cancelEditHotkey(_editingTriggerId);
+function getTriggerIcon(type) {
+  if (type === 'hotkey') {
+    return `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M6 12h.01M18 12h.01M7 16h10"/></svg>`;
   }
-  _editingTriggerId = triggerId;
+  if (type === 'voice') {
+    return `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4M8 23h8"/></svg>`;
+  }
+  if (type === 'snap' || type === 'anchor') {
+    return `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg>`;
+  }
+  return `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>`;
+}
 
-  const wrap = document.getElementById(`edit-${triggerId}`);
-  const input = document.getElementById(`hotkey-input-${triggerId}`);
-  const error = document.getElementById(`hotkey-error-${triggerId}`);
+async function testFireTrigger(id, event) {
+  if (event) {
+    event.stopPropagation();
+    const btn = event.currentTarget;
+    btn.style.transform = 'scale(0.85)';
+    setTimeout(() => { btn.style.transform = ''; }, 150);
+  }
+  await fireTrigger(id);
+}
+
+/* ── Live Key Capture Controller ── */
+let _activeKeysPressed = new Set();
+let _recordedComboString = '';
+
+function startHotkeyRecording(triggerId) {
+  if (_editingTriggerId) {
+    cancelHotkeyRecording(_editingTriggerId);
+  }
+
+  _editingTriggerId = triggerId;
+  _recordedComboString = '';
+  _activeKeysPressed.clear();
+
+  const wrap = document.getElementById(`hk-wrap-${triggerId}`);
+  const input = document.getElementById(`hk-input-${triggerId}`);
+  const errEl = document.getElementById(`hk-error-${triggerId}`);
+
   if (!wrap || !input) return;
 
   wrap.classList.add('visible');
-  input.value = '';
   input.classList.add('recording');
-  error.classList.remove('visible');
+  input.value = 'Recording keys...';
+  if (errEl) errEl.classList.remove('visible');
+
+  // Capture user inputs safely inside target elements
   input.focus();
-
-  _recordingKeys.clear();
-
-  const keyDownHandler = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-
-    if (e.key === 'Escape') {
-      cancelEditHotkey(triggerId);
-      return;
-    }
-
-    const parts = [];
-    if (e.ctrlKey) parts.push('ctrl');
-    if (e.shiftKey) parts.push('shift');
-    if (e.altKey) parts.push('alt');
-    if (e.metaKey) parts.push('win');
-
-    const key = e.key.toLowerCase();
-    if (!['control', 'shift', 'alt', 'meta'].includes(key)) {
-      parts.push(key === ' ' ? 'space' : key);
-      const combo = parts.join('+');
-      input.value = formatHotkey(combo);
-      input.dataset.rawCombo = combo;
-
-      setTimeout(() => commitHotkey(triggerId, combo), 300);
-    }
-  };
-
-  input._keyHandler = keyDownHandler;
-  document.addEventListener('keydown', keyDownHandler, true);
+  input.onkeydown = handleHotkeyKeyDown;
+  input.onkeyup = handleHotkeyKeyUp;
 }
 
-function cancelEditHotkey(triggerId) {
-  const wrap = document.getElementById(`edit-${triggerId}`);
-  const input = document.getElementById(`hotkey-input-${triggerId}`);
-  if (input && input._keyHandler) {
-    document.removeEventListener('keydown', input._keyHandler, true);
-  }
+function cancelHotkeyRecording(triggerId) {
+  const wrap = document.getElementById(`hk-wrap-${triggerId}`);
+  const input = document.getElementById(`hk-input-${triggerId}`);
   if (wrap) wrap.classList.remove('visible');
-  _editingTriggerId = null;
+  if (input) {
+    input.classList.remove('recording');
+    input.onkeydown = null;
+    input.onkeyup = null;
+  }
+  if (_editingTriggerId === triggerId) _editingTriggerId = null;
 }
 
-async function commitHotkey(triggerId, combo) {
-  const input = document.getElementById(`hotkey-input-${triggerId}`);
-  const error = document.getElementById(`hotkey-error-${triggerId}`);
-  if (!input) return;
+function handleHotkeyKeyDown(e) {
+  e.preventDefault();
+  e.stopPropagation();
 
-  input.classList.remove('recording');
+  const key = e.key;
 
-  const result = await editHotkeyInline(triggerId, combo);
-  if (result.ok) {
-    const trigger = _allTriggers.find(t => t.id === triggerId);
-    if (trigger) trigger.hotkey = result.trigger.hotkey;
-    setTimeout(() => {
-      cancelEditHotkey(triggerId);
-      renderTriggers();
-    }, 400);
+  if (key === 'Escape') {
+    cancelHotkeyRecording(_editingTriggerId);
+    return;
+  }
+
+  if (key === 'Enter' && _recordedComboString) {
+    saveHotkeyCombo(_editingTriggerId, _recordedComboString);
+    return;
+  }
+
+  const parts = [];
+  if (e.ctrlKey) parts.push('ctrl');
+  if (e.shiftKey) parts.push('shift');
+  if (e.altKey) parts.push('alt');
+  if (e.metaKey) parts.push('win');
+
+  // Extract non-modifier key signatures
+  const primaryKeys = ['Control', 'Shift', 'Alt', 'Meta', 'Windows'];
+  if (!primaryKeys.includes(key) && key !== ' ') {
+    parts.push(key.toLowerCase());
+  } else if (key === ' ') {
+    parts.push('space');
+  }
+
+  if (parts.length > 0) {
+    _recordedComboString = parts.join('+');
+    e.target.value = formatHotkey(_recordedComboString);
+  }
+}
+
+function handleHotkeyKeyUp(e) {
+  e.preventDefault();
+  e.stopPropagation();
+}
+
+async function saveHotkeyCombo(id, combo) {
+  const input = document.getElementById(`hk-input-${id}`);
+  const errEl = document.getElementById(`hk-error-${id}`);
+  
+  if (input) {
+    input.placeholder = 'Saving changes...';
+    input.value = '';
+    input.classList.remove('recording');
+  }
+
+  const res = await editHotkeyInline(id, combo);
+  if (res && res.ok) {
+    cancelHotkeyRecording(id);
+    loadAll(); // Hot-reload triggers
   } else {
-    error.textContent = result.error || 'Update failed';
-    error.classList.add('visible');
-    input.classList.add('recording');
+    if (errEl) {
+      errEl.textContent = res?.error || 'Failed to save.';
+      errEl.classList.add('visible');
+    }
+    if (input) input.classList.add('recording');
   }
-}
-
-async function fireTriggerPanel(triggerId) {
-  const card = document.getElementById(`trig-${triggerId}`);
-  if (card) {
-    card.style.opacity = '0.6';
-    setTimeout(() => { card.style.opacity = ''; }, 800);
-  }
-  await fireTrigger(triggerId);
 }
