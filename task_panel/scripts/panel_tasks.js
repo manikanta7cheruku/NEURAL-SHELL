@@ -9,39 +9,58 @@ const _deleteTimers = {};
 function renderTaskCard(task, index) {
   const card = document.createElement('div');
   card.className = 'task-card';
-  card.id = `card-${task.id}`;
+
+  try {
+  const taskId = task.id;
+  card.id = `card-${taskId}`;
   card.style.animationDelay = `${index * 30}ms`;
 
   const pri = task.priority || 'medium';
-  const badge = getDueBadge(task);
-  const dl = getDeadline(task);
-  const subs = task.subtasks || [];
-  const subDone = subs.filter(s => s.completed).length;
+  const badge = typeof getDueBadge === 'function' ? getDueBadge(task) : null;
+  const dl = typeof getDeadline === 'function' ? getDeadline(task) : null;
+
+  // tags may be array, JSON string, or comma-separated string
+  let tags = task.tags;
+  if (typeof tags === 'string') {
+    try { tags = JSON.parse(tags); } catch (_) {
+      tags = tags.split(',').map(s => s.trim()).filter(Boolean);
+    }
+  }
+  if (!Array.isArray(tags)) tags = [];
+
+  // subtasks may be array or JSON string — .filter on a string crashes the whole list
+  let subs = task.subtasks;
+  if (typeof subs === 'string') {
+    try { subs = JSON.parse(subs); } catch (_) { subs = []; }
+  }
+  if (!Array.isArray(subs)) subs = [];
+
+  const subDone = subs.filter(s => s && s.completed).length;
   const subPct = subs.length > 0 ? Math.round((subDone / subs.length) * 100) : null;
-  const pinned = task.tags && task.tags.includes('pinned');
+  const pinned = tags.includes('pinned');
 
   let html = '<div class="card-inner">';
 
   html += `
     <div class="card-top">
-      <div class="card-title" id="title-${task.id}"
-           ondblclick="startEditTitle(${task.id})">${escHtml(task.text)}</div>
+      <div class="card-title" id="title-${taskId}"
+           ondblclick="startEditTitle(${taskId})">${escHtml(task.text || '')}</div>
       <div class="card-actions">
         <button class="card-action-btn pin ${pinned ? 'pinned' : ''}"
-                onclick="togglePin(${task.id})" title="${pinned ? 'Unpin' : 'Pin'}">
+                onclick="togglePin(${taskId})" title="${pinned ? 'Unpin' : 'Pin'}">
           <svg width="10" height="10" viewBox="0 0 24 24" fill="${pinned ? 'currentColor' : 'none'}"
                stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
             <path d="M12 17v5"/><path d="M9 10.76a2 2 0 01-1.11 1.79l-1.78.9A2 2 0 005 15.24V16h14v-.76a2 2 0 00-1.11-1.79l-1.78-.9A2 2 0 0115 10.76V7a1 1 0 011-1 2 2 0 000-4H8a2 2 0 000 4 1 1 0 011 1z"/>
           </svg>
         </button>
-        <button class="card-action-btn delete" onclick="startDeleteTask(${task.id})" title="Delete">
+        <button class="card-action-btn delete" onclick="startDeleteTask(${taskId})" title="Delete">
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                stroke-width="1.8" stroke-linecap="round">
             <path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/>
           </svg>
         </button>
-        <button class="card-action-btn check" id="check-${task.id}"
-                onclick="startComplete(${task.id})" title="Complete">
+        <button class="card-action-btn check" id="check-${taskId}"
+                onclick="startComplete(${taskId})" title="Complete">
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--accent)"
                stroke-width="2.5" stroke-linecap="round"><path d="M20 6L9 17l-5-5"/></svg>
         </button>
@@ -53,21 +72,23 @@ function renderTaskCard(task, index) {
     html += `<div class="card-desc">${escHtml(task.description)}</div>`;
   }
 
-  html += `<div id="countdown-${task.id}" style="display:none"></div>`;
+  html += `<div id="countdown-${taskId}" style="display:none"></div>`;
 
   if (subs.length > 0) {
     html += `
       <div class="sub-section">
         <div class="sub-header">
           <span class="sub-label">Subtasks</span>
-          <span class="sub-count" id="sub-count-${task.id}">${subDone}/${subs.length}</span>
+          <span class="sub-count" id="sub-count-${taskId}">${subDone}/${subs.length}</span>
         </div>
         <div style="max-height:80px;overflow-y:auto">
     `;
     subs.forEach(sub => {
-      const done = sub.completed;
+      if (!sub) return;
+      const done = !!sub.completed;
+      const sid = sub.id != null ? sub.id : '';
       html += `
-        <div class="sub-row" id="sub-${task.id}-${sub.id}" onclick="toggleSubtask(${task.id},'${sub.id}')">
+        <div class="sub-row" id="sub-${taskId}-${sid}" onclick="toggleSubtask(${taskId},'${sid}')">
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none"
                stroke="${done ? 'var(--accent)' : 'rgba(255,255,255,0.15)'}"
                stroke-width="2" style="flex-shrink:0">
@@ -75,7 +96,7 @@ function renderTaskCard(task, index) {
               ? '<circle cx="12" cy="12" r="10"/><path d="M9 12l2 2 4-4"/>'
               : '<circle cx="12" cy="12" r="10"/>'}
           </svg>
-          <span class="sub-text ${done ? 'done' : ''}">${escHtml(sub.text)}</span>
+          <span class="sub-text ${done ? 'done' : ''}">${escHtml(sub.text || '')}</span>
         </div>
       `;
     });
@@ -83,10 +104,10 @@ function renderTaskCard(task, index) {
     html += `
       <div class="progress-track">
         <div class="progress-bar">
-          <div class="progress-fill" id="progress-${task.id}"
+          <div class="progress-fill" id="progress-${taskId}"
                style="width:${subPct}%;background:${subPct === 100 ? 'var(--success)' : 'var(--accent)'}"></div>
         </div>
-        <span class="progress-pct" id="pct-${task.id}">${subPct}%</span>
+        <span class="progress-pct" id="pct-${taskId}">${subPct}%</span>
       </div>
     </div>
     `;
@@ -94,7 +115,7 @@ function renderTaskCard(task, index) {
 
   html += `
     <div class="meta-row">
-      <div style="display:flex;align-items:center;gap:4px" onclick="cyclePriority(${task.id})">
+      <div style="display:flex;align-items:center;gap:4px" onclick="cyclePriority(${taskId})">
         <div class="pri-dot" style="background:${priorityColor(pri)}"></div>
         <span class="pri-label" style="color:${priorityLabelColor(pri)}">${pri}</span>
       </div>
@@ -110,6 +131,10 @@ function renderTaskCard(task, index) {
 
   html += '</div></div>';
   card.innerHTML = html;
+  } catch (err) {
+    console.error('Failed to render task:', task, err);
+    card.innerHTML = `<div class="card-inner"><div class="card-top"><div class="card-title">${escHtml((task && task.text) || 'Task')}</div></div></div>`;
+  }
   return card;
 }
 
@@ -308,7 +333,14 @@ async function togglePin(taskId) {
   const task = window._allTasks.find(t => t.id === taskId);
   if (!task) return;
 
-  const tags = Array.isArray(task.tags) ? [...task.tags] : [];
+  let tags = task.tags;
+  if (typeof tags === 'string') {
+    try { tags = JSON.parse(tags); } catch (_) {
+      tags = tags.split(',').map(s => s.trim()).filter(Boolean);
+    }
+  }
+  if (!Array.isArray(tags)) tags = [];
+  tags = [...tags];
   const pinned = tags.includes('pinned');
 
   if (pinned) {
@@ -327,10 +359,16 @@ async function togglePin(taskId) {
 async function toggleSubtask(taskId, subId) {
   if (!window._allTasks) return;
   const task = window._allTasks.find(t => t.id === taskId);
-  if (!task || !task.subtasks) return;
+  if (!task) return;
 
-  const updated = task.subtasks.map(s =>
-    s.id === subId ? { ...s, completed: !s.completed } : s
+  let subtasks = task.subtasks;
+  if (typeof subtasks === 'string') {
+    try { subtasks = JSON.parse(subtasks); } catch (_) { subtasks = []; }
+  }
+  if (!Array.isArray(subtasks) || subtasks.length === 0) return;
+
+  const updated = subtasks.map(s =>
+    s && String(s.id) === String(subId) ? { ...s, completed: !s.completed } : s
   );
   task.subtasks = updated;
 
