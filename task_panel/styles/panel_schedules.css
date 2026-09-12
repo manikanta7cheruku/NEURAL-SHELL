@@ -1,33 +1,31 @@
-/* ══════════════════════════════════════════════════════════════
-   SCHEDULE CARDS
-══════════════════════════════════════════════════════════════ */
-
 .sched-card {
-  background: var(--card);
+  background: rgba(255, 255, 255, 0.012);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 9px 11px;
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
   display: flex;
   align-items: center;
-  gap: 10px;
-  transition: all 0.2s ease;
-  animation: cardIn 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
+  gap: 12px;
+  transition: all 0.25s var(--ease-out);
+  animation: cardEntrance 0.35s var(--ease-out) both;
 }
 
 .sched-card:hover {
-  border-color: var(--border-h);
-  background: var(--card-h);
+  background: rgba(255, 255, 255, 0.025);
+  border-color: rgba(255, 255, 255, 0.12);
+  transform: translateY(-1px);
 }
 
 .sched-icon {
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   border-radius: var(--radius-sm);
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.015);
+  border: 1px solid rgba(255, 255, 255, 0.04);
   display: flex;
   align-items: center;
   justify-content: center;
+  color: var(--warn);
   flex-shrink: 0;
 }
 
@@ -37,38 +35,37 @@
 }
 
 .sched-msg {
-  font-size: 10.5px;
-  color: var(--text-2);
-  font-weight: 500;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .sched-time {
-  font-size: 8px;
-  color: var(--text-4);
-  font-variant-numeric: tabular-nums;
-  margin-top: 2px;
-  font-weight: 500;
+  font-size: 8.5px;
+  color: var(--text-muted);
+  font-family: 'JetBrains Mono', monospace;
+  margin-top: 3px;
 }
 
 .sched-remain {
-  font-size: 9px;
-  color: var(--accent);
-  font-variant-numeric: tabular-nums;
+  font-size: 8.5px;
+  font-family: 'JetBrains Mono', monospace;
   font-weight: 700;
-  flex-shrink: 0;
-  padding: 3px 7px;
+  color: var(--accent-light);
+  padding: 3px 8px;
   background: var(--accent-dim);
-  border: 1px solid rgba(99, 102, 241, 0.12);
+  border: 1px solid rgba(99, 102, 241, 0.15);
   border-radius: var(--radius-xs);
+  flex-shrink: 0;
 }
 
 .sched-remain.urgent {
   color: var(--warn);
   background: var(--warn-dim);
-  border-color: rgba(255, 180, 100, 0.15);
+  border-color: rgba(245, 158, 11, 0.18);
 }
 
 .sched-actions {
@@ -76,26 +73,33 @@
   align-items: center;
   gap: 2px;
   opacity: 0;
-  transition: opacity 0.15s ease;
+  transition: opacity 0.2s var(--ease-out);
 }
 
-.sched-card:hover .sched-actions { opacity: 1; }
+.sched-card:hover .sched-actions {
+  opacity: 1;
+}
 
 .sched-action-btn {
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   border-radius: var(--radius-xs);
   border: none;
   background: transparent;
-  color: var(--text-4);
+  color: var(--text-muted);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.12s ease;
+  transition: all 0.2s var(--ease-out);
 }
 
 .sched-action-btn:hover {
   background: rgba(255, 255, 255, 0.05);
-  color: var(--text-2);
+  color: var(--text-primary);
+}
+
+.sched-action-btn.cancel:hover {
+  color: var(--danger);
+  background: rgba(239, 68, 68, 0.1);
 }

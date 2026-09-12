@@ -1,23 +1,19 @@
-/* ══════════════════════════════════════════════════════════════
-   TRIGGER CARDS (Compact Panel View)
-══════════════════════════════════════════════════════════════ */
-
 .trigger-card {
-  background: var(--card);
+  background: rgba(255, 255, 255, 0.012);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 9px 11px;
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
   display: flex;
   align-items: center;
-  gap: 10px;
-  transition: all 0.2s ease;
-  animation: cardIn 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
-  cursor: default;
+  gap: 12px;
+  transition: all 0.25s var(--ease-out);
+  animation: cardEntrance 0.35s var(--ease-out) both;
 }
 
 .trigger-card:hover {
-  border-color: var(--border-h);
-  background: var(--card-h);
+  background: rgba(255, 255, 255, 0.025);
+  border-color: rgba(255, 255, 255, 0.12);
+  transform: translateY(-1px);
 }
 
 .trigger-card.disabled {
@@ -25,14 +21,15 @@
 }
 
 .trigger-icon {
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   border-radius: var(--radius-sm);
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.015);
+  border: 1px solid rgba(255, 255, 255, 0.04);
   display: flex;
   align-items: center;
   justify-content: center;
+  color: var(--accent-light);
   flex-shrink: 0;
 }
 
@@ -42,9 +39,9 @@
 }
 
 .trigger-name {
-  font-size: 10.5px;
+  font-size: 11.5px;
   font-weight: 600;
-  color: var(--text);
+  color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -53,122 +50,128 @@
 .trigger-meta {
   display: flex;
   align-items: center;
-  gap: 4px;
-  margin-top: 2px;
+  gap: 6px;
+  margin-top: 4px;
 }
 
 .trigger-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  padding: 2px 6px;
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid var(--border);
   font-size: 8px;
-  font-weight: 600;
-  color: var(--text-3);
-  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: var(--radius-xs);
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  color: var(--text-secondary);
 }
 
 .trigger-badge.hotkey {
   background: var(--accent-dim);
   border-color: rgba(99, 102, 241, 0.15);
-  color: var(--accent);
+  color: var(--accent-light);
 }
-
-.trigger-badge svg { flex-shrink: 0; }
 
 .trigger-fire-count {
-  font-size: 7.5px;
-  color: var(--text-4);
-  font-variant-numeric: tabular-nums;
-  font-weight: 600;
-}
-
-/* Inline Hotkey Editor */
-.hotkey-edit-wrap {
-  display: none;
-  margin-top: 6px;
-  padding: 6px;
-  background: rgba(0, 0, 0, 0.2);
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-}
-
-.hotkey-edit-wrap.visible { display: block; }
-
-.hotkey-edit-input {
-  width: 100%;
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-xs);
-  padding: 6px 8px;
-  font-size: 10px;
-  color: var(--text);
-  outline: none;
-  font-family: inherit;
-  text-align: center;
-  letter-spacing: 0.05em;
-  font-weight: 600;
-}
-
-.hotkey-edit-input:focus {
-  border-color: var(--accent-t);
-}
-
-.hotkey-edit-input.recording {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
-.hotkey-edit-hint {
   font-size: 8px;
-  color: var(--text-4);
-  text-align: center;
-  margin-top: 4px;
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--text-dim);
 }
 
-.hotkey-edit-error {
-  font-size: 8px;
-  color: var(--danger);
-  text-align: center;
-  margin-top: 3px;
-  display: none;
-}
-
-.hotkey-edit-error.visible { display: block; }
-
+/* Action Bars inside Triggers */
 .trigger-actions {
   display: flex;
   align-items: center;
   gap: 2px;
   opacity: 0;
-  transition: opacity 0.15s ease;
+  transition: opacity 0.2s var(--ease-out);
 }
 
-.trigger-card:hover .trigger-actions { opacity: 1; }
+.trigger-card:hover .trigger-actions {
+  opacity: 1;
+}
 
 .trigger-action-btn {
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 26px;
   border-radius: var(--radius-xs);
   border: none;
   background: transparent;
-  color: var(--text-4);
+  color: var(--text-muted);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.12s ease;
+  transition: all 0.2s var(--ease-out);
 }
 
 .trigger-action-btn:hover {
   background: rgba(255, 255, 255, 0.05);
-  color: var(--text-2);
+  color: var(--text-primary);
 }
 
 .trigger-action-btn.fire:hover {
-  color: var(--accent);
+  color: var(--accent-light);
   background: var(--accent-dim);
+}
+
+/* Beautiful Interactive Live Hotkey Recording Module */
+.hotkey-edit-wrap {
+  display: none;
+  margin-top: 8px;
+  padding: 10px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  flex-direction: column;
+  gap: 6px;
+  animation: cardEntrance 0.2s var(--ease-out) forwards;
+}
+
+.hotkey-edit-wrap.visible {
+  display: flex;
+}
+
+.hotkey-edit-input {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.01);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-xs);
+  padding: 8px;
+  font-size: 11px;
+  color: var(--text-primary);
+  outline: none;
+  font-family: 'JetBrains Mono', monospace;
+  text-align: center;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.hotkey-edit-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 12px rgba(99, 102, 241, 0.15);
+}
+
+.hotkey-edit-input.recording {
+  border-color: var(--danger);
+  color: var(--danger);
+  animation: glowpulse 1.5s infinite ease-in-out;
+  background: rgba(239, 68, 68, 0.02);
+}
+
+.hotkey-edit-hint {
+  font-size: 8px;
+  color: var(--text-dim);
+  text-align: center;
+}
+
+.hotkey-edit-error {
+  font-size: 8.5px;
+  color: var(--danger);
+  text-align: center;
+  display: none;
+  font-weight: 500;
+}
+
+.hotkey-edit-error.visible {
+  display: block;
 }

@@ -512,65 +512,6 @@ function createStatusWindow() {
   statusWindow.on('closed', () => { statusWindow = null; });
 }
 
-function openPanelWindow() {
-  if (panelWindow && !panelWindow.isDestroyed()) {
-    if (panelWindow.isVisible()) {
-      panelWindow.hide();
-    } else {
-      panelWindow.show();
-      panelWindow.focus();
-    }
-    return;
-  }
-
-  const appSource  = getAppSourcePath();
-  const panelHtml  = path.join(appSource, 'task_panel', 'panel.html');
-
-  if (!fs.existsSync(panelHtml)) {
-    console.warn('[PANEL] panel.html not found:', panelHtml);
-    return;
-  }
-
-  const display    = screen.getPrimaryDisplay();
-  const { width, height } = display.workAreaSize;
-  const panelWidth = 400;
-
-  panelWindow = new BrowserWindow({
-    width:           panelWidth,
-    height:          height,
-    x:               width - panelWidth,
-    y:               0,
-    frame:           false,
-    transparent:     false,
-    backgroundColor: '#09090b',
-    alwaysOnTop:     true,
-    skipTaskbar:     true,
-    resizable:       false,
-    show:            false,
-    webPreferences: {
-      nodeIntegration:  true,
-      contextIsolation: false,
-    }
-  });
-
-  panelWindow.loadFile(panelHtml);
-
-  panelWindow.once('ready-to-show', () => {
-    panelWindow.show();
-    panelWindow.focus();
-  });
-
-  panelWindow.on('closed', () => {
-    panelWindow = null;
-  });
-
-  panelWindow.on('blur', () => {
-    if (panelWindow && !panelWindow.isDestroyed()) {
-      panelWindow.hide();
-    }
-  });
-}
-
 function showOrbContextMenu() {
   const menuTemplate = [
     { label: 'SEVEN', enabled: false },
@@ -890,7 +831,7 @@ if (!gotTheLock) {
     // can successfully acquire the Single-Instance Lock/Mutex.
     if (process.platform === 'win32') {
       try {
-        const targets = ['trigger_daemon.py', 'overlay_daemon.js', 'schedule_daemon.py', 'panel_server.py'];
+        const targets = ['trigger_daemon.py', 'overlay_daemon.js', 'schedule_daemon.py', 'panel_server.py', 'panel_host.js'];
         targets.forEach(scriptName => {
           try {
             // Find PIDs of any python/electron process executing our script names

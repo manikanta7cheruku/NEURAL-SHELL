@@ -1,18 +1,21 @@
 /**
  * panel_schedules.js
- * Active schedule list with countdown chips.
+ * Active Schedules rendering and live second-by-second countdown clock logic.
  */
 
-let _allSchedules = [];
+let _scheduleInterval = null;
 
 function renderSchedules() {
   const list = document.getElementById('schedule-list');
   const empty = document.getElementById('schedule-empty');
   if (!list) return;
 
-  if (_allSchedules.length === 0) {
+  const schedules = window._allSchedules || [];
+
+  if (schedules.length === 0) {
     list.style.display = 'none';
     empty.style.display = 'flex';
+    stopSchedulesTimer();
     return;
   }
 
@@ -20,56 +23,86 @@ function renderSchedules() {
   list.style.display = 'flex';
   list.innerHTML = '';
 
-  _allSchedules.sort((a, b) => new Date(a.time) - new Date(b.time));
-
-  _allSchedules.forEach((sched, i) => {
-    list.appendChild(renderScheduleCard(sched, i));
+  schedules.forEach((s, i) => {
+    list.appendChild(renderScheduleCard(s, i));
   });
+
+  startSchedulesTimer();
 }
 
-function renderScheduleCard(sched, index) {
+function renderScheduleCard(s, index) {
   const card = document.createElement('div');
   card.className = 'sched-card';
+  card.id = `sched-${s.id}`;
   card.style.animationDelay = `${index * 30}ms`;
 
-  const type = sched.type || 'reminder';
-  const iconMap = {
-    reminder: '<path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/>',
-    alarm: '<circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2"/><path d="M5 3L2 6"/><path d="M22 6l-3-3"/>',
-    timer: '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
-    event: '<rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>',
-  };
-
-  const remain = timeRemaining(sched.time);
-  const urgent = isUrgent(sched.time);
-  const timeStr = formatSchedTime(sched.time);
+  const remains = timeRemaining(s.time);
+  const isUrge = remains && isUrgent(s.time);
+  const remainText = remains ? remains : 'past';
 
   card.innerHTML = `
     <div class="sched-icon">
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--text-3)"
-           stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-        ${iconMap[type] || iconMap.reminder}
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
       </svg>
     </div>
     <div class="sched-info">
-      <div class="sched-msg">${escHtml(sched.message || 'Untitled')}</div>
-      <div class="sched-time">${timeStr}</div>
+      <div class="sched-msg">${escHtml(s.message || 'Reminder')}</div>
+      <div class="sched-time">${formatSchedTime(s.time)}</div>
     </div>
-    ${remain ? `<div class="sched-remain ${urgent ? 'urgent' : ''}">${remain}</div>` : ''}
+    <span class="sched-remain ${isUrge ? 'urgent' : ''}" id="sched-timer-${s.id}">${remainText}</span>
     <div class="sched-actions">
-      <button class="sched-action-btn" onclick="dismissSchedule(${sched.id})" title="Dismiss">
-        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-             stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      <button class="sched-action-btn cancel" onclick="executeCancelSchedule(${s.id}, event)" title="Cancel Schedule">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="12"/>
+        </svg>
       </button>
     </div>
   `;
+
   return card;
 }
 
-async function dismissSchedule(schedId) {
-  const card = document.querySelector(`.sched-card`);
-  await cancelSchedule(schedId);
-  _allSchedules = _allSchedules.filter(s => s.id !== schedId);
-  renderSchedules();
-  updateTabCounts();
+async function executeCancelSchedule(id, event) {
+  if (event) event.stopPropagation();
+  const card = document.getElementById(`sched-${id}`);
+  if (card) {
+    card.style.opacity = '0.3';
+    card.style.pointerEvents = 'none';
+  }
+  const ok = await cancelSchedule(id);
+  if (ok) {
+    window._allSchedules = (window._allSchedules || []).filter(s => s.id !== id);
+    renderSchedules();
+  } else {
+    if (card) {
+      card.style.opacity = '';
+      card.style.pointerEvents = '';
+    }
+  }
+}
+
+function startSchedulesTimer() {
+  if (_scheduleInterval) return;
+  _scheduleInterval = setInterval(updateSchedulesClocks, 1000);
+}
+
+function stopSchedulesTimer() {
+  if (_scheduleInterval) {
+    clearInterval(_scheduleInterval);
+    _scheduleInterval = null;
+  }
+}
+
+function updateSchedulesClocks() {
+  const schedules = window._allSchedules || [];
+  schedules.forEach(s => {
+    const el = document.getElementById(`sched-timer-${s.id}`);
+    if (!el) return;
+    const remains = timeRemaining(s.time);
+    const isUrge = remains && isUrgent(s.time);
+    
+    el.textContent = remains ? remains : 'past';
+    el.classList.toggle('urgent', isUrge);
+  });
 }
