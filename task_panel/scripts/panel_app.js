@@ -113,7 +113,9 @@ function switchTab(tab) {
   _currentTab = tab;
 
   document.querySelectorAll('.tab').forEach(el => {
-    el.classList.toggle('active', el.dataset.tab === tab);
+    const isActive = el.dataset.tab === tab;
+    el.classList.toggle('active', isActive);
+    el.setAttribute('aria-selected', isActive ? 'true' : 'false');
   });
   document.querySelectorAll('.tab-content').forEach(el => {
     el.classList.add('hidden');

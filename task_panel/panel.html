@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Seven Panel</title>
+<title>Seven Command Center</title>
 <link rel="stylesheet" href="styles/panel_base.css">
 <link rel="stylesheet" href="styles/panel_layout.css">
 <link rel="stylesheet" href="styles/panel_tasks.css">
@@ -12,160 +12,59 @@
 <link rel="stylesheet" href="styles/panel_closeall.css">
 </head>
 <body>
-
-<div id="panel">
-
-  <!-- Header -->
-  <div class="panel-header">
+<main id="panel" aria-label="Seven command center">
+  <header class="panel-header">
     <div class="header-left">
-      <div class="header-brand">
-        <div class="brand-dot" id="brand-dot"></div>
-        <span class="header-title">Seven</span>
-      </div>
-      <span class="header-sub" id="header-sub">loading</span>
+      <div class="eyebrow"><span class="status-pulse" id="brand-dot" aria-hidden="true"></span><span>SEVEN COMMAND CENTER</span></div>
+      <div class="header-brand"><span class="header-title">Your focus, in one place.</span><span class="header-sub" id="header-sub">connecting</span></div>
     </div>
     <div class="header-actions">
-      <button class="icon-btn" onclick="toggleSearch()" title="Search (Ctrl+F)">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
-      </button>
-      <button class="icon-btn" onclick="closePanel()" title="Close (Esc)">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
-      </button>
+      <button type="button" class="icon-btn" onclick="toggleSearch()" title="Search (Ctrl+F)" aria-label="Search"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg></button>
+      <button type="button" class="icon-btn" onclick="closePanel()" title="Close (Esc)" aria-label="Close panel"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
     </div>
-  </div>
+  </header>
 
-  <!-- Summary Card -->
-  <div class="summary-card" id="summary-card">
-    <div class="summary-item">
-      <span class="summary-val" id="sum-completed">0</span>
-      <span class="summary-label">done</span>
+  <section class="command-summary" id="summary-card" aria-label="Today at a glance">
+    <div class="summary-heading"><span class="section-kicker">TODAY</span><span class="summary-health"><span class="health-dot"></span> Local & private</span></div>
+    <div class="summary-grid">
+      <div class="summary-item"><span class="summary-val" id="sum-completed">0</span><span class="summary-label">completed</span></div>
+      <div class="summary-item"><span class="summary-val accent" id="sum-pending">0</span><span class="summary-label">to focus on</span></div>
+      <div class="summary-item"><span class="summary-val warn" id="sum-overdue">0</span><span class="summary-label">overdue</span></div>
     </div>
-    <div class="summary-sep"></div>
-    <div class="summary-item">
-      <span class="summary-val accent" id="sum-pending">0</span>
-      <span class="summary-label">pending</span>
-    </div>
-    <div class="summary-sep"></div>
-    <div class="summary-item">
-      <span class="summary-val warn" id="sum-overdue">0</span>
-      <span class="summary-label">overdue</span>
-    </div>
-  </div>
+  </section>
 
-  <!-- Tab Bar -->
-  <div class="tab-bar">
-    <button class="tab active" data-tab="tasks" onclick="switchTab('tasks')">
-      Tasks <span class="tab-count" id="tab-cnt-tasks">0</span>
-    </button>
-    <button class="tab" data-tab="triggers" onclick="switchTab('triggers')">
-      Triggers <span class="tab-count" id="tab-cnt-triggers">0</span>
-    </button>
-    <button class="tab" data-tab="schedules" onclick="switchTab('schedules')">
-      Schedules <span class="tab-count" id="tab-cnt-schedules">0</span>
-    </button>
-  </div>
+  <nav class="tab-bar" aria-label="Command center sections" role="tablist">
+    <button type="button" class="tab active" data-tab="tasks" onclick="switchTab('tasks')" role="tab" aria-selected="true">Tasks <span class="tab-count" id="tab-cnt-tasks">0</span></button>
+    <button type="button" class="tab" data-tab="triggers" onclick="switchTab('triggers')" role="tab" aria-selected="false">Triggers <span class="tab-count" id="tab-cnt-triggers">0</span></button>
+    <button type="button" class="tab" data-tab="schedules" onclick="switchTab('schedules')" role="tab" aria-selected="false">Schedules <span class="tab-count" id="tab-cnt-schedules">0</span></button>
+  </nav>
 
-  <!-- Search -->
-  <div class="search-wrap" id="search-wrap">
-    <input class="search-input" id="search-input" placeholder="Search..." autocomplete="off">
-  </div>
+  <div class="search-wrap" id="search-wrap"><label class="sr-only" for="search-input">Search tasks</label><input class="search-input" id="search-input" placeholder="Search your command center..." autocomplete="off"></div>
 
-  <!-- Quick Add (Tasks tab) -->
   <div class="quick-add" id="quick-add">
-    <input class="quick-input" id="quick-input" placeholder="Add a task... (Enter)" autocomplete="off" spellcheck="false">
+    <label class="sr-only" for="quick-input">Add a task</label>
+    <div class="quick-input-wrap"><span class="quick-plus" aria-hidden="true">+</span><input class="quick-input" id="quick-input" placeholder="What needs your attention?" autocomplete="off" spellcheck="false"><span class="enter-hint">Enter</span></div>
   </div>
 
-  <!-- Tab Content -->
-  <div class="tab-content" id="tab-tasks">
-    <div class="filter-bar" id="task-filters">
-      <button class="filter-chip active" data-filter="all" onclick="setTaskFilter('all')">All</button>
-      <button class="filter-chip" data-filter="today" onclick="setTaskFilter('today')">Today</button>
-      <button class="filter-chip" data-filter="overdue" onclick="setTaskFilter('overdue')">Overdue</button>
-      <button class="filter-chip" data-filter="pinned" onclick="setTaskFilter('pinned')">Pinned</button>
-    </div>
+  <section class="tab-content" id="tab-tasks" role="tabpanel" aria-label="Tasks">
+    <div class="filter-bar" id="task-filters"><span class="filter-label">VIEW</span><button type="button" class="filter-chip active" data-filter="all" onclick="setTaskFilter('all')">All</button><button type="button" class="filter-chip" data-filter="today" onclick="setTaskFilter('today')">Today</button><button type="button" class="filter-chip" data-filter="overdue" onclick="setTaskFilter('overdue')">Overdue</button><button type="button" class="filter-chip" data-filter="pinned" onclick="setTaskFilter('pinned')">Pinned</button></div>
     <div class="scroll-area" id="task-list"></div>
-    <div class="empty-state" id="task-empty" style="display:none">
-      <div class="empty-icon">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.15)" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M9 12l2 2 4-4"/></svg>
-      </div>
-      <span class="empty-title">All clear</span>
-      <span class="empty-sub">No pending tasks</span>
-    </div>
-  </div>
+    <div class="empty-state" id="task-empty" style="display:none"><div class="empty-icon"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M5 12.5l4 4L19 6.5"/></svg></div><span class="empty-title">Clear runway</span><span class="empty-sub">No pending tasks in this view.</span></div>
+  </section>
 
-  <div class="tab-content hidden" id="tab-triggers">
-    <div class="filter-bar" id="trigger-filters">
-      <button class="filter-chip active" data-filter="all" onclick="setTriggerFilter('all')">All</button>
-      <button class="filter-chip" data-filter="hotkey" onclick="setTriggerFilter('hotkey')">Hotkey</button>
-      <button class="filter-chip" data-filter="voice" onclick="setTriggerFilter('voice')">Voice</button>
-      <button class="filter-chip" data-filter="snap" onclick="setTriggerFilter('snap')">Snap</button>
-      <button class="filter-chip" data-filter="workspace" onclick="setTriggerFilter('workspace')">Workspace</button>
-    </div>
+  <section class="tab-content hidden" id="tab-triggers" role="tabpanel" aria-label="Triggers">
+    <div class="filter-bar" id="trigger-filters"><span class="filter-label">TYPE</span><button type="button" class="filter-chip active" data-filter="all" onclick="setTriggerFilter('all')">All</button><button type="button" class="filter-chip" data-filter="hotkey" onclick="setTriggerFilter('hotkey')">Hotkey</button><button type="button" class="filter-chip" data-filter="voice" onclick="setTriggerFilter('voice')">Voice</button><button type="button" class="filter-chip" data-filter="snap" onclick="setTriggerFilter('snap')">Snap</button><button type="button" class="filter-chip" data-filter="workspace" onclick="setTriggerFilter('workspace')">Workspace</button></div>
     <div class="scroll-area" id="trigger-list"></div>
-    <div class="empty-state" id="trigger-empty" style="display:none">
-      <div class="empty-icon">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.15)" stroke-width="1.5"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
-      </div>
-      <span class="empty-title">No triggers</span>
-      <span class="empty-sub">Create triggers in the main app</span>
-    </div>
-  </div>
+    <div class="empty-state" id="trigger-empty" style="display:none"><div class="empty-icon">⌁</div><span class="empty-title">No triggers yet</span><span class="empty-sub">Create one in the Seven workspace.</span></div>
+  </section>
 
-  <div class="tab-content hidden" id="tab-schedules">
-    <div class="scroll-area" id="schedule-list"></div>
-    <div class="empty-state" id="schedule-empty" style="display:none">
-      <div class="empty-icon">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.15)" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
-      </div>
-      <span class="empty-title">No active schedules</span>
-      <span class="empty-sub">Ask Seven to set a reminder</span>
-    </div>
-  </div>
+  <section class="tab-content hidden" id="tab-schedules" role="tabpanel" aria-label="Schedules"><div class="scroll-area" id="schedule-list"></div><div class="empty-state" id="schedule-empty" style="display:none"><div class="empty-icon"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg></div><span class="empty-title">Your time is clear</span><span class="empty-sub">Ask Seven to set a reminder.</span></div></section>
 
-  <!-- Close All Modal -->
-  <div class="modal-overlay" id="closeall-modal" style="display:none">
-    <div class="modal-card">
-      <div class="modal-icon">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="rgba(255,180,100,0.9)" stroke-width="1.8" stroke-linecap="round"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-      </div>
-      <h3 class="modal-title">Close all applications?</h3>
-      <p class="modal-desc" id="closeall-desc">12 apps will be closed. A recovery workspace will be saved automatically.</p>
-      <div class="modal-actions">
-        <button class="modal-btn secondary" onclick="dismissCloseAll()">Cancel</button>
-        <button class="modal-btn primary" onclick="executeCloseAll()">Close and Save</button>
-      </div>
-    </div>
-  </div>
+  <div class="modal-overlay" id="closeall-modal" style="display:none"><div class="modal-card"><div class="modal-icon">!</div><span class="section-kicker">WORKSPACE ACTION</span><h3 class="modal-title">Close all applications?</h3><p class="modal-desc" id="closeall-desc">12 apps will be closed. A recovery workspace will be saved automatically.</p><div class="modal-actions"><button type="button" class="modal-btn secondary" onclick="dismissCloseAll()">Cancel</button><button type="button" class="modal-btn primary" onclick="executeCloseAll()">Close and save</button></div></div></div>
+  <div class="restore-banner" id="restore-banner" style="display:none"><span class="restore-text" id="restore-text">12 apps closed</span><button type="button" class="restore-btn" onclick="restoreLastWorkspace()">Restore</button><span class="restore-timer" id="restore-timer">60s</span></div>
 
-  <!-- Restore Banner -->
-  <div class="restore-banner" id="restore-banner" style="display:none">
-    <span class="restore-text" id="restore-text">12 apps closed</span>
-    <button class="restore-btn" onclick="restoreLastWorkspace()">Restore</button>
-    <span class="restore-timer" id="restore-timer">60s</span>
-  </div>
-
-  <!-- Footer -->
-  <div class="panel-footer">
-    <button class="footer-btn accent" onclick="openSevenTasks()">
-      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><path d="M15 3h6v6"/><path d="M10 14L21 3"/></svg>
-      Open Seven
-    </button>
-    <button class="footer-btn danger" onclick="showCloseAllModal()">
-      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
-      Close All
-    </button>
-    <span class="footer-hint">Alt+Shift+T</span>
-  </div>
-
-</div>
-
-<script src="scripts/panel_utils.js"></script>
-<script src="scripts/panel_api.js"></script>
-<script src="scripts/panel_tasks.js"></script>
-<script src="scripts/panel_triggers.js"></script>
-<script src="scripts/panel_schedules.js"></script>
-<script src="scripts/panel_closeall.js"></script>
-<script src="scripts/panel_summary.js"></script>
-<script src="scripts/panel_app.js"></script>
+  <footer class="panel-footer"><button type="button" class="footer-btn accent" onclick="openSevenTasks()"><span>Open Seven</span><span class="footer-arrow">↗</span></button><button type="button" class="footer-btn danger" onclick="showCloseAllModal()">Close all</button><span class="footer-hint">ALT + SHIFT + T</span></footer>
+</main>
+<script src="scripts/panel_utils.js"></script><script src="scripts/panel_api.js"></script><script src="scripts/panel_tasks.js"></script><script src="scripts/panel_triggers.js"></script><script src="scripts/panel_schedules.js"></script><script src="scripts/panel_closeall.js"></script><script src="scripts/panel_summary.js"></script><script src="scripts/panel_app.js"></script>
 </body>
 </html>
