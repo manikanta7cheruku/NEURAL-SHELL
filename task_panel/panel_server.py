@@ -29,8 +29,11 @@ import uvicorn
 def _get_tasks_db():
     try:
         from seven_paths import paths
-        return os.path.join(paths._seven_data, "tasks.db")
-    except Exception:
+        db_path = os.path.join(paths._seven_data, "tasks.db")
+        print(f"[PANEL DB] Loaded tasks.db from seven_paths: {db_path}")
+        return db_path
+    except Exception as e:
+        print(f"[PANEL DB WARN] Fallback to APPDATA: {e}")
         _appdata = os.environ.get("APPDATA", os.path.expanduser("~"))
         return os.path.join(_appdata, "SEVEN", "seven_data", "tasks.db")
 

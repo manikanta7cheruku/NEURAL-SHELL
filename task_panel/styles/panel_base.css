@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600;700&display=swap');
+
 *, *::before, *::after {
   box-sizing: border-box;
   margin: 0;
@@ -5,78 +7,43 @@
 }
 
 :root {
-  --bg:        rgba(12, 13, 20, 0.94);
-  --surface:   rgba(17, 18, 28, 0.96);
-  --card:      rgba(24, 25, 37, 0.9);
-  --card-h:    rgba(31, 32, 47, 0.96);
-  --border:    rgba(255, 255, 255, 0.075);
-  --border-h:  rgba(255, 255, 255, 0.16);
-  --border-a:  rgba(255, 255, 255, 0.22);
-  --text:      rgba(255, 255, 255, 0.95);
-  --text-2:    rgba(255, 255, 255, 0.76);
-  --text-3:    rgba(255, 255, 255, 0.52);
-  --text-4:    rgba(255, 255, 255, 0.30);
-  --accent:    #818cf8;
-  --accent-dim: rgba(129, 140, 248, 0.14);
-  --accent-t:  rgba(129, 140, 248, 0.52);
-  --warn:      rgba(251, 191, 36, 0.92);
-  --warn-dim:  rgba(251, 191, 36, 0.10);
-  --danger:    rgba(248, 113, 113, 0.92);
-  --success:   rgba(74, 222, 128, 0.92);
-  --radius:    14px;
-  --radius-sm: 8px;
-  --radius-xs: 5px;
+  --text-primary:   rgba(255, 255, 255, 0.95);
+  --text-secondary: rgba(255, 255, 255, 0.70);
+  --text-muted:     rgba(255, 255, 255, 0.45);
+  --text-dim:       rgba(255, 255, 255, 0.25);
+
+  --accent:         #6366f1;
+  --accent-light:   #818cf8;
+  --accent-dim:     rgba(99, 102, 241, 0.12);
+
+  --success:        #10b981;
+  --warn:           #f59e0b;
+  --warn-dim:       rgba(245, 158, 11, 0.12);
+  --danger:         #ef4444;
+
+  --radius-xl:      24px;
+  --radius-lg:      16px;
+  --radius-md:      12px;
+  --radius-sm:      8px;
+  --radius-xs:      5px;
 }
 
+/* ABSOLUTE TRANSPARENCY REQUIRED FOR ELECTRON GLASS */
 html, body {
   width: 100%;
   height: 100%;
   overflow: hidden;
-  background: transparent;
-  font-family: -apple-system, 'SF Pro Display', 'Segoe UI Variable Display',
-               'Segoe UI', system-ui, sans-serif;
+  background: transparent !important;
+  background-color: transparent !important;
+  font-family: 'Plus Jakarta Sans', -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  text-rendering: optimizeLegibility;
-  color: var(--text);
+  color: var(--text-primary);
   user-select: none;
 }
 
-::-webkit-scrollbar { width: 3px; }
+::-webkit-scrollbar { width: 5px; height: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.06); border-radius: 2px; }
-
-/* Animations */
-@keyframes panelIn {
-  0%   { transform: translateX(20px) scale(0.98); opacity: 0; }
-  100% { transform: translateX(0) scale(1); opacity: 1; }
-}
-
-@keyframes panelOut {
-  0%   { transform: translateX(0) scale(1); opacity: 1; }
-  100% { transform: translateX(20px) scale(0.98); opacity: 0; }
-}
-
-@keyframes cardIn {
-  0%   { opacity: 0; transform: translateY(4px); }
-  100% { opacity: 1; transform: translateY(0); }
-}
-
-@keyframes fadeIn {
-  0%   { opacity: 0; }
-  100% { opacity: 1; }
-}
-
-@keyframes slideUp {
-  0%   { opacity: 0; transform: translateY(8px); }
-  100% { opacity: 1; transform: translateY(0); }
-}
-
-@keyframes modalIn {
-  0%   { opacity: 0; transform: scale(0.95); }
-  100% { opacity: 1; transform: scale(1); }
-}
+::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.05); border-radius: 99px; }
+*:hover::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.15); }
 
 .hidden { display: none !important; }
-.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
-button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
