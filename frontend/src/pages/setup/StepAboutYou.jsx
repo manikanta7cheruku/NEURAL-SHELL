@@ -40,7 +40,7 @@ export default function StepAboutYou() {
             <div className="italic text-[11.5px] text-white/60 leading-relaxed">
               "{(() => {
                 const hour = new Date().getHours();
-                const greeting = hour < 5 ? 'Good evening' : hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : hour < 21 ? 'Good evening' : 'Good night';
+                const greeting = hour < 5 ? 'Good evening' : hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
                 return `${greeting}, ${firstName || 'friend'}.`;
               })()}"
             </div>
