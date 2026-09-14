@@ -12,9 +12,21 @@ import json
 import time
 import sqlite3
 import threading
-
 from trigger_modules.config import TRIGGERS_DB
 from trigger_modules.executor import execute_trigger
+
+# Safe global import with fallback to prevent NameError inside run() loop
+try:
+    import speech_recognition as sr
+except Exception:
+    class DummySR:
+        class WaitTimeoutError(Exception): pass
+        class Microphone:
+            def __enter__(self): return self
+            def __exit__(self, *args): pass
+        class Recognizer:
+            def listen(self, *args, **kwargs): raise DummySR.WaitTimeoutError()
+    sr = DummySR()
 
 
 class VoiceListener(threading.Thread):
@@ -99,18 +111,13 @@ class VoiceListener(threading.Thread):
     def run(self):
         """
         Main listener loop.
-        Delays 10s at start to let pynput keyboard hook stabilize
-        before opening any audio device (audio device access on
-        Windows briefly stalls the OS message pump that pynput
-        depends on, which can silently kill the keyboard hook).
+        Delays 10s at start to let pynput keyboard hook stabilize.
         """
-        # Single 10s delay — enough for pynput to register and stabilize
         time.sleep(10.0)
         print("[VOICE TRIGGER] Listener started — watching for phrases...")
 
-        # Open microphone ONCE — hold open for daemon lifetime
+        # Open microphone using safe global import reference
         try:
-            import speech_recognition as sr
             mic     = sr.Microphone()
             mic_ctx = mic.__enter__()
             recognizer = sr.Recognizer()
@@ -211,6 +218,6 @@ class VoiceListener(threading.Thread):
                 pass
 
     def stop(self):
-        """Signal the listener loop to stop."""
+        """Signal the listener loop to stop.""" 
         self.stop_event.set()
         print("[VOICE TRIGGER] Stop signal sent")
