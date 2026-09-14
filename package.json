@@ -13,7 +13,7 @@
         "clean": "rmdir /S /Q dist-electron 2>nul & echo cleaned",
         "build": "npm run kill && npm run clean && npm run build:frontend && npx electron-builder --config electron-builder.yml --x64",
         "dev": "npm run kill-dev-ports && concurrently \"npm run frontend:dev\" \"npm run electron:dev\"",
-        "kill-dev-ports": "powershell -NoProfile -Command \"Get-Process -Id (Get-NetTCPConnection -LocalPort 5173 -ErrorAction SilentlyContinue).OwningProcess -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue\"",
+        "kill-dev-ports": "node -e \"try { const p = require('child_process').execSync('netstat -ano').toString().split('\\n').find(l => l.includes(':5173') && l.includes('LISTENING')); if (p) { const pid = p.trim().split(/\\s+/).pop(); if (pid && !isNaN(pid)) require('child_process').execSync('taskkill /F /PID ' + pid, {stdio:'ignore'}); } } catch(e) {}\"",
         "frontend:dev": "cd frontend && npm run dev",
         "electron:dev": "wait-on http://127.0.0.1:5173 && electron .",
         "build:frontend": "cd frontend && npm run build",
