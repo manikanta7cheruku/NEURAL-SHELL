@@ -12,27 +12,41 @@ from colorama import Fore
 
 
 def _get_app_python(app_root: str) -> str:
-    """Resolve correct Python executable for background daemons."""
+    r"""
+    Resolve correct Python executable for background daemons.
+    Uses forward slashes in path descriptions to avoid unescaped backslash issues.
+    """
     app_path = os.environ.get('SEVEN_APP_PATH', '')
+
+    print(Fore.CYAN + f"[DAEMON] Resolving Python:")
+    print(Fore.CYAN + f"[DAEMON]   SEVEN_APP_PATH = {app_path or '(not set)'}")
+    print(Fore.CYAN + f"[DAEMON]   app_root       = {app_root}")
+
+    # Priority 1: SEVEN_APP_PATH (production)
     if app_path:
         for exe in ['pythonw.exe', 'python.exe']:
             c = os.path.join(app_path, 'python', exe)
             if os.path.exists(c):
+                print(Fore.GREEN + f"[DAEMON] Using embedded Python: {c}")
                 return c
 
+    # Priority 2: app_root\python
     for exe in ['pythonw.exe', 'python.exe']:
         c = os.path.join(app_root, 'python', exe)
         if os.path.exists(c):
+            print(Fore.GREEN + f"[DAEMON] Using root Python: {c}")
             return c
 
-    # Dev mode fallback
+    # Priority 3: Dev venv
     for c in [
         os.path.join(app_root, "venv", "Scripts", "pythonw.exe"),
         os.path.join(app_root, "venv", "Scripts", "python.exe"),
     ]:
         if os.path.exists(c):
+            print(Fore.YELLOW + f"[DAEMON] Using venv Python (dev): {c}")
             return c
 
+    print(Fore.RED + f"[DAEMON] WARNING: Falling back to sys.executable")
     return sys.executable
 
 
@@ -86,10 +100,20 @@ def launch_schedule_daemon():
             _env['PYTHONUNBUFFERED']    = '1'
             _env['PYTHONIOENCODING']    = 'utf-8'
 
+            try:
+                _appdata = os.environ.get('APPDATA', os.path.expanduser('~'))
+                _log_dir = os.path.join(_appdata, 'SEVEN', 'logs')
+                os.makedirs(_log_dir, exist_ok=True)
+                _out = open(os.path.join(_log_dir, "schedule_daemon_stdout.log"), "a", encoding="utf-8")
+                _err = open(os.path.join(_log_dir, "schedule_daemon_stderr.log"), "a", encoding="utf-8")
+            except Exception:
+                _out = subprocess.DEVNULL
+                _err = subprocess.DEVNULL
+
             subprocess.Popen(
                 [_python, _daemon],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stdout=_out,
+                stderr=_err,
                 stdin=subprocess.DEVNULL,
                 creationflags=0x08000000 | 0x00000008 | 0x00000200,
                 close_fds=True,
@@ -147,10 +171,20 @@ def launch_panel_server():
         _env['PYTHONUNBUFFERED']  = '1'
         _env['PYTHONIOENCODING']  = 'utf-8'
 
+        try:
+            _appdata = os.environ.get('APPDATA', os.path.expanduser('~'))
+            _log_dir = os.path.join(_appdata, 'SEVEN', 'logs')
+            os.makedirs(_log_dir, exist_ok=True)
+            _out = open(os.path.join(_log_dir, "panel_server_stdout.log"), "a", encoding="utf-8")
+            _err = open(os.path.join(_log_dir, "panel_server_stderr.log"), "a", encoding="utf-8")
+        except Exception:
+            _out = subprocess.DEVNULL
+            _err = subprocess.DEVNULL
+
         subprocess.Popen(
             [_python, _daemon],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=_out,
+            stderr=_err,
             stdin=subprocess.DEVNULL,
             creationflags=0x08000000 | 0x00000008 | 0x00000200,
             close_fds=True,
