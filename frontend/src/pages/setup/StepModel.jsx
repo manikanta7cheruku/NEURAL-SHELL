@@ -135,15 +135,22 @@ export default function StepModel() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ model: data.modelName })
       });
+      let maxPctSeen = 0;
       pollRef.current = setInterval(async () => {
         try {
           const r = await fetch(`${API}/api/bootstrap/status`);
           const st = await r.json();
-          setPct(st.model_pull?.progress || 0);
+          const rawPct = st.model_pull?.progress || 0;
+
+          // Frontend monotonic guard: progress never decreases
+          if (rawPct > maxPctSeen) maxPctSeen = rawPct;
+          setPct(maxPctSeen);
+
           if (st.model_pull?.current) setEta(st.model_pull.current);
 
           if (st.model_pull?.status === 'done') {
             clearInterval(pollRef.current);
+            setPct(100);
             next();
           }
           if (st.model_pull?.status === 'error') {
