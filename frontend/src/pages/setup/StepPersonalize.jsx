@@ -75,9 +75,17 @@ export default function StepPersonalize() {
                 {voices.filter(v => v.engine === 'piper').map(v => {
                   const isSelected = selectedIndex === v.index;
                   const isPlaying = previewingId === v.voice_id;
+                  const isAvailable = v.installed !== false;
                   return (
-                    <div key={v.voice_id} onClick={() => handleSelect(v)}
-                         className={`relative p-4 rounded-xl border cursor-pointer transition-all duration-300 ${isSelected ? 'bg-white/[0.05] border-white/30' : 'bg-white/[0.01] border-white/[0.06] hover:bg-white/[0.03]'}`}>
+                    <div key={v.voice_id} 
+                         onClick={() => isAvailable && handleSelect(v)}
+                         className={`relative p-4 rounded-xl border transition-all duration-300 ${
+                           !isAvailable
+                             ? 'bg-white/[0.01] border-white/[0.04] opacity-50 cursor-not-allowed'
+                             : isSelected 
+                             ? 'bg-white/[0.05] border-white/30 cursor-pointer' 
+                             : 'bg-white/[0.01] border-white/[0.06] hover:bg-white/[0.03] cursor-pointer'
+                         }`}>
                       <div className="flex items-center justify-between mb-1.5">
                         <div className="text-[13px] font-bold text-white">{v.name}</div>
                         <span className="text-[9px] text-white/30 font-mono">{v.language}</span>
@@ -87,11 +95,22 @@ export default function StepPersonalize() {
                           <span className="px-1.5 py-0.5 rounded bg-white/5 uppercase font-medium">{v.gender}</span>
                           <span className="px-1.5 py-0.5 rounded bg-white/5">{v.quality}</span>
                         </div>
-                        <button onClick={(e) => handlePreview(e, v)}
-                                className={`text-[10px] px-2.5 py-1 rounded border transition-colors ${isPlaying ? 'bg-white text-black border-white' : 'border-white/10 text-white/60 hover:border-white/30 hover:text-white'}`}>
-                          {isPlaying ? 'Playing' : 'Test'}
-                        </button>
+                        {isAvailable ? (
+                          <button onClick={(e) => handlePreview(e, v)}
+                                  className={`text-[10px] px-2.5 py-1 rounded border transition-colors ${isPlaying ? 'bg-white text-black border-white' : 'border-white/10 text-white/60 hover:border-white/30 hover:text-white'}`}>
+                            {isPlaying ? 'Playing' : 'Test'}
+                          </button>
+                        ) : (
+                          <span className="text-[9px] px-2 py-1 rounded bg-white/[0.03] text-white/40 border border-white/5 font-medium">
+                            Coming Soon
+                          </span>
+                        )}
                       </div>
+                      {!isAvailable && (
+                        <div className="mt-2 pt-2 border-t border-white/[0.05] text-[9px] text-white/30 italic">
+                          Available in upcoming Seven release
+                        </div>
+                      )}
                     </div>
                   );
                 })}
