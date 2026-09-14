@@ -138,10 +138,13 @@ def load_all_modules(ctx):
             ctx.command_log  = _cl
 
             stats = _sm.get_stats()
+            if not isinstance(stats, dict):
+                stats = {"total_conversations": 0, "total_facts": 0}
+                
             elapsed = round(_t.time() - _t0, 1)
             print(Fore.GREEN + f"[SYSTEM] [BG] Memory ready in {elapsed}s — "
-                  f"{stats['total_conversations']} conversations, "
-                  f"{stats['total_facts']} facts")
+                  f"{stats.get('total_conversations', 0)} conversations, "
+                  f"{stats.get('total_facts', 0)} facts")
 
             mood_status = _me.get_status()
             print(Fore.MAGENTA + f"[SYSTEM] [BG] Mood: "
