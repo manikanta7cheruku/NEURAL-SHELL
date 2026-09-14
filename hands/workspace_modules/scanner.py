@@ -2,6 +2,7 @@
 hands/workspace_modules/scanner.py
 Desktop scanner — enumerates all visible user-opened windows.
 Classifies each into an app config dict.
+Captures exact coordinates and maximized state.
 """
 import time
 from colorama import Fore
@@ -9,6 +10,7 @@ from colorama import Fore
 try:
     import win32gui
     import win32process
+    import win32con
     import psutil
 except ImportError:
     pass
@@ -83,21 +85,26 @@ def scan_current():
                 return
             seen_windows.add(window_key)
 
+            # Capture spatial coordinates & maximized state
             try:
-                rect     = win32gui.GetWindowRect(hwnd)
+                rect = win32gui.GetWindowRect(hwnd)
+                placement = win32gui.GetWindowPlacement(hwnd)
+                is_maximized = placement[1] == win32con.SW_SHOWMAXIMIZED
+
                 win_info = {
-                    "title":  title,
-                    "x":      rect[0],
-                    "y":      rect[1],
-                    "width":  rect[2] - rect[0],
-                    "height": rect[3] - rect[1],
+                    "title":        title,
+                    "x":            rect[0],
+                    "y":            rect[1],
+                    "width":        rect[2] - rect[0],
+                    "height":       rect[3] - rect[1],
+                    "is_maximized": is_maximized
                 }
             except Exception:
-                win_info = {"title": title}
+                win_info = {"title": title, "is_maximized": False}
 
             cfg = _classify(exe_name, exe_path, title, win_info, proc)
             if cfg:
-                cfg["pid"] = pid  # Passed to document capture inspector
+                cfg["pid"] = pid  # Attached for document capture process lookup
                 apps.append(cfg)
 
         except Exception:
