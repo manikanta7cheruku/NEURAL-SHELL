@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import useSetup from '../../stores/useSetup';
 
 const API = 'http://127.0.0.1:7777';
@@ -15,13 +15,12 @@ export default function StepDone({ onComplete }) {
   const [statusText, setStatusText] = useState('');
 
   const waitForBackend = async () => {
-    // Backend will restart after setup completes. Wait for it to come back up.
-    // Use /api/health (lightweight) instead of /api/status (heavy) for faster detection.
+    setStatusText('Waiting for Seven to come online...');
     for (let i = 0; i < 90; i++) {
       try {
         const r = await fetch(`${API}/api/health`, { signal: AbortSignal.timeout(2000) });
         if (r.ok) return true;
-      } catch (e) {}
+      } catch {}
       await new Promise(res => setTimeout(res, 1000));
     }
     return false;
@@ -29,25 +28,42 @@ export default function StepDone({ onComplete }) {
 
   const handleLaunch = async () => {
     setLoading(true);
+
+    // Step 1: Save setup config
     setStatusText('Saving configuration...');
-    await completeSetup();
+    try {
+      await completeSetup();
+    } catch (e) {
+      console.log('[SETUP] completeSetup error (non-fatal):', e.message);
+    }
 
+    // Step 2: Wait a moment for config to flush to disk
+    await new Promise(res => setTimeout(res, 1000));
+
+    // Step 3: Request backend restart
     setStatusText('Restarting Seven with full voice engine...');
-    try { await fetch(`${API}/api/bootstrap/restart`, { method: 'POST' }); } catch {}
+    try {
+      await fetch(`${API}/api/bootstrap/restart`, { method: 'POST' });
+    } catch (e) {
+      console.log('[SETUP] Restart request error (expected):', e.message);
+    }
 
-    setStatusText('Waiting for Seven to come online...');
+    // Step 4: Wait for backend to come back up
+    // Python exits and Electron restarts it — this takes 5-15 seconds
+    await new Promise(res => setTimeout(res, 3000));
     const ready = await waitForBackend();
 
     if (ready) {
-      setStatusText('Seven is now listening. Launching interface...');
-      // Trigger the welcome greeting so Seven speaks to the user
+      setStatusText('Seven is online. Launching interface...');
+      // Trigger welcome greeting
       try {
         await fetch(`${API}/api/setup/welcome-greeting`, { method: 'POST' });
       } catch {}
       setTimeout(() => onComplete?.(), 1500);
     } else {
-      setStatusText('Seven is still starting. Launching interface anyway...');
-      setTimeout(() => onComplete?.(), 1000);
+      // Backend didn't come back — launch anyway, frontend will show connecting screen
+      setStatusText('Launching interface...');
+      setTimeout(() => onComplete?.(), 500);
     }
   };
 
