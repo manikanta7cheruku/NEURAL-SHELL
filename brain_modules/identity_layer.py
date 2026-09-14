@@ -573,7 +573,7 @@ def handle_identity(clean_in, words, speaker_id, speaker_name, config):
         "you there", "still there", "anyone there",
         "what is this", "what is that", "what is it",
     }
-    if clean_in in _vague_questions or (len(words) <= 2 and words[0] in {"why", "how", "what", "when", "where"} and len(words) == 1):
+    if clean_in in _vague_questions or (len(words) == 1 and words[0] in {"why", "how", "what", "when", "where"}):
         return random.choice([
             "You need to give me more than that.",
             "Context. What are you actually asking?",
