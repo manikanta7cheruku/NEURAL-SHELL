@@ -212,7 +212,25 @@ export default function StepEnvironment() {
         <div className="space-y-3">
           <div className="text-[10px] text-white/40 tracking-[0.3em] font-medium uppercase">Step 4 of 6</div>
           <h2 className="text-[28px] font-bold text-white tracking-tight leading-tight">Environment<br/>Deployment</h2>
-          <p className="text-[12px] text-white/40 font-light">One-time setup of local AI binaries. Takes 5-10 minutes on most machines.</p>
+          <p className="text-[12px] text-white/40 font-light">One-time setup of local AI binaries.</p>
+          <div className="p-3 rounded-lg bg-white/[0.02] border border-white/[0.06] space-y-1.5">
+            <div className="flex justify-between text-[10px]">
+              <span className="text-white/50 font-medium">Python Libraries</span>
+              <span className="text-white/60 font-mono">2-5 min</span>
+            </div>
+            <div className="flex justify-between text-[10px]">
+              <span className="text-white/50 font-medium">Ollama Runtime</span>
+              <span className="text-white/60 font-mono">1-3 min</span>
+            </div>
+            <div className="flex justify-between text-[10px]">
+              <span className="text-white/50 font-medium">Services Startup</span>
+              <span className="text-white/60 font-mono">~10 sec</span>
+            </div>
+            <div className="flex justify-between text-[10px] pt-1.5 mt-1 border-t border-white/[0.05]">
+              <span className="text-white/80 font-semibold">Total Estimated</span>
+              <span className="text-white font-mono font-semibold">3-8 min</span>
+            </div>
+          </div>
         </div>
 
         {started && !allDone && (
