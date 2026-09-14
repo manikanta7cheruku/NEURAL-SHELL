@@ -168,10 +168,23 @@ def _spawn_detached(cmd: list, cwd: str) -> int:
     env['PYTHONUNBUFFERED']  = '1'
     env['PYTHONIOENCODING']  = 'utf-8'
 
+    # Redirect standard output and error to physical log files.
+    # This prevents the Windows standard stream initialization crash (WinError 6)
+    # in detached processes and captures any startup imports or syntax errors.
+    try:
+        appdata = os.environ.get('APPDATA', os.path.expanduser('~'))
+        log_dir = os.path.join(appdata, 'SEVEN', 'logs')
+        os.makedirs(log_dir, exist_ok=True)
+        out_file = open(os.path.join(log_dir, "trigger_daemon_stdout.log"), "a", encoding="utf-8")
+        err_file = open(os.path.join(log_dir, "trigger_daemon_stderr.log"), "a", encoding="utf-8")
+    except Exception:
+        out_file = subprocess.DEVNULL
+        err_file = subprocess.DEVNULL
+
     proc = subprocess.Popen(
         cmd,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=out_file,
+        stderr=err_file,
         stdin=subprocess.DEVNULL,
         creationflags=_CREATE_NO_WINDOW | _DETACHED_PROCESS | _CREATE_NEW_PROCESS_GROUP,
         close_fds=True,
@@ -248,19 +261,16 @@ def launch_trigger_daemon():
     _kill_existing("trigger_daemon", correct_python=python)
     time.sleep(0.3)
 
-    # Check if correct daemon already running after killing wrong ones
+    # Check if a live trigger daemon is already running
     already_running = False
     try:
         import psutil
-        python_lower = python.lower()
         for proc in psutil.process_iter(['pid', 'cmdline', 'exe']):
             try:
                 cmd = " ".join(proc.info['cmdline'] or [])
-                exe = (proc.info['exe'] or "").lower()
-                if "trigger_daemon" in cmd and exe == python_lower:
+                if "trigger_daemon" in cmd and proc.info['pid'] != os.getpid():
                     already_running = True
-                    print(Fore.CYAN + f"[TRIGGER] Correct daemon already running "
-                          f"PID {proc.info['pid']} ✓")
+                    print(Fore.CYAN + f"[TRIGGER] Daemon running (PID {proc.info['pid']}) ✓")
                     break
             except Exception:
                 pass
@@ -274,7 +284,7 @@ def launch_trigger_daemon():
     # Spawn fresh daemon
     try:
         pid = _spawn_detached([python, daemon], cwd=root)
-        print(Fore.CYAN + f"[TRIGGER] Spawned PID {pid}")
+        print(Fore.GREEN + f"[TRIGGER] Daemon spawned successfully (PID {pid}) ✓")
     except Exception as e:
         print(Fore.RED + f"[TRIGGER] Spawn failed: {e}")
         return
