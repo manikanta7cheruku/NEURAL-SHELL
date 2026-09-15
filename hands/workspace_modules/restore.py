@@ -7,7 +7,7 @@ import threading
 from colorama import Fore
 
 from hands.workspace_modules.scanner import scan_current
-from hands.workspace_modules.url_matching import url_matches
+from hands.workspace_modules.url_matching import url_matches, normalize_url
 from hands.workspace_modules.chrome_utils import (
     get_open_chrome_profiles,
     get_open_chrome_tabs,
@@ -59,9 +59,12 @@ def smart_restore(apps_config):
     try:
         import concurrent.futures
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as _pool:
+        from hands.workspace_modules.chrome_utils import get_open_chrome_tabs_per_profile
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as _pool:
             _prof_future = _pool.submit(get_open_chrome_profiles)
             _tabs_future = _pool.submit(get_open_chrome_tabs)
+            _per_prof_future = _pool.submit(get_open_chrome_tabs_per_profile)
 
             try:
                 current = scan_current()
@@ -78,6 +81,11 @@ def smart_restore(apps_config):
                     _tabs_future.result(timeout=3)
             except Exception:
                 open_chrome_urls, open_chrome_domains = set(), set()
+
+            try:
+                per_profile_urls = _per_prof_future.result(timeout=3)
+            except Exception:
+                per_profile_urls = {}
 
         open_exes     = set()
         open_ws_paths = set()
@@ -124,6 +132,7 @@ def smart_restore(apps_config):
         already_open = 0
 
         for cfg in filtered_apps:
+          try:
             t    = (cfg.get("type") or "").lower()
             exe  = (cfg.get("exe_path") or "").lower()
             ws   = (cfg.get("workspace_path") or "").lower()
@@ -139,49 +148,72 @@ def smart_restore(apps_config):
                     (app.get("type") or "").lower() == t for app in current
                 )
 
-                if not has_visible_browser_window:
-                    # Browser is completely closed (no visible windows).
-                    # Restore all tabs directly.
-                    print(Fore.GREEN + f"[WORKSPACE] {t.title()} is closed — will restore {len(tabs)} tab(s)")
+                if not has_visible_browser_window and not tabs:
+                    # Browser closed and no tabs to restore — skip
+                    already_open += 1
+                    continue
+
+                if not has_visible_browser_window and tabs:
+                    # Browser completely closed — restore ALL tabs
+                    print(Fore.GREEN + f"[WORKSPACE] {t.title()} is closed — "
+                          f"restoring all {len(tabs)} tab(s) for profile '{prof}'")
                     new_cfg = dict(cfg)
                     new_cfg["_browser_closed"] = True
                     missing.append(new_cfg)
                     continue
 
-                # Browser is open — check for open tabs via extension or title
-                if tabs and open_chrome_urls:
+                # Browser is open — do PER-PROFILE tab deduplication
+                if tabs:
                     missing_tabs = []
                     skipped_tabs = 0
+
+                    # Get the set of URLs open in THIS specific profile
+                    prof_open_urls = set()
+                    if per_profile_urls:
+                        # Try matching saved profile name against live profiles
+                        for live_prof, live_urls in per_profile_urls.items():
+                            lp = live_prof.lower()
+                            sp = (prof or "").lower()
+                            sd = (cfg.get("profile_dir") or "").lower()
+                            if (sp and (sp == lp or sp in lp or lp in sp)) or \
+                               (sd and (sd == lp or sd in lp or lp in sd)):
+                                prof_open_urls = live_urls
+                                break
 
                     for tab in tabs:
                         tab_url = tab.get("url", "")
                         if not tab_url:
                             continue
-                        if url_matches(tab_url, open_chrome_urls, open_chrome_domains):
+
+                        tab_norm = normalize_url(tab_url)
+
+                        # Check 1: Is this URL open in the SAME profile?
+                        if tab_norm in prof_open_urls:
                             skipped_tabs += 1
-                        else:
-                            missing_tabs.append(tab)
+                            continue
+
+                        # Check 2: If per-profile data unavailable, check global
+                        if not prof_open_urls and open_chrome_urls:
+                            if url_matches(tab_url, open_chrome_urls,
+                                           open_chrome_domains):
+                                skipped_tabs += 1
+                                continue
+
+                        # Tab is genuinely missing from this profile
+                        missing_tabs.append(tab)
 
                     if not missing_tabs:
                         already_open += 1
-                        print(Fore.CYAN + f"[WORKSPACE] {name}: All {skipped_tabs} tabs already open")
+                        print(Fore.CYAN + f"[WORKSPACE] {name}: "
+                              f"All {skipped_tabs} tabs already open in profile")
                     else:
                         new_cfg = dict(cfg)
                         new_cfg["tabs"] = missing_tabs
                         new_cfg["_partial"] = True
                         missing.append(new_cfg)
-                        print(Fore.GREEN + f"[WORKSPACE] {name}: {len(missing_tabs)} missing tab(s) to open ({skipped_tabs} already open)")
-
-                elif tabs and not open_chrome_urls:
-                    # Extension not connected — use title matching heuristic
-                    inferred_open = browser_profile_matches_window(cfg, browser_titles)
-                    if inferred_open:
-                        already_open += 1
-                        print(Fore.CYAN + f"[WORKSPACE] {name}: Tabs matched active window title")
-                    else:
-                        new_cfg = dict(cfg)
-                        new_cfg["_partial"] = False
-                        missing.append(new_cfg)
+                        print(Fore.GREEN + f"[WORKSPACE] {name}: "
+                              f"{len(missing_tabs)} missing, "
+                              f"{skipped_tabs} already open")
                 else:
                     if prof and prof in open_profiles:
                         already_open += 1
@@ -235,6 +267,10 @@ def smart_restore(apps_config):
                     already_open += 1
                 else:
                     missing.append(cfg)
+          except Exception as _cfg_err:
+            print(Fore.RED + f"[WORKSPACE] Error processing "
+                  f"{cfg.get('name','?')}: {_cfg_err}")
+            missing.append(cfg)  # attempt restore anyway
 
         if missing:
             print(Fore.CYAN + f"[WORKSPACE] Opening {len(missing)} apps "
