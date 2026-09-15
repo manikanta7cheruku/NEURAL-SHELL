@@ -907,8 +907,16 @@
   document.body.addEventListener('mousedown', (e) => {
     if (!document.getElementById('card').contains(e.target)) retract();
   });
+  
+  // Escape key dismisses
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') retract();
+  });
 
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') retract(); });
+  // Window blur (clicking outside anywhere on screen) dismisses smoothly
+  window.addEventListener('blur', () => {
+    retract();
+  });
 </script>
 </body>
 </html>
