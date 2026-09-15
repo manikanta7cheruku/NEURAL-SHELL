@@ -157,13 +157,24 @@ def smart_restore(apps_config):
                         missing.append(new_cfg)
 
                 elif tabs and not open_chrome_urls:
+                    # Extension not available — use heuristic + profile check
                     inferred_open = browser_profile_matches_window(
                         cfg, browser_titles
                     )
-                    if inferred_open or (prof and prof in open_profiles):
+                    profile_running = (
+                        prof and prof in open_profiles
+                    ) or _check_chrome_profile_active(cfg)
+
+                    if inferred_open or profile_running:
                         already_open += 1
+                        print(Fore.CYAN + f"[WORKSPACE] Already open "
+                              f"(heuristic): {name}")
                     else:
-                        missing.append(cfg)
+                        # Mark as NOT partial so _restore_browser does
+                        # its own Level 3 process check before launching
+                        new_cfg = dict(cfg)
+                        new_cfg["_partial"] = False
+                        missing.append(new_cfg)
 
                 else:
                     if (prof and prof in open_profiles) or \
@@ -261,6 +272,25 @@ def _do_restore(apps_config):
 
     for th in threads:
         th.join(timeout=20)
-
     elapsed = int((time.time() - t0) * 1000)
     print(Fore.GREEN + f"[WORKSPACE] Done in {elapsed}ms")
+
+def _check_chrome_profile_active(cfg):
+    """Quick check if Chrome is running with the saved profile directory."""
+    profile_dir = cfg.get("profile_dir", "")
+    if not profile_dir:
+        return False
+    try:
+        import psutil
+        for proc in psutil.process_iter(["name", "cmdline"]):
+            try:
+                if proc.info.get("name", "").lower() == "chrome.exe":
+                    cmdline = proc.info.get("cmdline") or []
+                    for arg in cmdline:
+                        if f"--profile-directory={profile_dir}" in arg:
+                            return True
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return False
