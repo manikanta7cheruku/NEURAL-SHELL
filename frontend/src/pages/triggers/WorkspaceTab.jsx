@@ -1,68 +1,44 @@
-import { useState, memo } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Scan, X, Save, Layout } from 'lucide-react';
 import ChromeTabSyncCard from './ChromeTabSyncCard';
 import WorkspaceCard from './WorkspaceCard';
 
-/**
- * Isolated input form — memoized so keystrokes don't re-render
- * the parent's workspace grid or scanned app tags.
- */
-const WorkspaceSaveForm = memo(function WorkspaceSaveForm({ scanned, onSave }) {
-  const [wsName, setWsName] = useState('');
-  const [wsSaving, setWsSaving] = useState(false);
-
-  const handleSave = async () => {
-    if (!wsName.trim() || !scanned) return;
-    setWsSaving(true);
-    await onSave({ name: wsName.trim(), apps: scanned, description: `${scanned.length} apps` });
-    setWsSaving(false);
-    setWsName('');
-  };
-
-  return (
-    <div className="flex items-center gap-2">
-      <input
-        value={wsName}
-        onChange={e => setWsName(e.target.value)}
-        onKeyDown={e => {
-          if (e.key === 'Enter') {
-            e.preventDefault();
-            handleSave();
-          }
-        }}
-        placeholder="Name this workspace (e.g., Focus, Morning, Code)"
-        className="flex-1 bg-white/[0.03] border border-white/8 rounded-lg px-3 py-2
-                   text-[11px] text-white/80 placeholder-white/20 outline-none
-                   focus:border-white/15 transition-colors"
-      />
-      <button
-        onClick={handleSave}
-        disabled={wsSaving || !wsName.trim()}
-        className="flex items-center gap-1.5 px-4 py-2 bg-s-accent/90
-                   text-white rounded-lg text-[10px] font-semibold
-                   hover:bg-s-accent disabled:opacity-25 transition-all flex-shrink-0"
-      >
-        <Save size={11} />
-        {wsSaving ? 'Saving...' : 'Save'}
-      </button>
-    </div>
-  );
-});
-
 export default function WorkspaceTab({ workspaces, onScan, onSave, onRestore, onDelete, reveal }) {
   const [scanning, setScanning] = useState(false);
   const [scanned,  setScanned]  = useState(null);
+  const [wsName,   setWsName]   = useState('');
+  const [wsSaving, setWsSaving] = useState(false);
+  const inputRef = useRef(null);
 
   const handleScan = async () => {
     setScanning(true);
     const r = await onScan();
     setScanning(false);
-    if (r.ok) setScanned(r.apps);
+    if (r.ok) {
+      setScanned(r.apps);
+      // Focus the name field on the next paint so it is instantly typable
+      requestAnimationFrame(() => {
+        if (inputRef.current) inputRef.current.focus();
+      });
+    }
   };
 
-  const handleSaveWorkspace = async (saveData) => {
-    await onSave(saveData);
+  const handleSaveWorkspace = async () => {
+    if (!wsName.trim() || !scanned) return;
+    setWsSaving(true);
+    await onSave({
+      name: wsName.trim(),
+      apps: scanned,
+      description: `${scanned.length} apps`,
+    });
+    setWsSaving(false);
+    setWsName('');
     setScanned(null);
+  };
+
+  const handleDismissScan = () => {
+    setScanned(null);
+    setWsName('');
   };
 
   return (
@@ -87,16 +63,47 @@ export default function WorkspaceTab({ workspaces, onScan, onSave, onRestore, on
       {scanned && (
         <div className="mb-4 bg-white/[0.02] border border-white/[0.12] rounded-xl p-4 backdrop-blur-sm">
           <div className="flex items-center justify-between mb-3">
-            <span className="text-[11px] text-white/70 font-medium">Found {scanned.length} apps</span>
-            <button onClick={() => setScanned(null)} className="text-white/25 hover:text-white/50 transition-colors">
+            <span className="text-[11px] text-white/70 font-medium">
+              Found {scanned.length} apps
+            </span>
+            <button
+              onClick={handleDismissScan}
+              className="text-white/25 hover:text-white/50 transition-colors"
+            >
               <X size={12} />
             </button>
           </div>
 
-          {/* Naming input rendered FIRST — instantly interactive after scan */}
-          <WorkspaceSaveForm scanned={scanned} onSave={handleSaveWorkspace} />
+          {/* Naming input — direct state, no memo, no re-mount */}
+          <div className="flex items-center gap-2">
+            <input
+              ref={inputRef}
+              value={wsName}
+              onChange={e => setWsName(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  handleSaveWorkspace();
+                }
+              }}
+              placeholder="Name this workspace (e.g., Focus, Morning, Code)"
+              className="flex-1 bg-white/[0.03] border border-white/8 rounded-lg px-3 py-2
+                         text-[11px] text-white/80 placeholder-white/20 outline-none
+                         focus:border-white/15 transition-colors"
+            />
+            <button
+              onClick={handleSaveWorkspace}
+              disabled={wsSaving || !wsName.trim()}
+              className="flex items-center gap-1.5 px-4 py-2 bg-s-accent/90
+                         text-white rounded-lg text-[10px] font-semibold
+                         hover:bg-s-accent disabled:opacity-25 transition-all flex-shrink-0"
+            >
+              <Save size={11} />
+              {wsSaving ? 'Saving...' : 'Save'}
+            </button>
+          </div>
 
-          {/* App tags rendered AFTER — no longer block input mount */}
+          {/* App tags below — heavy render deferred */}
           <div className="flex flex-wrap gap-1 max-h-[100px] overflow-y-auto mt-3
                           scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
             {scanned.map((app, i) => (
