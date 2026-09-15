@@ -20,8 +20,8 @@ app.on('window-all-closed', () => {});
 app.whenReady().then(() => {
   const { width: sw } = screen.getPrimaryDisplay().workArea;
 
-  const W = 340;
-  const H = 140;
+  const W = 380;
+  const H = 310;
 
   const win = new BrowserWindow({
     width:              W,
@@ -29,10 +29,8 @@ app.whenReady().then(() => {
     x:                  Math.round((sw - W) / 2),
     y:                  0,
     frame:              false,
-    transparent:        false,
-    backgroundColor:    '#00000001',
-    backgroundMaterial: 'acrylic',
-    vibrancy:           'under-window',
+    transparent:        true,
+    backgroundColor:    '#00000000',
     alwaysOnTop:        true,
     skipTaskbar:        true,
     resizable:          false,
