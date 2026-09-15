@@ -162,11 +162,15 @@ def _execute_trigger_complete(trigger, name, action_type, action_data,
         return
 
     # Step 4: Feedback + arrangement card
-    if action_type == "open_workspace" and result and not trigger.get("silent", False):
+    if action_type == "open_workspace" and not trigger.get("silent", False):
+        # Result may be None if action raised — normalize
+        if not result:
+            result = {"opened": 0, "skipped": 0}
         opened  = result.get("opened", 0)
         skipped = result.get("skipped", 0)
 
-        # Fallback: if workspace_apps is empty, reload from DB so arrangement card knows what to look for
+        # Fallback: if workspace_apps is empty, reload from DB so arrangement card
+        # knows what windows to look for
         if not workspace_apps:
             ws_id = action_data.get("workspace_id")
             ws_name = action_data.get("workspace_name")
@@ -188,6 +192,7 @@ def _execute_trigger_complete(trigger, name, action_type, action_data,
         # Ensure the overlay daemon is alive and ready to display
         ensure_overlay_alive_safe()
 
+        # Emit status notification
         if opened == 0 and skipped > 0:
             _send_overlay({
                 "type": "notif",
@@ -198,10 +203,7 @@ def _execute_trigger_complete(trigger, name, action_type, action_data,
                     "holdMs":   2200,
                 },
             })
-            # Apps are already running — brief pause then present arrangement card
-            time.sleep(1.0)
-            fire_arrangement_card(workspace_apps, get_windows_by_workspace_apps)
-
+            wait_time = 1.0
         elif opened > 0 and skipped > 0:
             _send_overlay({
                 "type": "notif",
@@ -212,19 +214,37 @@ def _execute_trigger_complete(trigger, name, action_type, action_data,
                     "holdMs":   2200,
                 },
             })
-            # Give newly-opened apps time to construct window frames
-            time.sleep(2.5)
-            fire_arrangement_card(workspace_apps, get_windows_by_workspace_apps)
-
+            wait_time = 2.5
         elif opened > 0:
-            # All apps were newly launched — wait for UI rendering
-            time.sleep(3.0)
-            fire_arrangement_card(workspace_apps, get_windows_by_workspace_apps)
+            wait_time = 3.0
+        else:
+            # opened == 0 and skipped == 0 — restore may have errored,
+            # but still try to arrange whatever windows we can find
+            wait_time = 1.5
+
+        # ALWAYS fire arrangement card when workspace has 2+ apps
+        if workspace_apps and len(workspace_apps) >= 2:
+            time.sleep(wait_time)
+            try:
+                fire_arrangement_card(workspace_apps, get_windows_by_workspace_apps)
+                print(f"[TRIGGER DAEMON] Arrangement card fired for "
+                      f"{len(workspace_apps)} apps")
+            except Exception as _ae:
+                print(f"[TRIGGER DAEMON] Arrangement card error: {_ae}")
+                import traceback
+                traceback.print_exc()
+        else:
+            print(f"[TRIGGER DAEMON] Skipping arrangement card "
+                  f"(only {len(workspace_apps)} app(s))")
 
     elif action_type == "open_app" and not trigger.get("silent", False):
         if len(workspace_apps) >= 2:
             time.sleep(2.5)
-            fire_arrangement_card(workspace_apps, get_windows_by_workspace_apps)
+            ensure_overlay_alive_safe()
+            try:
+                fire_arrangement_card(workspace_apps, get_windows_by_workspace_apps)
+            except Exception as _ae:
+                print(f"[TRIGGER DAEMON] Arrangement card error: {_ae}")
 
     # Step 5: Update fire stats
     update_fire_stats(trigger.get("id"))
