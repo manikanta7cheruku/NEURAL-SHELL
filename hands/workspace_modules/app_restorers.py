@@ -96,9 +96,123 @@ def _has_visible_chrome_window():
         return False
 
 
+def _resolve_profile_dir_bulletproof(profile_name, profile_dir_saved, tabs):
+    """
+    Determine the correct Chrome profile directory with 5-level fallback:
+      1. Saved profile_dir on disk
+      2. Extension per-profile data: match by tab URL fingerprint
+      3. Extension per-profile data: match by profile name substring
+      4. Chrome Local State info_cache lookup by profile_name
+      5. "Default" fallback
+    Returns the profile directory name (e.g., "Default", "Profile 1").
+    """
+    chrome_base = os.path.join(
+        os.environ.get("LOCALAPPDATA", ""),
+        "Google", "Chrome", "User Data"
+    )
+
+    # LEVEL 1: Trust saved profile_dir if it exists on disk
+    if profile_dir_saved and os.path.isdir(os.path.join(chrome_base, profile_dir_saved)):
+        return profile_dir_saved
+
+    # LEVEL 2 & 3: Query Chrome extension for live profile→tab mapping
+    try:
+        from backend.routes.chrome import get_tabs_by_profile
+        live_profiles = get_tabs_by_profile()  # {profile_key: [tabs]}
+
+        if live_profiles and tabs:
+            from hands.workspace_modules.url_matching import normalize_url
+
+            # Fingerprint saved tabs
+            saved_fingerprint = set()
+            for t in tabs:
+                u = t.get("url", "")
+                if u.startswith("http"):
+                    saved_fingerprint.add(normalize_url(u))
+
+            # LEVEL 2: Find the profile with the MOST overlap with our saved tabs
+            best_match = None
+            best_overlap = 0
+            for prof_key, tab_list in live_profiles.items():
+                live_fp = set()
+                for lt in tab_list:
+                    lu = lt.get("url", "")
+                    if lu:
+                        live_fp.add(normalize_url(lu))
+                overlap = len(saved_fingerprint & live_fp)
+                if overlap > best_overlap:
+                    best_overlap = overlap
+                    best_match = prof_key
+
+            if best_match and best_overlap >= 1:
+                # Convert extension profile key → Chrome profile dir
+                resolved = _extension_key_to_profile_dir(best_match, chrome_base)
+                if resolved:
+                    print(Fore.CYAN + f"  [PROFILE] Matched '{profile_name}' → "
+                          f"'{resolved}' via tab fingerprint ({best_overlap} overlap)")
+                    return resolved
+
+        # LEVEL 3: Match by profile name substring
+        if live_profiles and profile_name:
+            pn = profile_name.lower().strip()
+            for prof_key in live_profiles.keys():
+                pk = prof_key.lower().strip()
+                if pk == pn or pn in pk or pk in pn:
+                    resolved = _extension_key_to_profile_dir(prof_key, chrome_base)
+                    if resolved:
+                        print(Fore.CYAN + f"  [PROFILE] Matched '{profile_name}' → "
+                              f"'{resolved}' via name substring")
+                        return resolved
+    except Exception as e:
+        print(Fore.YELLOW + f"  [PROFILE] Extension lookup failed: {e}")
+
+    # LEVEL 4: Chrome Local State info_cache
+    try:
+        resolved = find_chrome_profile_dir(chrome_base, profile_name)
+        if resolved and os.path.isdir(os.path.join(chrome_base, resolved)):
+            return resolved
+    except Exception:
+        pass
+
+    # LEVEL 5: Default
+    return "Default"
+
+
+def _extension_key_to_profile_dir(prof_key, chrome_base):
+    """
+    Convert extension profile key (display name) → Chrome profile directory
+    by reading Local State info_cache.
+    """
+    import json as _json
+    try:
+        local_state_path = os.path.join(chrome_base, "Local State")
+        if not os.path.isfile(local_state_path):
+            return None
+        with open(local_state_path, "r", encoding="utf-8") as f:
+            state = _json.load(f)
+        info_cache = state.get("profile", {}).get("info_cache", {})
+        pk_lower = prof_key.lower().strip()
+        for dir_name, info in info_cache.items():
+            display = (info.get("name") or "").lower().strip()
+            gaia = (info.get("gaia_name") or "").lower().strip()
+            user = (info.get("user_name") or "").lower().strip().split("@")[0]
+            if pk_lower in (display, gaia, user) or \
+               pk_lower in display or display in pk_lower or \
+               pk_lower in user or user in pk_lower:
+                if os.path.isdir(os.path.join(chrome_base, dir_name)):
+                    return dir_name
+    except Exception:
+        pass
+    # Special case: "default" always maps to "Default"
+    if prof_key.lower() == "default":
+        return "Default"
+    return None
+
+
 def _restore_browser(cfg):
     """
     Restore Chrome tabs for a specific profile without duplicating open tabs.
+    Uses bulletproof profile resolution and multi-layer dedup.
     """
     tabs              = cfg.get("tabs", [])
     urls              = [t["url"] for t in tabs if t.get("url", "").startswith("http")]
@@ -117,82 +231,78 @@ def _restore_browser(cfg):
             time.sleep(0.2)
         return
 
-    # Resolve profile directory
-    chrome_base = os.path.join(
-        os.environ.get("LOCALAPPDATA", ""),
-        "Google", "Chrome", "User Data"
+    # BULLETPROOF profile resolution
+    profile_dir = _resolve_profile_dir_bulletproof(
+        profile_name, profile_dir_saved, tabs
     )
+    print(Fore.CYAN + f"  [PROFILE] Resolved '{profile_name}' → dir '{profile_dir}'")
 
-    if profile_dir_saved and os.path.isdir(os.path.join(chrome_base, profile_dir_saved)):
-        profile_dir = profile_dir_saved
-    else:
-        profile_dir = find_chrome_profile_dir(chrome_base, profile_name) or "Default"
-
-    # Case 1: Chrome was closed when scanned/restored -> Launch all URLs directly
+    # Case 1: Chrome closed → launch fresh with all URLs
     if browser_closed or not _has_visible_chrome_window():
-        print(Fore.GREEN + f"[WORKSPACE] Launching Chrome profile '{profile_dir}' with {len(urls)} tab(s)")
-        _launch_chrome_tabs(chrome_exe, profile_dir, urls)
+        print(Fore.GREEN + f"[WORKSPACE] Launching Chrome '{profile_dir}' cold "
+              f"with {len(urls)} tab(s)")
+        _launch_chrome_tabs(chrome_exe, profile_dir, urls, cold_start=True)
         return
 
-    # Case 2: Smart restore already computed exact missing tabs
+    # Case 2: Partial restore (dedup already computed) — re-verify against
+    # live extension data for THIS specific profile
     if is_partial:
-        # Final safety: re-check against live extension data right now
-        # (extension may have synced new tabs since restore.py ran)
         truly_missing = _final_dedup_check(urls, profile_name, profile_dir)
         if not truly_missing:
-            print(Fore.CYAN + f"[WORKSPACE] Chrome ({profile_name}): "
-                  f"All tabs already open (final check)")
+            print(Fore.CYAN + f"[WORKSPACE] Chrome ({profile_name}/{profile_dir}): "
+                  f"All tabs already open (final live check)")
             return
-        print(Fore.GREEN + f"[WORKSPACE] Chrome ({profile_name}): "
-              f"Opening {len(truly_missing)} missing tab(s) in '{profile_dir}'")
+        print(Fore.GREEN + f"[WORKSPACE] Chrome ({profile_name}/{profile_dir}): "
+              f"Opening {len(truly_missing)} missing tab(s)")
         _launch_chrome_tabs(chrome_exe, profile_dir, truly_missing)
         return
 
-    # Case 3: Live Chrome window exists -> check extension tabs
+    # Case 3: Full restore path — check per-profile live data first
     from hands.workspace_modules.url_matching import normalize_url
-    open_urls = set()
+    profile_open_urls = set()
+    all_open_urls = set()
 
     try:
         from backend.routes.chrome import get_tabs_by_profile
         current_profile_tabs = get_tabs_by_profile()
         for prof_key, tab_list in current_profile_tabs.items():
-            pk = prof_key.lower()
-            pn = profile_name.lower()
-            pd = profile_dir.lower()
-            if pk == pn or pk == pd or pn in pk or pk in pn:
-                for t in tab_list:
-                    u = t.get("url", "")
-                    if u:
-                        open_urls.add(normalize_url(u))
+            for t in tab_list:
+                u = t.get("url", "")
+                if not u:
+                    continue
+                norm = normalize_url(u)
+                all_open_urls.add(norm)
+                # Check if this prof_key maps to our target profile_dir
+                mapped_dir = _extension_key_to_profile_dir(
+                    prof_key, os.path.join(
+                        os.environ.get("LOCALAPPDATA", ""),
+                        "Google", "Chrome", "User Data"
+                    )
+                )
+                if mapped_dir and mapped_dir.lower() == profile_dir.lower():
+                    profile_open_urls.add(norm)
     except Exception:
         pass
 
-    if not open_urls:
-        try:
-            from hands.workspace_modules.chrome_utils import get_open_chrome_tabs
-            all_open_urls, _ = get_open_chrome_tabs()
-            if all_open_urls:
-                open_urls = all_open_urls
-        except Exception:
-            pass
-
-    if open_urls:
-        missing_urls = [u for u in urls if normalize_url(u) not in open_urls]
-    else:
-        missing_urls = urls
+    # Determine which tabs are missing FROM THIS PROFILE
+    # Rule: skip if URL is open ANYWHERE (any profile) — prevents duplicates
+    missing_urls = [u for u in urls if normalize_url(u) not in all_open_urls]
 
     if not missing_urls:
-        print(Fore.CYAN + f"[WORKSPACE] Chrome ({profile_name}): All {len(urls)} tabs are already open")
+        print(Fore.CYAN + f"[WORKSPACE] Chrome ({profile_name}/{profile_dir}): "
+              f"All {len(urls)} tabs already open somewhere")
         return
 
-    print(Fore.GREEN + f"[WORKSPACE] Chrome ({profile_name}): Opening {len(missing_urls)}/{len(urls)} missing tab(s)")
+    print(Fore.GREEN + f"[WORKSPACE] Chrome ({profile_name}/{profile_dir}): "
+          f"Opening {len(missing_urls)}/{len(urls)} missing tab(s)")
     _launch_chrome_tabs(chrome_exe, profile_dir, missing_urls)
 
 
 def _final_dedup_check(urls, profile_name, profile_dir):
     """
-    Last-resort dedup: query the Chrome extension's live tab data
-    right before launching. Returns only URLs that are truly not open.
+    Query Chrome extension live tab data and return only URLs that are
+    NOT currently open anywhere in Chrome (any profile). Prevents duplicates
+    regardless of which profile a tab lives in.
     """
     if not urls:
         return urls
@@ -200,7 +310,7 @@ def _final_dedup_check(urls, profile_name, profile_dir):
     from hands.workspace_modules.url_matching import normalize_url
     live_norm = set()
 
-    # Source 1: Extension per-profile data (most accurate)
+    # Source 1: Extension per-profile data (most accurate, includes all profiles)
     try:
         from backend.routes.chrome import get_tabs_by_profile
         all_profiles = get_tabs_by_profile()
@@ -212,7 +322,7 @@ def _final_dedup_check(urls, profile_name, profile_dir):
     except Exception:
         pass
 
-    # Source 2: Global Chrome URL set
+    # Source 2: Fallback to window-title scraping
     if not live_norm:
         try:
             from hands.workspace_modules.chrome_utils import get_open_chrome_tabs
@@ -224,30 +334,52 @@ def _final_dedup_check(urls, profile_name, profile_dir):
             pass
 
     if not live_norm:
-        return urls  # no live data available — trust the caller
+        print(Fore.YELLOW + f"  [DEDUP] No live data — trusting caller")
+        return urls
 
     truly_missing = [u for u in urls if normalize_url(u) not in live_norm]
     skipped = len(urls) - len(truly_missing)
     if skipped > 0:
-        print(Fore.CYAN + f"  [DEDUP] Final check: {skipped} tab(s) "
-              f"already open, {len(truly_missing)} truly missing")
+        print(Fore.CYAN + f"  [DEDUP] Final: {skipped} already open, "
+              f"{len(truly_missing)} to open in '{profile_dir}'")
     return truly_missing
 
 
-def _launch_chrome_tabs(chrome_exe, profile_dir, urls):
-    """Launch Chrome with the given profile directory and batch of URLs."""
+def _launch_chrome_tabs(chrome_exe, profile_dir, urls, cold_start=False):
+    """
+    Launch Chrome with the specified profile directory and batch of URLs.
+
+    cold_start=True  → Chrome is not running. Suppress session-restore prompt
+                       and prevent auto-reopening of previous session tabs.
+    cold_start=False → Chrome is already running. Tabs are appended to the
+                       existing window for this profile.
+    """
     if not urls:
         return
+
     try:
-        cmd = [chrome_exe, f"--profile-directory={profile_dir}"] + urls
+        cmd = [chrome_exe, f"--profile-directory={profile_dir}"]
+
+        if cold_start:
+            # Suppress the "Restore pages?" bubble and skip session restoration
+            # so we do NOT get duplicates from Chrome's own tab restore feature
+            cmd += [
+                "--no-startup-window",  # will be overridden by URLs below
+                "--disable-features=InfiniteSessionRestore",
+                "--hide-crash-restore-bubble",
+            ]
+            # Remove --no-startup-window since URLs force a window anyway
+            cmd = [c for c in cmd if c != "--no-startup-window"]
+
+        cmd += urls
         subprocess.Popen(cmd)
+        time.sleep(0.4)
     except Exception as e:
-        print(Fore.RED + f"  [-] Failed to batch launch Chrome tabs: {e}")
-        # Fallback to standard handler for each URL if batch execution fails
+        print(Fore.RED + f"  [-] Batch launch failed: {e}")
         for url in urls:
             try:
                 os.startfile(url)
-                time.sleep(0.2)
+                time.sleep(0.3)
             except Exception:
                 pass
 
