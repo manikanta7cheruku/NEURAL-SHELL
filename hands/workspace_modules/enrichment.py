@@ -31,6 +31,15 @@ def enrich_chrome(apps):
     browser_type = browser_entries[0].get("type", "chrome")
     exe_path     = browser_entries[0].get("exe_path", "")
 
+    # Collect profile_dir from original entries (set by document_capture.py)
+    # This maps Chrome PIDs to their --profile-directory= cmdline arg
+    _pid_to_profile_dir = {}
+    for b in browser_entries:
+        pd = b.get("profile_dir", "")
+        pid = b.get("pid", 0)
+        if pd and pid:
+            _pid_to_profile_dir[pid] = pd
+
     for entry in browser_entries:
         if entry in apps:
             apps.remove(entry)
@@ -54,6 +63,23 @@ def enrich_chrome(apps):
             continue
         total += len(clean)
         tab_count = len(clean)
+        # Resolve profile_dir: saved from cmdline > resolve from Local State
+        _resolved_dir = ""
+        for _pid, _pd in _pid_to_profile_dir.items():
+            if _pd.lower() in prof.lower() or prof.lower() in _pd.lower():
+                _resolved_dir = _pd
+                break
+        if not _resolved_dir:
+            try:
+                _chrome_base = os.path.join(
+                    os.environ.get("LOCALAPPDATA", ""),
+                    "Google", "Chrome", "User Data"
+                )
+                from hands.workspace_modules.helpers import find_chrome_profile_dir
+                _resolved_dir = find_chrome_profile_dir(_chrome_base, prof) or ""
+            except Exception:
+                pass
+
         apps.append({
             "type":         browser_type,
             "name":         f"Chrome ({prof}) - {tab_count} "
@@ -61,6 +87,7 @@ def enrich_chrome(apps):
             "exe_path":     exe_path,
             "tabs":         clean,
             "profile_name": prof,
+            "profile_dir":  _resolved_dir,
             "window":       {"title": f"Chrome - {prof}"},
         })
         print(Fore.CYAN + f"  Chrome profile '{prof}': {tab_count} tabs")
