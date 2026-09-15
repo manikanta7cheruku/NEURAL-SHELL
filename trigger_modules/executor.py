@@ -166,6 +166,28 @@ def _execute_trigger_complete(trigger, name, action_type, action_data,
         opened  = result.get("opened", 0)
         skipped = result.get("skipped", 0)
 
+        # Fallback: if workspace_apps is empty, reload from DB so arrangement card knows what to look for
+        if not workspace_apps:
+            ws_id = action_data.get("workspace_id")
+            ws_name = action_data.get("workspace_name")
+            try:
+                conn = sqlite3.connect(TRIGGERS_DB, timeout=5)
+                conn.row_factory = sqlite3.Row
+                if ws_id:
+                    ws_r = conn.execute("SELECT apps FROM workspaces WHERE id = ?", (ws_id,)).fetchone()
+                elif ws_name:
+                    ws_r = conn.execute("SELECT apps FROM workspaces WHERE LOWER(name) = ?", (ws_name.lower(),)).fetchone()
+                else:
+                    ws_r = None
+                conn.close()
+                if ws_r:
+                    workspace_apps = json.loads(ws_r["apps"] or "[]")
+            except Exception as _e:
+                print(f"[TRIGGER DAEMON] DB fallback load failed: {_e}")
+
+        # Ensure the overlay daemon is alive and ready to display
+        ensure_overlay_alive_safe()
+
         if opened == 0 and skipped > 0:
             _send_overlay({
                 "type": "notif",
@@ -173,11 +195,11 @@ def _execute_trigger_complete(trigger, name, action_type, action_data,
                     "title":    name,
                     "subtitle": "Already active",
                     "detail":   f"All {skipped} app{'s' if skipped != 1 else ''} already open",
-                    "holdMs":   2500,
+                    "holdMs":   2200,
                 },
             })
-            # Wait for windows to be visible, then show arrangement
-            time.sleep(1.2)
+            # Apps are already running — brief pause then present arrangement card
+            time.sleep(1.0)
             fire_arrangement_card(workspace_apps, get_windows_by_workspace_apps)
 
         elif opened > 0 and skipped > 0:
@@ -190,14 +212,13 @@ def _execute_trigger_complete(trigger, name, action_type, action_data,
                     "holdMs":   2200,
                 },
             })
-            # Give newly-opened apps 3 seconds to appear on screen
-            # (Notepad, Word, Chrome all take 1-2s to render window)
-            time.sleep(3.0)
+            # Give newly-opened apps time to construct window frames
+            time.sleep(2.5)
             fire_arrangement_card(workspace_apps, get_windows_by_workspace_apps)
 
         elif opened > 0:
-            # Longer wait — all apps were newly launched
-            time.sleep(3.5)
+            # All apps were newly launched — wait for UI rendering
+            time.sleep(3.0)
             fire_arrangement_card(workspace_apps, get_windows_by_workspace_apps)
 
     elif action_type == "open_app" and not trigger.get("silent", False):
