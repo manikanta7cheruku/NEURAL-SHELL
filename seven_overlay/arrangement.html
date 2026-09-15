@@ -12,7 +12,7 @@
 
   html, body {
     width: 380px;
-    height: 300px;
+    height: 310px;
     background: transparent;
     overflow: hidden;
     font-family: -apple-system, 'SF Pro Display', 'Segoe UI Variable Display',
@@ -27,22 +27,22 @@
   .card {
     position: relative;
     width: 380px;
-    height: 300px;
-    background: rgba(14, 14, 22, 0.78);
-    backdrop-filter: blur(42px) saturate(160%);
-    -webkit-backdrop-filter: blur(42px) saturate(160%);
-    border-left:   1px solid rgba(255, 255, 255, 0.08);
-    border-right:  1px solid rgba(255, 255, 255, 0.08);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
-    border-radius: 0 0 18px 18px;
+    height: 310px;
+    background: rgba(10, 10, 16, 0.82);
+    backdrop-filter: blur(60px) saturate(200%);
+    -webkit-backdrop-filter: blur(60px) saturate(200%);
+    /* Sharp glass: crisp hairline border, tight radius */
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 10px;
     display: flex;
     flex-direction: column;
     transform: translateY(-105%);
     opacity: 0;
     will-change: transform, opacity;
     box-shadow:
-      0 16px 48px rgba(0, 0, 0, 0.45),
-      inset 0 1px 0 rgba(255, 255, 255, 0.06);
+      0 24px 60px rgba(0, 0, 0, 0.65),
+      0 0 0 0.5px rgba(255, 255, 255, 0.08),
+      inset 0 0.5px 0 rgba(255, 255, 255, 0.12);
     overflow: hidden;
   }
 
@@ -50,33 +50,33 @@
     content: '';
     position: absolute;
     top: 0; left: 0; right: 0;
-    height: 55%;
+    height: 50%;
     background: linear-gradient(180deg,
-      rgba(255, 255, 255, 0.04) 0%,
+      rgba(255, 255, 255, 0.035) 0%,
       transparent 100%);
     pointer-events: none;
-    border-radius: 0 0 18px 18px;
+    border-radius: 10px 10px 0 0;
   }
 
   .card::after {
     content: '';
     position: absolute;
-    left: 24%; right: 24%;
+    left: 20%; right: 20%;
     bottom: 0;
-    height: 1px;
+    height: 0.5px;
     background: linear-gradient(90deg,
       transparent,
-      rgba(160, 130, 255, 0.32),
+      rgba(160, 130, 255, 0.35),
       transparent);
     pointer-events: none;
   }
 
   .card.show {
-    animation: slideDown 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    animation: slideDown 0.45s cubic-bezier(0.16, 1, 0.3, 1) forwards;
   }
 
   .card.hiding {
-    animation: slideUp 0.3s cubic-bezier(0.55, 0, 0.85, 0.35) forwards;
+    animation: slideUp 0.28s cubic-bezier(0.55, 0, 0.85, 0.35) forwards;
   }
 
   @keyframes slideDown {
@@ -94,7 +94,7 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 11px 16px 8px;
+    padding: 10px 14px 7px;
     position: relative;
     z-index: 2;
   }
@@ -102,15 +102,15 @@
   .header-left {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 7px;
   }
 
   .brand-dot {
-    width: 6px;
-    height: 6px;
+    width: 5px;
+    height: 5px;
     border-radius: 50%;
     background: rgba(180, 150, 255, 0.9);
-    box-shadow: 0 0 8px rgba(180, 150, 255, 0.6);
+    box-shadow: 0 0 6px rgba(180, 150, 255, 0.5);
     animation: pulse 2.4s ease-in-out infinite;
   }
 
@@ -120,7 +120,7 @@
   }
 
   .header-title {
-    font-size: 10.5px;
+    font-size: 10px;
     font-weight: 600;
     color: rgba(255, 255, 255, 0.85);
     letter-spacing: 0.02em;
@@ -129,20 +129,20 @@
   .header-title .sub {
     color: rgba(255, 255, 255, 0.35);
     font-weight: 400;
-    margin-left: 5px;
+    margin-left: 4px;
   }
 
   .btn-close {
-    width: 18px;
-    height: 18px;
+    width: 17px;
+    height: 17px;
     display: flex;
     align-items: center;
     justify-content: center;
     background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.07);
+    border: 0.5px solid rgba(255, 255, 255, 0.08);
     border-radius: 50%;
     color: rgba(255, 255, 255, 0.4);
-    font-size: 10px;
+    font-size: 9px;
     line-height: 1;
     cursor: pointer;
     transition: all 0.18s ease;
@@ -160,7 +160,7 @@
     flex: 1;
     display: none;
     flex-direction: column;
-    padding: 0 16px 14px;
+    padding: 0 14px 12px;
     position: relative;
     z-index: 2;
     min-height: 0;
@@ -168,7 +168,7 @@
 
   .phase.active {
     display: flex;
-    animation: fadeIn 0.28s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    animation: fadeIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
   }
 
   @keyframes fadeIn {
@@ -180,33 +180,33 @@
   .layout-grid {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
-    gap: 6px;
+    gap: 5px;
     flex: 1;
     align-content: center;
   }
 
   .layout-card {
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    border-radius: 9px;
-    padding: 8px 6px 6px;
+    background: rgba(255, 255, 255, 0.025);
+    border: 0.5px solid rgba(255, 255, 255, 0.07);
+    border-radius: 7px;
+    padding: 7px 5px 5px;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 5px;
+    gap: 4px;
     cursor: pointer;
     transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
     position: relative;
     overflow: hidden;
-    height: 68px;
+    height: 64px;
   }
 
   .layout-card:hover {
     background: rgba(160, 130, 255, 0.12);
-    border-color: rgba(180, 150, 255, 0.32);
-    transform: translateY(-1.5px);
-    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+    border-color: rgba(180, 150, 255, 0.35);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
   }
 
   .layout-card:active {
@@ -216,7 +216,7 @@
 
   .layout-preview {
     width: 100%;
-    height: 30px;
+    height: 28px;
   }
 
   .zone {
@@ -237,9 +237,9 @@
   }
 
   .layout-name {
-    font-size: 9px;
+    font-size: 8.5px;
     font-weight: 500;
-    color: rgba(255, 255, 255, 0.6);
+    color: rgba(255, 255, 255, 0.55);
     letter-spacing: 0.01em;
     transition: color 0.2s ease;
     white-space: nowrap;
@@ -254,21 +254,21 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 8px;
+    margin-bottom: 6px;
   }
 
   .back-btn {
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 3px;
     background: none;
     border: none;
     color: rgba(255, 255, 255, 0.5);
-    font-size: 10px;
+    font-size: 9.5px;
     font-weight: 500;
     cursor: pointer;
-    padding: 3px 5px;
-    border-radius: 5px;
+    padding: 2px 4px;
+    border-radius: 4px;
     transition: all 0.18s ease;
     font-family: inherit;
   }
@@ -279,44 +279,76 @@
   }
 
   .assign-hint {
-    font-size: 8.5px;
-    color: rgba(180, 150, 255, 0.7);
+    font-size: 8px;
+    color: rgba(180, 150, 255, 0.65);
     font-weight: 500;
     letter-spacing: 0.03em;
     text-transform: uppercase;
   }
 
-  /* ── Layout Preview with drop zones ── */
-  .preview-container {
-    background: rgba(0, 0, 0, 0.25);
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    border-radius: 8px;
-    padding: 8px;
+  /* ── Maximize mode banner ── */
+  .maximize-banner {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 6px 10px;
+    margin-bottom: 6px;
+    background: rgba(160, 130, 255, 0.08);
+    border: 0.5px solid rgba(180, 150, 255, 0.2);
+    border-radius: 6px;
+    font-size: 9px;
+    color: rgba(230, 215, 255, 0.85);
+    font-weight: 500;
+  }
+
+  .maximize-banner.visible {
+    display: flex;
+  }
+
+  .maximize-banner .mode-icon {
+    width: 12px;
+    height: 12px;
+    border-radius: 3px;
+    border: 1px solid rgba(180, 150, 255, 0.5);
     display: flex;
     align-items: center;
     justify-content: center;
-    height: 90px;
-    margin-bottom: 8px;
+    font-size: 7px;
+    flex-shrink: 0;
+  }
+
+  /* ── Layout Preview with drop zones ── */
+  .preview-container {
+    background: rgba(0, 0, 0, 0.25);
+    border: 0.5px solid rgba(255, 255, 255, 0.07);
+    border-radius: 6px;
+    padding: 7px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 85px;
+    margin-bottom: 6px;
   }
 
   .preview-grid {
     display: grid;
-    gap: 4px;
+    gap: 3px;
     width: 100%;
     height: 100%;
   }
 
   .drop-zone {
-    background: rgba(255, 255, 255, 0.04);
-    border: 1.5px dashed rgba(255, 255, 255, 0.15);
-    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.035);
+    border: 1px dashed rgba(255, 255, 255, 0.15);
+    border-radius: 5px;
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 4px 6px;
-    font-size: 9px;
+    padding: 3px 5px;
+    font-size: 8.5px;
     font-weight: 600;
-    color: rgba(255, 255, 255, 0.35);
+    color: rgba(255, 255, 255, 0.3);
     transition: all 0.2s ease;
     text-align: center;
     line-height: 1.15;
@@ -328,16 +360,16 @@
 
   .drop-zone.assigned {
     background: linear-gradient(135deg,
-      rgba(160, 130, 255, 0.22) 0%,
-      rgba(120, 90, 220, 0.15) 100%);
-    border: 1.5px solid rgba(180, 150, 255, 0.42);
-    color: rgba(230, 215, 255, 0.98);
+      rgba(160, 130, 255, 0.2) 0%,
+      rgba(120, 90, 220, 0.12) 100%);
+    border: 1px solid rgba(180, 150, 255, 0.4);
+    color: rgba(230, 215, 255, 0.95);
     font-weight: 500;
   }
 
   .drop-zone.drag-over {
     background: rgba(180, 150, 255, 0.28);
-    border: 1.5px solid rgba(200, 170, 255, 0.7);
+    border: 1px solid rgba(200, 170, 255, 0.7);
     color: rgba(255, 255, 255, 1);
     transform: scale(1.02);
   }
@@ -346,13 +378,13 @@
     display: inline-block;
     background: rgba(180, 150, 255, 0.4);
     color: #fff;
-    width: 14px;
-    height: 14px;
+    width: 13px;
+    height: 13px;
     border-radius: 50%;
-    font-size: 8.5px;
+    font-size: 8px;
     font-weight: 700;
-    line-height: 14px;
-    margin-right: 4px;
+    line-height: 13px;
+    margin-right: 3px;
     flex-shrink: 0;
   }
 
@@ -363,10 +395,10 @@
   /* ── Draggable window pills ── */
   .apps-scroll {
     display: flex;
-    gap: 5px;
+    gap: 4px;
     flex-wrap: wrap;
     align-content: flex-start;
-    max-height: 60px;
+    max-height: 55px;
     overflow-y: auto;
     padding: 2px;
     scrollbar-width: thin;
@@ -385,18 +417,18 @@
   .app-pill {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 12px;
-    padding: 4px 10px;
-    font-size: 10px;
+    gap: 4px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 0.5px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    padding: 3px 8px;
+    font-size: 9.5px;
     font-weight: 500;
-    color: rgba(255, 255, 255, 0.75);
+    color: rgba(255, 255, 255, 0.7);
     cursor: grab;
     transition: all 0.16s ease;
     white-space: nowrap;
-    max-width: 130px;
+    max-width: 125px;
     overflow: hidden;
     text-overflow: ellipsis;
   }
@@ -425,8 +457,8 @@
   }
 
   .app-pill .dot-indicator {
-    width: 5px;
-    height: 5px;
+    width: 4px;
+    height: 4px;
     border-radius: 50%;
     background: rgba(180, 150, 255, 0.8);
     flex-shrink: 0;
@@ -437,13 +469,13 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-top: 10px;
-    padding-top: 8px;
-    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    margin-top: 8px;
+    padding-top: 7px;
+    border-top: 0.5px solid rgba(255, 255, 255, 0.06);
   }
 
   .action-status {
-    font-size: 9px;
+    font-size: 8.5px;
     color: rgba(255, 255, 255, 0.35);
     letter-spacing: 0.02em;
   }
@@ -451,32 +483,32 @@
   .btn-apply {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
-    padding: 6px 14px;
+    gap: 4px;
+    padding: 5px 12px;
     background: linear-gradient(135deg,
-      rgba(160, 130, 255, 0.32) 0%,
-      rgba(120, 90, 220, 0.26) 100%);
-    border: 1px solid rgba(180, 150, 255, 0.38);
-    border-radius: 7px;
-    color: rgba(240, 230, 255, 0.98);
+      rgba(160, 130, 255, 0.3) 0%,
+      rgba(120, 90, 220, 0.22) 100%);
+    border: 0.5px solid rgba(180, 150, 255, 0.35);
+    border-radius: 6px;
+    color: rgba(240, 230, 255, 0.95);
     font-family: inherit;
-    font-size: 10px;
+    font-size: 9.5px;
     font-weight: 600;
     letter-spacing: 0.01em;
     cursor: pointer;
     transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
     box-shadow:
-      0 3px 10px rgba(120, 90, 220, 0.22),
-      inset 0 1px 0 rgba(255, 255, 255, 0.1);
+      0 2px 8px rgba(120, 90, 220, 0.2),
+      inset 0 0.5px 0 rgba(255, 255, 255, 0.1);
   }
 
   .btn-apply:hover:not(:disabled) {
     background: linear-gradient(135deg,
-      rgba(180, 150, 255, 0.48) 0%,
-      rgba(140, 110, 240, 0.4) 100%);
+      rgba(180, 150, 255, 0.45) 0%,
+      rgba(140, 110, 240, 0.38) 100%);
     border-color: rgba(200, 170, 255, 0.55);
     transform: translateY(-1px);
-    box-shadow: 0 5px 14px rgba(140, 110, 240, 0.32);
+    box-shadow: 0 4px 12px rgba(140, 110, 240, 0.3);
   }
 
   .btn-apply:active:not(:disabled) {
@@ -490,8 +522,8 @@
   }
 
   .btn-apply svg {
-    width: 10px;
-    height: 10px;
+    width: 9px;
+    height: 9px;
   }
 </style>
 </head>
@@ -515,49 +547,49 @@
     <div class="layout-grid">
       <div class="layout-card" onclick="selectLayout('maximize', 1)">
         <svg class="layout-preview" viewBox="0 0 60 30">
-          <rect class="zone zone-accent" x="1" y="1" width="58" height="28" rx="2.5"/>
+          <rect class="zone zone-accent" x="1" y="1" width="58" height="28" rx="2"/>
         </svg>
         <div class="layout-name">Maximize</div>
       </div>
 
       <div class="layout-card" onclick="selectLayout('split_vertical', 2)">
         <svg class="layout-preview" viewBox="0 0 60 30">
-          <rect class="zone" x="1"  y="1" width="28" height="28" rx="2.5"/>
-          <rect class="zone" x="31" y="1" width="28" height="28" rx="2.5"/>
+          <rect class="zone" x="1"  y="1" width="28" height="28" rx="2"/>
+          <rect class="zone" x="31" y="1" width="28" height="28" rx="2"/>
         </svg>
         <div class="layout-name">Split ↔</div>
       </div>
 
       <div class="layout-card" onclick="selectLayout('split_horizontal', 2)">
         <svg class="layout-preview" viewBox="0 0 60 30">
-          <rect class="zone" x="1" y="1"  width="58" height="13" rx="2.5"/>
-          <rect class="zone" x="1" y="16" width="58" height="13" rx="2.5"/>
+          <rect class="zone" x="1" y="1"  width="58" height="13" rx="2"/>
+          <rect class="zone" x="1" y="16" width="58" height="13" rx="2"/>
         </svg>
         <div class="layout-name">Stack ↕</div>
       </div>
 
       <div class="layout-card" onclick="selectLayout('grid', 4)">
         <svg class="layout-preview" viewBox="0 0 60 30">
-          <rect class="zone" x="1"  y="1"  width="28" height="13" rx="2"/>
-          <rect class="zone" x="31" y="1"  width="28" height="13" rx="2"/>
-          <rect class="zone" x="1"  y="16" width="28" height="13" rx="2"/>
-          <rect class="zone" x="31" y="16" width="28" height="13" rx="2"/>
+          <rect class="zone" x="1"  y="1"  width="28" height="13" rx="1.5"/>
+          <rect class="zone" x="31" y="1"  width="28" height="13" rx="1.5"/>
+          <rect class="zone" x="1"  y="16" width="28" height="13" rx="1.5"/>
+          <rect class="zone" x="31" y="16" width="28" height="13" rx="1.5"/>
         </svg>
         <div class="layout-name">2×2 Grid</div>
       </div>
 
       <div class="layout-card" onclick="selectLayout('stack', 3)">
         <svg class="layout-preview" viewBox="0 0 60 30">
-          <rect class="zone zone-accent" x="1" y="1" width="28" height="28" rx="2.5"/>
-          <rect class="zone" x="31" y="1"  width="28" height="13" rx="2"/>
-          <rect class="zone" x="31" y="16" width="28" height="13" rx="2"/>
+          <rect class="zone zone-accent" x="1" y="1" width="28" height="28" rx="2"/>
+          <rect class="zone" x="31" y="1"  width="28" height="13" rx="1.5"/>
+          <rect class="zone" x="31" y="16" width="28" height="13" rx="1.5"/>
         </svg>
         <div class="layout-name">Focus + 2</div>
       </div>
 
       <div class="layout-card" onclick="selectLayout('minimize_others', 1)">
         <svg class="layout-preview" viewBox="0 0 60 30">
-          <rect class="zone zone-accent" x="1" y="1" width="58" height="28" rx="2.5"/>
+          <rect class="zone zone-accent" x="1" y="1" width="58" height="28" rx="2"/>
         </svg>
         <div class="layout-name">Solo Focus</div>
       </div>
@@ -568,13 +600,19 @@
   <div class="phase" id="phase2">
     <div class="assign-topbar">
       <button class="back-btn" onclick="backToPhase1()">
-        <svg width="9" height="9" viewBox="0 0 10 10" fill="none">
+        <svg width="8" height="8" viewBox="0 0 10 10" fill="none">
           <path d="M6.5 2L3.5 5l3 3" stroke="currentColor" stroke-width="1.5"
                 stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
         Back
       </button>
-      <div class="assign-hint">Drag apps into zones</div>
+      <div class="assign-hint" id="assignHint">Drag apps into zones</div>
+    </div>
+
+    <!-- Maximize mode banner (shown only for maximize layout) -->
+    <div class="maximize-banner" id="maximizeBanner">
+      <span class="mode-icon" id="maximizeIcon">⬜</span>
+      <span id="maximizeText">No app selected → will maximize ALL windows</span>
     </div>
 
     <div class="preview-container">
@@ -602,11 +640,11 @@
   let _allWindows     = [];
   let _selectedLayout = null;
   let _slotCount      = 0;
-  let _assignments    = {};   // slotIdx -> hwnd
+  let _assignments    = {};
   let _isRetracting   = false;
 
   const LAYOUT_META = {
-    maximize:         { name: 'Maximize',    grid: [[1]],                              labels: ['All'] },
+    maximize:         { name: 'Maximize',    grid: [[1]],                              labels: ['One app'] },
     split_vertical:   { name: 'Split ↔',     grid: [[1, 2]],                          labels: ['Left', 'Right'] },
     split_horizontal: { name: 'Split ↕',     grid: [[1], [2]],                        labels: ['Top', 'Bottom'] },
     grid:             { name: '2×2 Grid',    grid: [[1, 2], [3, 4]],                  labels: ['↖', '↗', '↙', '↘'] },
@@ -614,14 +652,11 @@
     minimize_others:  { name: 'Solo Focus',  grid: [[1]],                              labels: ['Keep Open'] },
   };
 
-  // ══════════════════════════════════════════════════════════════════
   function applyData(data) {
     _windows      = data.windows    || [];
     _allWindows   = data.allWindows || [];
     _isRetracting = false;
-
     resetToPhase1();
-
     const card = document.getElementById('card');
     card.classList.remove('show', 'hiding');
     void card.offsetWidth;
@@ -630,7 +665,6 @@
 
   window.__applyArrangementData = applyData;
 
-  // ══════════════════════════════════════════════════════════════════
   function resetToPhase1() {
     _selectedLayout = null;
     _slotCount = 0;
@@ -646,10 +680,20 @@
     _assignments    = {};
 
     const meta = LAYOUT_META[layout];
-
     document.getElementById('phase1').classList.remove('active');
     document.getElementById('phase2').classList.add('active');
     document.getElementById('phaseSubtitle').textContent = meta.name;
+
+    // Maximize banner
+    const banner = document.getElementById('maximizeBanner');
+    if (layout === 'maximize') {
+      banner.classList.add('visible');
+      updateMaximizeBanner();
+      document.getElementById('assignHint').textContent = 'Optional: drag one app to maximize only it';
+    } else {
+      banner.classList.remove('visible');
+      document.getElementById('assignHint').textContent = 'Drag apps into zones';
+    }
 
     buildPreviewGrid(meta);
     buildAppsPool();
@@ -657,90 +701,70 @@
     updateActionStatus();
   }
 
-  function backToPhase1() {
-    resetToPhase1();
+  function backToPhase1() { resetToPhase1(); }
+
+  function updateMaximizeBanner() {
+    const icon = document.getElementById('maximizeIcon');
+    const text = document.getElementById('maximizeText');
+    const count = Object.keys(_assignments).length;
+    if (count > 0) {
+      icon.textContent = '🎯';
+      text.textContent = 'Will maximize ONLY the selected app';
+    } else {
+      icon.textContent = '⬜';
+      const total = [...new Set([..._windows, ..._allWindows].map(w => w.hwnd))].length;
+      text.textContent = `No app selected → will maximize ALL ${total} windows`;
+    }
   }
 
-  // ══════════════════════════════════════════════════════════════════
   function cleanTitle(t) {
     if (!t) return 'Window';
     let title = t.trim();
-
-    // Strip trailing app name after dash
     const parts = title.split(/\s+[-–—|]\s+/);
     if (parts.length > 1) {
-      // pick the fragment most likely to be document/window name (longest)
       title = [...parts].sort((a, b) => b.length - a.length)[0];
     }
-
     return title.length > 20 ? title.substring(0, 18) + '…' : title;
   }
 
   function buildPreviewGrid(meta) {
     const container = document.getElementById('previewGrid');
     container.innerHTML = '';
-
     const grid = meta.grid;
     const rows = grid.length;
     const cols = Math.max(...grid.map(r => r.length));
-
     container.style.gridTemplateRows    = `repeat(${rows}, 1fr)`;
     container.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
-
-    // Track cells added to avoid duplicates for spanning zones (e.g. Focus + 2)
     const placedZones = new Set();
 
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < cols; c++) {
         const zoneNum = grid[r][c];
         if (!zoneNum || placedZones.has(zoneNum)) continue;
-
         const zoneIdx = zoneNum - 1;
-
-        // Calculate span
-        let rowSpan = 1;
-        let colSpan = 1;
+        let rowSpan = 1, colSpan = 1;
         for (let rr = r + 1; rr < rows; rr++) {
-          if (grid[rr] && grid[rr][c] === zoneNum) rowSpan++;
-          else break;
+          if (grid[rr] && grid[rr][c] === zoneNum) rowSpan++; else break;
         }
         for (let cc = c + 1; cc < cols; cc++) {
-          if (grid[r][cc] === zoneNum) colSpan++;
-          else break;
+          if (grid[r][cc] === zoneNum) colSpan++; else break;
         }
-
         const zone = document.createElement('div');
         zone.className = 'drop-zone';
         zone.dataset.slotIndex = zoneIdx;
         zone.style.gridRow    = `${r + 1} / span ${rowSpan}`;
         zone.style.gridColumn = `${c + 1} / span ${colSpan}`;
+        zone.innerHTML = `<span class="zone-num">${zoneNum}</span><span class="zone-label">${meta.labels[zoneIdx] || ''}</span>`;
 
-        zone.innerHTML = `
-          <span class="zone-num">${zoneNum}</span>
-          <span class="zone-label">${meta.labels[zoneIdx] || ''}</span>
-        `;
-
-        // Drag/drop handlers
-        zone.addEventListener('dragover', (e) => {
-          e.preventDefault();
-          zone.classList.add('drag-over');
-        });
-        zone.addEventListener('dragleave', () => {
-          zone.classList.remove('drag-over');
-        });
+        zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.classList.add('drag-over'); });
+        zone.addEventListener('dragleave', () => { zone.classList.remove('drag-over'); });
         zone.addEventListener('drop', (e) => {
           e.preventDefault();
           zone.classList.remove('drag-over');
           const hwnd = e.dataTransfer.getData('text/plain');
           if (hwnd) assignToSlot(zoneIdx, parseInt(hwnd, 10));
         });
-        // Click to unassign
-        zone.addEventListener('click', () => {
-          if (_assignments[zoneIdx]) {
-            unassignSlot(zoneIdx);
-          }
-        });
-
+        zone.addEventListener('click', () => { if (_assignments[zoneIdx]) unassignSlot(zoneIdx); });
         container.appendChild(zone);
         placedZones.add(zoneNum);
       }
@@ -750,140 +774,114 @@
   function buildAppsPool() {
     const scroll = document.getElementById('appsScroll');
     scroll.innerHTML = '';
-
-    // Combine triggered + all windows, dedupe
     const seen = new Set();
     const pool = [];
     [..._windows, ..._allWindows].forEach(w => {
-      if (!seen.has(w.hwnd)) {
-        seen.add(w.hwnd);
-        pool.push(w);
-      }
+      if (!seen.has(w.hwnd)) { seen.add(w.hwnd); pool.push(w); }
     });
-
     pool.forEach(w => {
       const pill = document.createElement('div');
       pill.className = 'app-pill';
       pill.draggable = true;
       pill.dataset.hwnd = w.hwnd;
-      pill.innerHTML = `
-        <span class="dot-indicator"></span>
-        <span>${cleanTitle(w.title || w.exe)}</span>
-      `;
-
+      pill.innerHTML = `<span class="dot-indicator"></span><span>${cleanTitle(w.title || w.exe)}</span>`;
       pill.addEventListener('dragstart', (e) => {
         e.dataTransfer.setData('text/plain', String(w.hwnd));
         e.dataTransfer.effectAllowed = 'move';
         pill.classList.add('dragging');
       });
-      pill.addEventListener('dragend', () => {
-        pill.classList.remove('dragging');
-      });
-
+      pill.addEventListener('dragend', () => { pill.classList.remove('dragging'); });
       scroll.appendChild(pill);
     });
   }
 
   function autoAssignDefault() {
-    // Pre-fill slots with the first N triggered windows
+    if (_selectedLayout === 'maximize') return;
     const zones = document.querySelectorAll('.drop-zone');
     zones.forEach((zone, i) => {
-      if (i < _windows.length) {
-        assignToSlot(i, _windows[i].hwnd);
-      }
+      if (i < _windows.length) assignToSlot(i, _windows[i].hwnd);
     });
   }
 
   function assignToSlot(slotIdx, hwnd) {
-    // If this hwnd already assigned elsewhere, remove that first
     for (const [sIdx, h] of Object.entries(_assignments)) {
-      if (h === hwnd && parseInt(sIdx, 10) !== slotIdx) {
-        unassignSlot(parseInt(sIdx, 10));
-      }
+      if (h === hwnd && parseInt(sIdx, 10) !== slotIdx) unassignSlot(parseInt(sIdx, 10));
     }
-
     _assignments[slotIdx] = hwnd;
-
-    // Update UI
     const zone = document.querySelector(`.drop-zone[data-slot-index="${slotIdx}"]`);
     if (zone) {
       const win = [..._windows, ..._allWindows].find(w => w.hwnd === hwnd);
       const label = win ? cleanTitle(win.title || win.exe) : 'Assigned';
-      const meta  = LAYOUT_META[_selectedLayout];
-      const zoneNum = slotIdx + 1;
-
       zone.classList.add('assigned');
-      zone.innerHTML = `
-        <span class="zone-num">${zoneNum}</span>
-        <span class="zone-label">${label}</span>
-      `;
+      zone.innerHTML = `<span class="zone-num">${slotIdx + 1}</span><span class="zone-label">${label}</span>`;
     }
-
     updatePillStates();
     updateActionStatus();
+    if (_selectedLayout === 'maximize') updateMaximizeBanner();
   }
 
   function unassignSlot(slotIdx) {
     delete _assignments[slotIdx];
-
     const zone = document.querySelector(`.drop-zone[data-slot-index="${slotIdx}"]`);
     if (zone) {
       const meta = LAYOUT_META[_selectedLayout];
-      const zoneNum = slotIdx + 1;
       zone.classList.remove('assigned');
-      zone.innerHTML = `
-        <span class="zone-num">${zoneNum}</span>
-        <span class="zone-label">${meta.labels[slotIdx] || ''}</span>
-      `;
+      zone.innerHTML = `<span class="zone-num">${slotIdx + 1}</span><span class="zone-label">${meta.labels[slotIdx] || ''}</span>`;
     }
-
     updatePillStates();
     updateActionStatus();
+    if (_selectedLayout === 'maximize') updateMaximizeBanner();
   }
 
   function updatePillStates() {
     const assignedHwnds = new Set(Object.values(_assignments));
     document.querySelectorAll('.app-pill').forEach(pill => {
       const h = parseInt(pill.dataset.hwnd, 10);
-      if (assignedHwnds.has(h)) {
-        pill.classList.add('assigned');
-      } else {
-        pill.classList.remove('assigned');
-      }
+      pill.classList.toggle('assigned', assignedHwnds.has(h));
     });
   }
 
   function updateActionStatus() {
     const count = Object.keys(_assignments).length;
     const total = _slotCount;
-    document.getElementById('actionStatus').textContent =
-      `${count} of ${total} assigned`;
-    document.getElementById('applyBtn').disabled = (count === 0);
+    const status = document.getElementById('actionStatus');
+    const btn = document.getElementById('applyBtn');
+
+    if (_selectedLayout === 'maximize') {
+      status.textContent = count === 0 ? 'Apply = Maximize All' : 'Apply = Maximize selected';
+      btn.disabled = false;
+      return;
+    }
+    status.textContent = `${count} of ${total} assigned`;
+    btn.disabled = (count === 0);
   }
 
-  // ══════════════════════════════════════════════════════════════════
   function applyArrangement() {
-    const hwnd_list = [];
-    // Order by slot index
-    for (let i = 0; i < _slotCount; i++) {
-      if (_assignments[i]) {
-        hwnd_list.push(_assignments[i]);
+    const all = [..._windows, ..._allWindows];
+    let hwnd_list = [];
+
+    if (_selectedLayout === 'maximize') {
+      if (Object.keys(_assignments).length > 0) {
+        for (let i = 0; i < _slotCount; i++) {
+          if (_assignments[i]) hwnd_list.push(_assignments[i]);
+        }
+      } else {
+        hwnd_list = [...new Set(all.map(w => w.hwnd))];
+      }
+    } else {
+      for (let i = 0; i < _slotCount; i++) {
+        if (_assignments[i]) hwnd_list.push(_assignments[i]);
       }
     }
 
     if (hwnd_list.length === 0) return;
 
-    const all = [..._windows, ..._allWindows];
     const selectedSet = new Set(hwnd_list.map(Number));
-    const minimize_hwnds = [...new Set(
-      all.map(w => w.hwnd).filter(h => !selectedSet.has(Number(h)))
-    )];
+    const minimize_hwnds = (_selectedLayout === 'minimize_others')
+      ? [...new Set(all.map(w => w.hwnd).filter(h => !selectedSet.has(Number(h))))]
+      : [];
 
-    const payload = {
-      layout: _selectedLayout,
-      hwnd_list,
-      minimize_hwnds
-    };
+    const payload = { layout: _selectedLayout, hwnd_list, minimize_hwnds };
 
     try {
       if (window.electronAPI && window.electronAPI.applyLayout) {
@@ -892,38 +890,25 @@
     } catch (e) {
       console.error('applyLayout failed:', e);
     }
-
     retract();
   }
 
-  // ══════════════════════════════════════════════════════════════════
   function retract() {
     if (_isRetracting) return;
     _isRetracting = true;
-
     const card = document.getElementById('card');
     card.classList.remove('show');
     card.classList.add('hiding');
-
     setTimeout(() => {
-      if (window.electronAPI && window.electronAPI.close) {
-        window.electronAPI.close();
-      }
-    }, 320);
+      if (window.electronAPI && window.electronAPI.close) window.electronAPI.close();
+    }, 300);
   }
 
-  // Click on transparent area outside card = dismiss
   document.body.addEventListener('mousedown', (e) => {
-    const card = document.getElementById('card');
-    if (!card.contains(e.target)) {
-      retract();
-    }
+    if (!document.getElementById('card').contains(e.target)) retract();
   });
 
-  // Escape key dismisses
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') retract();
-  });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') retract(); });
 </script>
 </body>
 </html>
