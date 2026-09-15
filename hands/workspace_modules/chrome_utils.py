@@ -172,15 +172,13 @@ def browser_profile_matches_window(saved_cfg: dict,
 
 def get_open_chrome_tabs() -> tuple:
     """
-    Get all currently open Chrome tab URLs.
+    Get all currently open Chrome tab URLs (flat, all profiles combined).
     Returns (open_urls: set, open_domains: set).
-    Mode 1: Chrome extension via Seven backend.
-    Mode 2: Chrome DevTools Protocol on port 9222.
+    Used as a fallback when per-profile data is unavailable.
     """
     open_urls    = set()
     open_domains = set()
 
-    # Mode 1: Chrome extension
     try:
         from backend.routes.chrome import get_tabs_by_profile
         profile_tabs = get_tabs_by_profile()
@@ -189,10 +187,8 @@ def get_open_chrome_tabs() -> tuple:
                 for t in tabs:
                     url = t.get("url", "")
                     if url and url.startswith("http"):
-                        norm   = normalize_url(url)
-                        domain = extract_domain(url)
-                        open_urls.add(norm)
-                        open_domains.add(domain)
+                        open_urls.add(normalize_url(url))
+                        open_domains.add(extract_domain(url))
             if open_urls:
                 print(Fore.CYAN + f"[WORKSPACE] Chrome tabs via extension: "
                       f"{len(open_urls)} URLs, "
@@ -201,7 +197,6 @@ def get_open_chrome_tabs() -> tuple:
     except Exception:
         pass
 
-    # Mode 2: DevTools Protocol
     import socket as _socket
     try:
         _s = _socket.create_connection(("127.0.0.1", 9222), timeout=0.1)
@@ -217,10 +212,8 @@ def get_open_chrome_tabs() -> tuple:
         for tab in tabs_data:
             url = tab.get("url", "")
             if url and url.startswith("http"):
-                norm   = normalize_url(url)
-                domain = extract_domain(url)
-                open_urls.add(norm)
-                open_domains.add(domain)
+                open_urls.add(normalize_url(url))
+                open_domains.add(extract_domain(url))
         if open_urls:
             print(Fore.CYAN + f"[WORKSPACE] Chrome tabs via DevTools: "
                   f"{len(open_urls)} URLs, "
@@ -229,3 +222,38 @@ def get_open_chrome_tabs() -> tuple:
         pass
 
     return open_urls, open_domains
+
+
+def get_open_chrome_tabs_per_profile() -> dict:
+    """
+    Get currently open Chrome tab URLs grouped by profile.
+    Returns dict: { profile_name_lower: set(normalized_urls) }
+
+    This is the AUTHORITATIVE function for per-profile deduplication.
+    A tab open in Profile A will NOT prevent restoration in Profile B.
+    """
+    profile_url_map = {}
+
+    try:
+        from backend.routes.chrome import get_tabs_by_profile
+        profile_tabs = get_tabs_by_profile()
+        if profile_tabs:
+            for prof_key, tabs in profile_tabs.items():
+                pk = prof_key.strip().lower()
+                url_set = set()
+                for t in tabs:
+                    url = t.get("url", "")
+                    if url and url.startswith("http"):
+                        url_set.add(normalize_url(url))
+                if url_set:
+                    profile_url_map[pk] = url_set
+
+            if profile_url_map:
+                total = sum(len(v) for v in profile_url_map.values())
+                print(Fore.CYAN + f"[WORKSPACE] Chrome per-profile: "
+                      f"{len(profile_url_map)} profiles, {total} total URLs")
+                return profile_url_map
+    except Exception as e:
+        print(Fore.YELLOW + f"[WORKSPACE] Per-profile tab check failed: {e}")
+
+    return profile_url_map
