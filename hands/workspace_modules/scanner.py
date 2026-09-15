@@ -4,6 +4,7 @@ Desktop scanner — enumerates all visible user-opened windows.
 Classifies each into an app config dict.
 Captures exact coordinates and maximized state.
 """
+import os
 import time
 from colorama import Fore
 
@@ -111,6 +112,20 @@ def scan_current():
             pass
 
     win32gui.EnumWindows(_cb, None)
+
+    # Post-scan: filter phantom UWP apps that slipped through
+    _phantom_uwp_exes = {
+        "winstore.app.exe", "xboxapp.exe", "xboxpcapp.exe",
+        "xboxgameoverlay.exe", "xboxgamingoverlay.exe",
+    }
+    apps = [
+        a for a in apps
+        if not (
+            a.get("type") == "uwp"
+            and os.path.basename(a.get("exe_path", "")).lower() in _phantom_uwp_exes
+            and (a.get("window") or {}).get("width", 999) < 400
+        )
+    ]
 
     from hands.workspace_modules.enrichment import (
         enrich_chrome, enrich_vscode, enrich_explorer
