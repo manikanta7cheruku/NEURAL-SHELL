@@ -180,6 +180,24 @@ def _restore_browser(cfg):
     _launch_chrome_tabs(chrome_exe, profile_dir, missing_urls)
 
 
+def _launch_chrome_tabs(chrome_exe, profile_dir, urls):
+    """Launch Chrome with the given profile directory and batch of URLs."""
+    if not urls:
+        return
+    try:
+        cmd = [chrome_exe, f"--profile-directory={profile_dir}"] + urls
+        subprocess.Popen(cmd)
+    except Exception as e:
+        print(Fore.RED + f"  [-] Failed to batch launch Chrome tabs: {e}")
+        # Fallback to standard handler for each URL if batch execution fails
+        for url in urls:
+            try:
+                os.startfile(url)
+                time.sleep(0.2)
+            except Exception:
+                pass
+
+
 def _restore_explorer(cfg):
     folder = cfg.get("folder_path", "")
     name   = cfg.get("name", "")
@@ -201,6 +219,25 @@ def _restore_explorer(cfg):
             return
 
     subprocess.Popen(["explorer"])
+
+
+def _restore_vscode(cfg):
+    """Restore VS Code workspace session cleanly."""
+    ws = cfg.get("workspace_path", "")
+    exe = cfg.get("exe_path", "")
+    if ws and os.path.exists(ws):
+        if exe and os.path.exists(exe):
+            try:
+                subprocess.Popen([exe, ws])
+                return
+            except Exception:
+                pass
+        try:
+            os.startfile(ws)
+            return
+        except Exception:
+            pass
+    _restore_generic(cfg)
 
 
 def _restore_editor(cfg):
