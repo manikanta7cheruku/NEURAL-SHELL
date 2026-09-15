@@ -40,7 +40,9 @@ def has_taskbar_presence(hwnd: int) -> bool:
     try:
         import win32gui
         import win32con
+        import win32process
         import ctypes
+        import psutil
 
         title = win32gui.GetWindowText(hwnd)
         if not title or not title.strip():
@@ -51,6 +53,51 @@ def has_taskbar_presence(hwnd: int) -> bool:
 
         if not win32gui.IsWindowVisible(hwnd):
             return False
+
+        # Strictly block typical Windows 10/11 phantom background apps
+        title_lower = title.strip().lower()
+        ignore_titles = {
+            "microsoft store", "xbox", "settings", "calculator",
+            "movies & tv", "task view", "program manager", "photos", "camera",
+            "xbox game bar", "game bar", "windows security",
+            "cortana", "search", "action center", "notification center",
+        }
+        if title_lower in ignore_titles:
+            return False
+
+        # Block phantom UWP windows by exe name + small size heuristic.
+        # UWP apps like Microsoft Store and Xbox create invisible warm-up
+        # windows that pass DWM cloak checks on Windows 11.
+        try:
+            _, _pid = win32process.GetWindowThreadProcessId(hwnd)
+            _proc = psutil.Process(_pid)
+            _exe = _proc.name().lower()
+            _phantom_uwp = {
+                "winstore.app.exe", "xboxapp.exe", "xboxpcapp.exe",
+                "xboxgameoverlay.exe", "xboxgamingoverlay.exe",
+                "microsoft.photos.exe", "windowscamera.exe",
+                "skypeapp.exe", "microsoft.todos.exe",
+                "microsoft.windowsmaps.exe",
+                "microsoft.zunemusic.exe", "microsoft.zunevideo.exe",
+                "microsoft.windowscommunicationsapps.exe",
+                "microsoft.people.exe", "microsoft.stickynotes.exe",
+                "microsoft.msn.weather.exe",
+                "microsoft.windows.soundrecorder.exe",
+                "microsoft.windowsalarms.exe",
+            }
+            if _exe in _phantom_uwp:
+                rect = win32gui.GetWindowRect(hwnd)
+                w, h = rect[2] - rect[0], rect[3] - rect[1]
+                if w < 400 or h < 300:
+                    return False
+                # Check if process is suspended (UWP background state)
+                try:
+                    if _proc.status() == psutil.STATUS_STOPPED:
+                        return False
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
         ex_style = win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE)
         if ex_style & win32con.WS_EX_TOOLWINDOW:
