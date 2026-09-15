@@ -251,7 +251,8 @@ def _do_grid(handles, mx, my, mw, mh):
 def _do_stack(handles, mx, my, mw, mh):
     """
     Stack first 2 windows top and bottom.
-    If more than 2 — maximize the rest behind.
+    First window gets focus (brought to foreground).
+    If more than 2 — minimize the rest.
     """
     if len(handles) == 1:
         return _do_maximize(handles)
@@ -266,6 +267,14 @@ def _do_stack(handles, mx, my, mw, mh):
             win32gui.ShowWindow(hwnd, win32con.SW_MINIMIZE)
         except Exception:
             pass
+
+    # CRITICAL: Bring the focus window (first handle) to foreground.
+    # _place() uses SWP_NOACTIVATE so without this, the last-placed
+    # window stays on top — causing "Chrome instead of VSCode" bug.
+    try:
+        _safe_foreground(handles[0][0])
+    except Exception:
+        pass
 
     print(Fore.GREEN + f"[LAYOUT] Stack: {handles[0][1]} / {handles[1][1]}")
     return True, f"Stack: {handles[0][1]} and {handles[1][1]}"
@@ -398,6 +407,47 @@ def _restore_first(hwnd):
             time.sleep(0.08)
     except Exception:
         pass
+
+
+def _safe_foreground(hwnd):
+    """
+    Bring window to foreground using thread-attachment trick.
+    Bypasses Windows foreground lock restrictions.
+    """
+    try:
+        import ctypes
+        fg_hwnd = win32gui.GetForegroundWindow()
+        if fg_hwnd == hwnd:
+            return
+        fg_thread = win32process.GetWindowThreadProcessId(fg_hwnd)[0]
+        tgt_thread = win32process.GetWindowThreadProcessId(hwnd)[0]
+        cur_thread = win32api.GetCurrentThreadId()
+
+        try:
+            if fg_thread != cur_thread:
+                ctypes.windll.user32.AttachThreadInput(
+                    cur_thread, fg_thread, True
+                )
+            if tgt_thread != cur_thread and tgt_thread != fg_thread:
+                ctypes.windll.user32.AttachThreadInput(
+                    cur_thread, tgt_thread, True
+                )
+            win32gui.BringWindowToTop(hwnd)
+            ctypes.windll.user32.SetForegroundWindow(hwnd)
+        finally:
+            if fg_thread != cur_thread:
+                ctypes.windll.user32.AttachThreadInput(
+                    cur_thread, fg_thread, False
+                )
+            if tgt_thread != cur_thread and tgt_thread != fg_thread:
+                ctypes.windll.user32.AttachThreadInput(
+                    cur_thread, tgt_thread, False
+                )
+    except Exception:
+        try:
+            win32gui.BringWindowToTop(hwnd)
+        except Exception:
+            pass
 
 
 def _place(handle_tuple, x, y, w, h):
