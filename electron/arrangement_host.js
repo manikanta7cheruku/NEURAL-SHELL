@@ -80,8 +80,18 @@ app.whenReady().then(() => {
     }, 80);
   });
 
-  // Close handler
+  // Close handler from UI
   ipcMain.once('overlay-close', () => closeWin());
+
+  // Click outside anywhere on screen -> window loses focus (blur) -> close immediately
+  let blurEnabled = false;
+  setTimeout(() => { blurEnabled = true; }, 350); // Grace period to prevent immediate dismiss on show
+
+  win.on('blur', () => {
+    if (blurEnabled) {
+      closeWin();
+    }
+  });
 
   setTimeout(closeWin, 12000);
 
