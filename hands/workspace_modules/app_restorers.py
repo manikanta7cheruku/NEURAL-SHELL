@@ -59,9 +59,10 @@ def restore_one(cfg):
         # Restore window geometry (x, y, w, h, state)
         _restore_window_geometry(cfg, name)
 
-        print(Fore.GREEN + f"  [+] {name}")
     except Exception as e:
         print(Fore.RED + f"  [-] {name}: {e}")
+        import traceback
+        traceback.print_exc()
 
 
 def _has_visible_chrome_window():
