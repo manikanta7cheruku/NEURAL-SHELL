@@ -64,24 +64,47 @@ def restore_one(cfg):
         print(Fore.RED + f"  [-] {name}: {e}")
 
 
+def _has_visible_chrome_window():
+    """Check if there is at least one visible, non-minimized/normal Chrome window on screen."""
+    try:
+        import win32gui
+        import win32process
+        import psutil
+
+        found = []
+        def _cb(hwnd, _):
+            if not win32gui.IsWindowVisible(hwnd):
+                return
+            title = win32gui.GetWindowText(hwnd)
+            if not title or not title.strip():
+                return
+            try:
+                _, pid = win32process.GetWindowThreadProcessId(hwnd)
+                proc = psutil.Process(pid)
+                if proc.name().lower() == "chrome.exe":
+                    rect = win32gui.GetWindowRect(hwnd)
+                    w, h = rect[2] - rect[0], rect[3] - rect[1]
+                    if w > 200 and h > 200:
+                        found.append(hwnd)
+            except Exception:
+                pass
+
+        win32gui.EnumWindows(_cb, None)
+        return len(found) > 0
+    except Exception:
+        return False
+
+
 def _restore_browser(cfg):
     """
-    Restore Chrome/Edge tabs for a specific profile.
-
-    DEDUP STRATEGY (3 levels):
-      1. Chrome extension per-profile check (most accurate)
-      2. Global open URL check via extension/DevTools
-      3. Process-level profile check (is Chrome running with this profile?)
-
-    MULTI-PROFILE FIX:
-      Uses saved profile_dir from scan time to ensure tabs open
-      in the correct Chrome profile, not always Default.
+    Restore Chrome tabs for a specific profile without duplicating open tabs.
     """
     tabs              = cfg.get("tabs", [])
     urls              = [t["url"] for t in tabs if t.get("url", "").startswith("http")]
     profile_name      = cfg.get("profile_name", "")
     profile_dir_saved = cfg.get("profile_dir", "")
     is_partial        = cfg.get("_partial", False)
+    browser_closed    = cfg.get("_browser_closed", False)
     chrome_exe        = find_chrome_exe()
 
     if not urls:
@@ -93,30 +116,30 @@ def _restore_browser(cfg):
             time.sleep(0.2)
         return
 
-    # ── Resolve profile directory ──
+    # Resolve profile directory
     chrome_base = os.path.join(
         os.environ.get("LOCALAPPDATA", ""),
         "Google", "Chrome", "User Data"
     )
 
-    # Priority: saved profile_dir > resolve from profile_name > Default
-    if profile_dir_saved and os.path.isdir(
-        os.path.join(chrome_base, profile_dir_saved)
-    ):
+    if profile_dir_saved and os.path.isdir(os.path.join(chrome_base, profile_dir_saved)):
         profile_dir = profile_dir_saved
     else:
-        profile_dir = (
-            find_chrome_profile_dir(chrome_base, profile_name) or "Default"
-        )
+        profile_dir = find_chrome_profile_dir(chrome_base, profile_name) or "Default"
 
-    # ── If smart_restore already filtered tabs, trust it ──
-    if is_partial:
-        print(Fore.GREEN + f"[WORKSPACE] Chrome ({profile_name}): "
-              f"Opening {len(urls)} pre-filtered tab(s) in '{profile_dir}'")
+    # Case 1: Chrome was closed when scanned/restored -> Launch all URLs directly
+    if browser_closed or not _has_visible_chrome_window():
+        print(Fore.GREEN + f"[WORKSPACE] Launching Chrome profile '{profile_dir}' with {len(urls)} tab(s)")
         _launch_chrome_tabs(chrome_exe, profile_dir, urls)
         return
 
-    # ── Level 1: Per-profile URL check via Chrome extension ──
+    # Case 2: Smart restore already computed exact missing tabs
+    if is_partial:
+        print(Fore.GREEN + f"[WORKSPACE] Chrome ({profile_name}): Opening {len(urls)} missing tab(s) in '{profile_dir}'")
+        _launch_chrome_tabs(chrome_exe, profile_dir, urls)
+        return
+
+    # Case 3: Live Chrome window exists -> check extension tabs
     from hands.workspace_modules.url_matching import normalize_url
     open_urls = set()
 
@@ -135,7 +158,6 @@ def _restore_browser(cfg):
     except Exception:
         pass
 
-    # ── Level 2: Global URL check (all profiles combined) ──
     if not open_urls:
         try:
             from hands.workspace_modules.chrome_utils import get_open_chrome_tabs
@@ -145,94 +167,17 @@ def _restore_browser(cfg):
         except Exception:
             pass
 
-    # ── Filter missing URLs ──
     if open_urls:
         missing_urls = [u for u in urls if normalize_url(u) not in open_urls]
     else:
-        # ── Level 3: Process-level check ──
-        # Cannot verify URLs via extension or DevTools.
-        # If Chrome is already running with this profile, assume tabs
-        # are likely open (prevents duplication on re-trigger).
-        if _is_chrome_profile_running(profile_dir):
-            print(Fore.CYAN + f"[WORKSPACE] Chrome ({profile_name}): "
-                  f"Profile '{profile_dir}' already running, "
-                  f"skipping {len(urls)} tab(s) to avoid duplication")
-            return
         missing_urls = urls
-        print(Fore.YELLOW + f"[WORKSPACE] Chrome ({profile_name}): "
-              f"Cannot verify open tabs, opening {len(missing_urls)} URL(s)")
 
     if not missing_urls:
-        print(Fore.CYAN + f"[WORKSPACE] Chrome ({profile_name}): "
-              f"All {len(urls)} tabs already open — skipping")
+        print(Fore.CYAN + f"[WORKSPACE] Chrome ({profile_name}): All {len(urls)} tabs are already open")
         return
 
-    print(Fore.GREEN + f"[WORKSPACE] Chrome ({profile_name}): "
-          f"Opening {len(missing_urls)}/{len(urls)} tab(s) in '{profile_dir}'")
+    print(Fore.GREEN + f"[WORKSPACE] Chrome ({profile_name}): Opening {len(missing_urls)}/{len(urls)} missing tab(s)")
     _launch_chrome_tabs(chrome_exe, profile_dir, missing_urls)
-
-
-def _launch_chrome_tabs(chrome_exe, profile_dir, urls):
-    """Launch URLs in Chrome with the correct profile directory."""
-    if not urls:
-        return
-    # Launch all URLs in a single Chrome process for efficiency.
-    # Chrome opens them as tabs in the existing window for this profile.
-    cmd = [chrome_exe, f"--profile-directory={profile_dir}"] + urls
-    try:
-        subprocess.Popen(cmd)
-    except Exception as e:
-        print(Fore.YELLOW + f"[WORKSPACE] Chrome batch launch failed: {e}")
-        for u in urls:
-            try:
-                subprocess.Popen(
-                    [chrome_exe, f"--profile-directory={profile_dir}", u]
-                )
-                time.sleep(0.15)
-            except Exception:
-                pass
-
-
-def _is_chrome_profile_running(profile_dir):
-    """Check if Chrome is currently running with the given profile directory."""
-    try:
-        import psutil
-        for proc in psutil.process_iter(["name", "cmdline"]):
-            try:
-                if proc.info.get("name", "").lower() == "chrome.exe":
-                    cmdline = proc.info.get("cmdline") or []
-                    for arg in cmdline:
-                        if f"--profile-directory={profile_dir}" in arg:
-                            return True
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                continue
-    except Exception:
-        pass
-    return False
-
-
-def _restore_vscode(cfg):
-    ws  = cfg.get("workspace_path", "")
-    exe = cfg.get("exe_path", "")
-
-    if ws and os.path.exists(ws):
-        try:
-            subprocess.Popen(["code", ws])
-            return
-        except Exception:
-            pass
-
-    if exe and os.path.exists(exe):
-        try:
-            subprocess.Popen([exe])
-            return
-        except Exception:
-            pass
-
-    try:
-        subprocess.Popen("code", shell=True)
-    except Exception:
-        pass
 
 
 def _restore_explorer(cfg):
