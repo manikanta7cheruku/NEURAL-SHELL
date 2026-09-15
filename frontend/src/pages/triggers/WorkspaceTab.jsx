@@ -20,7 +20,7 @@ const WorkspaceSaveForm = memo(function WorkspaceSaveForm({ scanned, onSave }) {
   };
 
   return (
-    <div className="flex items-center gap-2 mt-3 pt-3 border-t border-white/5">
+    <div className="flex items-center gap-2">
       <input
         value={wsName}
         onChange={e => setWsName(e.target.value)}
@@ -92,7 +92,12 @@ export default function WorkspaceTab({ workspaces, onScan, onSave, onRestore, on
               <X size={12} />
             </button>
           </div>
-          <div className="flex flex-wrap gap-1 max-h-[100px] overflow-y-auto
+
+          {/* Naming input rendered FIRST — instantly interactive after scan */}
+          <WorkspaceSaveForm scanned={scanned} onSave={handleSaveWorkspace} />
+
+          {/* App tags rendered AFTER — no longer block input mount */}
+          <div className="flex flex-wrap gap-1 max-h-[100px] overflow-y-auto mt-3
                           scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
             {scanned.map((app, i) => (
               <span key={i} className="text-[8px] text-white/45 bg-[#0a0a0c]
@@ -101,7 +106,6 @@ export default function WorkspaceTab({ workspaces, onScan, onSave, onRestore, on
               </span>
             ))}
           </div>
-          <WorkspaceSaveForm scanned={scanned} onSave={handleSaveWorkspace} />
         </div>
       )}
 
