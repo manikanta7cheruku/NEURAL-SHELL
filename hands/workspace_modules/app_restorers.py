@@ -136,8 +136,16 @@ def _restore_browser(cfg):
 
     # Case 2: Smart restore already computed exact missing tabs
     if is_partial:
-        print(Fore.GREEN + f"[WORKSPACE] Chrome ({profile_name}): Opening {len(urls)} missing tab(s) in '{profile_dir}'")
-        _launch_chrome_tabs(chrome_exe, profile_dir, urls)
+        # Final safety: re-check against live extension data right now
+        # (extension may have synced new tabs since restore.py ran)
+        truly_missing = _final_dedup_check(urls, profile_name, profile_dir)
+        if not truly_missing:
+            print(Fore.CYAN + f"[WORKSPACE] Chrome ({profile_name}): "
+                  f"All tabs already open (final check)")
+            return
+        print(Fore.GREEN + f"[WORKSPACE] Chrome ({profile_name}): "
+              f"Opening {len(truly_missing)} missing tab(s) in '{profile_dir}'")
+        _launch_chrome_tabs(chrome_exe, profile_dir, truly_missing)
         return
 
     # Case 3: Live Chrome window exists -> check extension tabs
@@ -179,6 +187,51 @@ def _restore_browser(cfg):
 
     print(Fore.GREEN + f"[WORKSPACE] Chrome ({profile_name}): Opening {len(missing_urls)}/{len(urls)} missing tab(s)")
     _launch_chrome_tabs(chrome_exe, profile_dir, missing_urls)
+
+
+def _final_dedup_check(urls, profile_name, profile_dir):
+    """
+    Last-resort dedup: query the Chrome extension's live tab data
+    right before launching. Returns only URLs that are truly not open.
+    """
+    if not urls:
+        return urls
+
+    from hands.workspace_modules.url_matching import normalize_url
+    live_norm = set()
+
+    # Source 1: Extension per-profile data (most accurate)
+    try:
+        from backend.routes.chrome import get_tabs_by_profile
+        all_profiles = get_tabs_by_profile()
+        for _prof_key, _tab_list in all_profiles.items():
+            for _t in _tab_list:
+                _u = _t.get("url", "")
+                if _u:
+                    live_norm.add(normalize_url(_u))
+    except Exception:
+        pass
+
+    # Source 2: Global Chrome URL set
+    if not live_norm:
+        try:
+            from hands.workspace_modules.chrome_utils import get_open_chrome_tabs
+            _all_urls, _ = get_open_chrome_tabs()
+            if _all_urls:
+                for _u in _all_urls:
+                    live_norm.add(normalize_url(_u))
+        except Exception:
+            pass
+
+    if not live_norm:
+        return urls  # no live data available — trust the caller
+
+    truly_missing = [u for u in urls if normalize_url(u) not in live_norm]
+    skipped = len(urls) - len(truly_missing)
+    if skipped > 0:
+        print(Fore.CYAN + f"  [DEDUP] Final check: {skipped} tab(s) "
+              f"already open, {len(truly_missing)} truly missing")
+    return truly_missing
 
 
 def _launch_chrome_tabs(chrome_exe, profile_dir, urls):
