@@ -134,6 +134,21 @@ def smart_restore(apps_config):
             tabs = cfg.get("tabs", [])
 
             if t in ("chrome", "edge", "brave", "firefox"):
+                # Check if there are VISIBLE browser windows of this type open
+                has_visible_browser_window = any(
+                    (app.get("type") or "").lower() == t for app in current
+                )
+
+                if not has_visible_browser_window:
+                    # Browser is completely closed (no visible windows).
+                    # Restore all tabs directly.
+                    print(Fore.GREEN + f"[WORKSPACE] {t.title()} is closed — will restore {len(tabs)} tab(s)")
+                    new_cfg = dict(cfg)
+                    new_cfg["_browser_closed"] = True
+                    missing.append(new_cfg)
+                    continue
+
+                # Browser is open — check for open tabs via extension or title
                 if tabs and open_chrome_urls:
                     missing_tabs = []
                     skipped_tabs = 0
@@ -142,43 +157,33 @@ def smart_restore(apps_config):
                         tab_url = tab.get("url", "")
                         if not tab_url:
                             continue
-                        if url_matches(tab_url, open_chrome_urls,
-                                       open_chrome_domains):
+                        if url_matches(tab_url, open_chrome_urls, open_chrome_domains):
                             skipped_tabs += 1
                         else:
                             missing_tabs.append(tab)
 
                     if not missing_tabs:
                         already_open += 1
+                        print(Fore.CYAN + f"[WORKSPACE] {name}: All {skipped_tabs} tabs already open")
                     else:
                         new_cfg = dict(cfg)
                         new_cfg["tabs"] = missing_tabs
                         new_cfg["_partial"] = True
                         missing.append(new_cfg)
+                        print(Fore.GREEN + f"[WORKSPACE] {name}: {len(missing_tabs)} missing tab(s) to open ({skipped_tabs} already open)")
 
                 elif tabs and not open_chrome_urls:
-                    # Extension not available — use heuristic + profile check
-                    inferred_open = browser_profile_matches_window(
-                        cfg, browser_titles
-                    )
-                    profile_running = (
-                        prof and prof in open_profiles
-                    ) or _check_chrome_profile_active(cfg)
-
-                    if inferred_open or profile_running:
+                    # Extension not connected — use title matching heuristic
+                    inferred_open = browser_profile_matches_window(cfg, browser_titles)
+                    if inferred_open:
                         already_open += 1
-                        print(Fore.CYAN + f"[WORKSPACE] Already open "
-                              f"(heuristic): {name}")
+                        print(Fore.CYAN + f"[WORKSPACE] {name}: Tabs matched active window title")
                     else:
-                        # Mark as NOT partial so _restore_browser does
-                        # its own Level 3 process check before launching
                         new_cfg = dict(cfg)
                         new_cfg["_partial"] = False
                         missing.append(new_cfg)
-
                 else:
-                    if (prof and prof in open_profiles) or \
-                       (t in open_types):
+                    if prof and prof in open_profiles:
                         already_open += 1
                     else:
                         missing.append(cfg)
