@@ -15,8 +15,9 @@ export default function WorkspaceCard({ workspace, onRestore, onDelete }) {
   };
 
   return (
-    <div className={`rounded-2xl border overflow-hidden transition-all duration-300
-                     bg-white/[0.02] border-white/8 hover:border-white/12
+    <div className={`rounded-xl border overflow-hidden transition-all duration-300
+                     bg-white/[0.025] border-white/[0.12] hover:border-white/[0.2]
+                     backdrop-blur-sm shadow-[0_2px_12px_rgba(0,0,0,0.3)]
                      ${restoring ? 'scale-[0.98]' : ''}`}
          onMouseEnter={() => setHovered(true)}
          onMouseLeave={() => setHovered(false)}>
