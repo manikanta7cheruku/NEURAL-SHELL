@@ -65,10 +65,26 @@ def enrich_chrome(apps):
         tab_count = len(clean)
         # Resolve profile_dir: saved from cmdline > resolve from Local State
         _resolved_dir = ""
+
+        # Method 1: Match from captured --profile-directory= cmdline args
         for _pid, _pd in _pid_to_profile_dir.items():
-            if _pd.lower() in prof.lower() or prof.lower() in _pd.lower():
+            _pd_lower = _pd.lower()
+            _prof_lower = prof.lower()
+            if _pd_lower == _prof_lower or \
+               _pd_lower in _prof_lower or \
+               _prof_lower in _pd_lower:
                 _resolved_dir = _pd
                 break
+
+        # Method 2: Check if any original browser entry already has profile_dir
+        if not _resolved_dir:
+            for b in browser_entries:
+                _bpd = b.get("profile_dir", "")
+                if _bpd:
+                    _resolved_dir = _bpd
+                    break
+
+        # Method 3: Resolve from Chrome's Local State file
         if not _resolved_dir:
             try:
                 _chrome_base = os.path.join(
@@ -79,6 +95,15 @@ def enrich_chrome(apps):
                 _resolved_dir = find_chrome_profile_dir(_chrome_base, prof) or ""
             except Exception:
                 pass
+
+        # Method 4: If profile name looks like a directory name, use it directly
+        if not _resolved_dir and prof:
+            _chrome_base = os.path.join(
+                os.environ.get("LOCALAPPDATA", ""),
+                "Google", "Chrome", "User Data"
+            )
+            if os.path.isdir(os.path.join(_chrome_base, prof)):
+                _resolved_dir = prof
 
         apps.append({
             "type":         browser_type,
