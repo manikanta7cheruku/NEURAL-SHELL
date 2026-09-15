@@ -87,6 +87,15 @@ def smart_restore(apps_config):
             except Exception:
                 per_profile_urls = {}
 
+        # Pre-normalize global Chrome URLs for fast O(1) dedup lookup
+        open_chrome_urls_norm = set()
+        if open_chrome_urls:
+            for _u in open_chrome_urls:
+                try:
+                    open_chrome_urls_norm.add(normalize_url(_u))
+                except Exception:
+                    open_chrome_urls_norm.add(_u)
+
         open_exes     = set()
         open_ws_paths = set()
         open_folders  = set()
@@ -149,12 +158,10 @@ def smart_restore(apps_config):
                 )
 
                 if not has_visible_browser_window and not tabs:
-                    # Browser closed and no tabs to restore — skip
                     already_open += 1
                     continue
 
                 if not has_visible_browser_window and tabs:
-                    # Browser completely closed — restore ALL tabs
                     print(Fore.GREEN + f"[WORKSPACE] {t.title()} is closed — "
                           f"restoring all {len(tabs)} tab(s) for profile '{prof}'")
                     new_cfg = dict(cfg)
@@ -167,18 +174,17 @@ def smart_restore(apps_config):
                     missing_tabs = []
                     skipped_tabs = 0
 
-                    # Get the set of URLs open in THIS specific profile
-                    prof_open_urls = set()
+                    # Collect ALL live URLs across ALL profiles into one set
+                    # This is the primary dedup source — prevents cross-profile
+                    # false misses when profile name matching is ambiguous
+                    all_live_urls_norm = set()
                     if per_profile_urls:
-                        # Try matching saved profile name against live profiles
-                        for live_prof, live_urls in per_profile_urls.items():
-                            lp = live_prof.lower()
-                            sp = (prof or "").lower()
-                            sd = (cfg.get("profile_dir") or "").lower()
-                            if (sp and (sp == lp or sp in lp or lp in sp)) or \
-                               (sd and (sd == lp or sd in lp or lp in sd)):
-                                prof_open_urls = live_urls
-                                break
+                        for _live_urls in per_profile_urls.values():
+                            for _u in _live_urls:
+                                all_live_urls_norm.add(_u)  # already normalized by chrome_utils
+
+                    # Also merge the global URL set (normalized)
+                    all_live_urls_norm.update(open_chrome_urls_norm)
 
                     for tab in tabs:
                         tab_url = tab.get("url", "")
@@ -187,25 +193,26 @@ def smart_restore(apps_config):
 
                         tab_norm = normalize_url(tab_url)
 
-                        # Check 1: Is this URL open in the SAME profile?
-                        if tab_norm in prof_open_urls:
+                        # Check 1: Exact normalized match against ALL live Chrome URLs
+                        if tab_norm in all_live_urls_norm:
                             skipped_tabs += 1
                             continue
 
-                        # Check 2: If per-profile data unavailable, check global
-                        if not prof_open_urls and open_chrome_urls:
-                            if url_matches(tab_url, open_chrome_urls,
-                                           open_chrome_domains):
-                                skipped_tabs += 1
-                                continue
+                        # Check 2: Fuzzy URL matching (handles trailing slashes,
+                        # query param reordering, http vs https)
+                        if open_chrome_urls and url_matches(
+                            tab_url, open_chrome_urls, open_chrome_domains
+                        ):
+                            skipped_tabs += 1
+                            continue
 
-                        # Tab is genuinely missing from this profile
+                        # Tab is genuinely missing
                         missing_tabs.append(tab)
 
                     if not missing_tabs:
                         already_open += 1
                         print(Fore.CYAN + f"[WORKSPACE] {name}: "
-                              f"All {skipped_tabs} tabs already open in profile")
+                              f"All {skipped_tabs} tabs already open")
                     else:
                         new_cfg = dict(cfg)
                         new_cfg["tabs"] = missing_tabs
