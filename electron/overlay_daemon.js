@@ -492,7 +492,7 @@ function spawnPythonLayout(data) {
     const devPy      = path.join(projectRoot, 'venv', 'Scripts', 'python.exe');
     const devPyw     = path.join(projectRoot, 'venv', 'Scripts', 'pythonw.exe');
     
-    let python = sysExecutable = sysExecutable = '';
+    let python = '';
     if (fs.existsSync(embeddedPy)) {
       python = embeddedPy;
     } else if (fs.existsSync(devPy)) {
