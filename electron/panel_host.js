@@ -1,6 +1,7 @@
 /**
  * panel_host.js
  * Independent background Electron host for the Task Panel.
+ * Floating rounded glass card, top-right, margined — not docked full-height.
  */
 
 const { app, BrowserWindow, globalShortcut, ipcMain, screen, Tray, Menu, nativeImage } = require('electron');
@@ -27,6 +28,7 @@ let tray          = null;
 let commandServer = null;
 let currentHotkey = null;
 let configWatcher = null;
+let _pinned       = false;
 
 app.setName('SevenPanelHost');
 app.setAppUserModelId('com.sevenlabs.seven.panel');
@@ -120,83 +122,104 @@ function stopPanelServer() {
   panelServer = null;
 }
 
-// ── THE INVISIBLE CANVAS FIX ────────────────────────────────────────────────
-// ── THE INVISIBLE CANVAS FIX ────────────────────────────────────────────────
-// ── THE INVISIBLE CANVAS FIX ────────────────────────────────────────────────
+// ── Floating rounded card window (top-right, margined) ──────────────────────
+
 function createPanelWindow() {
-  if (panelWindow && !panelWindow.isDestroyed()) { 
-    panelWindow.show(); 
-    panelWindow.focus(); 
-    panelWindow.webContents.executeJavaScript(`(function(){var p=document.getElementById('panel');if(p){p.classList.add('open');p.classList.remove('closing');}})()`).catch(()=>{});
-    return; 
+  // Window is hidden, not destroyed, between opens — but reloaded fresh
+  // from disk every time it's reopened. This fixes two separate bugs we
+  // hit with the alternatives: (a) hide-without-reload silently served a
+  // stale in-memory page forever after the first open per session, and
+  // (b) destroy-and-recreate-every-time hits a well-documented Electron/
+  // Windows bug where a freshly created transparent window briefly paints
+  // solid black before the DWM alpha channel finishes initializing —
+  // consistent with the black borders you're seeing, and would also
+  // explain screenshot tools failing to capture it correctly.
+  if (panelWindow && !panelWindow.isDestroyed()) {
+    panelWindow.webContents.once('did-finish-load', () => {
+      panelWindow.show();
+      panelWindow.focus();
+    });
+    panelWindow.webContents.reloadIgnoringCache();
+    return;
   }
 
   const display = screen.getPrimaryDisplay();
   const workArea = display.workArea;
-
-  const windowW = 360; 
-  const windowH = workArea.height; 
+  const panelW = 340;
+  const panelH = Math.min(720, workArea.height - 32);
 
   panelWindow = new BrowserWindow({
-    width: windowW,
-    height: windowH,
-    x: workArea.x + workArea.width - windowW,
-    y: workArea.y,
+    width: panelW,
+    height: panelH,
+    x: workArea.x + workArea.width - panelW - 16,
+    y: workArea.y + 16,
     frame: false,
     transparent: true,
-    backgroundColor: '#00000000', 
-    backgroundMaterial: 'acrylic', // TRUE Windows 11 Native Glass
-    vibrancy: 'fullscreen-ui',     
+    backgroundColor: '#00000000',
+    // backgroundMaterial/vibrancy removed: confirmed incompatible with
+    // transparent:true on Windows (electron/electron#48440) — silently
+    // did nothing. True desktop-blur + rounded floating corners can't
+    // currently combine in Electron on Windows; going CSS-only instead.
     alwaysOnTop: true,
     skipTaskbar: true,
     resizable: false,
     movable: false,
     minimizable: false,
     maximizable: false,
-    hasShadow: false, 
+    hasShadow: false,
     focusable: true,
     show: false,
-    webPreferences: { 
-      nodeIntegration: false, 
-      contextIsolation: true, 
-      preload: path.join(ELECTRON_DIR, 'panel_preload.js'), 
-      backgroundThrottling: false 
-    }
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(ELECTRON_DIR, 'panel_preload.js'),
+      backgroundThrottling: false,
+    },
   });
 
   panelWindow.setAlwaysOnTop(true, 'pop-up-menu', 999);
   panelWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   panelWindow.loadFile(PANEL_HTML);
-  
-  panelWindow.once('ready-to-show', () => { 
-    panelWindow.show(); 
-    panelWindow.focus(); 
+  if (process.env.SEVEN_PANEL_DEBUG === '1') {
+    panelWindow.webContents.openDevTools({ mode: 'detach' });
+  }
+
+  panelWindow.once('ready-to-show', () => {
+    // Small delay before the very first show: a freshly created
+    // transparent window on Windows can paint solid black for the first
+    // frame or two before compositing settles. This only happens once
+    // per Panel Host process lifetime now, since reopens reuse this
+    // same warmed-up window via reload() above.
+    setTimeout(() => {
+      if (panelWindow && !panelWindow.isDestroyed()) {
+        panelWindow.show();
+        panelWindow.focus();
+      }
+    }, 40);
   });
-  
-  panelWindow.on('blur', () => { 
-    setTimeout(() => { if (panelWindow && !panelWindow.isDestroyed() && !panelWindow.isFocused()) closePanelWindow(); }, 200); 
+
+  panelWindow.on('blur', () => {
+    setTimeout(() => {
+      if (_pinned) return;
+      if (panelWindow && !panelWindow.isDestroyed() && !panelWindow.isFocused()) closePanelWindow();
+    }, 200);
   });
-  
-  // DO NOT destroy on close, keep in RAM for instant open
-  panelWindow.on('close', (e) => {
-    if (!app.isQuitting) {
-      e.preventDefault();
-      closePanelWindow();
-    }
+
+  panelWindow.on('closed', () => {
+    panelWindow = null;
   });
 }
 
 function closePanelWindow() {
   if (!panelWindow || panelWindow.isDestroyed()) return;
 
-  panelWindow.webContents.executeJavaScript(`(function(){var p=document.getElementById('panel');if(p){p.classList.remove('open');p.classList.add('closing');}})()`).catch(()=>{});
+  panelWindow.webContents.executeJavaScript(
+    `(function(){var p=document.getElementById('panel');if(p){p.classList.remove('open');p.classList.add('closing');}})()`
+  ).catch(() => {});
 
-  // Hide after 150ms to perfectly match the CSS fade animation duration
-  setTimeout(() => { 
-    if (panelWindow && !panelWindow.isDestroyed()) { 
-      panelWindow.hide(); 
-    } 
-  }, 150);
+  setTimeout(() => {
+    if (panelWindow && !panelWindow.isDestroyed()) panelWindow.hide();
+  }, 260);
 }
 
 function togglePanel() {
@@ -205,6 +228,7 @@ function togglePanel() {
 }
 
 ipcMain.on('panel-close', () => closePanelWindow());
+ipcMain.on('panel-set-pinned', (_e, pinned) => { _pinned = !!pinned; });
 ipcMain.on('panel-open-seven-tasks', () => {
   try {
     const req = http.request({ hostname: '127.0.0.1', port: 7777, path: '/api/status', method: 'GET' });
@@ -259,7 +283,7 @@ function createTray() {
       { type: 'separator' },
       { label: 'Open Seven', click: () => ipcMain.emit('panel-open-seven-tasks') },
       { type: 'separator' },
-      { label: 'Quit Panel Host', click: () => { app.isQuitting = true; stopPanelServer(); closePanelWindow(); tray.destroy(); app.quit(); } }
+      { label: 'Quit Panel Host', click: () => { app.isQuitting = true; stopPanelServer(); if (panelWindow && !panelWindow.isDestroyed()) panelWindow.destroy(); tray.destroy(); app.quit(); } }
     ]));
   } catch (e) {}
 }
@@ -278,6 +302,6 @@ app.on('before-quit', () => {
   globalShortcut.unregisterAll();
   if (configWatcher) { try { configWatcher.close(); } catch {} }
   stopPanelServer();
-  closePanelWindow();
+  if (panelWindow && !panelWindow.isDestroyed()) panelWindow.destroy();
   if (tray) { tray.destroy(); tray = null; }
 });
