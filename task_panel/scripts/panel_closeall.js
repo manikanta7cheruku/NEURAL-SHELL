@@ -34,6 +34,10 @@ async function executeCloseAll() {
   const result = await closeAllAPI(true, true);
   if (result && result.success) {
     showRestoreBanner(result.closed_count || 0);
+  } else {
+    const msg = (result && (result.detail || result.error)) || 'Close All failed — see terminal for details.';
+    console.error('[PANEL] Close All failed:', result);
+    alert(msg);
   }
 }
 
