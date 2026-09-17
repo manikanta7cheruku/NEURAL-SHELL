@@ -33,7 +33,8 @@ if (_argv.includes('--overlay-daemon')) {
 
 // ============================================================================
 // APP IDENTITY — Set AFTER script routing so sub-processes never inherit this
-// ============================================================================
+// ============================================================================ 
+console.log('[STARTUP] main.js loaded as primary process.');
 app.setName('SEVEN');
 app.setAppUserModelId('com.sevenlabs.seven');
 
@@ -826,45 +827,47 @@ if (!gotTheLock) {
     if (isAppReady) return;
     isAppReady = true;
 
-    // Purge lingering background processes on startup
-    // Ensures old development daemons are terminated so the new production daemons
-    // can successfully acquire the Single-Instance Lock/Mutex.
+    console.log('[STARTUP] Electron ready. Launching Seven...');
+
+    // Purge lingering background daemons from a previous dev session.
+    // This USED to run via execSync 5 times in a row (one PowerShell +
+    // WMI query per target, ~300-800ms each = 2-4s of the main process
+    // frozen before Python or the window even started). Now it's a
+    // single combined query and runs async — it no longer blocks
+    // anything below it.
     if (process.platform === 'win32') {
-      try {
-        const targets = ['trigger_daemon.py', 'overlay_daemon.js', 'schedule_daemon.py', 'panel_server.py', 'panel_host.js'];
-        targets.forEach(scriptName => {
-          try {
-            // Find PIDs of any python/electron process executing our script names
-            const cmd = `powershell -NoProfile -Command "Get-WmiObject Win32_Process | Where-Object { $_.CommandLine -like '*${scriptName}*' } | Select-Object -ExpandProperty ProcessId"`;
-            const result = execSync(cmd, { windowsHide: true, encoding: 'utf8', timeout: 4000 });
-            const pids = result.trim().split(/\r?\n/).filter(p => p.trim());
-            
-            pids.forEach(pidStr => {
-              const pid = parseInt(pidStr.trim(), 10);
-              if (pid && pid !== process.pid) {
-                console.log(`[STARTUP] Terminating lingering background daemon: ${scriptName} (PID ${pid})`);
-                try {
-                  execSync(`taskkill /pid ${pid} /f`, { windowsHide: true, timeout: 2000 });
-                } catch (err) {}
-              }
-            });
-          } catch (e) {}
+      const targets = ['trigger_daemon.py', 'overlay_daemon.js', 'schedule_daemon.py', 'panel_server.py', 'panel_host.js'];
+      const filter = targets.map(t => `$_.CommandLine -like '*${t}*'`).join(' -or ');
+      const cmd = `powershell -NoProfile -Command "Get-WmiObject Win32_Process | Where-Object { ${filter} } | Select-Object -ExpandProperty ProcessId"`;
+      exec(cmd, { windowsHide: true, timeout: 4000 }, (err, stdout) => {
+        if (err || !stdout) return;
+        const pids = stdout.trim().split(/\r?\n/).filter(p => p.trim());
+        pids.forEach(pidStr => {
+          const pid = parseInt(pidStr.trim(), 10);
+          if (pid && pid !== process.pid) {
+            console.log(`[STARTUP] Terminating lingering background daemon (PID ${pid})`);
+            exec(`taskkill /pid ${pid} /f`, { windowsHide: true }, () => {});
+          }
         });
-      } catch (e) {}
+      });
     }
 
+    console.log('[STARTUP] Starting Python backend...');
     startPython();
     createStatusWindow();
     createMainWindow();
     createTray();
+    console.log('[STARTUP] Window created — waiting for backend on :7777 (can take 10-40s cold: numpy/ChromaDB/sentence-transformers imports + Ollama check)...');
 
     waitForBackend().then((ready) => {
       if (!ready) {
+        console.error('[STARTUP] Backend did not respond within 180s.');
         if (mainWindow) {
           mainWindow.webContents.loadURL('data:text/html,<h2>SEVEN failed to start</h2>');
         }
         return;
       }
+      console.log('[STARTUP] Backend confirmed alive — reloading window.');
       if (mainWindow) {
         mainWindow.webContents.reload();
       }
