@@ -11,6 +11,14 @@ window._allSchedules = [];
 window._allTriggers = [];
 let _filteredTasks = [];
 
+/**
+ * Extract trigger ID from a trigger object, compatible with panel_triggers.js
+ */
+function triggerIdOf(t) {
+  if (!t) return null;
+  return t.id != null ? t.id : (t.trigger_id != null ? t.trigger_id : null);
+}
+
 /** tags may be array, JSON string, or comma-separated string */
 function normalizeTags(tags) {
   if (Array.isArray(tags)) return tags.filter(Boolean).map(String);
@@ -127,6 +135,45 @@ async function loadAll() {
   updateBrand(alive);
   updateSummaryCard(stats, countCompletedToday(window._allTasks));
   updateTabCounts();
+
+  // Process offline trigger queue when Seven is alive
+  if (alive) {
+    try {
+      let queue = getOfflineTriggerQueue(); // This is an array of action objects
+      const newQueue = [];
+      for (const action of queue) {
+        if (action.type === 'toggle') {
+          const ok = await toggleTriggerEnabled(action.triggerId, action.payload.enabled);
+          if (ok) {
+            // If successful, do not add to newQueue (i.e., remove)
+            continue;
+          }
+        } else if (action.type === 'delete') {
+          const ok = await deleteTriggerAPI(action.triggerId);
+          if (ok) {
+            // If successful, do not add to newQueue
+            // Also remove the trigger from UI and update counts
+            window._allTriggers = (window._allTriggers || []).filter(t => triggerIdOf(t) !== action.triggerId);
+            if (typeof updateTabCounts === 'function') updateTabCounts();
+            if ((window._allTriggers || []).length === 0) setTimeout(renderTriggers, 240);
+            continue;
+          }
+        } else if (action.type === 'fire') {
+          const result = await fireTrigger(action.triggerId);
+          if (result && result.success) {
+            // If successful, do not add to newQueue (i.e., remove)
+            continue;
+          }
+        }
+        // If we get here, the action failed or is of another type; keep it in the queue
+        newQueue.push(action);
+      }
+      // Save the updated queue back
+      localStorage.setItem(OFFLINE_TRIGGER_QUEUE_KEY, JSON.stringify(newQueue));
+    } catch (e) {
+      console.error('Error processing offline trigger queue:', e);
+    }
+  }
 
   if (_currentTab === 'tasks') {
     if (typeof stopSchedulesTimer === 'function') stopSchedulesTimer();

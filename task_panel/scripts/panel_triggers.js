@@ -13,6 +13,22 @@ let _triggerFilter = 'all';
 let _editingTriggerId = null;
 const _deleteConfirm = {};
 
+const OFFLINE_TRIGGER_QUEUE_KEY = 'offlineTriggerActions';
+
+function queueOfflineAction(action) {
+  const queue = JSON.parse(localStorage.getItem(OFFLINE_TRIGGER_QUEUE_KEY) || '[]');
+  queue.push(action);
+  localStorage.setItem(OFFLINE_TRIGGER_QUEUE_KEY, JSON.stringify(queue));
+}
+
+function getOfflineTriggerQueue() {
+  return JSON.parse(localStorage.getItem(OFFLINE_TRIGGER_QUEUE_KEY) || '[]');
+}
+
+function clearOfflineTriggerQueue() {
+  localStorage.removeItem(OFFLINE_TRIGGER_QUEUE_KEY);
+}
+
 function triggerIdOf(t) {
   if (!t) return null;
   return t.id != null ? t.id : (t.trigger_id != null ? t.trigger_id : null);
@@ -135,7 +151,7 @@ function renderTriggerCard(t, index) {
         </div>
         <div class="trigger-actions">
           ${isHotkey ? `
-            <button class="trigger-action-btn edit" onclick="startHotkeyRecording(${id})" title="Edit Hotkey">
+            <button class="trigger-action-btn edit" onclick="openTriggerEdit(${id})" title="Edit Trigger">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 113 3L12 15l-4 1 1-4 9.5-9.5z"/>
               </svg>
@@ -204,7 +220,19 @@ async function testFireTrigger(id, event) {
     btn.style.transform = 'scale(0.85)';
     setTimeout(() => { btn.style.transform = ''; }, 150);
   }
-  await fireTrigger(id);
+  const result = await fireTrigger(id);
+  if (!result || !result.success) {
+    // Queue the fire action for when Seven is available
+    queueOfflineAction({ type: 'fire', triggerId: id });
+    alert('Cannot fire trigger: Seven is not running. The fire will be attempted when Seven is available.');
+    return;
+  }
+  // If successful, remove any queued fire actions for this trigger
+  const queue = getOfflineTriggerQueue();
+  const newQueue = queue.filter(action => !(action.type === 'fire' && action.triggerId === id));
+  if (newQueue.length !== queue.length) {
+    localStorage.setItem(OFFLINE_TRIGGER_QUEUE_KEY, JSON.stringify(newQueue));
+  }
 }
 
 async function handleToggleTrigger(id, event) {
@@ -222,14 +250,19 @@ async function handleToggleTrigger(id, event) {
 
   const ok = await toggleTriggerEnabled(id, next);
   if (!ok) {
-    t.enabled = !next;
-    t.status = !next ? 'active' : 'disabled';
-    if (btn) { btn.classList.toggle('on', !next); btn.setAttribute('aria-pressed', String(!next)); }
-    if (card) card.classList.toggle('disabled', next);
+    // Queue the toggle action
+    queueOfflineAction({ type: 'toggle', triggerId: id, payload: { enabled: next } });
+  } else {
+    // If the online call succeeded, we can remove any queued toggle actions for this trigger
+    const queue = getOfflineTriggerQueue();
+    const newQueue = queue.filter(action => !(action.type === 'toggle' && action.triggerId === id));
+    if (newQueue.length !== queue.length) {
+      localStorage.setItem(OFFLINE_TRIGGER_QUEUE_KEY, JSON.stringify(newQueue));
+    }
   }
 }
 
-function handleDeleteTrigger(id, event) {
+async function handleDeleteTrigger(id, event) {
   if (event) event.stopPropagation();
   const btn = document.getElementById(`trig-del-${id}`);
   if (!btn) return;
@@ -237,7 +270,34 @@ function handleDeleteTrigger(id, event) {
   if (_deleteConfirm[id]) {
     clearTimeout(_deleteConfirm[id]);
     delete _deleteConfirm[id];
-    finishDeleteTrigger(id);
+    const t = (window._allTriggers || []).find(x => triggerIdOf(x) === id);
+    if (!t) return; // already removed?
+
+    const ok = await finishDeleteTrigger(id); // now returns the result of deleteTriggerAPI
+    if (ok) {
+      // Successfully deleted via API, remove from UI and clean queue
+      window._allTriggers = (window._allTriggers || []).filter(x => triggerIdOf(x) !== id);
+      if (typeof updateTabCounts === 'function') updateTabCounts();
+      if ((window._allTriggers || []).length === 0) setTimeout(renderTriggers, 240);
+      // Remove any queued delete actions for this trigger
+      const queue = getOfflineTriggerQueue();
+      const newQueue = queue.filter(action => !(action.type === 'delete' && action.triggerId === id));
+      if (newQueue.length !== queue.length) {
+        localStorage.setItem(OFFLINE_TRIGGER_QUEUE_KEY, JSON.stringify(newQueue));
+      }
+    } else {
+      // Failed to delete via API, queue the delete action and show error
+      queueOfflineAction({ type: 'delete', triggerId: id });
+      alert('Failed to delete trigger. Seven may not be running. The delete will be retried when Seven is available.');
+      // Re-arm the button for next click? The user can try again.
+      btn.classList.add('confirm');
+      btn.title = 'Click again to delete';
+      _deleteConfirm[id] = setTimeout(() => {
+        btn.classList.remove('confirm');
+        btn.title = 'Delete';
+        delete _deleteConfirm[id];
+      }, 2500);
+    }
     return;
   }
 
@@ -256,14 +316,24 @@ async function finishDeleteTrigger(id) {
     card.classList.add('leaving');
     setTimeout(() => card.remove(), 220);
   }
-  await deleteTriggerAPI(id);
-  window._allTriggers = (window._allTriggers || []).filter(t => triggerIdOf(t) !== id);
-  if (typeof updateTabCounts === 'function') updateTabCounts();
-  if ((window._allTriggers || []).length === 0) setTimeout(renderTriggers, 240);
+  return await deleteTriggerAPI(id);
 }
 
 let _activeKeysPressed = new Set();
 let _recordedComboString = '';
+
+function openTriggerEdit(triggerId) {
+  // Navigate to Seven app with specific trigger in edit mode
+  if (window.electronAPI?.navigateTo) {
+    window.electronAPI.navigateTo(`/triggers/edit/${triggerId}`);
+  }
+  // Fallback: navigate to triggers section
+  else if (window.electronAPI?.openSevenTasks) {
+    window.electronAPI.openSevenTasks();
+    // Would need additional mechanism to trigger edit mode for specific trigger
+  }
+  closePanel();
+}
 
 function startHotkeyRecording(triggerId) {
   if (_editingTriggerId) cancelHotkeyRecording(_editingTriggerId);
