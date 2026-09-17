@@ -31,6 +31,7 @@ function taskHasPin(t) {
 }
 
 window.addEventListener('DOMContentLoaded', () => {
+  console.log('[PANEL BUILD] 2026-09-16-offline-fallback — if this exact line is not in your console after a full process restart, you are testing a stale cached build, not this one.');
   // FAST-BOOT: Load cached data immediately so UI is instantly populated
   try {
     const cachedTasks = localStorage.getItem('seven_cached_tasks');
