@@ -209,6 +209,51 @@ def check_trigger():
 class QuickTaskCreate(BaseModel):
     text: str
 
+@app.get("/panel/triggers")
+def get_triggers_direct():
+    """
+    Direct SQLite read of triggers.db — fallback when Seven's main
+    backend (port 7777) is not running. Read-only: toggling, editing,
+    deleting, and firing a trigger all still require the main app.
+    """
+    try:
+        from seven_paths import paths
+        triggers_db = os.path.join(paths._seven_data, "triggers.db")
+    except Exception:
+        _appdata = os.environ.get("APPDATA", os.path.expanduser("~"))
+        triggers_db = os.path.join(_appdata, "SEVEN", "seven_data", "triggers.db")
+
+    if not os.path.exists(triggers_db):
+        return []
+
+    try:
+        conn = sqlite3.connect(triggers_db, timeout=10)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        rows = conn.execute(
+            "SELECT * FROM triggers ORDER BY "
+            "CASE WHEN hotkey IS NOT NULL THEN 0 "
+            "WHEN voice_phrase IS NOT NULL THEN 1 "
+            "WHEN audio_pattern IS NOT NULL THEN 2 "
+            "ELSE 3 END, name ASC"
+        ).fetchall()
+        conn.close()
+
+        result = []
+        for r in rows:
+            d = dict(r)
+            d["enabled"] = bool(d.get("enabled", 1))
+            d["silent"] = bool(d.get("silent", 0))
+            try:
+                d["action_data"] = json.loads(d.get("action_data") or "{}")
+            except Exception:
+                d["action_data"] = {}
+            result.append(d)
+        return result
+    except Exception as e:
+        print(f"[PANEL] triggers fallback error: {e}")
+        return []
+
 
 @app.post("/panel/tasks")
 def quick_create_task(body: QuickTaskCreate):
