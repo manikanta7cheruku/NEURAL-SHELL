@@ -18,8 +18,8 @@
   --warn-dim:       rgba(245, 158, 11, 0.12);
   --danger:         #ef4444;
 
-  --card:           rgba(255, 255, 255, 0.03);
-  --card-h:         rgba(255, 255, 255, 0.06);
+  --card:           rgba(255, 255, 255, 0.05);
+  --card-h:         rgba(255, 255, 255, 0.08);
   --border:         rgba(255, 255, 255, 0.08);
   --border-h:       rgba(255, 255, 255, 0.14);
 
@@ -63,13 +63,11 @@ html, body {
   width: calc(100% - 32px);
   height: calc(100vh - 32px);
   margin: 16px;
-  background: linear-gradient(165deg, rgba(255,255,255,0.07), rgba(255,255,255,0.01) 40%), rgba(14, 14, 18, 0.95);
-  backdrop-filter: blur(60px) saturate(200%);
-  -webkit-backdrop-filter: blur(60px) saturate(200%);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: linear-gradient(135deg, rgba(15, 15, 25, 0.9), rgba(25, 25, 35, 0.928));
+  border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: var(--radius-xl);
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.05),
-              inset 0 1px 0 rgba(255, 255, 255, 0.14), inset 0 0 40px rgba(255, 255, 255, 0.02);
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.332), 0 0 0 1px rgba(255, 255, 255, 0.08),
+              inset 0 1px 0 rgba(255, 255, 255, 0.1), inset 0 0 10px rgba(255, 255, 255, 0.03);
   display: flex; flex-direction: column; overflow: hidden;
   transform: translateY(10px) scale(0.985); opacity: 0;
 }
@@ -195,7 +193,7 @@ html, body {
 .trigger-info { flex: 1; min-width: 0; }
 .trigger-name { font-size: 11.5px; font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .trigger-meta { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
-.trigger-badge { font-size: 8px; font-weight: 700; padding: 2px 6px; border-radius: var(--radius-xs); background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.04); color: var(--text-secondary); }
+.trigger-badge { font-size: 8px; font-weight: 700; padding: 2px 6px; border-radius: var(--radius-xs); background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.04); color: var(--text-secondary); white-space: nowrap; }
 .trigger-badge.hotkey { background: var(--accent-dim); border-color: rgba(99, 102, 241, 0.15); color: var(--accent-light); }
 .trigger-fire-count { font-size: 8px; font-family: 'JetBrains Mono', monospace; color: var(--text-dim); }
 .trigger-actions { display: flex; align-items: center; gap: 2px; opacity: 0; transition: opacity 0.2s var(--ease-out); }
