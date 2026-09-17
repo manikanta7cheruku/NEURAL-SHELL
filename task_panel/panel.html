@@ -4,12 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Seven Tasks</title>
-<link rel="stylesheet" href="styles/panel_base.css" />
-<link rel="stylesheet" href="styles/panel_layout.css" />
-<link rel="stylesheet" href="styles/panel_tasks.css" />
-<link rel="stylesheet" href="styles/panel_triggers.css" />
-<link rel="stylesheet" href="styles/panel_schedules.css" />
-<link rel="stylesheet" href="styles/panel_closeall.css" />
+<link rel="stylesheet" href="styles/panel.css" />
 <style>
   html, body {
     background: transparent !important;
@@ -25,7 +20,6 @@
 <body>
 
 <div id="panel">
-  <!-- Header -->
   <div class="panel-header">
     <div class="header-left">
       <div class="eyebrow"><span class="status-pulse" id="brand-dot" aria-hidden="true"></span><span>SEVEN COMMAND CENTER</span></div>
@@ -39,17 +33,25 @@
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
       </button>
     </div>
-  </header>
+  </div>
 
-  <!-- Summary Stats Strip -->
   <div class="summary-card" id="summary-card">
     <div class="summary-item">
       <span class="summary-val" id="sum-completed">0</span>
       <span class="summary-label">done</span>
     </div>
-  </section>
+    <div class="summary-sep"></div>
+    <div class="summary-item">
+      <span class="summary-val accent" id="sum-pending">0</span>
+      <span class="summary-label">pending</span>
+    </div>
+    <div class="summary-sep"></div>
+    <div class="summary-item">
+      <span class="summary-val warn" id="sum-overdue">0</span>
+      <span class="summary-label">overdue</span>
+    </div>
+  </div>
 
-  <!-- Tab Selector Bar -->
   <div class="tab-bar">
     <button class="tab active" data-tab="tasks" onclick="switchTab('tasks')">
       Tasks <span class="tab-count" id="tab-cnt-tasks">0</span>
@@ -62,17 +64,14 @@
     </button>
   </div>
 
-  <!-- Search Input -->
   <div class="search-wrap" id="search-wrap">
     <input class="search-input" id="search-input" placeholder="Search..." autocomplete="off">
   </div>
 
-  <!-- Sticky Quick Add Input -->
   <div class="quick-add" id="quick-add">
     <input class="quick-input" id="quick-input" placeholder="Add a task... (Enter to save)" autocomplete="off" spellcheck="false">
   </div>
 
-  <!-- TAB CONTENT: TASKS -->
   <div class="tab-content active" id="tab-tasks">
     <div class="filter-bar" id="task-filters">
       <button class="filter-chip active" data-filter="all" onclick="setTaskFilter('all')">All</button>
@@ -90,7 +89,6 @@
     </div>
   </div>
 
-  <!-- TAB CONTENT: TRIGGERS -->
   <div class="tab-content hidden" id="tab-triggers">
     <div class="filter-bar" id="trigger-filters">
       <button class="filter-chip active" data-filter="all" onclick="setTriggerFilter('all')">All</button>
@@ -109,7 +107,6 @@
     </div>
   </div>
 
-  <!-- TAB CONTENT: SCHEDULES -->
   <div class="tab-content hidden" id="tab-schedules">
     <div class="scroll-area" id="schedule-list"></div>
     <div class="empty-state" id="schedule-empty" style="display:none">
@@ -121,7 +118,6 @@
     </div>
   </div>
 
-  <!-- Close All Warning Modal -->
   <div class="modal-overlay" id="closeall-modal" style="display:none">
     <div class="modal-card">
       <h3 class="modal-title">Close Workspace?</h3>
@@ -133,14 +129,12 @@
     </div>
   </div>
 
-  <!-- Post-Close All Recovery Banner -->
   <div class="restore-banner" id="restore-banner" style="display:none">
     <span class="restore-text" id="restore-text">Workspace closed</span>
     <button class="restore-btn" onclick="restoreLastWorkspace()">Undo Close</button>
     <span class="restore-timer" id="restore-timer">60s</span>
   </div>
 
-  <!-- Panel Footer with Actions -->
   <div class="panel-footer">
     <button class="footer-btn accent" onclick="openSevenTasks()">
       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><path d="M15 3h6v6"/><path d="M10 14L21 3"/></svg>
