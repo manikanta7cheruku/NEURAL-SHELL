@@ -1,84 +1,22 @@
 .modal-overlay {
   position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, 0.4);
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(6px);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 1000;
-  animation: panelEntrance 0.2s ease-out forwards;
+  animation: panelEntrance 0.18s ease-out forwards;
 }
-
-.modal-card {
-  width: 100%;
-  max-width: 260px;
-  background: rgba(25, 25, 28, 0.85);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 14px;
-  padding: 20px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-  gap: 8px;
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
-}
-
-.modal-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: #fff;
-  margin: 0;
-}
-
-.modal-desc {
-  font-size: 11px;
-  color: #999;
-  line-height: 1.5;
-  margin: 0 0 12px 0;
-}
-
-.modal-actions {
-  display: flex;
-  gap: 8px;
-  width: 100%;
-}
-
-.modal-btn {
-  flex: 1;
-  padding: 8px 0;
-  border-radius: 8px;
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 0.15s;
-  border: none;
-}
-
-.modal-btn.secondary { background: rgba(255, 255, 255, 0.08); color: #ccc; }
-.modal-btn.secondary:hover { background: rgba(255, 255, 255, 0.12); color: #fff; }
-.modal-btn.primary { background: #E5484D; color: #fff; }
-.modal-btn.primary:hover { background: #F15A5F; }
-
-/* Restore Banner */
-.restore-banner {
-  position: absolute; bottom: 64px; left: 16px; right: 16px;
-  background: rgba(40, 40, 45, 0.9); border: 1px solid rgba(255,255,255,0.1);
-  border-radius: 10px; padding: 10px 14px; display: flex; align-items: center; gap: 10px;
-  z-index: 500; box-shadow: 0 10px 20px rgba(0,0,0,0.3);
-}
-.restore-text { flex: 1; font-size: 11px; color: #fff; font-weight: 500; }
-.restore-btn { padding: 4px 10px; border-radius: 6px; background: rgba(255,255,255,0.1); border: none; color: #fff; font-size: 10px; cursor: pointer; }
-.restore-btn:hover { background: rgba(255,255,255,0.15); }
-.restore-timer { font-size: 10px; color: #888; }
 
 .modal-card {
   width: 100%;
   max-width: 290px;
-  background: rgba(20, 20, 30, 0.5);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(20, 20, 30, 0.7);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: 24px 20px;
   display: flex;
@@ -86,9 +24,10 @@
   align-items: center;
   gap: 14px;
   text-align: center;
-  box-shadow: 
+  box-shadow:
     0 24px 48px rgba(0, 0, 0, 0.5),
     inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  animation: modalIn 0.28s var(--ease-out) forwards;
 }
 
 .modal-icon {
@@ -137,10 +76,9 @@
 
 .modal-btn.secondary {
   background: rgba(255, 255, 255, 0.02);
-  border-color: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.06);
   color: var(--text-secondary);
 }
-
 .modal-btn.secondary:hover {
   background: rgba(255, 255, 255, 0.06);
   color: var(--text-primary);
@@ -149,15 +87,13 @@
 .modal-btn.primary {
   background: var(--warn);
   border-color: var(--warn);
-  color: #000000;
+  color: #000;
 }
-
 .modal-btn.primary:hover {
   background: #fbbf24;
-  box-shadow: 0 0 12px rgba(245, 158, 11, 0.2);
+  box-shadow: 0 0 12px rgba(245, 158, 11, 0.25);
 }
 
-/* Restore Banner UI */
 .restore-banner {
   position: absolute;
   bottom: 72px;
@@ -172,21 +108,21 @@
   gap: 8px;
   z-index: 500;
   box-shadow: 0 12px 24px rgba(0, 0, 0, 0.25);
-  animation: cardEntrance 0.35s var(--ease-out) forwards;
+  animation: slideUp 0.3s var(--ease-out) forwards;
 }
 
 .restore-text {
   flex: 1;
   font-size: 10.5px;
   color: var(--success);
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .restore-btn {
   padding: 5px 12px;
   border-radius: var(--radius-xs);
-  background: rgba(16, 185, 129, 0.12);
-  border: 1px solid rgba(16, 185, 129, 0.2);
+  background: rgba(16, 185, 129, 0.14);
+  border: 1px solid rgba(16, 185, 129, 0.25);
   color: var(--success);
   font-size: 9.5px;
   font-weight: 700;
@@ -194,14 +130,11 @@
   transition: all 0.15s ease;
   font-family: inherit;
 }
-
-.restore-btn:hover {
-  background: rgba(16, 185, 129, 0.22);
-}
+.restore-btn:hover { background: rgba(16, 185, 129, 0.24); }
 
 .restore-timer {
   font-size: 9px;
   font-family: 'JetBrains Mono', monospace;
-  color: rgba(16, 185, 129, 0.5);
+  color: rgba(16, 185, 129, 0.55);
   font-weight: 700;
 }
