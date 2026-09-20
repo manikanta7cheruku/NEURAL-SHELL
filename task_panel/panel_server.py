@@ -24,6 +24,83 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
 
+# ─────────────────────────────────────────────────────────────────────────
+# ROTATING LOG FILE FOR PANEL SERVER (DEBUG ANYWHERE)
+# ─────────────────────────────────────────────────────────────────────────
+_LOG_DIR = os.path.join(
+    os.environ.get('APPDATA', os.path.expanduser('~')),
+    'SEVEN', 'logs'
+)
+try:
+    os.makedirs(_LOG_DIR, exist_ok=True)
+    _LOG_FILE = os.path.join(_LOG_DIR, 'panel_server.log')
+    # Rotate if log exceeds 2MB
+    if os.path.exists(_LOG_FILE) and os.path.getsize(_LOG_FILE) > 2 * 1024 * 1024:
+        try:
+            os.rename(_LOG_FILE, os.path.join(_LOG_DIR, 'panel_server.log.old'))
+        except Exception:
+            pass
+    class _TeeStream:
+        def __init__(self, original, log_path):
+            self._orig = original
+            self._log_path = log_path
+
+        def write(self, data):
+            if self._orig:
+                try:
+                    self._orig.write(data)
+                except Exception:
+                    pass
+            if data and data.strip():
+                try:
+                    with open(self._log_path, 'a', encoding='utf-8') as f:
+                        ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                        for line in data.rstrip('\n').split('\n'):
+                            f.write(f"[{ts}] {line}\n")
+                except Exception:
+                    pass
+
+        def flush(self):
+            if self._orig:
+                try:
+                    self._orig.flush()
+                except Exception:
+                    pass
+
+        def isatty(self):
+            if hasattr(self._orig, 'isatty'):
+                try:
+                    return self._orig.isatty()
+                except Exception:
+                    return False
+            return False
+
+        def fileno(self):
+            if hasattr(self._orig, 'fileno'):
+                try:
+                    return self._orig.fileno()
+                except Exception:
+                    return 1
+            return 1
+
+        def readable(self):
+            return False
+
+        def writable(self):
+            return True
+
+        def seekable(self):
+            return False
+
+        def __getattr__(self, name):
+            return getattr(self._orig, name)
+
+    sys.stdout = _TeeStream(sys.stdout, _LOG_FILE)
+    sys.stderr = _TeeStream(sys.stderr, _LOG_FILE)
+    print(f"\n[PANEL SERVER START] Logging active at: {_LOG_FILE}")
+except Exception as e:
+    print(f"Failed to setup logging: {e}")
+
 # ── DB Path ──────────────────────────────────────────────────────────────────
 
 def _get_seven_data():
@@ -60,6 +137,28 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+class FrontendLog(BaseModel):
+    level: str
+    message: str
+
+@app.post("/panel/log")
+def log_frontend(body: FrontendLog):
+    """Bridges UI logs directly into panel_server.log"""
+    print(f"[UI_{body.level.upper()}] {body.message}")
+    return {"status": "ok"}
+
+@app.get("/panel/debug/logs")
+def get_debug_logs():
+    """Allows UI to pull and display backend logs directly"""
+    try:
+        log_path = os.path.join(_LOG_DIR, 'panel_server.log')
+        if not os.path.exists(log_path):
+            return {"logs": "No log file found."}
+        with open(log_path, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+            return {"logs": "".join(lines[-100:])}  # return last 100 lines
+    except Exception as e:
+        return {"logs": f"Error reading logs: {str(e)}"}
 # ── DB helpers ────────────────────────────────────────────────────────────────
 
 def _conn():
@@ -415,19 +514,372 @@ def delete_trigger_direct(trigger_id: int):
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 
+def _set_brightness_level(level: int) -> tuple:
+    """Set screen brightness to specified percentage (0-100) instantly on laptops and desktop monitors."""
+    level = max(0, min(100, int(level)))
+    methods_tried = []
+
+    # Method 1: screen_brightness_control library
+    try:
+        import screen_brightness_control as sbc
+        sbc.set_brightness(level)
+        return True, f"Brightness set to {level}% via SBC"
+    except Exception as e:
+        methods_tried.append(f"sbc: {e}")
+
+    # Method 2: Direct Windows Dxva2 DDC/CI API (for desktop monitors via HDMI/DisplayPort)
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        monitors = []
+        def _enum_proc(hmon, hdc, lprect, lparam):
+            monitors.append(hmon)
+            return True
+
+        MONITORENUMPROC = ctypes.WINFUNCTYPE(
+            wintypes.BOOL,
+            wintypes.HMONITOR,
+            wintypes.HDC,
+            ctypes.POINTER(wintypes.RECT),
+            wintypes.LPARAM
+        )
+        ctypes.windll.user32.EnumDisplayMonitors(None, None, MONITORENUMPROC(_enum_proc), 0)
+
+        dxva2 = ctypes.windll.dxva2
+        class PHYSICAL_MONITOR(ctypes.Structure):
+            _fields_ = [
+                ("hPhysicalMonitor", wintypes.HANDLE),
+                ("szPhysicalMonitorDescription", wintypes.WCHAR * 128)
+            ]
+
+        success_mon = 0
+        for hmon in monitors:
+            num_monitors = wintypes.DWORD()
+            if dxva2.GetNumberOfPhysicalMonitorsFromHMONITOR(hmon, ctypes.byref(num_monitors)) and num_monitors.value > 0:
+                p_monitors = (PHYSICAL_MONITOR * num_monitors.value)()
+                if dxva2.GetPhysicalMonitorsFromHMONITOR(hmon, num_monitors.value, p_monitors):
+                    for pm in p_monitors:
+                        if dxva2.SetVCPFeature(pm.hPhysicalMonitor, 0x10, level):
+                            success_mon += 1
+                        dxva2.DestroyPhysicalMonitor(pm.hPhysicalMonitor)
+        if success_mon > 0:
+            return True, f"Brightness set to {level}% on {success_mon} monitor(s) via DDC/CI"
+    except Exception as e:
+        methods_tried.append(f"dxva2: {e}")
+
+    # Method 3: PowerShell WMI (laptops and integrated displays)
+    try:
+        ps_cmd = f"(Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightnessMethods).WmiSetBrightness(1, {level})"
+        subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", ps_cmd],
+            capture_output=True,
+            creationflags=0x08000000 if sys.platform == "win32" else 0,
+            timeout=3
+        )
+        return True, f"Brightness set to {level}% via WMI"
+    except Exception as e:
+        methods_tried.append(f"wmi: {e}")
+
+    return False, f"Failed to set brightness ({'; '.join(methods_tried)})"
+
+
+def _set_volume_level(level: int) -> tuple:
+    """Set system audio volume percentage instantly."""
+    level = max(0, min(100, int(level)))
+    try:
+        from ctypes import cast, POINTER
+        from comtypes import CLSCTX_ALL
+        from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
+        devices = AudioUtilities.GetSpeakers()
+        interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+        vol = cast(interface, POINTER(IAudioEndpointVolume))
+        vol.SetMasterVolumeLevelScalar(level / 100.0, None)
+        return True, f"Volume set to {level}%"
+    except Exception:
+        pass
+
+    try:
+        ps_script = f"""
+        $obj = New-Object -ComObject WScript.Shell
+        1..50 | ForEach-Object {{ $obj.SendKeys([char]174) }}
+        1..{level // 2} | ForEach-Object {{ $obj.SendKeys([char]175) }}
+        """
+        subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_script],
+            capture_output=True,
+            creationflags=0x08000000 if sys.platform == "win32" else 0,
+            timeout=3
+        )
+        return True, f"Volume set to ~{level}%"
+    except Exception as e:
+        return False, f"Failed to set volume: {e}"
+
+
+def _send_win_key(vk_code: int, name: str) -> tuple:
+    """Send a Windows virtual key event instantly."""
+    try:
+        import ctypes
+        ctypes.windll.user32.keybd_event(vk_code, 0, 0, 0)
+        ctypes.windll.user32.keybd_event(vk_code, 0, 2, 0)
+        return True, f"Executed: {name}"
+    except Exception as e:
+        return False, f"Key action failed: {e}"
+
+
+def _execute_seven_action_direct(action_data: dict, trigger_name: str = "") -> tuple:
+    """Fast, direct execution for system, media, and hardware actions."""
+    import re
+    import ctypes
+
+    raw = (
+        action_data.get("action")
+        or action_data.get("name")
+        or action_data.get("command")
+        or action_data.get("target")
+        or trigger_name
+        or ""
+    )
+    raw_str = str(raw).strip().lower()
+    value = action_data.get("value")
+
+    # 1. Screen Brightness
+    if "bright" in raw_str:
+        nums = re.findall(r'\d+', raw_str)
+        level = None
+        if nums:
+            level = int(nums[0])
+        elif value is not None:
+            try:
+                level = int(value)
+            except Exception:
+                pass
+
+        if level is not None:
+            return _set_brightness_level(level)
+        elif "up" in raw_str:
+            return _set_brightness_level(80)
+        elif "down" in raw_str:
+            return _set_brightness_level(30)
+        else:
+            return _set_brightness_level(50)
+
+    # 2. Volume & Mute
+    if "mute" in raw_str:
+        return _send_win_key(0xAD, "Mute Toggle")
+
+    if "vol" in raw_str or "sound" in raw_str or "audio" in raw_str:
+        nums = re.findall(r'\d+', raw_str)
+        level = None
+        if nums:
+            level = int(nums[0])
+        elif value is not None:
+            try:
+                level = int(value)
+            except Exception:
+                pass
+
+        if level is not None:
+            return _set_volume_level(level)
+        elif "up" in raw_str:
+            return _send_win_key(0xAF, "Volume Up")
+        elif "down" in raw_str:
+            return _send_win_key(0xAE, "Volume Down")
+        else:
+            return _set_volume_level(50)
+
+    # 3. Media Controls
+    if any(k in raw_str for k in ("play", "pause", "media")):
+        return _send_win_key(0xB3, "Play/Pause")
+    if "next" in raw_str:
+        return _send_win_key(0xB0, "Next Track")
+    if any(k in raw_str for k in ("prev", "previous", "back")):
+        return _send_win_key(0xB1, "Previous Track")
+    if "stop" in raw_str:
+        return _send_win_key(0xB2, "Stop Track")
+
+    # 4. System Controls
+    if any(k in raw_str for k in ("lock", "lock_pc", "lock_workstation")):
+        ctypes.windll.user32.LockWorkStation()
+        return True, "Workstation locked"
+    if any(k in raw_str for k in ("sleep", "suspend")):
+        ctypes.windll.PowrProf.SetSuspendState(0, 1, 0)
+        return True, "PC put to sleep"
+    if any(k in raw_str for k in ("restart", "reboot")):
+        subprocess.Popen("shutdown /r /t 0", shell=True)
+        return True, "PC restarting"
+    if any(k in raw_str for k in ("shutdown", "power_off")):
+        subprocess.Popen("shutdown /s /t 0", shell=True)
+        return True, "PC shutting down"
+    if any(k in raw_str for k in ("taskmgr", "task_manager", "task manager")):
+        subprocess.Popen("taskmgr.exe", shell=True)
+        return True, "Task Manager opened"
+    if any(k in raw_str for k in ("screen", "snip", "screenshot")):
+        subprocess.Popen("explorer.exe ms-screenclip:", shell=True)
+        return True, "Snipping Tool opened"
+    if any(k in raw_str for k in ("recycle", "trash", "empty_recycle_bin")):
+        ctypes.windll.shell32.SHEmptyRecycleBinW(None, None, 7)
+        return True, "Recycle bin emptied"
+
+    return False, f"Unhandled seven_action: {raw_str}"
+
+
+def _execute_action_direct(action_type: str, action_data: dict, trigger_name: str = "") -> tuple:
+    """
+    Direct, sub-millisecond offline action executor.
+    Executes instantly without loading heavy AI/NLP modules.
+    """
+    try:
+        if action_type == "open_app":
+            apps = action_data.get("apps") or []
+            if not isinstance(apps, list):
+                apps = [apps]
+
+            single = action_data.get("path") or action_data.get("app") or action_data.get("exe") or action_data.get("target")
+
+            apps_to_launch = []
+            for a in apps:
+                if not a:
+                    continue
+                if isinstance(a, dict):
+                    p = a.get("path") or a.get("exe") or a.get("name")
+                    if p:
+                        apps_to_launch.append(str(p).strip())
+                else:
+                    apps_to_launch.append(str(a).strip())
+
+            if single:
+                if isinstance(single, dict):
+                    single_str = single.get("path") or single.get("exe") or single.get("name")
+                else:
+                    single_str = str(single).strip()
+
+                if single_str and single_str not in apps_to_launch:
+                    apps_to_launch.insert(0, single_str)
+
+            if not apps_to_launch:
+                return False, "No application specified"
+
+            launched = []
+            for app_str in apps_to_launch:
+                if not app_str:
+                    continue
+                try:
+                    os.startfile(app_str)
+                    launched.append(app_str)
+                except Exception:
+                    try:
+                        cmd = f'start "" "{app_str}"' if " " in app_str else f'start {app_str}'
+                        subprocess.Popen(cmd, shell=True)
+                        launched.append(app_str)
+                    except Exception as le:
+                        print(f"[PANEL FIRE] Launch failed for {app_str}: {le}")
+            return True, f"Launched: {', '.join(launched)}"
+
+        elif action_type == "open_url":
+            url = action_data.get("url") or action_data.get("target") or action_data.get("link")
+            if not url:
+                return False, "No URL specified"
+            url_str = str(url).strip()
+            if not (url_str.startswith("http://") or url_str.startswith("https://")):
+                url_str = "https://" + url_str
+            webbrowser.open(url_str)
+            return True, f"Opened URL: {url_str}"
+
+        elif action_type == "open_file":
+            file_path = action_data.get("path") or action_data.get("file") or action_data.get("target")
+            if not file_path:
+                return False, "No file path specified"
+            file_str = str(file_path).strip()
+            if not os.path.exists(file_str):
+                return False, f"File not found: {file_str}"
+            os.startfile(file_str)
+            return True, f"Opened file: {file_str}"
+
+        elif action_type == "open_folder":
+            folder = action_data.get("path") or action_data.get("folder") or action_data.get("target")
+            if not folder:
+                return False, "No folder path specified"
+            folder_str = str(folder).strip()
+            if not os.path.exists(folder_str):
+                return False, f"Folder not found: {folder_str}"
+            os.startfile(folder_str)
+            return True, f"Opened folder: {folder_str}"
+
+        elif action_type == "run_command":
+            cmd = action_data.get("command") or action_data.get("cmd") or action_data.get("script")
+            if not cmd:
+                return False, "No command specified"
+            cmd_str = str(cmd).strip()
+            subprocess.Popen(cmd_str, shell=True)
+            return True, f"Executed command: {cmd_str}"
+
+        elif action_type == "open_workspace":
+            ws_id = action_data.get("workspace_id")
+            ws_name = action_data.get("workspace_name") or action_data.get("name")
+
+            triggers_db = os.path.join(SEVEN_DATA_DIR, "triggers.db")
+            ws_data = None
+            if os.path.exists(triggers_db):
+                try:
+                    with sqlite3.connect(triggers_db, timeout=10) as conn:
+                        conn.row_factory = sqlite3.Row
+                        if ws_id:
+                            row = conn.execute("SELECT * FROM workspaces WHERE id = ?", (ws_id,)).fetchone()
+                        elif ws_name:
+                            row = conn.execute("SELECT * FROM workspaces WHERE LOWER(name) = ?", (ws_name.lower().strip(),)).fetchone()
+                        else:
+                            row = None
+                        if row:
+                            ws_data = dict(row)
+                except Exception as wse:
+                    print(f"[PANEL] Workspace fetch error: {wse}")
+
+            if ws_data:
+                try:
+                    from workspace_modules.restore import restore_workspace
+                    restore_workspace(ws_data)
+                    return True, f"Restored workspace: {ws_data.get('name')}"
+                except Exception as restore_err:
+                    apps_json = ws_data.get("apps", "[]")
+                    apps = json.loads(apps_json) if isinstance(apps_json, str) else apps_json
+                    launched = []
+                    for a in apps:
+                        p = a.get("exe") or a.get("path") or a.get("name")
+                        if p:
+                            try:
+                                os.startfile(p)
+                                launched.append(p)
+                            except Exception:
+                                try:
+                                    subprocess.Popen(p, shell=True)
+                                    launched.append(p)
+                                except Exception:
+                                    pass
+                    return True, f"Launched apps for {ws_data.get('name')}: {launched}"
+
+            return False, "Workspace not found"
+
+        elif action_type == "seven_action":
+            return _execute_seven_action_direct(action_data, trigger_name)
+
+        return False, f"Unknown action type: {action_type}"
+
+    except Exception as e:
+        print(f"[PANEL] _execute_action_direct error: {e}")
+        return False, str(e)
+
+
 @app.post("/panel/triggers/{trigger_id}/fire")
 def fire_trigger_direct(trigger_id: int):
     """
-    Direct SQLite fire of trigger — fallback when Seven's main
-    backend (port 7777) is not running. Executes the trigger's action
-    directly using trigger_modules.executor.
+    Direct SQLite fire of trigger — executes immediately with 0 delay.
     """
     triggers_db = os.path.join(SEVEN_DATA_DIR, "triggers.db")
 
     if not os.path.exists(triggers_db):
         raise HTTPException(status_code=500, detail="Triggers database not found")
 
-    # Get the trigger
     try:
         conn = sqlite3.connect(triggers_db, timeout=10)
         conn.row_factory = sqlite3.Row
@@ -444,39 +896,33 @@ def fire_trigger_direct(trigger_id: int):
             trigger["action_data"] = json.loads(trigger.get("action_data") or "{}")
         except Exception:
             trigger["action_data"] = {}
+
+        conn.execute(
+            "UPDATE triggers SET fire_count = fire_count + 1, last_fired = ? WHERE id = ?",
+            (datetime.now().isoformat(), trigger_id)
+        )
+        conn.commit()
         conn.close()
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
-    if not trigger.get("enabled", False):
-        return {"success": False, "error": "Trigger is disabled"}
+    import threading
 
-    try:
-        from trigger_modules.executor import execute_trigger
-        import threading
-        
-        # execute_trigger in trigger_modules handles intelligent background threading, 
-        # on-screen overlay animations, status notifications, and stats logging autonomously.
-        threading.Thread(target=execute_trigger, args=(trigger,), daemon=True).start()
-        return {"success": True, "message": "Trigger execution initiated via daemon executor"}
-    except Exception as e:
-        print(f"[PANEL SERVER] executor load error: {e}. Running quick python subprocess fallback.")
+    def _async_fire():
+        action_type = trigger.get("action_type", "")
+        action_data = trigger.get("action_data", {})
+        trigger_name = trigger.get("name", "")
+        print(f"[PANEL FIRE] Executing trigger #{trigger_id} '{trigger_name}' ({action_type})")
         try:
-            action_type = trigger.get('action_type')
-            action_data = trigger.get('action_data', {})
-            if action_type == 'open_app':
-                app_path = action_data.get('path') or action_data.get('app')
-                if app_path:
-                    subprocess.Popen(app_path, shell=True)
-                    return {"success": True, "message": f"Launched {app_path}"}
-            elif action_type == 'open_url':
-                url = action_data.get('url')
-                if url:
-                    webbrowser.open(url)
-                    return {"success": True, "message": f"Opened {url}"}
-            return {"success": False, "error": f"Unsupported offline action type: {action_type}"}
-        except Exception as fe:
-            raise HTTPException(status_code=500, detail=f"Failed to execute fallback: {str(fe)}")
+            ok, msg = _execute_action_direct(action_type, action_data, trigger_name)
+            print(f"[PANEL FIRE] Result: ok={ok}, msg={msg}")
+        except Exception as ex:
+            import traceback
+            print(f"[PANEL FIRE CRASH] Traceback:")
+            traceback.print_exc()
+
+    threading.Thread(target=_async_fire, daemon=True).start()
+    return {"success": True, "message": f"Trigger #{trigger_id} fired"}
 
 
 @app.post("/panel/tasks")
