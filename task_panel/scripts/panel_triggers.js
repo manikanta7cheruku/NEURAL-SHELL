@@ -10,10 +10,83 @@
  */
 
 let _triggerFilter = 'all';
-let _editingTriggerId = null;
 const _deleteConfirm = {};
 
 const OFFLINE_TRIGGER_QUEUE_KEY = 'offlineTriggerActions';
+// Trigger state override system removed - using API fallbacks instead
+
+async function safeFireTrigger(id) {
+  try {
+    if (typeof sevenAPI === 'function') {
+      const r = await sevenAPI(`/triggers/${id}/fire`, 'POST');
+      if (r && r.success) return r;
+    }
+  } catch (err) {
+    console.warn('[PANEL] sevenAPI fire failed, trying panel server fallback:', err);
+  }
+  
+  try {
+    if (typeof panelAPI === 'function') {
+      return await panelAPI(`/panel/triggers/${id}/fire`, 'POST');
+    } else {
+      const resp = await fetch(`http://127.0.0.1:7778/panel/triggers/${id}/fire`, { method: 'POST' });
+      return await resp.json();
+    }
+  } catch (err) {
+    console.error('[PANEL] safeFireTrigger fallback failed:', err);
+    return null;
+  }
+}
+
+async function safeToggleTriggerEnabled(id, enabled) {
+  try {
+    if (typeof sevenAPI === 'function') {
+      const r = await sevenAPI(`/triggers/${id}`, 'PUT', { enabled });
+      if (r && r.success) return r;
+    }
+  } catch (err) {
+    console.warn('[PANEL] sevenAPI toggle failed, trying panel server fallback:', err);
+  }
+
+  try {
+    if (typeof panelAPI === 'function') {
+      return await panelAPI(`/panel/triggers/${id}`, 'PUT', { enabled });
+    } else {
+      const resp = await fetch(`http://127.0.0.1:7778/panel/triggers/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled })
+      });
+      return await resp.json();
+    }
+  } catch (err) {
+    console.error('[PANEL] safeToggleTriggerEnabled fallback failed:', err);
+    return null;
+  }
+}
+
+async function safeDeleteTrigger(id) {
+  try {
+    if (typeof sevenAPI === 'function') {
+      const r = await sevenAPI(`/triggers/${id}`, 'DELETE');
+      if (r && r.success) return r;
+    }
+  } catch (err) {
+    console.warn('[PANEL] sevenAPI delete failed, trying panel server fallback:', err);
+  }
+
+  try {
+    if (typeof panelAPI === 'function') {
+      return await panelAPI(`/panel/triggers/${id}`, 'DELETE');
+    } else {
+      const resp = await fetch(`http://127.0.0.1:7778/panel/triggers/${id}`, { method: 'DELETE' });
+      return await resp.json();
+    }
+  } catch (err) {
+    console.error('[PANEL] safeDeleteTrigger fallback failed:', err);
+    return null;
+  }
+}
 
 function queueOfflineAction(action) {
   const queue = JSON.parse(localStorage.getItem(OFFLINE_TRIGGER_QUEUE_KEY) || '[]');
@@ -150,13 +223,6 @@ function renderTriggerCard(t, index) {
           </div>
         </div>
         <div class="trigger-actions">
-          ${isHotkey ? `
-            <button class="trigger-action-btn edit" onclick="openTriggerEdit(${id})" title="Edit Trigger">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 113 3L12 15l-4 1 1-4 9.5-9.5z"/>
-              </svg>
-            </button>
-          ` : ''}
           <button class="trigger-action-btn fire" onclick="testFireTrigger(${id}, event)" title="Fire Trigger">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
               <polygon points="5 3 19 12 5 21 5 3"/>
@@ -171,13 +237,6 @@ function renderTriggerCard(t, index) {
             <span class="mini-toggle-knob"></span>
           </button>
         </div>
-      </div>
-
-      <div class="hotkey-edit-wrap" id="hk-wrap-${id}" style="display:none">
-        <input type="text" class="hotkey-edit-input" id="hk-input-${id}"
-               placeholder="Press your hotkey combo..." readonly spellcheck="false" />
-        <div class="hotkey-edit-hint">Press Esc to cancel. Press Enter to save.</div>
-        <div class="hotkey-edit-error" id="hk-error-${id}"></div>
       </div>
     `;
   } catch (err) {
@@ -220,11 +279,10 @@ async function testFireTrigger(id, event) {
     btn.style.transform = 'scale(0.85)';
     setTimeout(() => { btn.style.transform = ''; }, 150);
   }
-  const result = await fireTrigger(id);
-  if (!result || !result.success) {
+  const result = await safeFireTrigger(id);
+  if (!result) {
     // Queue the fire action for when Seven is available
     queueOfflineAction({ type: 'fire', triggerId: id });
-    alert('Cannot fire trigger: Seven is not running. The fire will be attempted when Seven is available.');
     return;
   }
   // If successful, remove any queued fire actions for this trigger
@@ -239,21 +297,24 @@ async function handleToggleTrigger(id, event) {
   if (event) event.stopPropagation();
   const t = (window._allTriggers || []).find(x => triggerIdOf(x) === id);
   if (!t) return;
+
   const next = !triggerIsEnabled(t);
 
   const btn = document.getElementById(`trig-toggle-${id}`);
   const card = document.getElementById(`trigger-${id}`);
   if (btn) { btn.classList.toggle('on', next); btn.setAttribute('aria-pressed', String(next)); }
   if (card) card.classList.toggle('disabled', !next);
+
+  // Update the trigger object to reflect the new state for consistency
   t.enabled = next;
   t.status = next ? 'active' : 'disabled';
 
-  const ok = await toggleTriggerEnabled(id, next);
+  const ok = await safeToggleTriggerEnabled(id, next);
   if (!ok) {
-    // Queue the toggle action
+    // Queue the toggle action as last resort if both Seven and panel server are unavailable
     queueOfflineAction({ type: 'toggle', triggerId: id, payload: { enabled: next } });
   } else {
-    // If the online call succeeded, we can remove any queued toggle actions for this trigger
+    // If the API call succeeded (to either Seven or panel server), we can remove any queued toggle actions for this trigger
     const queue = getOfflineTriggerQueue();
     const newQueue = queue.filter(action => !(action.type === 'toggle' && action.triggerId === id));
     if (newQueue.length !== queue.length) {
@@ -316,111 +377,7 @@ async function finishDeleteTrigger(id) {
     card.classList.add('leaving');
     setTimeout(() => card.remove(), 220);
   }
-  return await deleteTriggerAPI(id);
+  return await safeDeleteTrigger(id);
 }
 
-let _activeKeysPressed = new Set();
-let _recordedComboString = '';
-
-function openTriggerEdit(triggerId) {
-  // Navigate to Seven app with specific trigger in edit mode
-  if (window.electronAPI?.navigateTo) {
-    window.electronAPI.navigateTo(`/triggers/edit/${triggerId}`);
-  }
-  // Fallback: navigate to triggers section
-  else if (window.electronAPI?.openSevenTasks) {
-    window.electronAPI.openSevenTasks();
-    // Would need additional mechanism to trigger edit mode for specific trigger
-  }
-  closePanel();
-}
-
-function startHotkeyRecording(triggerId) {
-  if (_editingTriggerId) cancelHotkeyRecording(_editingTriggerId);
-
-  _editingTriggerId = triggerId;
-  _recordedComboString = '';
-  _activeKeysPressed.clear();
-
-  const wrap = document.getElementById(`hk-wrap-${triggerId}`);
-  const input = document.getElementById(`hk-input-${triggerId}`);
-  const errEl = document.getElementById(`hk-error-${triggerId}`);
-  if (!wrap || !input) return;
-
-  wrap.style.display = '';
-  wrap.classList.add('visible');
-  input.classList.add('recording');
-  input.value = 'Recording keys...';
-  if (errEl) errEl.classList.remove('visible');
-
-  input.focus();
-  input.onkeydown = handleHotkeyKeyDown;
-  input.onkeyup = handleHotkeyKeyUp;
-}
-
-function cancelHotkeyRecording(triggerId) {
-  const wrap = document.getElementById(`hk-wrap-${triggerId}`);
-  const input = document.getElementById(`hk-input-${triggerId}`);
-  if (wrap) { wrap.classList.remove('visible'); wrap.style.display = 'none'; }
-  if (input) {
-    input.classList.remove('recording');
-    input.onkeydown = null;
-    input.onkeyup = null;
-  }
-  if (_editingTriggerId === triggerId) _editingTriggerId = null;
-}
-
-function handleHotkeyKeyDown(e) {
-  e.preventDefault();
-  e.stopPropagation();
-  const key = e.key;
-
-  if (key === 'Escape') { cancelHotkeyRecording(_editingTriggerId); return; }
-  if (key === 'Enter' && _recordedComboString) { saveHotkeyCombo(_editingTriggerId, _recordedComboString); return; }
-
-  const parts = [];
-  if (e.ctrlKey) parts.push('ctrl');
-  if (e.shiftKey) parts.push('shift');
-  if (e.altKey) parts.push('alt');
-  if (e.metaKey) parts.push('win');
-
-  const primaryKeys = ['Control', 'Shift', 'Alt', 'Meta', 'Windows'];
-  if (!primaryKeys.includes(key) && key !== ' ') {
-    parts.push(key.toLowerCase());
-  } else if (key === ' ') {
-    parts.push('space');
-  }
-
-  if (parts.length > 0) {
-    _recordedComboString = parts.join('+');
-    e.target.value = formatHotkey(_recordedComboString);
-  }
-}
-
-function handleHotkeyKeyUp(e) {
-  e.preventDefault();
-  e.stopPropagation();
-}
-
-async function saveHotkeyCombo(id, combo) {
-  const input = document.getElementById(`hk-input-${id}`);
-  const errEl = document.getElementById(`hk-error-${id}`);
-
-  if (input) {
-    input.placeholder = 'Saving changes...';
-    input.value = '';
-    input.classList.remove('recording');
-  }
-
-  const res = await editHotkeyInline(id, combo);
-  if (res && res.ok) {
-    cancelHotkeyRecording(id);
-    loadAll();
-  } else {
-    if (errEl) {
-      errEl.textContent = res?.error || 'Failed to save.';
-      errEl.classList.add('visible');
-    }
-    if (input) input.classList.add('recording');
-  }
-}
+// Edit functionality removed as per user request
