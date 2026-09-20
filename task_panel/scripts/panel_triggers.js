@@ -15,14 +15,40 @@ const _deleteConfirm = {};
 const OFFLINE_TRIGGER_QUEUE_KEY = 'offlineTriggerActions';
 // Trigger state override system removed - using API fallbacks instead
 
-async function safeFireTrigger(id) {
+async function isSevenOnline() {
   try {
-    if (typeof sevenAPI === 'function') {
-      const r = await sevenAPI(`/triggers/${id}/fire`, 'POST');
-      if (r && r.success) return r;
-    }
-  } catch (err) {
-    console.warn('[PANEL] sevenAPI fire failed, trying panel server fallback:', err);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 150); // fast 150ms timeout
+    const resp = await fetch('http://127.0.0.1:7777/api/status', { signal: controller.signal });
+    clearTimeout(timeout);
+    return resp.ok;
+  } catch (e) {
+    return false;
+  }
+}
+
+async function isSevenOnline() {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 60); // ultra-fast 60ms probe
+    const resp = await fetch('http://127.0.0.1:7777/api/status', { signal: controller.signal });
+    clearTimeout(timeout);
+    return resp.ok;
+  } catch (e) {
+    return false;
+  }
+}
+
+async function safeFireTrigger(id) {
+  const online = await isSevenOnline();
+  
+  if (online) {
+    try {
+      if (typeof sevenAPI === 'function') {
+        const r = await sevenAPI(`/triggers/${id}/fire`, 'POST');
+        if (r && r.success) return r;
+      }
+    } catch (err) {}
   }
   
   try {
@@ -33,19 +59,21 @@ async function safeFireTrigger(id) {
       return await resp.json();
     }
   } catch (err) {
-    console.error('[PANEL] safeFireTrigger fallback failed:', err);
+    console.error('[PANEL] Fire trigger failed:', err);
     return null;
   }
 }
 
 async function safeToggleTriggerEnabled(id, enabled) {
-  try {
-    if (typeof sevenAPI === 'function') {
-      const r = await sevenAPI(`/triggers/${id}`, 'PUT', { enabled });
-      if (r && r.success) return r;
-    }
-  } catch (err) {
-    console.warn('[PANEL] sevenAPI toggle failed, trying panel server fallback:', err);
+  const online = await isSevenOnline();
+
+  if (online) {
+    try {
+      if (typeof sevenAPI === 'function') {
+        const r = await sevenAPI(`/triggers/${id}`, 'PUT', { enabled });
+        if (r && r.success) return r;
+      }
+    } catch (err) {}
   }
 
   try {
@@ -60,19 +88,21 @@ async function safeToggleTriggerEnabled(id, enabled) {
       return await resp.json();
     }
   } catch (err) {
-    console.error('[PANEL] safeToggleTriggerEnabled fallback failed:', err);
+    console.error('[PANEL] Toggle trigger failed:', err);
     return null;
   }
 }
 
 async function safeDeleteTrigger(id) {
-  try {
-    if (typeof sevenAPI === 'function') {
-      const r = await sevenAPI(`/triggers/${id}`, 'DELETE');
-      if (r && r.success) return r;
-    }
-  } catch (err) {
-    console.warn('[PANEL] sevenAPI delete failed, trying panel server fallback:', err);
+  const online = await isSevenOnline();
+
+  if (online) {
+    try {
+      if (typeof sevenAPI === 'function') {
+        const r = await sevenAPI(`/triggers/${id}`, 'DELETE');
+        if (r && r.success) return r;
+      }
+    } catch (err) {}
   }
 
   try {
@@ -83,7 +113,7 @@ async function safeDeleteTrigger(id) {
       return await resp.json();
     }
   } catch (err) {
-    console.error('[PANEL] safeDeleteTrigger fallback failed:', err);
+    console.error('[PANEL] Delete trigger failed:', err);
     return null;
   }
 }
@@ -280,17 +310,11 @@ async function testFireTrigger(id, event) {
     setTimeout(() => { btn.style.transform = ''; }, 150);
   }
   const result = await safeFireTrigger(id);
-  if (!result) {
-    // Queue the fire action for when Seven is available
-    queueOfflineAction({ type: 'fire', triggerId: id });
+  if (!result || !result.success) {
+    console.warn('[PANEL] Offline trigger execution failed:', result);
     return;
   }
-  // If successful, remove any queued fire actions for this trigger
-  const queue = getOfflineTriggerQueue();
-  const newQueue = queue.filter(action => !(action.type === 'fire' && action.triggerId === id));
-  if (newQueue.length !== queue.length) {
-    localStorage.setItem(OFFLINE_TRIGGER_QUEUE_KEY, JSON.stringify(newQueue));
-  }
+  console.log('[PANEL] Trigger fired successfully:', id);
 }
 
 async function handleToggleTrigger(id, event) {
