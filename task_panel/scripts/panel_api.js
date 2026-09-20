@@ -52,11 +52,15 @@ async function completeTaskAPI(taskId) {
 }
 
 async function updateTaskAPI(taskId, patch) {
-  return sevenAPI(`/tasks/${taskId}`, 'PUT', patch);
+  const r = await sevenAPI(`/tasks/${taskId}`, 'PUT', patch);
+  if (r && r.success) return r;
+  return panelAPI(`/panel/tasks/${taskId}`, 'PUT', patch);
 }
 
 async function deleteTaskAPI(taskId) {
-  return sevenAPI(`/tasks/${taskId}`, 'DELETE');
+  const r = await sevenAPI(`/tasks/${taskId}`, 'DELETE');
+  if (r && r.success) return r;
+  return panelAPI(`/panel/tasks/${taskId}`, 'DELETE');
 }
 
 async function updateSubtasksAPI(taskId, subtasks) {
@@ -111,17 +115,63 @@ async function editHotkeyInline(triggerId, newHotkey) {
 }
 
 async function toggleTriggerEnabled(triggerId, enabled) {
-  const r = await sevenAPI(`/triggers/${triggerId}`, 'PUT', { enabled });
-  return !!(r && r.success);
+  // Try Seven backend first
+  try {
+    const r = await sevenAPI(`/triggers/${triggerId}`, 'PUT', { enabled });
+    if (r && r.success) return true;
+  } catch (e) {
+    // Seven backend unavailable, try panel server fallback
+    console.log('[PANEL] Seven backend unavailable for toggle, trying panel server fallback');
+  }
+
+  // Fallback to panel server
+  try {
+    const r = await panelAPI(`/panel/triggers/${triggerId}`, 'PUT', { enabled });
+    return r && r.success;
+  } catch (e) {
+    console.error('[PANEL] Panel server fallback also failed for toggle:', e);
+    return false;
+  }
 }
 
 async function deleteTriggerAPI(triggerId) {
-  const r = await sevenAPI(`/triggers/${triggerId}`, 'DELETE');
-  return !!(r && r.success);
+  // Try Seven backend first
+  try {
+    const r = await sevenAPI(`/triggers/${triggerId}`, 'DELETE');
+    return r && r.success;
+  } catch (e) {
+    // Seven backend unavailable, try panel server fallback
+    console.log('[PANEL] Seven backend unavailable for delete, trying panel server fallback');
+  }
+
+  // Fallback to panel server
+  try {
+    const r = await panelAPI(`/panel/triggers/${triggerId}`, 'DELETE');
+    return r && r.success;
+  } catch (e) {
+    console.error('[PANEL] Panel server fallback also failed for delete:', e);
+    return false;
+  }
 }
 
 async function fireTrigger(triggerId) {
-  return sevenAPI(`/triggers/${triggerId}/fire`, 'POST');
+  // Try Seven backend first
+  try {
+    const r = await sevenAPI(`/triggers/${triggerId}/fire`, 'POST');
+    if (r && r.success) return true;
+  } catch (e) {
+    // Seven backend unavailable, try panel server fallback
+    console.log('[PANEL] Seven backend unavailable for fire, trying panel server fallback');
+  }
+
+  // Fallback to panel server
+  try {
+    const r = await panelAPI(`/panel/triggers/${triggerId}/fire`, 'POST');
+    return r && r.success;
+  } catch (e) {
+    console.error('[PANEL] Panel server fallback also failed for fire:', e);
+    return false;
+  }
 }
 
 /* ── Schedules ── */
@@ -146,7 +196,9 @@ async function fetchSchedules() {
 
 async function cancelSchedule(schedId) {
   const r = await sevenAPI(`/schedules/${schedId}`, 'DELETE');
-  return !!(r && r.success);
+  if (r && r.success) return true;
+  const r2 = await panelAPI(`/panel/schedules/${schedId}`, 'DELETE');
+  return !!(r2 && r2.success);
 }
 
 /* ── Close All ── */
