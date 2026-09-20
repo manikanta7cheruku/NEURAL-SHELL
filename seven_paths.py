@@ -31,15 +31,14 @@ def _is_installed():
     Detect if running from an installed location vs dev.
     Installed = running from Program Files or via packaged Electron.
     """
+    # Direct path check - if code/executable lives in typical install directories, it is installed
+    exe_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+    if 'Program Files' in exe_dir or 'AppData' in exe_dir or 'resources' in exe_dir:
+        return True
+
     # Check Electron packaged mode
     if os.environ.get('SEVEN_ELECTRON_MODE') == '1':
-        # Check if we're in a typical install directory
-        exe_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
-        if 'Program Files' in exe_dir or 'AppData' in exe_dir:
-            return True
-        # Check for resources/app structure (electron-builder)
-        if 'resources' in exe_dir:
-            return True
+        return True
 
     # Check if frozen (PyInstaller — future-proofing)
     if getattr(sys, 'frozen', False):
