@@ -106,7 +106,13 @@ function startPanelServer() {
   panelServer = spawn(pythonExe, [PANEL_SERVER], {
     cwd: PROJECT_ROOT, windowsHide: true, stdio: ['ignore', outLog, errLog],
     ...(process.platform === 'win32' ? { creationflags: 0x08000000 } : {}),
-    env: { ...process.env, PYTHONUNBUFFERED: '1', PYTHONIOENCODING: 'utf-8', SEVEN_APP_PATH: PROJECT_ROOT }
+    env: { 
+      ...process.env, 
+      PYTHONUNBUFFERED: '1', 
+      PYTHONIOENCODING: 'utf-8', 
+      SEVEN_APP_PATH: PROJECT_ROOT,
+      SEVEN_ELECTRON_MODE: '1'
+    }
   });
 
   panelServer.on('close', () => { panelServer = null; if (!app.isQuitting) setTimeout(startPanelServer, 3000); });
@@ -177,7 +183,7 @@ function createPanelWindow() {
     },
   });
 
-  panelWindow.setAlwaysOnTop(true, 'pop-up-menu', 999);
+  panelWindow.setAlwaysOnTop(true, 'floating-toplevel');
   panelWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   panelWindow.loadFile(PANEL_HTML);
   if (process.env.SEVEN_PANEL_DEBUG === '1') {
@@ -241,6 +247,26 @@ ipcMain.on('panel-open-seven-tasks', () => {
   } catch (e) {}
   closePanelWindow();
 });
+ipcMain.on('open-main-app-with-route', (_, route) => {
+  try {
+    const navFile = path.join(SEVEN_DATA, 'nav_trigger.json');
+    const nav = { route };
+    fs.writeFileSync(navFile, JSON.stringify(nav), 'utf8');
+  } catch (e) {
+    console.error('[PANEL] Failed to write nav_trigger.json:', e);
+  }
+  // Launch the main Electron app
+  const electronExe = process.execPath;
+  const { spawn } = require('node:child_process');
+  const proc = spawn(electronExe, {
+    detached: true,
+    windowsHide: true,
+    stdio: 'ignore',
+    env: { ...process.env }
+  });
+  proc.unref();
+  closePanelWindow();
+});
 
 function startCommandServer() {
   commandServer = http.createServer((req, res) => {
@@ -289,7 +315,7 @@ function createTray() {
 }
 
 app.whenReady().then(async () => {
-  if (await isAnotherHostAlive()) { app.quit(); process.exit(0); return; }
+  if (await isAnotherHostAlive()) { app.quit(); }
   registerHotkey(readPanelHotkey());
   watchConfig();
   createTray();
@@ -302,6 +328,7 @@ app.on('before-quit', () => {
   globalShortcut.unregisterAll();
   if (configWatcher) { try { configWatcher.close(); } catch {} }
   stopPanelServer();
+  if (commandServer) { commandServer.close(); commandServer = null; }
   if (panelWindow && !panelWindow.isDestroyed()) panelWindow.destroy();
   if (tray) { tray.destroy(); tray = null; }
 });
