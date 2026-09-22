@@ -41,6 +41,59 @@ from trigger_modules.audio_listener import AudioListener
 from trigger_modules.voice_listener import VoiceListener
 from trigger_modules.reload_poller import ReloadPoller
 
+_tab_listener_proc = None
+
+
+def _offline_tab_listener_supervisor():
+    """
+    Background supervisor thread:
+    Ensures offline_tab_listener.py is active on port 7777 when Seven main backend
+    is closed, so Chrome Extension can continuously send live tab updates.
+    """
+    global _tab_listener_proc
+    import socket
+    import subprocess
+
+    while True:
+        try:
+            port_open = False
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.settimeout(0.1)
+                res = s.connect_ex(("127.0.0.1", 7777))
+                s.close()
+                port_open = (res == 0)
+            except Exception:
+                port_open = False
+
+            if not port_open:
+                if _tab_listener_proc is None or _tab_listener_proc.poll() is not None:
+                    base_dir = os.environ.get(
+                        "SEVEN_APP_PATH",
+                        os.path.dirname(os.path.abspath(__file__))
+                    )
+                    script_path = os.path.join(
+                        base_dir, "hands", "workspace_modules", "offline_tab_listener.py"
+                    )
+                    if os.path.isfile(script_path):
+                        py_exe = sys.executable
+                        if "python.exe" in py_exe.lower():
+                            pw_exe = py_exe.lower().replace("python.exe", "pythonw.exe")
+                            if os.path.isfile(pw_exe):
+                                py_exe = pw_exe
+
+                        _tab_listener_proc = subprocess.Popen(
+                            [py_exe, script_path],
+                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+                            | getattr(subprocess, "DETACHED_PROCESS", 0x00000008),
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                        )
+        except Exception:
+            pass
+
+        time.sleep(2.0)
+
 
 def main():
     if not acquire_lock():
@@ -88,6 +141,11 @@ def main():
             pass
 
     threading.Thread(target=_preload, daemon=True).start()
+
+    # Supervise offline tab listener for 24/7 Chrome sync
+    threading.Thread(
+        target=_offline_tab_listener_supervisor, daemon=True
+    ).start()
 
     # Start all listeners
     hotkey_listener.start()
