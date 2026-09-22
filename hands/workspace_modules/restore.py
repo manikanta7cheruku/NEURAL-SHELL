@@ -7,7 +7,7 @@ import threading
 from colorama import Fore
 
 from hands.workspace_modules.scanner import scan_current
-from hands.workspace_modules.url_matching import url_matches, normalize_url
+from hands.workspace_modules.url_matching import url_matches, normalize_url, extract_domain
 from hands.workspace_modules.chrome_utils import (
     get_open_chrome_profiles,
     get_open_chrome_tabs,
@@ -132,8 +132,41 @@ def smart_restore(apps_config):
                 if name: open_uwp.add(name)
 
         open_profiles.update(_extra_profiles)
+
+        # PROCESS-LEVEL FALLBACK: build a set of all running process names.
+        # This catches apps the window scanner missed (minimized terminals,
+        # UWP apps with generic titles, background processes, etc.)
+        _running_procs = set()
+        try:
+            import psutil
+            for _p in psutil.process_iter(['name']):
+                try:
+                    _pn = (_p.info.get('name') or '').lower()
+                    if _pn:
+                        _running_procs.add(_pn)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        # Detect browser visibility and tab data availability
+        _chrome_visible = any(
+            (app.get("type") or "").lower() in ("chrome", "edge", "brave", "firefox")
+            for app in current
+        )
+        _no_tab_data = (
+            len(open_chrome_urls) == 0
+            and len(open_chrome_urls_norm) == 0
+            and len(per_profile_urls) == 0
+        )
+
+        if _chrome_visible and _no_tab_data:
+            print(Fore.CYAN + "[WORKSPACE] Chrome running, backend offline. "
+                  "Will use per-profile directory checks for safe dedup.")
+
         print(Fore.CYAN + f"[WORKSPACE] Open URLs: {len(open_chrome_urls)}, "
-              f"Domains: {len(open_chrome_domains)}")
+              f"Domains: {len(open_chrome_domains)}, "
+              f"Per-profile: {len(per_profile_urls)} profiles")
 
         filtered_apps = [cfg for cfg in apps_config if should_restore(cfg)]
 
@@ -152,10 +185,17 @@ def smart_restore(apps_config):
             tabs = cfg.get("tabs", [])
 
             if t in ("chrome", "edge", "brave", "firefox"):
-                # Check if there are VISIBLE browser windows of this type open
                 has_visible_browser_window = any(
                     (app.get("type") or "").lower() == t for app in current
                 )
+
+                # COLD START: caller marked browser as fully closed
+                if cfg.get("_browser_closed") and tabs:
+                    print(Fore.GREEN + f"[WORKSPACE] {t.title()} marked "
+                          f"_browser_closed — restoring all {len(tabs)} "
+                          f"tab(s) for profile '{prof}' (offline mode)")
+                    missing.append(cfg)
+                    continue
 
                 if not has_visible_browser_window and not tabs:
                     already_open += 1
@@ -169,45 +209,101 @@ def smart_restore(apps_config):
                     missing.append(new_cfg)
                     continue
 
-                # Browser is open — do PER-PROFILE tab deduplication
+                # Browser is visible — dedup tabs
                 if tabs:
                     missing_tabs = []
                     skipped_tabs = 0
 
-                    # Collect ALL live URLs across ALL profiles into one set
-                    # This is the primary dedup source — prevents cross-profile
-                    # false misses when profile name matching is ambiguous
-                    all_live_urls_norm = set()
-                    if per_profile_urls:
-                        for _live_urls in per_profile_urls.values():
-                            for _u in _live_urls:
-                                all_live_urls_norm.add(_u)  # already normalized by chrome_utils
-
-                    # Also merge the global URL set (normalized)
-                    all_live_urls_norm.update(open_chrome_urls_norm)
-
-                    for tab in tabs:
-                        tab_url = tab.get("url", "")
-                        if not tab_url:
+                    if _no_tab_data:
+                        # OFFLINE: No extension data available.
+                        # Check if THIS SPECIFIC profile directory is open
+                        # using multi-layer detection (cmdline + windows +
+                        # session lock files).
+                        # - Profile OPEN → skip entirely (cannot dedup tabs
+                        #   without extension data; launching would duplicate)
+                        # - Profile CLOSED → launch all saved tabs
+                        from hands.workspace_modules.app_restorers import (
+                            _is_profile_dir_open,
+                        )
+                        pdir = (cfg.get("profile_dir") or "").strip()
+                        if pdir and _is_profile_dir_open(pdir):
+                            already_open += 1
+                            print(Fore.CYAN + f"[WORKSPACE] {name}: Profile "
+                                  f"'{pdir}' is open (offline mode — skipping "
+                                  f"to prevent duplicates; individual closed "
+                                  f"tabs cannot be recovered without Seven "
+                                  f"backend running)")
                             continue
+                        else:
+                            missing_tabs = list(tabs)
+                            print(Fore.GREEN + f"[WORKSPACE] {name}: Profile "
+                                  f"'{pdir or '?'}' not open (offline) — "
+                                  f"cold-launching {len(missing_tabs)} tab(s)")
+                    else:
+                        # ONLINE: Per-profile deduplication.
+                        # Match on profile_dir (disk directory) against
+                        # the re-keyed per_profile_urls. This guarantees
+                        # each account's tabs are checked ONLY against
+                        # that account's live URLs — never cross-profile.
+                        pdir = (cfg.get("profile_dir") or "").strip()
+                        prof_live_urls = set()
 
-                        tab_norm = normalize_url(tab_url)
+                        if per_profile_urls and pdir:
+                            # Exact match on disk directory
+                            if pdir in per_profile_urls:
+                                prof_live_urls = per_profile_urls[pdir]
+                            else:
+                                # Case-insensitive match
+                                pdir_lower = pdir.lower()
+                                for pk, urls in per_profile_urls.items():
+                                    if pk.lower() == pdir_lower:
+                                        prof_live_urls = urls
+                                        break
 
-                        # Check 1: Exact normalized match against ALL live Chrome URLs
-                        if tab_norm in all_live_urls_norm:
-                            skipped_tabs += 1
-                            continue
+                        # Fallback: match on profile_name if dir didn't match
+                        if not prof_live_urls and per_profile_urls and prof:
+                            if prof in per_profile_urls:
+                                prof_live_urls = per_profile_urls[prof]
+                            else:
+                                for pk, urls in per_profile_urls.items():
+                                    if pk.lower() == prof.lower():
+                                        prof_live_urls = urls
+                                        break
 
-                        # Check 2: Fuzzy URL matching (handles trailing slashes,
-                        # query param reordering, http vs https)
-                        if open_chrome_urls and url_matches(
-                            tab_url, open_chrome_urls, open_chrome_domains
-                        ):
-                            skipped_tabs += 1
-                            continue
+                        # Last resort: global URLs (only if zero per-profile data)
+                        if not prof_live_urls and not per_profile_urls and open_chrome_urls_norm:
+                            prof_live_urls = open_chrome_urls_norm
 
-                        # Tab is genuinely missing
-                        missing_tabs.append(tab)
+                        # Build per-profile domain set for fuzzy matching
+                        prof_live_domains = set()
+                        for _u in prof_live_urls:
+                            try:
+                                _d = extract_domain(_u)
+                                if _d:
+                                    prof_live_domains.add(_d)
+                            except Exception:
+                                pass
+
+                        for tab in tabs:
+                            tab_url = tab.get("url", "")
+                            if not tab_url:
+                                continue
+
+                            tab_norm = normalize_url(tab_url)
+
+                            # Check 1: Exact match against THIS profile only
+                            if tab_norm in prof_live_urls:
+                                skipped_tabs += 1
+                                continue
+
+                            # Check 2: Fuzzy match against THIS profile only
+                            if prof_live_urls and url_matches(
+                                tab_url, prof_live_urls, prof_live_domains
+                            ):
+                                skipped_tabs += 1
+                                continue
+
+                            missing_tabs.append(tab)
 
                     if not missing_tabs:
                         already_open += 1
@@ -259,6 +355,36 @@ def smart_restore(apps_config):
                 else:
                     missing.append(cfg)
 
+            elif t in ("powershell", "cmd", "terminal", "pwsh"):
+                # Terminal dedup: check ONLY by visible window scan match.
+                # Do NOT use process-level check (_running_procs) because
+                # Seven's own child processes include powershell.exe / cmd.exe
+                # which causes false positives when Seven is open.
+                _term_name_match = False
+                if name:
+                    for app in current:
+                        cn = (app.get("name") or "").lower()
+                        ct = (app.get("type") or "").lower()
+                        if ct == t or (name and (name in cn or cn in name)):
+                            _term_name_match = True
+                            break
+                # Also check working directory match for same-type terminals
+                _term_cwd_match = False
+                _saved_cwd = (cfg.get("working_dir") or "").lower().strip()
+                if _saved_cwd:
+                    for app in current:
+                        if (app.get("type") or "").lower() == t:
+                            _app_cwd = (app.get("working_dir") or "").lower().strip()
+                            if _app_cwd and _app_cwd == _saved_cwd:
+                                _term_cwd_match = True
+                                break
+                if _term_name_match or _term_cwd_match or (exe and exe in open_exes):
+                    already_open += 1
+                    print(Fore.CYAN + f"[WORKSPACE] Already open (terminal): {name}")
+                else:
+                    missing.append(cfg)
+                    print(Fore.YELLOW + f"[WORKSPACE] Missing terminal: {name}")
+
             else:
                 is_open = False
                 if exe and exe in open_exes:
@@ -268,6 +394,25 @@ def smart_restore(apps_config):
                         curr_name = (app.get("name") or "").lower()
                         if name in curr_name or curr_name in name:
                             is_open = True
+                            break
+                # PROCESS-LEVEL FALLBACK: check if the app's process is running
+                # even if the window scanner missed it (minimized, no title, etc.)
+                if not is_open and exe:
+                    _exe_basename = os.path.basename(exe).lower()
+                    if _exe_basename in _running_procs:
+                        is_open = True
+                        print(Fore.CYAN + f"[WORKSPACE] Already open (process): {name}")
+                if not is_open and name:
+                    # Try matching process names derived from app name
+                    _name_guesses = [
+                        name.replace(" ", "").lower() + ".exe",
+                        name.split(" - ")[0].strip().lower() + ".exe",
+                        name.split(" ")[0].strip().lower() + ".exe",
+                    ]
+                    for _guess in _name_guesses:
+                        if _guess in _running_procs:
+                            is_open = True
+                            print(Fore.CYAN + f"[WORKSPACE] Already open (process match '{_guess}'): {name}")
                             break
 
                 if is_open:
