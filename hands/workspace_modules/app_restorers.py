@@ -1,18 +1,64 @@
 """
 hands/workspace_modules/app_restorers.py
 Type-agnostic restoration system.
-Handles browser tab restoration, workspace pathing, and exact spatial geometry positioning.
+v1.4.2 — Offline profile resolution, per-profile Chrome detection,
+         terminal type fix, CPU-throttled geometry.
 """
 
 import os
 import subprocess
 import time
+import json as _json
+import ctypes
+import threading
 from colorama import Fore
 
 from hands.workspace_modules.helpers import (
     find_chrome_exe,
     find_chrome_profile_dir,
 )
+
+_browser_launch_lock = threading.Lock()
+
+
+def _force_foreground(hwnd):
+    try:
+        import win32gui
+        import win32con
+        import win32process
+
+        if not win32gui.IsWindow(hwnd):
+            return
+
+        placement = win32gui.GetWindowPlacement(hwnd)
+        if placement[1] in (win32con.SW_SHOWMINIMIZED, win32con.SW_MINIMIZE):
+            win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+        else:
+            win32gui.ShowWindow(hwnd, win32con.SW_SHOW)
+
+        win32gui.BringWindowToTop(hwnd)
+
+        fore_hwnd = win32gui.GetForegroundWindow()
+        if fore_hwnd and fore_hwnd != hwnd:
+            fore_thread, _ = win32process.GetWindowThreadProcessId(fore_hwnd)
+            curr_thread = win32process.GetCurrentThreadId()
+            if fore_thread != curr_thread:
+                try:
+                    win32process.AttachThreadInput(curr_thread, fore_thread, True)
+                    win32gui.SetForegroundWindow(hwnd)
+                    win32process.AttachThreadInput(curr_thread, fore_thread, False)
+                except Exception:
+                    win32gui.SetForegroundWindow(hwnd)
+            else:
+                win32gui.SetForegroundWindow(hwnd)
+        else:
+            win32gui.SetForegroundWindow(hwnd)
+    except Exception:
+        try:
+            import win32gui
+            win32gui.SetForegroundWindow(hwnd)
+        except Exception:
+            pass
 
 
 def restore_one(cfg):
@@ -25,25 +71,24 @@ def restore_one(cfg):
     prot = cfg.get("protocol", "")
 
     try:
-        # Chrome/Edge with tab data
         if tabs and t in ("chrome", "edge", "brave", "firefox"):
             _restore_browser(cfg)
-        # VS Code with workspace path
         elif ws and t == "vscode":
             _restore_vscode(cfg)
-        # File Explorer with folder path
         elif t == "explorer":
             _restore_explorer(cfg)
-        # UWP app with protocol URI
         elif prot and t == "uwp":
             _restore_uwp(cfg)
-        # Terminals with working_dir
         elif t in ("powershell", "cmd", "terminal", "pwsh"):
             _restore_terminal(cfg)
         else:
-            _restore_generic(cfg)
+            # Check name for terminal hints before generic fallback
+            name_lower = name.lower()
+            if any(kw in name_lower for kw in ("powershell", "pwsh", "terminal", "cmd", "command prompt")):
+                _restore_terminal(cfg)
+            else:
+                _restore_generic(cfg)
 
-        # Reopen saved document files for non-generic apps
         open_files = cfg.get("open_files", [])
         if open_files and t not in ("chrome", "edge", "brave", "firefox"):
             if t not in ("app", ""):
@@ -56,7 +101,6 @@ def restore_one(cfg):
                 except Exception as _fe:
                     print(Fore.YELLOW + f"  [~] {name} file restore: {_fe}")
 
-        # Restore window geometry (x, y, w, h, state)
         _restore_window_geometry(cfg, name)
 
     except Exception as e:
@@ -65,14 +109,32 @@ def restore_one(cfg):
         traceback.print_exc()
 
 
-def _has_visible_chrome_window():
-    """Check if there is at least one visible, non-minimized/normal Chrome window on screen."""
+# ── CHROME WINDOW & PROFILE DETECTION ────────────────────────────────────
+
+def _get_chrome_windows_with_profiles():
+    """
+    Enumerate visible Chrome windows and determine profile directory
+    from process command line args.
+    """
+    windows = []
     try:
         import win32gui
         import win32process
         import psutil
 
-        found = []
+        pid_profile_map = {}
+        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+            try:
+                if (proc.info.get('name') or '').lower() != 'chrome.exe':
+                    continue
+                cmdline = proc.info.get('cmdline') or []
+                for arg in cmdline:
+                    if arg.startswith('--profile-directory='):
+                        pid_profile_map[proc.info['pid']] = arg.split('=', 1)[1]
+                        break
+            except Exception:
+                continue
+
         def _cb(hwnd, _):
             if not win32gui.IsWindowVisible(hwnd):
                 return
@@ -82,29 +144,180 @@ def _has_visible_chrome_window():
             try:
                 _, pid = win32process.GetWindowThreadProcessId(hwnd)
                 proc = psutil.Process(pid)
-                if proc.name().lower() == "chrome.exe":
-                    rect = win32gui.GetWindowRect(hwnd)
-                    w, h = rect[2] - rect[0], rect[3] - rect[1]
-                    if w > 200 and h > 200:
-                        found.append(hwnd)
+                if proc.name().lower() != 'chrome.exe':
+                    return
+                rect = win32gui.GetWindowRect(hwnd)
+                w, h = rect[2] - rect[0], rect[3] - rect[1]
+                if w < 200 or h < 200:
+                    return
+
+                profile_dir = pid_profile_map.get(pid)
+                if not profile_dir:
+                    try:
+                        parent = proc.parent()
+                        while parent and parent.name().lower() == 'chrome.exe':
+                            profile_dir = pid_profile_map.get(parent.pid)
+                            if profile_dir:
+                                break
+                            parent = parent.parent()
+                    except Exception:
+                        pass
+
+                windows.append({
+                    "hwnd": hwnd,
+                    "title": title,
+                    "profile_dir": profile_dir,
+                })
             except Exception:
                 pass
 
         win32gui.EnumWindows(_cb, None)
-        return len(found) > 0
-    except Exception:
+    except Exception as e:
+        print(Fore.YELLOW + f"[WORKSPACE] Chrome window scan failed: {e}")
+    return windows
+
+
+def _has_visible_chrome_window():
+    return len(_get_chrome_windows_with_profiles()) > 0
+
+
+def _is_profile_dir_open(profile_dir):
+    """
+    Check if a Chrome profile directory currently has a running window.
+    Uses three fallback layers because Chrome's multi-process model
+    hides --profile-directory from many child processes.
+
+    Layer 1: Scan all chrome.exe processes for --profile-directory= arg
+    Layer 2: Check window enumeration (visible windows tied to PIDs
+             whose parent chain contains the profile directory)
+    Layer 3: Check Chrome's session lock file (SingletonLock in the
+             profile directory exists ONLY when profile is actively open)
+    """
+    if not profile_dir:
         return False
+
+    # ── Layer 1: Process cmdline scan ────────────────────────────────
+    try:
+        import psutil
+        target_lower = f"--profile-directory={profile_dir}".lower()
+        for proc in psutil.process_iter(["name", "cmdline"]):
+            try:
+                if (proc.info.get("name") or "").lower() != "chrome.exe":
+                    continue
+                cmdline = proc.info.get("cmdline") or []
+                for arg in cmdline:
+                    if arg and arg.lower() == target_lower:
+                        return True
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+    # ── Layer 2: Window enumeration ──────────────────────────────────
+    try:
+        windows = _get_chrome_windows_with_profiles()
+        pd_lower = profile_dir.lower()
+        for w in windows:
+            wpd = (w.get("profile_dir") or "").lower()
+            if wpd == pd_lower:
+                return True
+    except Exception:
+        pass
+
+    # ── Layer 3: Session lock file check ─────────────────────────────
+    # Chrome creates 'Singleton*' symlinks or lock files inside the
+    # profile directory when the profile is actively open.
+    # This works even when cmdline is inaccessible.
+    try:
+        chrome_base = os.path.join(
+            os.environ.get("LOCALAPPDATA", ""),
+            "Google", "Chrome", "User Data"
+        )
+        pdir_path = os.path.join(chrome_base, profile_dir)
+        if os.path.isdir(pdir_path):
+            # Chrome creates these files ONLY while profile is running
+            for lock_name in ("SingletonLock", "SingletonSocket", "SingletonCookie"):
+                lock_path = os.path.join(pdir_path, lock_name)
+                if os.path.exists(lock_path) or os.path.islink(lock_path):
+                    return True
+            # Additional check: LOCK file inside Session Storage
+            # (indicates active Chrome session on this profile)
+            session_lock = os.path.join(pdir_path, "Sessions")
+            if os.path.isdir(session_lock):
+                # Look for a Session file modified in last 5 minutes
+                # (Chrome updates these while profile is active)
+                import time as _time
+                now = _time.time()
+                for fname in os.listdir(session_lock):
+                    if fname.startswith("Session_") or fname.startswith("Tabs_"):
+                        fpath = os.path.join(session_lock, fname)
+                        try:
+                            mtime = os.path.getmtime(fpath)
+                            if (now - mtime) < 300:  # 5 minutes
+                                return True
+                        except Exception:
+                            continue
+    except Exception:
+        pass
+
+    return False
+
+
+# ── BULLETPROOF PROFILE RESOLUTION ───────────────────────────────────────
+
+def _scan_chrome_profile_preferences():
+    """
+    Scan Chrome User Data directory and read each profile's Preferences
+    file to build email → profile_dir mapping.
+    This is the MOST RELIABLE method — reads ground truth from disk.
+    Works 100% offline, no HTTP or Local State needed.
+    """
+    chrome_base = os.path.join(
+        os.environ.get("LOCALAPPDATA", ""),
+        "Google", "Chrome", "User Data"
+    )
+    if not os.path.isdir(chrome_base):
+        return {}
+
+    mapping = {}  # key (lowercase) → profile dir name
+    try:
+        for entry in os.listdir(chrome_base):
+            prefs_path = os.path.join(chrome_base, entry, "Preferences")
+            if not os.path.isfile(prefs_path):
+                continue
+            try:
+                with open(prefs_path, "r", encoding="utf-8") as f:
+                    prefs = _json.load(f)
+
+                # Source 1: account_info (most reliable)
+                for acc in prefs.get("account_info", []):
+                    email = (acc.get("email") or "").lower().strip()
+                    if email:
+                        mapping[email] = entry
+                        mapping[email.split("@")[0]] = entry
+
+                # Source 2: profile.name
+                pname = (prefs.get("profile", {}).get("name") or "").lower().strip()
+                if pname and pname not in mapping:
+                    mapping[pname] = entry
+
+                # Source 3: profile.user_name
+                uname = (prefs.get("profile", {}).get("user_name") or "").lower().strip()
+                if uname:
+                    mapping[uname] = entry
+                    mapping[uname.split("@")[0]] = entry
+
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return mapping
 
 
 def _resolve_profile_dir_bulletproof(profile_name, profile_dir_saved, tabs):
     """
-    Determine the correct Chrome profile directory with 5-level fallback:
-      1. Saved profile_dir on disk
-      2. Extension per-profile data: match by tab URL fingerprint
-      3. Extension per-profile data: match by profile name substring
-      4. Chrome Local State info_cache lookup by profile_name
-      5. "Default" fallback
-    Returns the profile directory name (e.g., "Default", "Profile 1").
+    Determine the correct Chrome profile directory.
+    v1.4.2: Reads Preferences files directly from disk — 100% offline.
     """
     chrome_base = os.path.join(
         os.environ.get("LOCALAPPDATA", ""),
@@ -113,60 +326,87 @@ def _resolve_profile_dir_bulletproof(profile_name, profile_dir_saved, tabs):
 
     # LEVEL 1: Trust saved profile_dir if it exists on disk
     if profile_dir_saved and os.path.isdir(os.path.join(chrome_base, profile_dir_saved)):
+        print(Fore.CYAN + f"  [PROFILE] '{profile_name}' → '{profile_dir_saved}' (saved)")
         return profile_dir_saved
 
-    # LEVEL 2 & 3: Query Chrome extension for live profile→tab mapping
+    # LEVEL 2: Scan Preferences files from ALL profile dirs on disk
+    if profile_name:
+        pn = profile_name.lower().strip()
+        prefs_map = _scan_chrome_profile_preferences()
+
+        # Exact match
+        if pn in prefs_map:
+            resolved = prefs_map[pn]
+            print(Fore.CYAN + f"  [PROFILE] Matched '{profile_name}' → "
+                  f"'{resolved}' (Preferences exact match)")
+            return resolved
+
+        # Fuzzy match
+        best_dir = None
+        best_score = 0
+        for key, dir_name in prefs_map.items():
+            if pn in key or key in pn:
+                score = min(len(pn), len(key))
+                if score > best_score:
+                    best_score = score
+                    best_dir = dir_name
+        if best_dir and best_score >= 3:
+            print(Fore.CYAN + f"  [PROFILE] Matched '{profile_name}' → "
+                  f"'{best_dir}' (Preferences fuzzy, score={best_score})")
+            return best_dir
+
+    # LEVEL 3: Local State info_cache (backup)
+    if profile_name:
+        pn = profile_name.lower().strip()
+        try:
+            local_state_path = os.path.join(chrome_base, "Local State")
+            if os.path.isfile(local_state_path):
+                with open(local_state_path, "r", encoding="utf-8") as f:
+                    state = _json.load(f)
+                info_cache = state.get("profile", {}).get("info_cache", {})
+                for dir_name, info in info_cache.items():
+                    if not os.path.isdir(os.path.join(chrome_base, dir_name)):
+                        continue
+                    candidates = [
+                        (info.get("user_name") or "").lower().strip(),
+                        (info.get("user_name") or "").lower().strip().split("@")[0],
+                        (info.get("gaia_name") or "").lower().strip(),
+                        (info.get("name") or "").lower().strip(),
+                    ]
+                    for c in candidates:
+                        if c and c == pn:
+                            print(Fore.CYAN + f"  [PROFILE] Matched '{profile_name}' → "
+                                  f"'{dir_name}' (Local State exact)")
+                            return dir_name
+        except Exception:
+            pass
+
+    # LEVEL 4: Extension HTTP (only if Seven online)
     try:
-        from backend.routes.chrome import get_tabs_by_profile
-        live_profiles = get_tabs_by_profile()  # {profile_key: [tabs]}
-
-        if live_profiles and tabs:
-            from hands.workspace_modules.url_matching import normalize_url
-
-            # Fingerprint saved tabs
-            saved_fingerprint = set()
-            for t in tabs:
-                u = t.get("url", "")
-                if u.startswith("http"):
-                    saved_fingerprint.add(normalize_url(u))
-
-            # LEVEL 2: Find the profile with the MOST overlap with our saved tabs
-            best_match = None
-            best_overlap = 0
-            for prof_key, tab_list in live_profiles.items():
-                live_fp = set()
-                for lt in tab_list:
-                    lu = lt.get("url", "")
-                    if lu:
-                        live_fp.add(normalize_url(lu))
-                overlap = len(saved_fingerprint & live_fp)
-                if overlap > best_overlap:
-                    best_overlap = overlap
-                    best_match = prof_key
-
-            if best_match and best_overlap >= 1:
-                # Convert extension profile key → Chrome profile dir
-                resolved = _extension_key_to_profile_dir(best_match, chrome_base)
-                if resolved:
-                    print(Fore.CYAN + f"  [PROFILE] Matched '{profile_name}' → "
-                          f"'{resolved}' via tab fingerprint ({best_overlap} overlap)")
-                    return resolved
-
-        # LEVEL 3: Match by profile name substring
-        if live_profiles and profile_name:
-            pn = profile_name.lower().strip()
-            for prof_key in live_profiles.keys():
-                pk = prof_key.lower().strip()
-                if pk == pn or pn in pk or pk in pn:
-                    resolved = _extension_key_to_profile_dir(prof_key, chrome_base)
+        from hands.workspace_modules.chrome_utils import (
+            _fetch_tabs_via_http, _is_seven_backend_alive,
+        )
+        if _is_seven_backend_alive():
+            live = _fetch_tabs_via_http()
+            if live and tabs:
+                from hands.workspace_modules.url_matching import normalize_url
+                saved_fp = {normalize_url(t["url"]) for t in tabs
+                            if t.get("url", "").startswith("http")}
+                best_match, best_overlap = None, 0
+                for pk, tl in live.items():
+                    lfp = {normalize_url(lt["url"]) for lt in tl if lt.get("url")}
+                    overlap = len(saved_fp & lfp)
+                    if overlap > best_overlap:
+                        best_overlap = overlap
+                        best_match = pk
+                if best_match and best_overlap >= 1:
+                    resolved = _extension_key_to_profile_dir(best_match, chrome_base)
                     if resolved:
-                        print(Fore.CYAN + f"  [PROFILE] Matched '{profile_name}' → "
-                              f"'{resolved}' via name substring")
                         return resolved
-    except Exception as e:
-        print(Fore.YELLOW + f"  [PROFILE] Extension lookup failed: {e}")
+    except Exception:
+        pass
 
-    # LEVEL 4: Chrome Local State info_cache
+    # LEVEL 5: helpers fallback
     try:
         resolved = find_chrome_profile_dir(chrome_base, profile_name)
         if resolved and os.path.isdir(os.path.join(chrome_base, resolved)):
@@ -174,16 +414,11 @@ def _resolve_profile_dir_bulletproof(profile_name, profile_dir_saved, tabs):
     except Exception:
         pass
 
-    # LEVEL 5: Default
+    print(Fore.YELLOW + f"  [PROFILE] Could not resolve '{profile_name}' → 'Default'")
     return "Default"
 
 
 def _extension_key_to_profile_dir(prof_key, chrome_base):
-    """
-    Convert extension profile key (display name) → Chrome profile directory
-    by reading Local State info_cache.
-    """
-    import json as _json
     try:
         local_state_path = os.path.join(chrome_base, "Local State")
         if not os.path.isfile(local_state_path):
@@ -203,177 +438,121 @@ def _extension_key_to_profile_dir(prof_key, chrome_base):
                     return dir_name
     except Exception:
         pass
-    # Special case: "default" always maps to "Default"
     if prof_key.lower() == "default":
         return "Default"
     return None
 
 
+# ── BROWSER RESTORE ──────────────────────────────────────────────────────
+
 def _restore_browser(cfg):
-    """
-    Restore Chrome tabs for a specific profile without duplicating open tabs.
-    Uses bulletproof profile resolution and multi-layer dedup.
-    """
     tabs              = cfg.get("tabs", [])
     urls              = [t["url"] for t in tabs if t.get("url", "").startswith("http")]
     profile_name      = cfg.get("profile_name", "")
     profile_dir_saved = cfg.get("profile_dir", "")
-    is_partial        = cfg.get("_partial", False)
-    browser_closed    = cfg.get("_browser_closed", False)
+    browser_closed_hint = cfg.get("_browser_closed", False)
     chrome_exe        = find_chrome_exe()
 
     if not urls:
         return
-
     if not chrome_exe:
         for url in urls:
             subprocess.Popen(f'start chrome "{url}"', shell=True)
             time.sleep(0.2)
         return
 
-    # BULLETPROOF profile resolution
-    profile_dir = _resolve_profile_dir_bulletproof(
-        profile_name, profile_dir_saved, tabs
-    )
-    print(Fore.CYAN + f"  [PROFILE] Resolved '{profile_name}' → dir '{profile_dir}'")
+    with _browser_launch_lock:
+        profile_dir = _resolve_profile_dir_bulletproof(
+            profile_name, profile_dir_saved, tabs
+        )
+        print(Fore.CYAN + f"  [PROFILE] Resolved '{profile_name}' → dir '{profile_dir}'")
 
-    # Case 1: Chrome closed → launch fresh with all URLs
-    if browser_closed or not _has_visible_chrome_window():
-        print(Fore.GREEN + f"[WORKSPACE] Launching Chrome '{profile_dir}' cold "
-              f"with {len(urls)} tab(s)")
-        _launch_chrome_tabs(chrome_exe, profile_dir, urls, cold_start=True)
-        return
+        # Validate daemon hint against reality
+        any_chrome_open = _has_visible_chrome_window()
+        profile_open = _is_profile_dir_open(profile_dir)
+        truly_cold = browser_closed_hint and not any_chrome_open
 
-    # Case 2: Partial restore (dedup already computed) — re-verify against
-    # live extension data for THIS specific profile
-    if is_partial:
-        truly_missing = _final_dedup_check(urls, profile_name, profile_dir)
-        if not truly_missing:
-            print(Fore.CYAN + f"[WORKSPACE] Chrome ({profile_name}/{profile_dir}): "
-                  f"All tabs already open (final live check)")
+        if truly_cold:
+            print(Fore.GREEN + f"[WORKSPACE] Launching Chrome '{profile_dir}' cold "
+                  f"with {len(urls)} tab(s)")
+            _launch_chrome_tabs(chrome_exe, profile_dir, urls, cold_start=True)
             return
-        print(Fore.GREEN + f"[WORKSPACE] Chrome ({profile_name}/{profile_dir}): "
-              f"Opening {len(truly_missing)} missing tab(s)")
-        _launch_chrome_tabs(chrome_exe, profile_dir, truly_missing)
-        return
 
-    # Case 3: Full restore path — check per-profile live data first
-    from hands.workspace_modules.url_matching import normalize_url
-    profile_open_urls = set()
-    all_open_urls = set()
+        if not profile_open:
+            print(Fore.GREEN + f"[WORKSPACE] Profile '{profile_dir}' not open — "
+                  f"launching with {len(urls)} tab(s)")
+            _launch_chrome_tabs(chrome_exe, profile_dir, urls, cold_start=False)
+            return
 
-    try:
-        from backend.routes.chrome import get_tabs_by_profile
-        current_profile_tabs = get_tabs_by_profile()
-        for prof_key, tab_list in current_profile_tabs.items():
-            for t in tab_list:
-                u = t.get("url", "")
-                if not u:
-                    continue
-                norm = normalize_url(u)
-                all_open_urls.add(norm)
-                # Check if this prof_key maps to our target profile_dir
-                mapped_dir = _extension_key_to_profile_dir(
-                    prof_key, os.path.join(
-                        os.environ.get("LOCALAPPDATA", ""),
-                        "Google", "Chrome", "User Data"
-                    )
-                )
-                if mapped_dir and mapped_dir.lower() == profile_dir.lower():
-                    profile_open_urls.add(norm)
-    except Exception:
-        pass
+        # Profile IS open — dedup against THIS PROFILE ONLY.
+        # Never merge URLs across accounts. A tab closed in Profile 1
+        # must not be skipped just because Profile 2 has the same URL.
+        from hands.workspace_modules.url_matching import normalize_url
+        this_profile_urls = set()
 
-    # Determine which tabs are missing FROM THIS PROFILE
-    # Rule: skip if URL is open ANYWHERE (any profile) — prevents duplicates
-    missing_urls = [u for u in urls if normalize_url(u) not in all_open_urls]
-
-    if not missing_urls:
-        print(Fore.CYAN + f"[WORKSPACE] Chrome ({profile_name}/{profile_dir}): "
-              f"All {len(urls)} tabs already open somewhere")
-        return
-
-    print(Fore.GREEN + f"[WORKSPACE] Chrome ({profile_name}/{profile_dir}): "
-          f"Opening {len(missing_urls)}/{len(urls)} missing tab(s)")
-    _launch_chrome_tabs(chrome_exe, profile_dir, missing_urls)
-
-
-def _final_dedup_check(urls, profile_name, profile_dir):
-    """
-    Query Chrome extension live tab data and return only URLs that are
-    NOT currently open anywhere in Chrome (any profile). Prevents duplicates
-    regardless of which profile a tab lives in.
-    """
-    if not urls:
-        return urls
-
-    from hands.workspace_modules.url_matching import normalize_url
-    live_norm = set()
-
-    # Source 1: Extension per-profile data (most accurate, includes all profiles)
-    try:
-        from backend.routes.chrome import get_tabs_by_profile
-        all_profiles = get_tabs_by_profile()
-        for _prof_key, _tab_list in all_profiles.items():
-            for _t in _tab_list:
-                _u = _t.get("url", "")
-                if _u:
-                    live_norm.add(normalize_url(_u))
-    except Exception:
-        pass
-
-    # Source 2: Fallback to window-title scraping
-    if not live_norm:
         try:
-            from hands.workspace_modules.chrome_utils import get_open_chrome_tabs
-            _all_urls, _ = get_open_chrome_tabs()
-            if _all_urls:
-                for _u in _all_urls:
-                    live_norm.add(normalize_url(_u))
+            from hands.workspace_modules.chrome_utils import (
+                _fetch_tabs_via_http, _is_seven_backend_alive,
+            )
+            if _is_seven_backend_alive():
+                _live = _fetch_tabs_via_http()
+                # _live is keyed by disk directory after re-keying
+                # e.g. {"Default": [...], "Profile 1": [...]}
+                _this_tabs = _live.get(profile_dir, [])
+                if not _this_tabs:
+                    # Case-insensitive fallback
+                    _pd_lower = profile_dir.lower()
+                    for _pk, _tl in _live.items():
+                        if _pk.lower() == _pd_lower:
+                            _this_tabs = _tl
+                            break
+                for _t in _this_tabs:
+                    _u = _t.get("url", "")
+                    if _u:
+                        this_profile_urls.add(normalize_url(_u))
         except Exception:
             pass
 
-    if not live_norm:
-        print(Fore.YELLOW + f"  [DEDUP] No live data — trusting caller")
-        return urls
+        if not this_profile_urls:
+            try:
+                from hands.workspace_modules.chrome_utils import get_open_chrome_tabs
+                legacy, _ = get_open_chrome_tabs()
+                this_profile_urls = legacy
+            except Exception:
+                pass
 
-    truly_missing = [u for u in urls if normalize_url(u) not in live_norm]
-    skipped = len(urls) - len(truly_missing)
-    if skipped > 0:
-        print(Fore.CYAN + f"  [DEDUP] Final: {skipped} already open, "
-              f"{len(truly_missing)} to open in '{profile_dir}'")
-    return truly_missing
+        if not this_profile_urls:
+            print(Fore.YELLOW + f"[WORKSPACE] Chrome '{profile_dir}' open but no tab "
+                  f"data (Seven offline). Skipping to avoid duplicates.")
+            return
+
+        missing = [u for u in urls if normalize_url(u) not in this_profile_urls]
+        if not missing:
+            print(Fore.CYAN + f"[WORKSPACE] Chrome ({profile_name}/{profile_dir}): "
+                  f"All {len(urls)} tabs already open")
+            return
+
+        print(Fore.GREEN + f"[WORKSPACE] Chrome ({profile_name}/{profile_dir}): "
+              f"Opening {len(missing)}/{len(urls)} missing tab(s)")
+        _launch_chrome_tabs(chrome_exe, profile_dir, missing)
 
 
 def _launch_chrome_tabs(chrome_exe, profile_dir, urls, cold_start=False):
-    """
-    Launch Chrome with the specified profile directory and batch of URLs.
-
-    cold_start=True  → Chrome is not running. Suppress session-restore prompt
-                       and prevent auto-reopening of previous session tabs.
-    cold_start=False → Chrome is already running. Tabs are appended to the
-                       existing window for this profile.
-    """
     if not urls:
         return
-
     try:
         cmd = [chrome_exe, f"--profile-directory={profile_dir}"]
-
         if cold_start:
-            # Suppress the "Restore pages?" bubble and skip session restoration
-            # so we do NOT get duplicates from Chrome's own tab restore feature
             cmd += [
-                "--no-startup-window",  # will be overridden by URLs below
                 "--disable-features=InfiniteSessionRestore",
                 "--hide-crash-restore-bubble",
             ]
-            # Remove --no-startup-window since URLs force a window anyway
-            cmd = [c for c in cmd if c != "--no-startup-window"]
-
         cmd += urls
         subprocess.Popen(cmd)
-        time.sleep(0.4)
+        if cold_start:
+            time.sleep(1.2)  # Give Chrome extra time to write lock when cold starting
+        else:
+            time.sleep(0.4)
     except Exception as e:
         print(Fore.RED + f"  [-] Batch launch failed: {e}")
         for url in urls:
@@ -384,14 +563,14 @@ def _launch_chrome_tabs(chrome_exe, profile_dir, urls, cold_start=False):
                 pass
 
 
+# ── NON-BROWSER APP RESTORERS ────────────────────────────────────────────
+
 def _restore_explorer(cfg):
     folder = cfg.get("folder_path", "")
     name   = cfg.get("name", "")
-
     if folder and os.path.exists(folder):
         subprocess.Popen(["explorer", folder])
         return
-
     if name:
         clean = name
         for prefix in ("File Explorer: ", "File Explorer — ", "File Explorer - "):
@@ -403,27 +582,75 @@ def _restore_explorer(cfg):
         if os.path.exists(clean):
             subprocess.Popen(["explorer", clean])
             return
-
     subprocess.Popen(["explorer"])
 
 
 def _restore_vscode(cfg):
-    """Restore VS Code workspace session cleanly."""
-    ws = cfg.get("workspace_path", "")
+    """Restore VS Code with the EXACT workspace/folder that was scanned."""
+    ws  = cfg.get("workspace_path", "")
     exe = cfg.get("exe_path", "")
+    name = cfg.get("name", "")
+
+    # Find VS Code executable
+    if not exe or not os.path.exists(exe):
+        for candidate in [
+            os.path.join(os.environ.get("LOCALAPPDATA", ""),
+                         "Programs", "Microsoft VS Code", "Code.exe"),
+            os.path.join(os.environ.get("ProgramFiles", ""),
+                         "Microsoft VS Code", "Code.exe"),
+        ]:
+            if os.path.exists(candidate):
+                exe = candidate
+                break
+    if not exe:
+        exe = "code"
+
     if ws and os.path.exists(ws):
-        if exe and os.path.exists(exe):
-            try:
-                subprocess.Popen([exe, ws])
-                return
-            except Exception:
-                pass
+        try:
+            print(Fore.CYAN + f"  [VSCODE] Opening workspace: {ws}")
+            subprocess.Popen([exe, ws])
+            return
+        except Exception as e:
+            print(Fore.YELLOW + f"  [VSCODE] Failed with exe '{exe}': {e}")
         try:
             os.startfile(ws)
             return
         except Exception:
             pass
-    _restore_generic(cfg)
+
+    # Fallback: just open VS Code
+    try:
+        subprocess.Popen([exe])
+    except Exception:
+        _restore_generic(cfg)
+
+
+def _restore_terminal(cfg):
+    """
+    Restore terminal with correct executable and working directory.
+    FIX: Checks both type AND name to determine the right shell.
+    """
+    cwd      = cfg.get("working_dir", "")
+    app_type = (cfg.get("type") or "").lower()
+    name     = (cfg.get("name") or "").lower()
+
+    # Determine correct shell from type AND name
+    if app_type in ("powershell", "pwsh") or "powershell" in name or "pwsh" in name:
+        exe = "powershell"
+    elif app_type == "terminal" or "windows terminal" in name or "wt" in name:
+        exe = "wt"
+    elif app_type == "cmd" or "command prompt" in name or name == "cmd":
+        exe = "cmd"
+    else:
+        exe = "powershell"  # Safe default
+
+    flags = subprocess.CREATE_NEW_CONSOLE
+    print(Fore.CYAN + f"  [TERMINAL] Opening {exe}" +
+          (f" in {cwd}" if cwd else ""))
+    if cwd and os.path.exists(cwd):
+        subprocess.Popen([exe], cwd=cwd, creationflags=flags)
+    else:
+        subprocess.Popen([exe], creationflags=flags)
 
 
 def _restore_editor(cfg):
@@ -454,17 +681,6 @@ def _restore_uwp(cfg):
         except Exception:
             pass
     _restore_generic(cfg)
-
-
-def _restore_terminal(cfg):
-    cwd      = cfg.get("working_dir", "")
-    app_type = (cfg.get("type") or "").lower()
-    exe      = "powershell" if app_type in ("powershell", "terminal") else "cmd"
-    flags    = subprocess.CREATE_NEW_CONSOLE
-    if cwd and os.path.exists(cwd):
-        subprocess.Popen([exe], cwd=cwd, creationflags=flags)
-    else:
-        subprocess.Popen([exe], creationflags=flags)
 
 
 def _restore_generic(cfg):
@@ -507,7 +723,7 @@ def _restore_generic(cfg):
         pass
 
 
-# ── WINDOW GEOMETRY RESTORER ──────────────────────────────────────────────
+# ── WINDOW GEOMETRY (CPU-throttled) ──────────────────────────────────────
 
 def _restore_window_geometry(cfg, app_name):
     win_info = cfg.get("window") or {}
@@ -519,7 +735,6 @@ def _restore_window_geometry(cfg, app_name):
 
     if x is None or y is None or w is None or h is None:
         return
-
     if w < 100 or h < 100:
         return
 
@@ -537,7 +752,6 @@ def _wait_and_position_window(cfg, app_name, x, y, w, h, is_maximized):
         import win32gui
         import win32con
         import win32process
-        import win32api
         import psutil
     except ImportError:
         return
@@ -546,14 +760,15 @@ def _wait_and_position_window(cfg, app_name, x, y, w, h, is_maximized):
     exe_name = os.path.basename(exe_path).lower() if exe_path else ""
     saved_title = (cfg.get("window", {}).get("title") or "").lower().strip()
 
-    # Multi-monitor safety
     x, y, w, h = _clamp_to_visible_monitor(x, y, w, h)
 
-    end_time = _t.time() + 8.0
+    end_time = _t.time() + 6.0
     target_hwnd = None
+    empty_scans = 0
+    pid_cache = {}
 
     while _t.time() < end_time and target_hwnd is None:
-        _t.sleep(0.4)
+        _t.sleep(0.8)
         candidates = []
 
         def _enum_cb(hwnd, _):
@@ -564,27 +779,31 @@ def _wait_and_position_window(cfg, app_name, x, y, w, h, is_maximized):
                 if not title:
                     return
                 _, pid = win32process.GetWindowThreadProcessId(hwnd)
-                try:
-                    proc = psutil.Process(pid)
-                    proc_exe = (proc.exe() or "").lower()
-                    proc_name = proc.name().lower()
-                except Exception:
+                cached = pid_cache.get(pid)
+                if cached is None:
+                    try:
+                        proc = psutil.Process(pid)
+                        cached = ((proc.exe() or "").lower(), proc.name().lower())
+                        pid_cache[pid] = cached
+                    except Exception:
+                        pid_cache[pid] = ("", "")
+                        return
+                proc_exe, proc_name = cached
+                if not proc_name:
                     return
                 if any(m in proc_exe for m in ["mk-projects\\seven", "\\seven\\"]):
                     return
-
                 match_score = 0
                 if exe_path and proc_exe == exe_path:
                     match_score = 10
                 elif exe_name and proc_name == exe_name:
                     match_score = 8
                 elif saved_title:
-                    title_lower = title.lower()
-                    if title_lower == saved_title:
+                    tl = title.lower()
+                    if tl == saved_title:
                         match_score = 6
-                    elif saved_title in title_lower or title_lower in saved_title:
+                    elif saved_title in tl or tl in saved_title:
                         match_score = 4
-
                 if match_score > 0:
                     candidates.append((match_score, hwnd, title))
             except Exception:
@@ -597,17 +816,20 @@ def _wait_and_position_window(cfg, app_name, x, y, w, h, is_maximized):
 
         if candidates:
             candidates.sort(reverse=True)
-            _, target_hwnd, matched_title = candidates[0]
+            _, target_hwnd, _ = candidates[0]
             break
+        else:
+            empty_scans += 1
+            if empty_scans >= 3:
+                return
 
     if target_hwnd is None:
         return
 
-    # Wait for window size to stabilize
     prev_rect = None
     stable_count = 0
-    for _ in range(15):
-        _t.sleep(0.1)
+    for _ in range(10):
+        _t.sleep(0.15)
         try:
             rect = win32gui.GetWindowRect(target_hwnd)
         except Exception:
@@ -620,7 +842,6 @@ def _wait_and_position_window(cfg, app_name, x, y, w, h, is_maximized):
             stable_count = 0
             prev_rect = rect
 
-    # Restore minimized states
     try:
         placement = win32gui.GetWindowPlacement(target_hwnd)
         if placement[1] in (win32con.SW_SHOWMINIMIZED, win32con.SW_MINIMIZE):
@@ -629,16 +850,14 @@ def _wait_and_position_window(cfg, app_name, x, y, w, h, is_maximized):
     except Exception:
         pass
 
-    # If the window was maximized when scanned, apply native Win32 Maximize
     if is_maximized:
         try:
             win32gui.ShowWindow(target_hwnd, win32con.SW_MAXIMIZE)
-            print(Fore.GREEN + f"  [POS] Maximized window '{app_name}' cleanly")
+            _force_foreground(target_hwnd)
             return
         except Exception:
             pass
 
-    # Un-maximize before placing if maximized
     try:
         placement = win32gui.GetWindowPlacement(target_hwnd)
         if placement[1] == win32con.SW_SHOWMAXIMIZED:
@@ -647,67 +866,42 @@ def _wait_and_position_window(cfg, app_name, x, y, w, h, is_maximized):
     except Exception:
         pass
 
-    # Apply saved geometry (coordinates)
-    def _apply_geometry():
+    def _apply():
         try:
             win32gui.SetWindowPos(
-                target_hwnd,
-                win32con.HWND_TOP,
-                x, y, w, h,
-                win32con.SWP_SHOWWINDOW | win32con.SWP_NOACTIVATE,
+                target_hwnd, win32con.HWND_TOP,
+                x, y, w, h, win32con.SWP_SHOWWINDOW,
             )
+            _force_foreground(target_hwnd)
             return True
         except Exception:
             return False
 
-    _apply_geometry()
+    _apply()
     _t.sleep(0.3)
-
-    # Double-pass override verification
     try:
-        rect_after = win32gui.GetWindowRect(target_hwnd)
-        actual_w = rect_after[2] - rect_after[0]
-        actual_h = rect_after[3] - rect_after[1]
-        if abs(actual_w - w) > 20 or abs(actual_h - h) > 20:
-            _apply_geometry()
+        r = win32gui.GetWindowRect(target_hwnd)
+        if abs((r[2]-r[0]) - w) > 20 or abs((r[3]-r[1]) - h) > 20:
+            _apply()
     except Exception:
         pass
-
-    print(Fore.GREEN + f"  [POS] Positioned '{app_name}' at ({x}, {y}) {w}×{h}")
 
 
 def _clamp_to_visible_monitor(x, y, w, h):
     try:
         import win32api
         import win32con
-
         point = (x + w // 2, y + h // 2)
-        monitors = win32api.EnumDisplayMonitors()
-        target_monitor = None
-
-        for hmon, _, rect in monitors:
-            mx1, my1, mx2, my2 = rect
-            if mx1 <= point[0] <= mx2 and my1 <= point[1] <= my2:
-                target_monitor = (mx1, my1, mx2, my2)
-                break
-
-        if target_monitor:
-            return x, y, w, h
-
+        for hmon, _, rect in win32api.EnumDisplayMonitors():
+            if rect[0] <= point[0] <= rect[2] and rect[1] <= point[1] <= rect[3]:
+                return x, y, w, h
         primary = win32api.GetMonitorInfo(
             win32api.MonitorFromPoint((0, 0), win32con.MONITOR_DEFAULTTOPRIMARY)
         )
-        work_area = primary['Work']
-        pw = work_area[2] - work_area[0]
-        ph = work_area[3] - work_area[1]
-
-        new_w = min(w, pw - 40)
-        new_h = min(h, ph - 40)
-        new_x = work_area[0] + (pw - new_w) // 2
-        new_y = work_area[1] + (ph - new_h) // 2
-
-        print(Fore.YELLOW + f"  [POS] Clamped '{x},{y}' to primary screen bounds")
-        return new_x, new_y, new_w, new_h
-
+        wa = primary['Work']
+        pw, ph = wa[2] - wa[0], wa[3] - wa[1]
+        return wa[0] + (pw - min(w, pw-40)) // 2, \
+               wa[1] + (ph - min(h, ph-40)) // 2, \
+               min(w, pw-40), min(h, ph-40)
     except Exception:
         return x, y, w, h
