@@ -35,6 +35,56 @@ _trigger_cooldowns = {}
 _TRIGGER_COOLDOWN_SEC = 5.0
 
 
+def _is_backend_alive_fast():
+    """
+    Ultra-fast (~50ms) port check to detect if Seven's FastAPI is running.
+    Returns True instantly if reachable, False on connection-refused.
+    NEVER blocks — uses raw socket with 0.1s timeout.
+    """
+    import socket
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(0.1)
+        result = s.connect_ex(("127.0.0.1", 7777))
+        s.close()
+        return result == 0
+    except Exception:
+        return False
+
+
+def _wait_for_backend(timeout=8.0):
+    """
+    Wait for FastAPI backend ONLY if Seven appears to be starting up.
+    If Seven is completely closed (port refuses connection), skip the wait
+    entirely — dedup will use scan_current() window data instead.
+    """
+    # Fast-fail: if port is refused instantly, Seven is closed. Don't wait.
+    if not _is_backend_alive_fast():
+        print(f"[TRIGGER DAEMON] Seven is closed (port 7777 refused). "
+              f"Skipping backend wait — using offline restore path.")
+        return False
+
+    # Seven's port responded — it may still be booting. Wait for /api/chrome/tabs/status.
+    import urllib.request
+    start = time.time()
+    while time.time() - start < timeout:
+        try:
+            req = urllib.request.urlopen(
+                "http://127.0.0.1:7777/api/chrome/tabs/status",
+                timeout=1.0
+            )
+            if req.status == 200:
+                print(f"[TRIGGER DAEMON] Backend ready "
+                      f"(waited {time.time() - start:.1f}s)")
+                return True
+        except Exception:
+            pass
+        time.sleep(0.5)
+    print(f"[TRIGGER DAEMON] WARNING: Backend not reachable after "
+          f"{timeout}s — dedup will be inaccurate")
+    return False
+
+
 # ─────────────────────────────────────────────────────────────────────────
 # MAIN ENTRY POINT
 # ─────────────────────────────────────────────────────────────────────────
@@ -310,9 +360,18 @@ def _exec_open_workspace(data):
     """
     Restore a workspace by ID or name using smart_restore.
     Returns {"opened": N, "skipped": N} for caller to show feedback.
+
+    OFFLINE MODE (Seven closed):
+      - Skips backend wait (fast connection-refused check)
+      - Pre-marks Chrome configs with _browser_closed=True so smart_restore
+        uses cold-start path and opens ALL saved tabs (no dedup gate skip)
     """
     workspace_id   = data.get("workspace_id")
     workspace_name = data.get("workspace_name")
+
+    _t_start = time.time()
+    print(f"[TRIGGER DAEMON] _exec_open_workspace START "
+          f"(id={workspace_id} name={workspace_name})")
 
     try:
         conn = sqlite3.connect(TRIGGERS_DB, timeout=5)
@@ -350,12 +409,105 @@ def _exec_open_workspace(data):
             print("[TRIGGER DAEMON] Workspace has no apps")
             return {"opened": 0, "skipped": 0}
 
+        print(f"[TRIGGER DAEMON] Loaded workspace '{workspace.get('name')}' "
+              f"with {len(apps)} apps ({time.time() - _t_start:.2f}s)")
+
+        # Detect Seven backend state with 50ms port check
+        seven_alive = _is_backend_alive_fast()
+        print(f"[TRIGGER DAEMON] Seven backend alive: {seven_alive}")
+
+        if seven_alive:
+            # Online path — wait for backend to fully boot if still starting
+            _wait_for_backend(timeout=8.0)
+        else:
+            # Offline path — check if browser processes are ACTUALLY running.
+            # Only mark _browser_closed=True when the browser is truly absent.
+            # This prevents duplicate tabs on re-trigger when Chrome is already
+            # open from a previous workspace restore.
+            print(f"[TRIGGER DAEMON] OFFLINE MODE — checking per-profile browser state")
+            # Build a set of currently-running Chrome profile directories.
+            # This is more precise than checking just chrome.exe existence
+            # because Chrome may be running for Profile A but not Profile B.
+            _running_profiles = set()
+            _browser_running = {}
+            try:
+                import psutil
+                for proc in psutil.process_iter(['name', 'cmdline']):
+                    try:
+                        pname = (proc.info.get('name') or '').lower()
+                        if pname in ('chrome.exe', 'msedge.exe',
+                                     'brave.exe', 'firefox.exe'):
+                            _browser_running[pname] = True
+                            cmdline = proc.info.get('cmdline') or []
+                            for arg in cmdline:
+                                if arg and arg.startswith('--profile-directory='):
+                                    _running_profiles.add(
+                                        arg.split('=', 1)[1].lower()
+                                    )
+                                    break
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+            # Fallback: session lock file check for profiles that psutil missed
+            try:
+                _chrome_base = os.path.join(
+                    os.environ.get("LOCALAPPDATA", ""),
+                    "Google", "Chrome", "User Data"
+                )
+                if os.path.isdir(_chrome_base):
+                    for _entry in os.listdir(_chrome_base):
+                        if _entry != "Default" and not _entry.startswith("Profile"):
+                            continue
+                        _pdir = os.path.join(_chrome_base, _entry)
+                        for _lock in ("SingletonLock", "SingletonSocket", "SingletonCookie"):
+                            if os.path.exists(os.path.join(_pdir, _lock)) or \
+                               os.path.islink(os.path.join(_pdir, _lock)):
+                                _running_profiles.add(_entry.lower())
+                                break
+            except Exception:
+                pass
+
+            _exe_map = {
+                "chrome": "chrome.exe", "edge": "msedge.exe",
+                "brave": "brave.exe", "firefox": "firefox.exe",
+            }
+            marked = 0
+            for cfg in apps:
+                t = (cfg.get("type") or "").lower()
+                if t in _exe_map:
+                    # Check if THIS SPECIFIC profile is running
+                    cfg_pdir = (cfg.get("profile_dir") or "").lower().strip()
+                    browser_exe_running = _browser_running.get(_exe_map[t], False)
+
+                    if not browser_exe_running:
+                        # Browser fully closed — cold start needed
+                        cfg["_browser_closed"] = True
+                        marked += 1
+                    elif cfg_pdir and cfg_pdir not in _running_profiles:
+                        # Browser running but THIS profile is closed —
+                        # do NOT mark as cold-start (that would relaunch
+                        # session restore); let normal path launch just
+                        # this profile's window.
+                        cfg["_browser_closed"] = False
+                    else:
+                        # This profile is already running — dedup will handle
+                        cfg["_browser_closed"] = False
+            print(f"[TRIGGER DAEMON] Marked {marked} browser config(s) "
+                  f"for cold-start "
+                  f"({len(_browser_running)} browser exe(s), "
+                  f"{len(_running_profiles)} profile(s) running: "
+                  f"{sorted(_running_profiles)})")
+
+        _t_restore = time.time()
         from hands.workspace import smart_restore
         opened, skipped = smart_restore(apps)
-        print(f"[TRIGGER DAEMON] Smart restore: "
-              f"{opened} opened, {skipped} already running")
+        print(f"[TRIGGER DAEMON] smart_restore returned: "
+              f"opened={opened} skipped={skipped} "
+              f"(took {time.time() - _t_restore:.2f}s)")
 
-        if is_seven_running() and workspace_id:
+        if seven_alive and workspace_id:
             try:
                 import requests
                 requests.post(
@@ -367,7 +519,8 @@ def _exec_open_workspace(data):
                 pass
 
         print(f"[TRIGGER DAEMON] Workspace done: "
-              f"{workspace.get('name')} ({len(apps)} apps)")
+              f"{workspace.get('name')} ({len(apps)} apps) "
+              f"TOTAL {time.time() - _t_start:.2f}s")
 
         return {"opened": opened, "skipped": skipped}
 
@@ -699,12 +852,35 @@ def _exec_seven_action(data):
 
             # ── SHOW TASKS PANEL ──
             if re.search(r'\b(show|open)\s+(my\s+)?tasks?\b', part):
+                _panel_ok = False
                 try:
                     import requests as _req
-                    _req.post("http://127.0.0.1:7779/panel/open", timeout=3)
+                    for _port in (7779, 7778):
+                        try:
+                            _r = _req.post(
+                                f"http://127.0.0.1:{_port}/panel/open",
+                                timeout=2,
+                            )
+                            if _r.status_code < 400:
+                                _panel_ok = True
+                                break
+                        except Exception:
+                            continue
+                except Exception as _te:
+                    print(f"[TRIGGER DAEMON] Task panel error: {_te}")
+
+                if not _panel_ok:
+                    try:
+                        webbrowser.open("http://127.0.0.1:7778/panel/triggers")
+                        _panel_ok = True
+                    except Exception:
+                        pass
+
+                if _panel_ok:
                     _handled.append("tasks panel")
-                except Exception:
-                    pass
+                else:
+                    print("[TRIGGER DAEMON] Task panel: all ports failed")
+                    _unhandled.append(part)
                 continue
 
             # ── SHOW SCHEDULE ──
