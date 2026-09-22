@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, startTransition } from 'react';
 import { Scan, X, Save, Layout } from 'lucide-react';
 import ChromeTabSyncCard from './ChromeTabSyncCard';
 import WorkspaceCard from './WorkspaceCard';
@@ -6,20 +6,40 @@ import WorkspaceCard from './WorkspaceCard';
 export default function WorkspaceTab({ workspaces, onScan, onSave, onRestore, onDelete, reveal }) {
   const [scanning, setScanning] = useState(false);
   const [scanned,  setScanned]  = useState(null);
+  const [showTags, setShowTags] = useState(false);
   const [wsName,   setWsName]   = useState('');
   const [wsSaving, setWsSaving] = useState(false);
   const inputRef = useRef(null);
 
+ // Auto-focus the name input the instant the scanned block mounts
+  useEffect(() => {
+    if (scanned && inputRef.current) {
+      // In Electron, the webview loses OS focus during IPC round-trips.
+      // window.focus() reclaims it, then input.focus() places the caret.
+      const timer = setTimeout(() => {
+        try { window.focus(); } catch (_) {}
+        if (inputRef.current) {
+          inputRef.current.focus();
+          inputRef.current.click();
+        }
+      }, 150);
+      return () => clearTimeout(timer);
+    }
+  }, [scanned]);
+
   const handleScan = async () => {
     setScanning(true);
+    setShowTags(false);
     const r = await onScan();
     setScanning(false);
     if (r.ok) {
+      // Mount the input field immediately
       setScanned(r.apps);
-      // Focus the name field on the next paint so it is instantly typable
-      requestAnimationFrame(() => {
-        if (inputRef.current) inputRef.current.focus();
-      });
+      // Defer the heavy tag list to a low-priority transition
+      // so the browser can paint the input field first
+      setTimeout(() => {
+        startTransition(() => setShowTags(true));
+      }, 50);
     }
   };
 
@@ -34,11 +54,13 @@ export default function WorkspaceTab({ workspaces, onScan, onSave, onRestore, on
     setWsSaving(false);
     setWsName('');
     setScanned(null);
+    setShowTags(false);
   };
 
   const handleDismissScan = () => {
     setScanned(null);
     setWsName('');
+    setShowTags(false);
   };
 
   return (
@@ -74,10 +96,11 @@ export default function WorkspaceTab({ workspaces, onScan, onSave, onRestore, on
             </button>
           </div>
 
-          {/* Naming input — direct state, no memo, no re-mount */}
+          {/* Name input — renders IMMEDIATELY, no heavy siblings blocking it */}
           <div className="flex items-center gap-2">
             <input
               ref={inputRef}
+              autoFocus
               value={wsName}
               onChange={e => setWsName(e.target.value)}
               onKeyDown={e => {
@@ -86,6 +109,7 @@ export default function WorkspaceTab({ workspaces, onScan, onSave, onRestore, on
                   handleSaveWorkspace();
                 }
               }}
+              onClick={e => e.target.focus()}
               placeholder="Name this workspace (e.g., Focus, Morning, Code)"
               className="flex-1 bg-white/[0.03] border border-white/8 rounded-lg px-3 py-2
                          text-[11px] text-white/80 placeholder-white/20 outline-none
@@ -103,16 +127,22 @@ export default function WorkspaceTab({ workspaces, onScan, onSave, onRestore, on
             </button>
           </div>
 
-          {/* App tags below — heavy render deferred */}
-          <div className="flex flex-wrap gap-1 max-h-[100px] overflow-y-auto mt-3
-                          scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
-            {scanned.map((app, i) => (
-              <span key={i} className="text-[8px] text-white/45 bg-[#0a0a0c]
-                                        border border-white/6 px-2 py-0.5 rounded">
-                {app.name || app.type}
-              </span>
-            ))}
-          </div>
+          {/* App tags — deferred via startTransition, won't block input */}
+          {showTags ? (
+            <div className="flex flex-wrap gap-1 max-h-[100px] overflow-y-auto mt-3
+                            scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
+              {scanned.map((app, i) => (
+                <span key={i} className="text-[8px] text-white/45 bg-[#0a0a0c]
+                                          border border-white/6 px-2 py-0.5 rounded">
+                  {app.name || app.type}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <div className="mt-3 text-[9px] text-white/25 animate-pulse">
+              Loading {scanned.length} apps…
+            </div>
+          )}
         </div>
       )}
 
