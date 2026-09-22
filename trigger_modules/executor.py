@@ -853,22 +853,37 @@ def _exec_seven_action(data):
             # ── SHOW TASKS PANEL ──
             if re.search(r'\b(show|open)\s+(my\s+)?tasks?\b', part):
                 _panel_ok = False
-                try:
-                    import requests as _req
-                    for _port in (7779, 7778):
-                        try:
-                            _r = _req.post(
-                                f"http://127.0.0.1:{_port}/panel/open",
-                                timeout=2,
-                            )
-                            if _r.status_code < 400:
-                                _panel_ok = True
-                                break
-                        except Exception:
-                            continue
-                except Exception as _te:
-                    print(f"[TRIGGER DAEMON] Task panel error: {_te}")
 
+                # Method 1: Navigate Seven UI via nav_trigger.json (most reliable)
+                try:
+                    _appdata = os.environ.get('APPDATA', '')
+                    _nav = os.path.join(_appdata, 'SEVEN', 'nav_trigger.json')
+                    with open(_nav, 'w') as _f:
+                        json.dump({"route": "/triggers"}, _f)
+                    _panel_ok = True
+                    print("[TRIGGER DAEMON] Task panel: nav_trigger.json written")
+                except Exception as _ne:
+                    print(f"[TRIGGER DAEMON] Task panel nav_trigger failed: {_ne}")
+
+                # Method 2: HTTP POST to panel server
+                if not _panel_ok:
+                    try:
+                        import requests as _req
+                        for _port in (7779, 7778):
+                            try:
+                                _r = _req.post(
+                                    f"http://127.0.0.1:{_port}/panel/open",
+                                    timeout=2,
+                                )
+                                if _r.status_code < 400:
+                                    _panel_ok = True
+                                    break
+                            except Exception:
+                                continue
+                    except Exception as _te:
+                        print(f"[TRIGGER DAEMON] Task panel HTTP error: {_te}")
+
+                # Method 3: Open in default browser
                 if not _panel_ok:
                     try:
                         webbrowser.open("http://127.0.0.1:7778/panel/triggers")
@@ -879,7 +894,7 @@ def _exec_seven_action(data):
                 if _panel_ok:
                     _handled.append("tasks panel")
                 else:
-                    print("[TRIGGER DAEMON] Task panel: all ports failed")
+                    print("[TRIGGER DAEMON] Task panel: all methods failed")
                     _unhandled.append(part)
                 continue
 
