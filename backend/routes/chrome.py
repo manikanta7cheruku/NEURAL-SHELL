@@ -20,6 +20,7 @@ MULTI-PROFILE SUPPORT:
 import os
 import sys
 import time
+import json
 from datetime import datetime
 from typing import Optional
 from fastapi import APIRouter
@@ -34,6 +35,37 @@ router = APIRouter()
 
 _tab_snapshots = {}
 _last_update = 0
+
+_CACHE_DIR = os.path.join(os.environ.get("APPDATA", ""), "SEVEN", "cache")
+_CACHE_FILE = os.path.join(_CACHE_DIR, "live_chrome_tabs.json")
+
+
+def _persist_tabs_cache():
+    """Persist latest tab snapshot across all profiles to disk for offline daemon."""
+    try:
+        os.makedirs(_CACHE_DIR, exist_ok=True)
+        all_tabs = []
+        for prof_name, snap in _tab_snapshots.items():
+            for win in snap.get("windows", []):
+                for tab in win.get("tabs", []):
+                    all_tabs.append({
+                        "url":       tab.get("url", ""),
+                        "title":     tab.get("title", ""),
+                        "profile":   prof_name,
+                        "incognito": win.get("incognito", False),
+                        "pinned":    tab.get("pinned", False),
+                        "active":    tab.get("active", False),
+                    })
+        payload = {
+            "available": bool(all_tabs),
+            "tabs":      all_tabs,
+            "count":     len(all_tabs),
+            "timestamp": datetime.now().isoformat(),
+        }
+        with open(_CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump(payload, f)
+    except Exception:
+        pass
 
 def get_extension_install_dir():
     try:
@@ -77,6 +109,7 @@ def receive_tabs(payload: TabSyncPayload):
     }
 
     _last_update = time.time()
+    _persist_tabs_cache()
 
     return {
         "success": True,
@@ -246,6 +279,7 @@ def clear_tabs():
     global _tab_snapshots, _last_update
     _tab_snapshots = {}
     _last_update = 0
+    _persist_tabs_cache()
     return {"success": True, "message": "Tab data cleared"}
 
 # ── Direct access for workspace scanner ──────────────────────────────────
