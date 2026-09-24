@@ -47,12 +47,32 @@ _tab_listener_proc = None
 def _offline_tab_listener_supervisor():
     """
     Background supervisor thread:
-    Ensures offline_tab_listener.py is active on port 7777 when Seven main backend
-    is closed, so Chrome Extension can continuously send live tab updates.
+    Ensures offline_tab_listener.py is active on port 7777 ONLY when Seven's
+    main backend is genuinely closed — never while it's mid-startup.
+
+    BUG FIX (found after main.py started crash-looping with "Port 7777 is
+    still in use"): the original version polled port 7777 every 2s and
+    spawned offline_tab_listener.py the instant it saw the port unoccupied.
+    Since trigger_daemon.py runs independently and survives Seven closing
+    by design, this supervisor was ALWAYS alive in the background — so
+    every main.py restart (including a normal one, and especially the
+    5s-interval crash-retry loop) had a window where port 7777 was
+    briefly free, which this supervisor won the race for almost every
+    time, permanently blocking main.py's own bind attempt. Fixed with:
+    (a) requiring several consecutive "closed" readings, spaced out, before
+    treating the port as genuinely free — a brief restart blip no longer
+    looks like "Seven is closed" — and (b) tearing down the fallback
+    listener immediately the moment the real backend reclaims the port,
+    instead of leaving it running indefinitely as a silent contender.
     """
     global _tab_listener_proc
     import socket
     import subprocess
+
+    CONSECUTIVE_CLOSED_REQUIRED = 4   # 4 x 2s = 8s of confirmed silence
+    POLL_INTERVAL = 2.0
+
+    consecutive_closed = 0
 
     while True:
         try:
@@ -66,8 +86,29 @@ def _offline_tab_listener_supervisor():
             except Exception:
                 port_open = False
 
-            if not port_open:
-                if _tab_listener_proc is None or _tab_listener_proc.poll() is not None:
+            if port_open:
+                consecutive_closed = 0
+                # Real backend (or anything) has the port now. If our own
+                # fallback listener is still running, it's redundant and
+                # will fight the next legitimate restart — tear it down.
+                if _tab_listener_proc is not None and _tab_listener_proc.poll() is None:
+                    try:
+                        _tab_listener_proc.terminate()
+                        _tab_listener_proc.wait(timeout=3)
+                    except Exception:
+                        try:
+                            _tab_listener_proc.kill()
+                        except Exception:
+                            pass
+                    _tab_listener_proc = None
+                    print("[TRIGGER DAEMON] Port 7777 reclaimed by main backend — offline tab listener stopped")
+            else:
+                consecutive_closed += 1
+                already_running = (
+                    _tab_listener_proc is not None
+                    and _tab_listener_proc.poll() is None
+                )
+                if not already_running and consecutive_closed >= CONSECUTIVE_CLOSED_REQUIRED:
                     base_dir = os.environ.get(
                         "SEVEN_APP_PATH",
                         os.path.dirname(os.path.abspath(__file__))
@@ -89,10 +130,13 @@ def _offline_tab_listener_supervisor():
                             stdout=subprocess.DEVNULL,
                             stderr=subprocess.DEVNULL,
                         )
+                        print(f"[TRIGGER DAEMON] Port 7777 confirmed closed for "
+                              f"{CONSECUTIVE_CLOSED_REQUIRED * POLL_INTERVAL:.0f}s — "
+                              f"starting offline tab listener")
         except Exception:
             pass
 
-        time.sleep(2.0)
+        time.sleep(POLL_INTERVAL)
 
 
 def main():
