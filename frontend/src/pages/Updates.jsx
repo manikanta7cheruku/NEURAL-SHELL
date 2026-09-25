@@ -231,9 +231,9 @@ export default function Updates() {
                   {downloadProgress}%
                 </span>
               </div>
-              <div className="h-px bg-s-border rounded-full overflow-hidden">
+              <div className="h-1 bg-s-border rounded-full overflow-hidden">
                 <div
-                  className="h-full bg-s-accent transition-all duration-300"
+                  className="h-full bg-s-accent transition-all duration-300 rounded-full"
                   style={{ width: downloadProgress + "%" }}
                 />
               </div>
@@ -245,13 +245,22 @@ export default function Updates() {
 
           {/* Download ready */}
           {downloadReady && !downloading && (
-            <div className="bg-s-card border border-s-border rounded-xl px-4 py-3">
-              <p className="text-[12px] text-s-text-2 font-medium mb-0.5">
-                Ready to install
-              </p>
-              <p className="text-[11px] text-s-text-4 font-light">
-                Seven will close and restart automatically during installation
-              </p>
+            <div className="bg-s-accent/5 border border-s-accent/20 rounded-xl px-4 py-4">
+              <div className="flex items-start gap-3">
+                <div className="w-8 h-8 rounded-lg bg-s-accent/10 border border-s-accent/20 flex items-center justify-center flex-shrink-0 mt-0.5">
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                    <path d="M3 7L6 10L11 4" stroke="#6366f1" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                </div>
+                <div className="flex-1">
+                  <p className="text-[12px] text-s-text font-medium mb-1">
+                    Update ready to install
+                  </p>
+                  <p className="text-[11px] text-s-text-4 font-light leading-relaxed">
+                    Seven will close, install version {info?.version}, and reopen automatically. This takes about 30 seconds.
+                  </p>
+                </div>
+              </div>
             </div>
           )}
 
@@ -265,15 +274,16 @@ export default function Updates() {
           {/* Action buttons */}
           <div className="flex gap-3 w-full justify-center">
             {downloadReady ? (
-              <>
-                  <HoverButton onClick={installUpdate} variant="install" className="w-full max-w-sm mx-auto">
-                  <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
-                    <path d="M2 11L11 2M11 2H5M11 2V8"
-                      stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
-                  </svg>
-                  Restart and install
-                </HoverButton>
-              </>
+              <button
+                onClick={installUpdate}
+                className="w-full max-w-sm mx-auto py-3.5 rounded-xl bg-s-accent text-white text-[13px] font-medium tracking-wide hover:bg-s-accent/90 active:scale-[0.98] transition-all duration-200 flex items-center justify-center gap-2 shadow-lg shadow-s-accent/20"
+              >
+                <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+                  <path d="M6.5 1V8M6.5 8L9.5 5M6.5 8L3.5 5M2 11H11"
+                    stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+                Restart and install
+              </button>
             ) : downloading ? (
               <HoverButton disabled className="flex-1">
                 <div className="w-3 h-3 rounded-full border border-s-text-4/30 border-t-s-text-4 animate-spin" />
