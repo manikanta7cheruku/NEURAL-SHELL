@@ -69,6 +69,9 @@ const useUpdate = create((set, get) => ({
     try {
       const r = await api.post('/update/install');
 
+      // Backend has already launched the silent update launcher script.
+      // Close the app immediately. The launcher handles everything:
+      // kills remaining processes, runs installer silently, relaunches.
       if (r.data?.quit) {
         setTimeout(() => {
           if (window.electron?.quitApp) {
@@ -76,7 +79,7 @@ const useUpdate = create((set, get) => ({
           } else {
             window.close();
           }
-        }, 800);
+        }, 150);
       }
     } catch (e) {
       set({ error: e?.response?.data?.detail || 'Install failed' });
