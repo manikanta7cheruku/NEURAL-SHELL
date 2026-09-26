@@ -61,19 +61,22 @@ const useUpdate = create((set, get) => ({
 
   // ── User clicks "Restart & Install" ──
   installUpdate: async () => {
-    const { downloadPath, info } = get();
+    const { downloadPath } = get();
     if (!downloadPath) return;
 
+    set({ error: null });
+
     try {
-      const r    = await api.post('/update/install');
-      const path = r.data.installer_path;
+      const r = await api.post('/update/install');
 
-      // Auto mode = silent install (no wizard)
-      // Manual mode = show wizard (Next/Finish)
-      const silent = info?.download_mode === 'auto';
-
-      if (window.electron?.runInstaller) {
-        window.electron.runInstaller(path, silent);
+      if (r.data?.quit) {
+        setTimeout(() => {
+          if (window.electron?.quitApp) {
+            window.electron.quitApp();
+          } else {
+            window.close();
+          }
+        }, 800);
       }
     } catch (e) {
       set({ error: e?.response?.data?.detail || 'Install failed' });
