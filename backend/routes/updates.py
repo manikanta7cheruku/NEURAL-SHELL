@@ -76,8 +76,10 @@ def trigger_download():
 
 @router.post("/api/update/install")
 def trigger_install():
-    """Signal Electron to run the downloaded installer and quit."""
+    """Launch the downloaded installer as a detached process and signal quit."""
     try:
+        import subprocess
+
         updater = _get_updater()
         state   = updater.get_state()
         path    = state.get("download_path")
@@ -87,6 +89,21 @@ def trigger_install():
         if not os.path.exists(path):
             raise HTTPException(status_code=400, detail="Downloaded file not found. Please download again.")
 
+        # Launch installer as a fully detached process.
+        # DETACHED_PROCESS (0x08) + CREATE_NEW_PROCESS_GROUP (0x200)
+        # ensures the installer survives after Electron and Python exit.
+        CREATE_NEW_PROCESS_GROUP = 0x00000200
+        DETACHED_PROCESS         = 0x00000008
+
+        subprocess.Popen(
+            [path],
+            creationflags=CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS,
+            close_fds=True,
+            shell=False,
+        )
+        print("[UPDATER] Installer launched: " + path)
+
+        # Clear pending state
         try:
             updater._clear_pending_download()
             updater._state["download_path"]     = None
@@ -96,7 +113,7 @@ def trigger_install():
         except Exception:
             pass
 
-        return {"success": True, "installer_path": path}
+        return {"success": True, "installer_path": path, "quit": True}
     except HTTPException:
         raise
     except Exception as e:
