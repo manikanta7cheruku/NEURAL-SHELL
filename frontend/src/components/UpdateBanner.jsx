@@ -60,13 +60,13 @@ export default function UpdateBanner() {
           </div>
         ) : downloadReady ? (
           <span className="text-[11px] text-s-green font-medium">
-            Seven {info?.version} downloaded — restart required to apply update
+            Seven {info?.version} downloaded. Restart to apply.
           </span>
         ) : (
           <span className="text-[11px] text-s-text-3">
             {info?.is_critical
-              ? 'Critical security update — '
-              : 'Update available — '}
+              ? 'Critical security update: '
+              : 'Update available: '}
             Seven {info?.version}
           </span>
         )}
