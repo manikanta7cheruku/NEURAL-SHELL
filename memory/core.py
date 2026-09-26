@@ -100,7 +100,19 @@ def _load_offline_embedder_standalone(model_name: str):
     which is already built to work with ChromaDB's Rust query layer.
     Falls back to manual embedder only if chromadb utility is unavailable.
     """
-    from sentence_transformers import SentenceTransformer
+    try:
+        from sentence_transformers import SentenceTransformer
+    except Exception as e:
+        print(f"[MEMORY] Failed to import SentenceTransformer: {e}")
+        # Return a dummy embedder that returns zero vectors of correct dimension
+        class _DummyEmbedder:
+            def __call__(self, input):
+                texts = [input] if isinstance(input, str) else list(input)
+                # all-MiniLM-L6-v2 produces 384-dim embeddings
+                return [[0.0] * 384 for _ in texts]
+            def name(self):
+                return "dummy_embedder"
+        return _DummyEmbedder()
 
     # First verify model is cached locally
     home = os.path.expanduser("~")

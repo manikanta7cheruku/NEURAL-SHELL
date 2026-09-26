@@ -50,8 +50,8 @@ class HotkeyListener:
                     self._pressed_keys.add(name)
                     self._check_combo()
                     self._schedule_reset()
-                except Exception:
-                    pass
+                except Exception as ex:
+                    print(f"[HOTKEY] on_press error: {ex}")
 
             def on_release(key):
                 try:
@@ -68,7 +68,7 @@ class HotkeyListener:
             )
             self._listener.daemon = True
             self._listener.start()
-            print("[HOTKEY] Listener started via pynput engine")
+            print(f"[HOTKEY] Listener started via pynput engine ({len(self._hotkey_map)} hotkeys registered)")
 
             # Windows low-level keyboard hooks require the installing
             # thread to pump messages continuously. If the thread blocks
