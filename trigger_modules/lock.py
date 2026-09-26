@@ -10,20 +10,15 @@ from trigger_modules.config import LOCK_FILE
 
 def acquire_lock():
     """
-    Two-stage mutex check:
-      1. OpenMutexW — detects inherited handles (child process bypass)
-      2. CreateMutexW + ERROR_ALREADY_EXISTS — race condition fallback
-
-    Also marks the mutex non-inheritable so child processes spawned
-    by this daemon (AppOpener indexer etc.) cannot bypass the check.
+    Session-local single instance lock.
+    Uses Local\\ namespace to work on standard non-admin Windows user accounts.
     """
     try:
         import ctypes
-        _mutex_name = "Global\\SevenTriggerDaemon_SingleInstance"
+        _mutex_name = "Local\\SevenTriggerDaemon_SingleInstance"
         _kernel32   = ctypes.windll.kernel32
-
-        # Stage 1: Try to OPEN existing mutex before creating
         _existing = _kernel32.OpenMutexW(0x1F0001, False, _mutex_name)
+        _stale_mutex = False
         if _existing:
             _kernel32.CloseHandle(_existing)
 
@@ -53,16 +48,11 @@ def acquire_lock():
             else:
                 print(f"[TRIGGER DAEMON] Stale mutex found — previous "
                       f"instance is dead. Starting fresh.")
+                _stale_mutex = True
 
         # Stage 2: Create and own the mutex
         _mutex    = _kernel32.CreateMutexW(None, True, _mutex_name)
         _last_err = _kernel32.GetLastError()
-
-        if _last_err == 183:  # ERROR_ALREADY_EXISTS
-            print("[TRIGGER DAEMON] Already running (CreateMutex). Exiting.")
-            if _mutex:
-                _kernel32.CloseHandle(_mutex)
-            return False
 
         if not _mutex:
             print("[TRIGGER DAEMON] Mutex creation failed — starting anyway")
@@ -70,6 +60,14 @@ def acquire_lock():
 
         # Mark mutex non-inheritable
         _kernel32.SetHandleInformation(_mutex, 1, 0)
+
+        if _last_err == 183:  # ERROR_ALREADY_EXISTS
+            if _stale_mutex:
+                print("[TRIGGER DAEMON] Took over abandoned mutex.")
+            else:
+                print("[TRIGGER DAEMON] Already running (CreateMutex). Exiting.")
+                _kernel32.CloseHandle(_mutex)
+                return False
 
         acquire_lock._mutex_handle = _mutex
         print(f"[TRIGGER DAEMON] Mutex acquired. PID: {os.getpid()}")
