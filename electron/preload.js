@@ -12,7 +12,10 @@ const bridgeApi = {
   // Navigation
   onNavigate: (callback) => ipcRenderer.on('navigate', (_, route) => callback(route)),
 
-  // Update installer
+  // Quit the entire app (used by updater after launching installer)
+  quitApp: () => ipcRenderer.send('quit-app'),
+
+  // Legacy update installer (kept for compatibility)
   runInstaller: (installerPath, silent = false) =>
     ipcRenderer.send('run-installer', { path: installerPath, silent }),
 };
