@@ -76,32 +76,85 @@ def trigger_download():
 
 @router.post("/api/update/install")
 def trigger_install():
-    """Launch the downloaded installer as a detached process and signal quit."""
+    """
+    Professional silent update flow.
+    
+    Creates a detached launcher script that:
+      1. Waits for Electron and Python to fully exit
+      2. Kills any remaining processes (safety net)
+      3. Runs the NSIS installer silently (/S flag, no UI)
+      4. Relaunches the updated app automatically
+      5. Cleans up the installer and itself
+    
+    The user sees: click -> app closes instantly -> new version opens.
+    No install wizard, no progress bars, no file-lock errors.
+    """
     try:
         import subprocess
+        import tempfile
 
         updater = _get_updater()
         state   = updater.get_state()
-        path    = state.get("download_path")
+        installer_path = state.get("download_path")
 
-        if not path:
+        if not installer_path:
             raise HTTPException(status_code=400, detail="No download in progress")
-        if not os.path.exists(path):
+        if not os.path.exists(installer_path):
             raise HTTPException(status_code=400, detail="Downloaded file not found. Please download again.")
 
-        # Launch installer as a fully detached process.
-        # DETACHED_PROCESS (0x08) + CREATE_NEW_PROCESS_GROUP (0x200)
-        # ensures the installer survives after Electron and Python exit.
+        # ── Build the silent update launcher script ──
+        # This .bat runs completely independently after the app exits.
+        bat_lines = [
+            "@echo off",
+            "title Seven Update",
+            "",
+            ":: Wait for Electron and Python to fully exit",
+            "timeout /t 2 /nobreak >nul",
+            "",
+            ":: Safety net: kill any remaining Seven processes",
+            "taskkill /f /im SEVEN.exe 2>nul",
+            "",
+            ":: Wait for file handles to release (prevents 'Failed to uninstall' error)",
+            "timeout /t 2 /nobreak >nul",
+            "",
+            ":: Run installer silently. /S = no UI, no wizard, no prompts.",
+            ":: NSIS reads the install path from the registry automatically.",
+            '"' + installer_path + '" /S',
+            "",
+            ":: Wait for installer to finish writing files",
+            "timeout /t 3 /nobreak >nul",
+            "",
+            ":: Relaunch the updated app",
+            'if exist "%LOCALAPPDATA%\\Programs\\SEVEN\\SEVEN.exe" (',
+            '    start "" "%LOCALAPPDATA%\\Programs\\SEVEN\\SEVEN.exe"',
+            ') else if exist "%PROGRAMFILES%\\SEVEN\\SEVEN.exe" (',
+            '    start "" "%PROGRAMFILES%\\SEVEN\\SEVEN.exe"',
+            ')',
+            "",
+            ":: Clean up installer and this script",
+            'del /f /q "' + installer_path + '" 2>nul',
+            'del /f /q "%~f0" 2>nul',
+        ]
+
+        bat_path = os.path.join(tempfile.gettempdir(), "seven_update_launcher.bat")
+        with open(bat_path, "w", encoding="utf-8") as f:
+            f.write("\r\n".join(bat_lines))
+
+        print("[UPDATER] Launcher script created: " + bat_path)
+
+        # Launch the bat script as a fully detached process.
+        # It survives after Electron and Python exit.
         CREATE_NEW_PROCESS_GROUP = 0x00000200
         DETACHED_PROCESS         = 0x00000008
 
         subprocess.Popen(
-            [path],
+            ["cmd.exe", "/c", bat_path],
             creationflags=CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS,
             close_fds=True,
             shell=False,
+            cwd=tempfile.gettempdir(),
         )
-        print("[UPDATER] Installer launched: " + path)
+        print("[UPDATER] Silent update launcher started")
 
         # Clear pending state
         try:
@@ -113,7 +166,7 @@ def trigger_install():
         except Exception:
             pass
 
-        return {"success": True, "installer_path": path, "quit": True}
+        return {"success": True, "installer_path": installer_path, "quit": True}
     except HTTPException:
         raise
     except Exception as e:
