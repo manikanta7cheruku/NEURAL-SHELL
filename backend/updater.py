@@ -1,27 +1,22 @@
+"""
+PROJECT SEVEN - backend/updater.py
+Dual-Pathway Update Verification & Delivery Subsystem.
+
+Primary: Query Render Master DB (allows selective tier deployments).
+Fallback: Query GitHub CDN directly (ensures high availability).
+"""
+
 import os
 import json
 import threading
 import requests
 import tempfile
+from colorama import Fore
 
 TIMEOUT        = 10
-CHECK_DELAY    = 15       # first check after 15 seconds
-RECHECK_DELAY  = 7200     # recheck every 2 hours
-_version_logged = False   # log version only once
-
-# Update server — your backend that hosts release metadata
-# Set to empty string to disable server checks and use local override only
-SERVER_URL = os.environ.get("SEVEN_UPDATE_SERVER", "").rstrip("/")
-
-def _get_cache_file():
-    appdata = os.environ.get("APPDATA", "")
-    if appdata:
-        path = os.path.normpath(os.path.join(appdata, "SEVEN", "pending_update.json"))
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        return path
-    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "pending_update.json")
-
-_DOWNLOAD_CACHE_FILE = _get_cache_file()
+CHECK_DELAY    = 15       # First check after 15 seconds
+RECHECK_DELAY  = 7200     # Recheck every 2 hours
+_version_logged = False   # Log version only once
 
 _state = {
     "update_available":  False,
@@ -41,7 +36,7 @@ def _get_cache_file():
         folder = os.path.normpath(os.path.join(appdata, "SEVEN"))
         os.makedirs(folder, exist_ok=True)
         return os.path.join(folder, "pending_update.json")
-    # Fallback
+    # Fallback to current directory
     here = os.path.dirname(os.path.abspath(__file__))
     return os.path.join(here, "pending_update.json")
 
@@ -50,9 +45,7 @@ def _load_pending_download():
     """On startup — check if a download was completed before restart."""
     try:
         cache_file = _get_cache_file()
-        print("[UPDATER] Cache file: " + cache_file)
         if not os.path.exists(cache_file):
-            print("[UPDATER] No pending download found")
             return
         with open(cache_file, "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -64,7 +57,6 @@ def _load_pending_download():
             _state["info"]              = data.get("info")
             print("[UPDATER] Pending download restored: " + path)
         else:
-            print("[UPDATER] Cached path gone: " + path)
             os.remove(cache_file)
     except Exception as e:
         print("[UPDATER] Load pending error: " + str(e))
@@ -101,18 +93,11 @@ def get_state():
 
 
 def _read_current_version():
-    """
-    Read app version.
-    Priority:
-      1. version.txt (written by Electron on startup — most reliable)
-      2. package.json (dev mode fallback)
-    """
+    """Read local version.txt with fallback to package.json."""
     try:
-        import sys
         base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         app_path = os.environ.get("SEVEN_APP_PATH", "")
 
-        # All places to look for version.txt
         version_txt_candidates = [
             os.path.join(app_path, "version.txt") if app_path else None,
             os.path.join(base, "version.txt"),
@@ -129,7 +114,6 @@ def _read_current_version():
                 if v:
                     return v
 
-        # Fallback: package.json for dev mode
         pkg_candidates = [
             os.path.join(app_path, "package.json") if app_path else None,
             os.path.join(base, "package.json"),
@@ -144,7 +128,6 @@ def _read_current_version():
                 with open(p, "r", encoding="utf-8") as f:
                     content = f.read().lstrip("\ufeff")
                     v = json.loads(content).get("version", "1.1.0")
-                print("[UPDATER] Version " + v + " (from package.json)")
                 return v
 
         return "1.1.0"
@@ -177,6 +160,10 @@ def _check_local_override():
 
 
 def check_for_updates(force=False):
+    """
+    Check for updates.
+    Tries Render Server first. Falls back to GitHub Releases directly if offline.
+    """
     if _state["checking"] and not force:
         return get_state()
 
@@ -201,10 +188,63 @@ def check_for_updates(force=False):
             except Exception:
                 pass
 
-        # Check GitHub releases directly — no custom server needed
+        # ── Pathway 1: Render Server Check (Staged/Tiered Releases) ──
+        try:
+            RENDER_UPDATE_URL = "https://seven-server-a825.onrender.com/api/updates/latest"
+            print(f"[UPDATER] Checking Render server for {tier} tier...")
+
+            r = None
+            try:
+                r = requests.get(
+                    RENDER_UPDATE_URL,
+                    params={"tier": tier, "current_version": current},
+                    timeout=TIMEOUT,
+                )
+            except (requests.exceptions.Timeout, requests.exceptions.ConnectionError):
+                print("[UPDATER] Render server waking up, retrying...")
+                import time
+                time.sleep(5)
+                r = requests.get(
+                    RENDER_UPDATE_URL,
+                    params={"tier": tier, "current_version": current},
+                    timeout=45,
+                )
+
+            if r is not None and r.status_code == 200:
+                data = r.json()
+                if data.get("update_available"):
+                    raw_changelog = data.get("changelog", [])
+                    if isinstance(raw_changelog, str):
+                        changelog = [
+                            line.strip()
+                            for line in raw_changelog.splitlines()
+                            if line.strip()
+                        ]
+                    elif isinstance(raw_changelog, list):
+                        changelog = [str(c).strip() for c in raw_changelog if str(c).strip()]
+                    else:
+                        changelog = []
+
+                    _state["update_available"] = True
+                    _state["info"] = {
+                        "version":       data.get("version", "").strip().lstrip("vV"),
+                        "changelog":     changelog,
+                        "download_url":  data.get("download_url"),
+                        "download_mode": data.get("download_mode", "manual"),
+                        "size_mb":       data.get("size_mb", 0),
+                        "published_at":  data.get("published_at", ""),
+                        "is_critical":   bool(data.get("is_critical", False)),
+                    }
+                    print("[UPDATER] Update available from Render: " + data.get("version", ""))
+                    _state["checking"] = False
+                    return
+        except Exception as se:
+            print(f"[UPDATER] Render check skipped: {se}")
+
+        # ── Pathway 2: GitHub Releases CDN (Fallback/High-Availability) ──
         try:
             GITHUB_RELEASES_URL = "https://api.github.com/repos/manikanta7cheruku/seven-releases/releases/latest"
-            print("[UPDATER] Checking GitHub releases...")
+            print("[UPDATER] Checking GitHub releases fallback...")
 
             r = requests.get(
                 GITHUB_RELEASES_URL,
@@ -221,16 +261,13 @@ def check_for_updates(force=False):
                     _state["checking"] = False
                     return
 
-                # Compare versions
                 try:
                     from packaging import version as pv
                     is_newer = pv.parse(latest_version) > pv.parse(current)
                 except Exception:
-                    # Fallback string compare
                     is_newer = latest_version != current
 
                 if is_newer:
-                    # Find the .exe asset
                     assets = release.get("assets", [])
                     download_url = ""
                     size_bytes = 0
@@ -241,13 +278,17 @@ def check_for_updates(force=False):
                             size_bytes = asset.get("size", 0)
                             break
 
-                    # Parse changelog from release body
                     body = release.get("body", "")
                     changelog = []
                     for line in body.splitlines():
                         line = line.strip()
                         if line.startswith("- ") or line.startswith("* "):
                             changelog.append(line[2:].strip())
+                    if not changelog:
+                        for line in body.splitlines():
+                            line = line.strip()
+                            if line and not line.startswith("#"):
+                                changelog.append(line)
                     if not changelog and body.strip():
                         changelog = [body.strip()[:200]]
 
@@ -261,7 +302,7 @@ def check_for_updates(force=False):
                         "published_at":  release.get("published_at", ""),
                         "is_critical":   "critical" in release.get("body", "").lower(),
                     }
-                    print("[UPDATER] Update available: " + latest_version)
+                    print("[UPDATER] Fallback Update available on GitHub: " + latest_version)
                 else:
                     _state["update_available"] = False
                     _state["info"]             = None
@@ -270,14 +311,14 @@ def check_for_updates(force=False):
             elif r.status_code == 403:
                 print("[UPDATER] GitHub rate limited — will retry later")
             elif r.status_code == 404:
-                print("[UPDATER] No releases found on GitHub yet")
+                print("[UPDATER] No releases found on GitHub")
                 _state["update_available"] = False
             else:
                 _state["error"] = "GitHub API error: " + str(r.status_code)
                 print("[UPDATER] GitHub error: " + str(r.status_code))
 
         except requests.exceptions.ConnectionError:
-            print("[UPDATER] Offline — skipping update check")
+            print("[UPDATER] Offline — skipping check")
         except requests.exceptions.Timeout:
             print("[UPDATER] Update check timed out")
         except Exception as e:
