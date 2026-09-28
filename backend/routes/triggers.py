@@ -566,15 +566,11 @@ def update_trigger(trigger_id: int, body: TriggerUpdate):
                 else:
                     params.append(None)
 
-            # Track plan limit warning (does NOT block, just informs)
-            plan_warning = None
-
             if body.enabled is not None:
                 was_enabled = bool(existing["enabled"])
                 will_enable = bool(body.enabled)
 
-                # Check plan limit only when enabling (not disabling)
-                # If over limit: allow the toggle BUT return warning in response
+                # Enforce plan limit on enable. Reject with 403 if over limit.
                 if will_enable and not was_enabled:
                     try:
                         from backend.api_server import check_limit
@@ -585,22 +581,26 @@ def update_trigger(trigger_id: int, body: TriggerUpdate):
                         limit_check = check_limit("triggers", active_count)
 
                         if not limit_check["allowed"]:
-                            # Allow the toggle but warn user
-                            plan_warning = {
-                                "type": "plan_limit_exceeded",
-                                "current": active_count + 1,
-                                "limit": limit_check["limit"],
-                                "tier": limit_check["tier"],
-                                "upgrade_to": limit_check.get("upgrade_needed", "pro"),
-                                "message": (
-                                    f"You've exceeded your {limit_check['tier'].upper()} "
-                                    f"plan limit of {limit_check['limit']} active triggers. "
-                                    f"Upgrade to {limit_check.get('upgrade_needed', 'PRO').upper()} "
-                                    f"for unlimited triggers."
+                            tier    = limit_check["tier"]
+                            limit   = limit_check["limit"]
+                            upgrade = limit_check.get("upgrade_needed", "pro")
+                            print(Fore.YELLOW + f"[TRIGGERS] Enable blocked: "
+                                  f"{active_count + 1}/{limit} triggers on {tier.upper()}")
+                            raise HTTPException(status_code=403, detail={
+                                "error":           "plan_limit_reached",
+                                "message":         (
+                                    f"You have reached the {tier.upper()} plan limit of "
+                                    f"{limit} active triggers. Disable another trigger or "
+                                    f"upgrade to {upgrade.upper()} to enable this one."
                                 ),
-                            }
-                            print(Fore.YELLOW + f"[TRIGGERS] Plan limit warning: "
-                                  f"{active_count + 1}/{limit_check['limit']} triggers active")
+                                "current":         active_count + 1,
+                                "limit":           limit,
+                                "tier":            tier,
+                                "upgrade_to":      upgrade,
+                                "upgrade_message": f"Upgrade to {upgrade.upper()} for more triggers.",
+                            })
+                    except HTTPException:
+                        raise
                     except Exception as _limit_err:
                         print(Fore.YELLOW + f"[TRIGGERS] Plan check skipped: {_limit_err}")
 
@@ -635,10 +635,7 @@ def update_trigger(trigger_id: int, body: TriggerUpdate):
         print(Fore.GREEN + f"[TRIGGERS] Updated #{trigger_id}")
         _signal_daemon_reload()
 
-        response = {"success": True, "trigger": _row_to_dict(updated)}
-        if plan_warning:
-            response["plan_warning"] = plan_warning
-        return response
+        return {"success": True, "trigger": _row_to_dict(updated)}
 
     except HTTPException:
         raise
