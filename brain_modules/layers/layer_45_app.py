@@ -83,16 +83,13 @@ def process(ctx, deps):
     if not apps:
         apps = [remaining.strip()]
 
-    _cmd_paths   = config.KEY.get("commands", {}).get("app_paths", {})
-    _cmd_aliases = config.KEY.get("commands", {}).get("app_aliases", {})
-
     if tag == "OPEN":
-        _validation = _validate_open(apps, _cmd_paths, _cmd_aliases)
+        _validation = _validate_open(apps)
         if _validation:
             return LayerResult.stop(_validation)
 
     if tag == "CLOSE":
-        _validation = _validate_close(apps, _cmd_paths)
+        _validation = _validate_close(apps)
         if _validation:
             return LayerResult.stop(_validation)
 
@@ -127,33 +124,35 @@ def process(ctx, deps):
     return LayerResult.stop(f"{speech} {tags}")
 
 
-def _validate_open(apps, cmd_paths, cmd_aliases):
-    """Return an error message if any app is invalid, else None."""
+def _validate_open(apps):
+    """Return an error message if any app is clearly invalid, else None."""
     for _app in apps:
         _app_clean = _app.lower().strip()
-        # Known configured app
-        if _app_clean in cmd_paths or _app_clean in cmd_aliases:
-            continue
         # Common system app
         if _app_clean in _ALWAYS_CLOSEABLE:
             continue
-        # Real software heuristics
+        # Check app discovery index
+        try:
+            from hands.app_discovery import search_apps
+            hits = search_apps(_app_clean, limit=1)
+            if hits:
+                continue
+        except Exception:
+            pass
+        # Real software heuristics (fallback when index not ready)
         _words = _app_clean.split()
         _looks_real = (
-            len(_words) >= 2 or           # "premiere pro"
-            len(_app_clean) >= 6 or       # "spotify"
+            len(_words) >= 2 or
+            len(_app_clean) >= 6 or
             _app_clean.endswith('.exe')
         )
         if _looks_real:
             continue
-        return (
-            f"I don't see '{_app}' installed. "
-            f"If it is a custom file or folder, add it in Commands."
-        )
+        return f"I cannot find '{_app}' on your system."
     return None
 
 
-def _validate_close(apps, cmd_paths):
+def _validate_close(apps):
     """Return response for special close cases, else None."""
     for _app in apps:
         _app_clean = _app.lower().strip()
@@ -176,7 +175,7 @@ def _validate_close(apps, cmd_paths):
             return "That does not look like an app name. What did you want to close?"
 
         # Reject very short unknown words
-        if len(_app_clean) < 3 and _app_clean not in cmd_paths:
+        if len(_app_clean) < 3:
             return "Close what? Be more specific."
 
     return None
