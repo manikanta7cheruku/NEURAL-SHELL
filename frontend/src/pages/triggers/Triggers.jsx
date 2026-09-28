@@ -159,10 +159,11 @@ const TABS = [
 ];
 
 const FILTERS = [
-  { key: 'all',    label: 'All' },
-  { key: 'hotkey', label: 'Hotkey' },
-  { key: 'voice',  label: 'Voice' },
-  { key: 'audio',  label: 'Audio' },
+  { key: 'all',       label: 'All' },
+  { key: 'hotkey',    label: 'Hotkey' },
+  { key: 'voice',     label: 'Voice' },
+  { key: 'audio',     label: 'Audio' },
+  { key: 'workspace', label: 'Workspace' },
 ];
 
 export default function Triggers() {
@@ -237,6 +238,7 @@ export default function Triggers() {
     if (filter === 'hotkey') return !!t.hotkey;
     if (filter === 'voice')  return !!t.voice_phrase;
     if (filter === 'audio')  return !!t.audio_pattern;
+    if (filter === 'workspace') return t.action_type === 'open_workspace';
     return true;
   });
 
@@ -464,8 +466,11 @@ export default function Triggers() {
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-1">
                   {FILTERS.map(f => {
-                    const ct = f.key==='all' ? stats.total : f.key==='hotkey' ? stats.hotkey :
-                               f.key==='voice' ? stats.voice : stats.audio;
+                    const ct = f.key === 'all' ? stats.total :
+                               f.key === 'hotkey' ? stats.hotkey :
+                               f.key === 'voice' ? stats.voice :
+                               f.key === 'audio' ? stats.audio :
+                               triggers.filter(t => t.action_type === 'open_workspace').length;
                     return (
                       <button key={f.key}
                               onClick={() => { setFilter(f.key); if (f.key !== 'hotkey') setCompact(false); }}
