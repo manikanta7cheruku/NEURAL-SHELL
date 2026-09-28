@@ -64,9 +64,22 @@ const useTriggers = create((set, get) => ({
       }
       return { ok: false, msg: 'Update failed.' };
     } catch (e) {
+      const status = e.response?.status;
       const detail = e.response?.data?.detail;
-      // Extract specific plan limit message if it's an object
-      const msg = (detail && detail.message) ? detail.message : (typeof detail === 'string' ? detail : 'Update failed.');
+      const msg    = (detail && detail.message)
+        ? detail.message
+        : (typeof detail === 'string' ? detail : 'Update failed.');
+
+      // Plan limit hit — refetch to revert optimistic UI state
+      if (status === 403) {
+        await get().fetchTriggers();
+        return {
+          ok: false,
+          msg,
+          plan_limit: detail && typeof detail === 'object' ? detail : null,
+        };
+      }
+
       return { ok: false, msg };
     }
   },
