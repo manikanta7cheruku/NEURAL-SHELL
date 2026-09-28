@@ -8,7 +8,6 @@ import AdminMessageBanner from './components/AdminMessageBanner';
 import Landing        from './pages/Landing';
 import Home           from './pages/Home';
 import Console        from './pages/Console';
-import Commands       from './pages/Commands';
 import Memory         from './pages/Memory';
 import Schedules      from './pages/Schedules';
 import Tasks          from './pages/Tasks';
@@ -73,7 +72,6 @@ function MainApp({ isFirstLaunch }) {
           <Routes>
             <Route path="/dashboard" element={<Home isFirstLaunch={isFirstLaunch} />} />
             <Route path="/console"   element={<Console />}  />
-            <Route path="/commands"  element={<Commands />} />
             <Route path="/memory"    element={<Memory />}   />
             <Route path="/schedules" element={<Schedules />}/>
             <Route path="/tasks"     element={<Tasks />}    />

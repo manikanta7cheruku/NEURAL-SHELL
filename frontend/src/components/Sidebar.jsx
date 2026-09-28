@@ -16,7 +16,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import {
-  LayoutDashboard, Terminal, Zap,
+  LayoutDashboard, Terminal,
   CheckSquare, Calendar, Radio,
   Brain, BookOpen,
   CreditCard, Settings, RefreshCw,
@@ -32,7 +32,6 @@ import useTasks   from '../stores/useTasks';
 const TOP_RAIL = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/console',   label: 'Console',   icon: Terminal        },
-  { to: '/commands',  label: 'Commands',  icon: Zap             },
 ];
 
 const SECTIONS = [
