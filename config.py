@@ -252,10 +252,7 @@ def get_defaults():
             "opacity": 0.8,
             "text_color": "#00FF00"
         },
-        "commands": {
-            "app_aliases": {},
-            "app_paths": {}
-        },
+        "commands": {},
         "license": {
             "key": "",
             "tier": "free",
