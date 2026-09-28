@@ -17,8 +17,6 @@ const FEATURES = {
     '7 triggers & hotkeys',
     '3 schedules',
     '1 knowledge file',
-    '3 URL shortcuts',
-    '3 app aliases',
     'Basic window control'
   ],
   pro: [
@@ -28,8 +26,6 @@ const FEATURES = {
     '77 triggers & hotkeys',
     '20 schedules',
     '7 knowledge files',
-    '7 URL shortcuts',
-    '7 app aliases',
     'Advanced window control',
     'Memory search'
   ],
