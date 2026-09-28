@@ -8,6 +8,7 @@ Uses robust packaged Python path resolution.
 import os
 import sys
 import subprocess
+import threading
 from colorama import Fore
 
 
@@ -196,3 +197,25 @@ def launch_panel_server():
 
     except Exception as _pe:
         print(Fore.YELLOW + f"[PANEL-SRV] Launch failed: {_pe}")
+
+def launch_indexers():
+    """
+    Start app discovery and file indexing in background threads.
+    Called once during startup. Non-blocking.
+    """
+    try:
+        from hands.app_discovery import discover_apps
+        from hands.files import build_file_index
+
+        discover_apps(background=True)
+        print(Fore.GREEN + "[SYSTEM] App discovery started in background")
+
+        threading.Thread(
+            target=build_file_index,
+            daemon=True,
+            name="SevenFileIndexer",
+        ).start()
+        print(Fore.GREEN + "[SYSTEM] File indexer started in background")
+
+    except Exception as e:
+        print(Fore.YELLOW + f"[SYSTEM] Indexer launch failed: {e}")
