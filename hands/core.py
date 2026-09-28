@@ -11,7 +11,7 @@ Importing from hands.core continues to work identically.
 No external file needs to change.
 """
 
-from hands.app_launcher import open_app, _get_aliases, _get_custom_paths
+from hands.app_launcher import open_app
 from hands.app_closer   import close_app
 import webbrowser
 import pyautogui
