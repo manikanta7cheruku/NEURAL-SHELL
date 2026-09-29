@@ -217,5 +217,22 @@ def launch_indexers():
         ).start()
         print(Fore.GREEN + "[SYSTEM] File indexer started in background")
 
+        def _delayed_content_index():
+            """Wait for file index to build first, then index content."""
+            import time as _t
+            _t.sleep(30)
+            try:
+                from hands.file_content import build_content_index
+                build_content_index()
+            except Exception as _e:
+                print(Fore.YELLOW + f"[SYSTEM] Content indexer failed: {_e}")
+
+        threading.Thread(
+            target=_delayed_content_index,
+            daemon=True,
+            name="SevenContentIndexer",
+        ).start()
+        print(Fore.GREEN + "[SYSTEM] Content indexer queued (starts after file index)")
+
     except Exception as e:
         print(Fore.YELLOW + f"[SYSTEM] Indexer launch failed: {e}")
