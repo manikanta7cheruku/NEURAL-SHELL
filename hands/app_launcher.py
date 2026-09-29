@@ -59,6 +59,45 @@ _FAST_LAUNCH = {
     "files":        ("exe", "explorer"),
 }
 
+# -- Special Windows folder shortcuts --
+# "open downloads" / "open screenshots folder" etc. open the actual folder.
+_SPECIAL_FOLDERS = {}
+
+def _init_special_folders():
+    """Build folder shortcuts from real user profile paths."""
+    home = os.path.expanduser("~")
+    mapping = {
+        "downloads":       os.path.join(home, "Downloads"),
+        "download":        os.path.join(home, "Downloads"),
+        "documents":       os.path.join(home, "Documents"),
+        "document":        os.path.join(home, "Documents"),
+        "pictures":        os.path.join(home, "Pictures"),
+        "picture":         os.path.join(home, "Pictures"),
+        "photos":          os.path.join(home, "Pictures"),
+        "videos":          os.path.join(home, "Videos"),
+        "video":           os.path.join(home, "Videos"),
+        "music":           os.path.join(home, "Music"),
+        "desktop":         os.path.join(home, "Desktop"),
+        "screenshots":     os.path.join(home, "Pictures", "Screenshots"),
+        "screenshot":      os.path.join(home, "Pictures", "Screenshots"),
+        "recordings":      os.path.join(home, "Videos", "Recordings"),
+        "captures":        os.path.join(home, "Videos", "Captures"),
+        "onedrive":        os.path.join(home, "OneDrive"),
+        "recent":          "shell:recent",
+        "startup":         "shell:startup",
+        "appdata":         os.path.join(home, "AppData"),
+        "local appdata":   os.path.join(home, "AppData", "Local"),
+        "roaming":         os.path.join(home, "AppData", "Roaming"),
+        "temp":            os.path.join(home, "AppData", "Local", "Temp"),
+    }
+    for key, path in mapping.items():
+        if path.startswith("shell:"):
+            _SPECIAL_FOLDERS[key] = path
+        elif os.path.exists(path):
+            _SPECIAL_FOLDERS[key] = path
+
+_init_special_folders()
+
 # Extension to default player mapping (used by app_closer.py)
 _EXTENSION_PROCESS_MAP = {
     ".jpg":  ["Microsoft.Photos", "Photos", "mspaint", "gimp"],
@@ -176,6 +215,33 @@ def open_app(app_name: str) -> bool:
         mood_engine.on_command_result(True)
         return True
 
+    # ── 1b. Drive open (e.g. "open disk M", "open drive D") ─────
+    import re
+    drive_match = re.match(r'^(?:disk|drive)\s+([a-z])$', clean)
+    if drive_match:
+        drive_letter = drive_match.group(1).upper()
+        drive_path = f"{drive_letter}:\\"
+        if os.path.exists(drive_path):
+            subprocess.Popen(f'explorer "{drive_path}"', shell=True)
+            command_log.log_command("OPEN", clean, True, f"Drive: {drive_path}")
+            mood_engine.on_command_result(True)
+            return True
+
+    # ── 1c. Special folder shortcuts ────────────────────────────
+    _folder_clean = clean.replace(" folder", "").replace(" directory", "").strip()
+    if _folder_clean in _SPECIAL_FOLDERS:
+        _fpath = _SPECIAL_FOLDERS[_folder_clean]
+        try:
+            if _fpath.startswith("shell:"):
+                subprocess.Popen(f'explorer {_fpath}', shell=True)
+            else:
+                subprocess.Popen(f'explorer "{_fpath}"', shell=True)
+            command_log.log_command("OPEN", clean, True, f"Folder: {_fpath}")
+            mood_engine.on_command_result(True)
+            print(Fore.GREEN + f"   -> Opened folder: {_fpath}")
+            return True
+        except Exception as e:
+            print(Fore.YELLOW + f"   -> Folder open failed: {e}")
     print(Fore.CYAN + f"HANDS: Opening '{clean}'...")
 
     try:
@@ -274,6 +340,7 @@ def open_app(app_name: str) -> bool:
 
         # ── 6. AppOpener (last resort, async) ───────────────────
         print(Fore.YELLOW + f"   -> Falling back to AppOpener for '{clean}'...")
+        appopener_worked = threading.Event()
         try:
             from AppOpener import open as app_opener
 
@@ -282,19 +349,73 @@ def open_app(app_name: str) -> bool:
                     app_opener(clean, match_closest=True, throw_error=True)
                     command_log.log_command("OPEN", clean, True, "AppOpener")
                     mood_engine.on_command_result(True)
+                    appopener_worked.set()
                 except Exception as err:
-                    print(Fore.RED + f"   -> AppOpener failed: {err}")
-                    command_log.log_command("OPEN", clean, False, str(err))
-                    mood_engine.on_command_result(False)
+                    print(Fore.YELLOW + f"   -> AppOpener failed: {err}")
 
-            threading.Thread(target=_async_appopener, daemon=True).start()
+            t = threading.Thread(target=_async_appopener, daemon=True)
+            t.start()
+            t.join(timeout=3.0)
+
+            if appopener_worked.is_set():
+                return True
+        except ImportError:
+            pass
+
+        # ── 7. Web fallback for known services ──────────────────
+        WEB_SERVICES = {
+            "github": "https://github.com",
+            "youtube": "https://youtube.com",
+            "gmail": "https://mail.google.com",
+            "google": "https://google.com",
+            "twitter": "https://twitter.com",
+            "x": "https://x.com",
+            "linkedin": "https://linkedin.com",
+            "reddit": "https://reddit.com",
+            "facebook": "https://facebook.com",
+            "instagram": "https://instagram.com",
+            "netflix": "https://netflix.com",
+            "amazon": "https://amazon.com",
+            "twitch": "https://twitch.tv",
+            "stackoverflow": "https://stackoverflow.com",
+            "chatgpt": "https://chat.openai.com",
+            "claude": "https://claude.ai",
+            "notion": "https://notion.so",
+            "wikipedia": "https://en.wikipedia.org",
+            "spotify": "https://open.spotify.com",
+            "discord": "https://discord.com",
+            "telegram": "https://web.telegram.org",
+            "whatsapp": "https://web.whatsapp.com",
+            "zoom": "https://zoom.us",
+            "slack": "https://slack.com",
+            "figma": "https://figma.com",
+            "canva": "https://canva.com",
+            "drive": "https://drive.google.com",
+            "maps": "https://maps.google.com",
+            "calendar": "https://calendar.google.com",
+        }
+        if clean in WEB_SERVICES:
+            webbrowser.open(WEB_SERVICES[clean])
+            command_log.log_command("OPEN", clean, True, f"Web: {WEB_SERVICES[clean]}")
+            mood_engine.on_command_result(True)
             return True
 
-        except ImportError:
-            print(Fore.RED + f"   -> AppOpener not available. Cannot open '{clean}'.")
-            command_log.log_command("OPEN", clean, False, "AppOpener not installed")
-            mood_engine.on_command_result(False)
-            return False
+        # ── 8. Universal URL fallback ───────────────────────────
+        # If nothing else worked and the name looks like a domain,
+        # try opening it as a website. Handles "open wikipedia",
+        # "open canva", "open figma", any single-word service.
+        if ' ' not in clean and len(clean) >= 3 and clean.isalnum():
+            _guess_url = f"https://{clean}.com"
+            print(Fore.CYAN + f"   -> Trying universal URL: {_guess_url}")
+            webbrowser.open(_guess_url)
+            command_log.log_command("OPEN", clean, True, f"Universal URL: {_guess_url}")
+            mood_engine.on_command_result(True)
+            return True
+
+        print(Fore.RED + f"   -> Cannot find '{clean}' anywhere.")
+        command_log.log_command("OPEN", clean, False, "Not found in any source")
+        mood_engine.on_command_result(False)
+        return False
 
     except Exception as e:
         print(Fore.RED + f"HANDS: Failed to open '{clean}': {e}")
