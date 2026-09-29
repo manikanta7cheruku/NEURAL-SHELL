@@ -69,6 +69,30 @@ def process(ctx, deps):
             remaining = remaining[len(_art):].strip()
             break
 
+    # Detect "in browser" / "in chrome" / "in edge" force-browser mode
+    _force_browser = False
+    for _suffix in [" in browser", " in chrome", " in edge",
+                    " in firefox", " in web"]:
+        if remaining.endswith(_suffix):
+            _force_browser = True
+            remaining = remaining[:-len(_suffix)].strip()
+            break
+
+    # Handle force-browser: open URL directly, skip app launch
+    if _force_browser and tag == "OPEN":
+        import webbrowser
+        _url_name = remaining.lower().strip()
+        _url = f"https://{_url_name}.com"
+        try:
+            webbrowser.open(_url)
+            return LayerResult.stop(
+                f"Opening {_url_name} in your browser."
+            )
+        except Exception:
+            return LayerResult.stop(
+                f"Could not open {_url_name} in the browser."
+            )
+
     # Self-referential open commands
     if remaining.lower().strip() in _SELF_WORDS and tag == "OPEN":
         return LayerResult.stop(
@@ -93,6 +117,23 @@ def process(ctx, deps):
         if _validation:
             return LayerResult.stop(_validation)
 
+        # Check if closing a browser with multiple windows
+        _BROWSERS = {"chrome", "firefox", "edge", "brave", "opera", "vivaldi"}
+        for _app in apps:
+            _app_clean = _app.lower().strip()
+            if _app_clean in _BROWSERS and not close_all:
+                _win_count = _count_app_windows(_app_clean)
+                if _win_count >= 2:
+                    from brain_modules.dialogue_manager import set_pending
+                    set_pending("close_confirm", {
+                        "app": _app_clean,
+                        "count": _win_count,
+                    }, timeout_sec=30)
+                    return LayerResult.stop(
+                        f"You have {_win_count} {_app_clean} windows open. "
+                        f"Close all of them, just the active one, or cancel?"
+                    )
+
     tags = " ".join([
         f"###{tag}: ALL_{a}" if close_all else f"###{tag}: {a}"
         for a in apps
@@ -100,26 +141,38 @@ def process(ctx, deps):
     app_list = ", ".join(apps)
 
     if tag == "OPEN":
-        speech = random.choice([
-            f"Opening {app_list}.",
-            f"On it. {app_list} coming up.",
-            f"{app_list}, coming right up.",
-            f"Launching {app_list}.",
-        ])
+        if len(apps) == 1:
+            speech = random.choice([
+                f"Opening {app_list} for you.",
+                f"Sure, launching {app_list}.",
+                f"On it, {app_list} coming up.",
+                f"Got it, opening {app_list}.",
+                f"{app_list}, here we go.",
+                f"Alright, {app_list} coming right up.",
+            ])
+        else:
+            speech = random.choice([
+                f"Opening {app_list} for you.",
+                f"Sure, launching all of those.",
+                f"On it, bringing up {app_list}.",
+                f"Got it, opening them now.",
+            ])
     else:
-        speech = (
-            random.choice([
-                f"Closing all {app_list}.",
-                f"Shutting down every {app_list}.",
-                f"Killing all {app_list} instances."
+        if close_all:
+            speech = random.choice([
+                f"Closing all {app_list} windows now.",
+                f"Shutting down every {app_list} for you.",
+                f"Killing all {app_list} instances.",
+                f"Alright, wiping out {app_list}.",
             ])
-            if close_all else
-            random.choice([
-                f"Closing {app_list}.",
-                f"Shutting down {app_list}.",
-                f"Done with {app_list}."
+        else:
+            speech = random.choice([
+                f"Closing {app_list} for you.",
+                f"Sure, shutting down {app_list}.",
+                f"Done, {app_list} closed.",
+                f"Got it, {app_list} is gone.",
+                f"Alright, closing {app_list}.",
             ])
-        )
 
     return LayerResult.stop(f"{speech} {tags}")
 
@@ -143,10 +196,20 @@ def _validate_open(apps):
         _words = _app_clean.split()
         _looks_real = (
             len(_words) >= 2 or
-            len(_app_clean) >= 6 or
-            _app_clean.endswith('.exe')
+            len(_app_clean) >= 4 or
+            _app_clean.endswith('.exe') or
+            _app_clean.isdigit()
         )
         if _looks_real:
+            continue
+        # Check web services before rejecting
+        _web_services = {
+            "github", "youtube", "gmail", "google", "twitter",
+            "linkedin", "reddit", "facebook", "instagram",
+            "netflix", "amazon", "twitch", "stackoverflow",
+            "chatgpt", "claude", "notion", "wikipedia", "spotify",
+        }
+        if _app_clean in _web_services:
             continue
         return f"I cannot find '{_app}' on your system."
     return None
@@ -179,3 +242,35 @@ def _validate_close(apps):
             return "Close what? Be more specific."
 
     return None
+
+def _count_app_windows(app_name: str) -> int:
+    """Count visible top-level windows belonging to an app."""
+    count = 0
+    try:
+        import win32gui
+
+        def _callback(hwnd, _):
+            nonlocal count
+            if win32gui.IsWindowVisible(hwnd):
+                title = win32gui.GetWindowText(hwnd).lower()
+                if app_name in title and len(title) > 3:
+                    count += 1
+
+        win32gui.EnumWindows(_callback, None)
+    except Exception:
+        # Fallback: count processes
+        try:
+            import psutil
+            for proc in psutil.process_iter(['name']):
+                try:
+                    pname = (proc.info['name'] or '').lower()
+                    if app_name in pname:
+                        count += 1
+                except Exception:
+                    pass
+            # Rough estimate: processes / 3 for Chrome-like apps
+            if app_name in ("chrome", "edge", "brave"):
+                count = max(1, count // 3)
+        except Exception:
+            count = 1
+    return max(count, 1)
