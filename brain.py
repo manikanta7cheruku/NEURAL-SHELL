@@ -205,6 +205,20 @@ def think(prompt_text, speaker_id="default"):
     """Execute pipeline layers and generate assistant response."""
     global USER_NAME
 
+    # -- Dialogue state check --
+    # If Seven is waiting for a clarification response (e.g. "close all chrome?"),
+    # check if this input answers the pending question before running the pipeline.
+    try:
+        from brain_modules.dialogue_manager import has_pending, check_pending
+        if has_pending():
+            _dialogue_reply = check_pending(prompt_text)
+            if _dialogue_reply:
+                print(Fore.CYAN + f"[BRAIN] Dialogue handled: {prompt_text[:40]}")
+                _save_conversation(prompt_text, _dialogue_reply, speaker_id)
+                return _dialogue_reply
+    except Exception as _dm_err:
+        print(Fore.YELLOW + f"[BRAIN] Dialogue check skipped: {_dm_err}")
+
     ctx = BrainContext(
         prompt_text=prompt_text,
         speaker_id=speaker_id,
