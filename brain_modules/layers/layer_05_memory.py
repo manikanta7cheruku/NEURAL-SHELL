@@ -13,13 +13,43 @@ from colorama import Fore
 from brain_modules.layer_result import LayerResult
 
 
-# Words that signal a live data query — memory is irrelevant for these.
+# Words that signal a live data query or conversational intent where memory search is invalid.
 _WEB_INTENT_WORDS = {
     "weather", "temperature", "forecast", "rain", "sunny", "humidity",
     "news", "latest", "breaking", "happened", "update",
     "price", "stock", "market", "crypto", "bitcoin",
     "score", "match", "who won", "game result",
     "trending", "viral", "right now", "currently",
+}
+
+_CONVERSATIONAL_INTENTS = {
+    "hi", "hello", "hey", "sup", "how are you", "how r u", "how you doing",
+    "where are you", "where do you", "who are you", "what are you",
+    "thanks", "thank you", "ok", "okay", "cool", "nice", "good job",
+    "bye", "goodbye", "see ya", "good night", "good morning",
+    "hola", "yo", "greetings", "morning", "afternoon", "evening",
+    "yes", "no", "yep", "nope", "sure", "nah", "indeed", "correct",
+}
+
+
+# Self-knowledge tokens and phrases - answered by layer_03_identity from self_model.
+# If any of these appear, skip memory search entirely.
+# Memory contamination on these questions causes the LLM to confabulate
+# system facts from unrelated past conversations.
+_SELF_ENTITIES = {
+    "version", "build", "release", "patch",
+    "model", "llm", "llama",
+    "hardware", "specs", "specifications", "ram", "gpu", "cpu", "vram", "processor",
+}
+
+_SELF_KNOWLEDGE_PHRASES = {
+    "who are you", "what are you", "your name", "who made you", "who created you",
+    "what can you do", "what do you do", "your capabilities", "what are your features",
+    "tell me about yourself", "introduce yourself", "how can you help",
+    "what is my name", "whats my name", "what's my name", "my name",
+    "who am i", "do you know me", "do you remember me",
+    "where are you from", "where you from", "where do you live",
+    "where are you", "where do you run", "where are you hosted",
 }
 
 # Opinion question starters — Seven should form a fresh view.
@@ -51,10 +81,27 @@ def process(ctx, deps):
             or ctx.is_command or ctx.is_greeting or ctx.is_action_cmd):
         return LayerResult.pass_through()
 
-    # Skip memory for live data queries.
-    _clean = ctx.clean_in.lower()
+    # Skip memory for live data and conversational pleasantries.
+    _clean = ctx.clean_in.lower().strip()
+    if _clean in _CONVERSATIONAL_INTENTS or any(_clean.startswith(c) for c in _CONVERSATIONAL_INTENTS):
+        return LayerResult.pass_through()
+
+    # Skip memory search for short conversational noise (under 2 words)
+    # unless it matches some specific search keywords.
+    tokens = [t for t in _clean.split() if t]
+    if len(tokens) <= 1 and not (tokens and tokens[0] in {"react", "docker", "python", "kubernetes", "git"}):
+        print(Fore.CYAN + "[MEMORY] Skipping — ultra-short query, treating as conversational noise")
+        return LayerResult.pass_through()
+
     if any(w in _clean for w in _WEB_INTENT_WORDS):
         print(Fore.CYAN + "[MEMORY] Skipping — live data query")
+        return LayerResult.pass_through()
+
+    #Skip memory for self-knowledge queries.
+    # These are answered from programmatic self_model, never from ChromaDB.
+    clean_tokens = set(_clean.split())
+    if (clean_tokens & _SELF_ENTITIES) or any(p in _clean for p in _SELF_KNOWLEDGE_PHRASES):
+        print(Fore.CYAN + "[MEMORY] Skipping - self-knowledge query, using ground truth")
         return LayerResult.pass_through()
 
     # Skip memory for opinion questions.
@@ -71,15 +118,12 @@ def process(ctx, deps):
 
     try:
         raw_memory = seven_memory.search(ctx.prompt_text, user_id=search_uid)
-        if raw_memory:
-            # Wrap memory in clear delimiters so LLM knows what it is.
-            # The raw format contains [FACT] and [CONVERSATION] markers
-            # which the LLM sometimes prints verbatim. This wrapper
-            # frames it as reference context, not content to recite.
+        if raw_memory and raw_memory.strip():
+            # Quiet wrapper. Weak local models will parrot loud framing tokens.
+            # Facts are exposed as bullet list, not tagged blocks.
             ctx.memory_context = (
-                "PERSONAL CONTEXT (use naturally, never quote markers):\n"
+                "What you know about the user:\n"
                 + raw_memory
-                + "\nEND PERSONAL CONTEXT"
             )
             print(Fore.MAGENTA + "[MEMORY] Found relevant memories!")
     except Exception as _mem_err:
