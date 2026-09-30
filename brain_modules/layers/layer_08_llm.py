@@ -196,14 +196,10 @@ def process(ctx, deps):
     }
 
     # ── Streaming path ───────────────────────────────────────────
-    # Streaming is for voice only — speaker_id != "default" means voice ID
-    # identified a speaker, or main.py is calling with a real speaker id.
-    # Chat API always passes speaker_id="default". Streaming on chat forces
-    # chat.py to consume the full generator before responding anyway,
-    # adding overhead without benefit.
+    # Supports both voice and web UI SSE token streaming
     use_streaming = (
-        config.KEY.get('brain', {}).get('streaming', False)
-        and ctx.speaker_id != "default"
+        config.KEY.get('brain', {}).get('streaming', True)
+        or ctx.speaker_id != "default"
     )
 
     if use_streaming:
