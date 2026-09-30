@@ -33,6 +33,7 @@ const useChat = create((set, get) => ({
         text: r.data.response,
         actions: r.data.actions || [],
         fileResults: r.data.file_results || null,
+        taskResults: r.data.task_results || null,
         time: new Date(),
       };
       set((s) => ({ messages: [...s.messages, botMsg], sending: false }));
