@@ -87,118 +87,105 @@ def reset_session():
     from brain_modules.identity_layer import reset_session as identity_reset
     identity_reset()
 
+    try:
+        from brain_modules.conversation_thread import ConversationThread
+        ConversationThread.clear("default")
+        import config
+        _save_user_id = config.KEY.get("identity", {}).get("user_name", "default").lower() or "default"
+        ConversationThread.clear(_save_user_id)
+    except Exception as _ct_err:
+        print(Fore.YELLOW + f"[BRAIN] Session thread clear failed: {_ct_err}")
+
     print(Fore.YELLOW + "[BRAIN] Session reset.")
 
 
-load_name_from_memory()
+# Deferred load of name. Will be called during think() to prevent
+# heavy memory/model loading during Python's import phase on boot.
+_name_loaded = False
+
+
+def ensure_name_loaded():
+    global _name_loaded
+    if not _name_loaded:
+        load_name_from_memory()
+        _name_loaded = True
+
 
 _SKIP_GREETINGS = {"hi", "hello", "hey"}
 
 
-def _save_conversation(prompt_text, result, speaker_id):
-    """Save direct conversation turn to ChromaDB memory."""
+def save_completed_turn(prompt_text, response_text, speaker_id, source="chat"):
+    """
+    Unified entry point to record a completed dialogue turn.
+    Saves to ChromaDB, extracts facts, and writes to rolling session thread.
+    Synchronizes streaming chat, voice, and non-streaming responses.
+    """
     try:
-        if not prompt_text or len(prompt_text.strip()) <= 3:
+        if not prompt_text or not response_text:
             return
 
-        if prompt_text.lower().strip() in _SKIP_GREETINGS:
+        p_clean = prompt_text.strip()
+        r_clean = re.sub(r'###\w+:\s*\S+', '', response_text).strip()
+
+        if len(p_clean) <= 3 or not r_clean:
             return
 
-        if isinstance(result, tuple) and len(result) == 2 and result[0] == "__STREAM__":
+        if p_clean.lower().strip() in _SKIP_GREETINGS:
             return
 
-        if not isinstance(result, str) or not result.strip():
-            return
+        # Unified thread ID resolution using dynamic memory state
+        if speaker_id not in ("default", "unknown") and speaker_id:
+            _save_user_id = speaker_id.strip().lower()
+        elif USER_NAME and USER_NAME.strip().lower() not in ("admin", "default", "unknown", ""):
+            _save_user_id = USER_NAME.strip().lower()
+        else:
+            _save_user_id = "default"
 
-        if result.strip().startswith("###") or result.startswith("Processing error"):
-            return
-
-        _save_user_id = speaker_id if speaker_id not in ("default", "unknown") else (
-            config.KEY.get("identity", {}).get("user_name", "default").lower() or "default"
-        )
-        _source = "voice" if speaker_id not in ("default", "unknown") else "chat"
-
-        # Enforce memory quotas directly to avoid background API context failures
+        # 1. Add to rolling thread buffer for repetition detection
         try:
-            if seven_memory and hasattr(seven_memory, 'conversations'):
-                _current = seven_memory.conversations.count()
-                _tier = config.KEY.get("license", {}).get("tier", "free")
-                
-                _limits = {
-                    "free": 7,
-                    "pro": 77,
-                    "ultimate": -1
-                }
-                _max_allowed = _limits.get(_tier, 7)
+            from brain_modules.conversation_thread import ConversationThread
+            ConversationThread.add_turn(_save_user_id, p_clean, r_clean)
+        except Exception as _ct_err:
+            print(Fore.YELLOW + f"[BRAIN] Session thread save failed: {_ct_err}")
 
-                print(Fore.CYAN + f"[BRAIN QUOTA] Current: {_current}/{_max_allowed} | Tier: {_tier}")
-                if _max_allowed != -1 and _current >= _max_allowed:
-                    print(Fore.YELLOW + f"[BRAIN] Quota reached ({_current}/{_max_allowed}) for tier '{_tier}' - skipping conversation save.")
-                    return
-        except Exception as _q_err:
-            print(Fore.YELLOW + f"[BRAIN] Quota verification bypassed: {_q_err}")
+        # 2. Extract facts via idle worker
+        try:
+            from brain_modules.idle_worker import enqueue
+            enqueue("extract_facts", {"text": p_clean, "speaker_id": _save_user_id})
+        except Exception as _f_err:
+            print(Fore.YELLOW + f"[BRAIN] Facts extraction enqueue failed: {_f_err}")
 
-        _clean_response = re.sub(r'###\w+:\s*\S+', '', result).strip()
-        if not _clean_response:
-            return
-
+        # 3. Store conversation in ChromaDB
         if seven_memory:
             try:
-                seven_memory.extract_and_store_facts(prompt_text, user_id=_save_user_id)
-            except Exception:
-                pass
+                seven_memory.store_conversation(
+                    user_input=p_clean,
+                    seven_response=r_clean,
+                    user_id=_save_user_id,
+                    source=source,
+                )
+                print(Fore.GREEN + f"[BRAIN] Saved completed turn ({source}): '{p_clean[:35]}...'")
+            except Exception as _mem_err:
+                print(Fore.YELLOW + f"[BRAIN] ChromaDB store bypassed: {_mem_err}")
 
-            seven_memory.store_conversation(
-                user_input=prompt_text,
-                seven_response=_clean_response,
-                user_id=_save_user_id,
-                source=_source,
-            )
-            print(Fore.GREEN + f"[BRAIN] Saved turn ({_source}): '{prompt_text[:35]}...'")
+    except Exception as _err:
+        print(Fore.YELLOW + f"[BRAIN] Unified save turn failed: {_err}")
 
-    except Exception as _mem_err:
-        print(Fore.YELLOW + f"[BRAIN] Auto-save skipped: {_mem_err}")
+
+def _save_conversation(prompt_text, result, speaker_id):
+    """Save direct non-streaming conversation turn to ChromaDB memory."""
+    if isinstance(result, tuple) and len(result) == 2 and result[0] == "__STREAM__":
+        # Bypassed here; streaming handles its own saves on stream completion callback
+        return
+    save_completed_turn(prompt_text, result, speaker_id, source="chat")
 
 
 def store_voice_turn(prompt_text, response_text, speaker_id, was_interrupted=False):
     """Save processed streaming voice turns into ChromaDB memory."""
-    try:
-        if not prompt_text or not response_text:
-            return
-        if len(prompt_text.strip()) <= 3 or prompt_text.lower().strip() in _SKIP_GREETINGS:
-            return
-
-        _save_user_id = speaker_id if speaker_id not in ("default", "unknown") else (
-            config.KEY.get("identity", {}).get("user_name", "default").lower() or "default"
-        )
-
-        _clean = re.sub(r'###\w+:\s*\S+', '', response_text).strip()
-        if not _clean:
-            return
-
-        if was_interrupted:
-            _clean = f"[INTERRUPTED] {_clean}"
-
-        # Resolve seven_memory instance safely
-        mem = seven_memory
-        if not mem:
-            try:
-                from memory import seven_memory as _lazy_mem
-                mem = _lazy_mem
-            except Exception:
-                mem = None
-
-        if mem:
-            mem.store_conversation(
-                user_input=prompt_text,
-                seven_response=_clean,
-                user_id=_save_user_id,
-                source="voice",
-            )
-            print(Fore.GREEN + f"[BRAIN] Voice conversation saved to memory (interrupted={was_interrupted})")
-
-    except Exception as _err:
-        print(Fore.YELLOW + f"[BRAIN] Voice memory save skipped: {_err}")
+    _clean = response_text
+    if was_interrupted:
+        _clean = f"[INTERRUPTED] {response_text}"
+    save_completed_turn(prompt_text, _clean, speaker_id, source="voice")
 
 def _execute_resolved_reference(resolved: dict) -> str:
     """
@@ -286,6 +273,22 @@ def _execute_resolved_reference(resolved: dict) -> str:
 def think(prompt_text, speaker_id="default"):
     """Execute pipeline layers and generate assistant response."""
     global USER_NAME
+    
+    ensure_name_loaded()
+
+    # Refresh user name from config on every call.
+    # Config can change during runtime via Settings UI without backend restart.
+    try:
+        import json
+        _cfg_path = os.path.join(os.environ.get('APPDATA', ''), 'SEVEN', 'config.json')
+        if os.path.exists(_cfg_path):
+            with open(_cfg_path, 'r', encoding='utf-8-sig') as _f:
+                _cfg_data = json.load(_f)
+            _fresh_name = _cfg_data.get('identity', {}).get('user_name', '').strip()
+            if _fresh_name and _fresh_name.lower() not in ('admin', ''):
+                USER_NAME = _fresh_name
+    except Exception:
+        pass
 
     # -- Dialogue state check --
     # If Seven is waiting for a clarification response (e.g. "close all chrome?"),
