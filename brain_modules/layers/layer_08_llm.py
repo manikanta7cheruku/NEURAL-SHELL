@@ -115,6 +115,22 @@ def process(ctx, deps):
     if ctx.llm_note:
         full_prompt = ctx.llm_note + "\n\n" + full_prompt
 
+    # Working memory hint: if a recent action exists (file search results,
+    # app disambiguation), inject a small context block so the LLM knows
+    # what the user may be referring to. Prevents the model from starting a
+    # new search when the user says "open the second one".
+    try:
+        from brain_modules.dialogue_manager import has_recent_action, get_last_action
+        from brain_modules.prompt_builder import build_reference_hint, build_dialogue_examples
+        if has_recent_action():
+            _recent = get_last_action()
+            _ref_hint = build_reference_hint(_recent)
+            _examples = build_dialogue_examples()
+            if _ref_hint:
+                full_prompt = _ref_hint + _examples + "\n" + full_prompt
+    except Exception as _hint_err:
+        print(Fore.YELLOW + f"[LLM] Memory hint skipped: {_hint_err}")
+
     # Chain-of-thought removed: llama3 at local context sizes does not follow
     # structured [THINK]/[ANSWER] format reliably. The instruction causes
     # preamble generation instead of actual reasoning, degrading response quality.
