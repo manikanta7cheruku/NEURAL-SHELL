@@ -112,6 +112,21 @@ def process(ctx, deps):
         if _validation:
             return LayerResult.stop(_validation)
 
+        # Remember app-open intent for reference resolution ("open the second one")
+        if len(apps) == 1:
+            try:
+                from hands.app_discovery import search_apps
+                _matches = search_apps(apps[0], limit=5)
+                if _matches and len(_matches) >= 2:
+                    from brain_modules.dialogue_manager import remember_action
+                    _mem_results = [
+                        {"name": m.get("name", ""), "path": m.get("path", "")}
+                        for m in _matches
+                    ]
+                    remember_action("app_disambiguate", apps[0], _mem_results)
+            except Exception as _mem_err:
+                pass
+
     if tag == "CLOSE":
         _validation = _validate_close(apps)
         if _validation:
