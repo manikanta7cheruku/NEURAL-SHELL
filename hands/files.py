@@ -522,10 +522,26 @@ def build_file_index(force: bool = False):
 
 
 # -- Main Search --
-def search_files(query: str, max_results: int = 8, user_name: str = "") -> list:
-    """Search user directories for files matching a natural language query."""
+def _get_search_limit(max_results):
+    """Prefer explicit arg, else read from config, else default to 8."""
+    if max_results is not None and max_results > 0:
+        return max_results
+    try:
+        import config
+        val = int(config.KEY.get("brain", {}).get("search_max_results", 8))
+        return max(3, min(20, val))
+    except Exception:
+        return 8
+
+
+def search_files(query: str, max_results: int = None, user_name: str = "") -> list:
+    """Search user directories for files matching a natural language query.
+
+    max_results: if None, reads from config.KEY['brain']['search_max_results'].
+    """
+    max_results = _get_search_limit(max_results)
     keywords, target_extensions, looking_for_folder = _extract_keywords(query)
-    print(Fore.CYAN + f"[FILES] Query: '{query}' | KW: {keywords} | Folder: {looking_for_folder}")
+    print(Fore.CYAN + f"[FILES] Query: '{query}' | KW: {keywords} | Folder: {looking_for_folder} | Limit: {max_results}")
 
     if not keywords:
         return []
@@ -560,7 +576,7 @@ def search_files(query: str, max_results: int = 8, user_name: str = "") -> list:
                             "path": hit["path"],
                             "size_kb": 0,
                             "modified": "",
-                            "ext": hit["ext"],
+                            "ext": hit["ext"],  
                             "score": 50,
                             "snippet": hit.get("snippet", ""),
                         })
