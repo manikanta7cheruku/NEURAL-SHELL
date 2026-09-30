@@ -101,6 +101,7 @@ def process(ctx, deps):
         tier         = _tier,
         input_text   = ctx.clean_in,
         is_voice     = _is_voice,
+        speaker_id   = ctx.speaker_id,
     )
 
     full_prompt = assemble_prompt(
@@ -115,19 +116,19 @@ def process(ctx, deps):
     if ctx.llm_note:
         full_prompt = ctx.llm_note + "\n\n" + full_prompt
 
-    # Working memory hint: if a recent action exists (file search results,
-    # app disambiguation), inject a small context block so the LLM knows
-    # what the user may be referring to. Prevents the model from starting a
-    # new search when the user says "open the second one".
+    # Working memory hint: only inject when current input clearly references
+    # the recent action. Blanket injection primes the 1B model to emit
+    # ###OPEN tokens on unrelated questions ("What is React" mistaken for a file).
     try:
-        from brain_modules.dialogue_manager import has_recent_action, get_last_action
+        from brain_modules.dialogue_manager import should_inject_reference_hint, get_last_action
         from brain_modules.prompt_builder import build_reference_hint, build_dialogue_examples
-        if has_recent_action():
+        if should_inject_reference_hint(ctx.clean_in):
             _recent = get_last_action()
             _ref_hint = build_reference_hint(_recent)
             _examples = build_dialogue_examples()
             if _ref_hint:
                 full_prompt = _ref_hint + _examples + "\n" + full_prompt
+                print(Fore.CYAN + "[LLM] Reference hint injected for strong reference input")
     except Exception as _hint_err:
         print(Fore.YELLOW + f"[LLM] Memory hint skipped: {_hint_err}")
 
@@ -230,6 +231,13 @@ def process(ctx, deps):
                 except Exception:
                     pass
 
+                # Dynamic save of completed stream turn to repeat threads and database
+                try:
+                    from brain import save_completed_turn
+                    save_completed_turn(prompt_text, complete_reply, speaker_id, source="chat")
+                except Exception as _save_err:
+                    print(Fore.YELLOW + f"[LLM] Streaming turn save failed: {_save_err}")
+
         return LayerResult.stop_stream(_sentence_gen())
 
     # ── Non-streaming path ───────────────────────────────────────
@@ -290,11 +298,29 @@ def process(ctx, deps):
 def _clean_response(text):
     """
     Strip robotic trailing phrases that LLMs append regardless of system prompt.
-    These come from RLHF training — the model learned to end responses with
+    These come from RLHF training - the model learned to end responses with
     assistant-style prompts. We remove them post-generation.
+    Also strips RLHF apology reflex openings that fire on any correction hint.
     """
     if not text:
         return text
+
+    import re
+
+    # Strip RLHF apology reflex openings (1B models cannot suppress these)
+    _apology_openers = [
+        r"^you'?re right,?\s*i was wrong\.?\s*",
+        r"^i apologize,?\s*",
+        r"^my apologies,?\s*",
+        r"^you'?re absolutely right,?\s*",
+        r"^i'?m sorry,?\s*",
+        r"^sorry (about|for) (that|the confusion),?\s*",
+    ]
+    for pattern in _apology_openers:
+        text = re.sub(pattern, "", text, flags=re.IGNORECASE).strip()
+
+    if not text:
+        return "Understood."
 
     _trailers = [
         "go ahead.", "go ahead",
@@ -319,11 +345,10 @@ def _clean_response(text):
     for trailer in _trailers:
         if text_lower.endswith(trailer):
             cut = len(text) - len(trailer)
-            text = text[:cut].rstrip(" .,!-—")
+            text = text[:cut].rstrip(" .,!-")
             text_lower = text.lower().rstrip()
             break
 
-    import re
     text = re.sub(r'\s*[/\\]+\s*$', '', text).strip()
 
     return text.strip()
