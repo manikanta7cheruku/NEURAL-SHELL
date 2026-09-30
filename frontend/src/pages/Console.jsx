@@ -5,6 +5,8 @@ import {
   Send, Paperclip, X, FileText, ChevronRight,
   Cpu, User, AlertCircle, Upload,
 } from 'lucide-react';
+import FileResultCards from '../components/FileResultCards';
+import TaskResultCard from '../components/TaskResultCard';
 
 const CMDS = [
   { c: 'Memory',    d: ['/memory', '/facts', '/convos', '/stats'] },
@@ -97,35 +99,22 @@ function MessageBubble({ msg }) {
               {msg.text}
             </pre>
           ) : (
-            <p className={`text-[12.5px] leading-relaxed whitespace-pre-wrap
-                           ${msg.error ? 'text-red-300' : 'text-white/70'}`}>
-              {displayText}
-            </p>
+            displayText && (
+              <p className={`text-[12.5px] leading-relaxed whitespace-pre-wrap
+                             ${msg.error ? 'text-red-300' : 'text-white/70'}`}>
+                {displayText}
+              </p>
+            )
           )}
 
-          {/* File results */}
+          {/* File result cards */}
           {msg.fileResults?.count > 0 && (
-            <div className="mt-3 pt-3 border-t border-white/[0.05] space-y-1.5">
-              <div className="text-[8px] text-white/30 uppercase tracking-widest font-medium">
-                {msg.fileResults.count} file{msg.fileResults.count > 1 ? 's' : ''} found
-              </div>
-              {msg.fileResults.results.map((f, i) => (
-                <div key={i} className="flex items-start gap-2">
-                  <span className="text-[8px] font-mono text-white/30 bg-white/[0.04]
-                                   px-1.5 py-0.5 rounded mt-0.5 flex-shrink-0">
-                    {f.ext || 'file'}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <div className="text-[10px] text-white/60 font-medium truncate">{f.name}</div>
-                    <button onClick={() => navigator.clipboard.writeText(f.path)}
-                            className="text-[8px] text-white/25 hover:text-s-accent
-                                       font-mono truncate block w-full text-left transition-colors">
-                      {f.path}
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
+            <FileResultCards data={msg.fileResults} />
+          )}
+
+          {/* Task result cards */}
+          {msg.taskResults && (
+            <TaskResultCard data={msg.taskResults} />
           )}
 
           {/* Actions */}
