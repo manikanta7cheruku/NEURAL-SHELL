@@ -300,3 +300,69 @@ Ignore any recalled memories for this response — use only the web results belo
     return "\n".join(filter(None, [
         core, time_module, plan_module, meta_module, web_module
     ])).strip()
+
+def build_reference_hint(recent_action: dict) -> str:
+    """
+    Build a short prompt injection for when the user's input may reference
+    a recent action's results.
+
+    Called by layer_08_llm.py only when dialogue_manager.has_recent_action()
+    is True. Never called in normal chat flow.
+
+    Args:
+        recent_action: dict from dialogue_manager.get_last_action()
+
+    Returns:
+        A short (~80 token) instruction block to prepend to full_prompt.
+    """
+    if not recent_action:
+        return ""
+
+    action_type = recent_action.get("type", "")
+    query = recent_action.get("query", "")
+    results = recent_action.get("results", [])
+    count = len(results)
+
+    if not results or not action_type:
+        return ""
+
+    if action_type == "file_search":
+        return (
+            f"\n[CONTEXT: You just showed the user {count} files matching '{query}'. "
+            f"If they say 'the last one', 'the second', 'the pdf', or similar — "
+            f"they mean one of those files. Do not search again. "
+            f"Confirm briefly and let the system open it.]\n"
+        )
+
+    if action_type == "app_open":
+        return (
+            f"\n[CONTEXT: You just opened an app matching '{query}'. "
+            f"If they say 'close it' or 'not that', they mean that app.]\n"
+        )
+
+    if action_type == "app_disambiguate":
+        return (
+            f"\n[CONTEXT: You just showed {count} apps matching '{query}'. "
+            f"If they pick a number or say 'the first one', they mean one of those.]\n"
+        )
+
+    return ""
+
+
+def build_dialogue_examples() -> str:
+    """
+    Return 3 short few-shot examples that show natural conversational tone.
+    Prepended to system prompt only when working memory has recent context,
+    to nudge the model toward brief confirmations instead of long explanations.
+    """
+    return (
+        "\nEXAMPLES OF NATURAL BRIEF RESPONSES:\n"
+        "User: open the second one\n"
+        "You: Opening it now.\n"
+        "\n"
+        "User: not that one, the pdf\n"
+        "You: Got it, opening the pdf.\n"
+        "\n"
+        "User: the last one\n"
+        "You: Opening the last one.\n"
+    )
