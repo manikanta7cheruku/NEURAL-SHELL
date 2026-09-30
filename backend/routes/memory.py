@@ -8,6 +8,8 @@ import os
 import datetime
 import logging
 
+from memory import facts_store
+
 _log = logging.getLogger('seven.memory')
 
 router = APIRouter()
@@ -760,6 +762,127 @@ async def import_memory(request: Request):
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/api/memory/facts/structured",
+            summary="Get structured facts from SQLite store",
+            description="Returns facts from the structured SQLite store with speaker partitioning, category filtering, and correction chain metadata.")
+def get_structured_facts(
+    speaker_id: str = None,
+    category: str = None,
+    active_only: bool = True,
+    limit: int = 500
+):
+    """Query the structured facts store with optional filters."""
+    try:
+        facts = facts_store.get_facts(
+            speaker_id=speaker_id,
+            category=category,
+            active_only=active_only,
+            limit=limit
+        )
+        return {"facts": facts, "total": len(facts)}
+    except Exception as e:
+        _log.error(f"[API] Structured facts query failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.patch("/api/memory/facts/structured/{fact_id}",
+              summary="Update or supersede a structured fact",
+              description="Updates a fact in place if mode is 'update' (default), or creates a new fact linked to the old one if mode is 'supersede'.")
+async def update_structured_fact(fact_id: int, request: Request):
+    """Update or supersede a structured fact."""
+    try:
+        body = await request.json()
+        new_value = (body.get("value") or "").strip()
+        mode = body.get("mode", "update")
+        source_text = body.get("source_text")
+
+        if not new_value:
+            raise HTTPException(status_code=400, detail="Value cannot be empty")
+
+        if mode == "supersede":
+            new_id = facts_store.supersede_fact(
+                old_id=fact_id,
+                new_value=new_value,
+                source_text=source_text
+            )
+            if new_id is None:
+                raise HTTPException(status_code=404, detail="Original fact not found or inactive")
+            return {"success": True, "new_id": new_id, "old_id": fact_id}
+        else:
+            ok = facts_store.update_fact(fact_id, new_value)
+            if not ok:
+                raise HTTPException(status_code=404, detail="Fact not found or inactive")
+            return {"success": True, "id": fact_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        _log.error(f"[API] Structured fact update failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/api/memory/facts/structured/{fact_id}",
+               summary="Delete a structured fact",
+               description="Hard deletes a structured fact record from the SQLite store.")
+def delete_structured_fact(fact_id: int):
+    """Delete a structured fact."""
+    try:
+        ok = facts_store.delete_fact(fact_id)
+        if not ok:
+            return {"success": False, "error": "Fact not found"}
+        return {"success": True, "deleted": fact_id}
+    except Exception as e:
+        _log.error(f"[API] Structured fact delete failed: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@router.post("/api/memory/facts/structured",
+             summary="Add a new structured fact",
+             description="Inserts a new fact into the structured SQLite store with speaker partitioning and category.")
+async def add_structured_fact(request: Request):
+    """Add a fact directly to the structured store."""
+    try:
+        body = await request.json()
+        value = (body.get("value") or "").strip()
+        speaker_id = body.get("speaker_id", "default")
+        category = body.get("category", "manual")
+        key = body.get("key")
+        source_text = body.get("source_text")
+
+        if not value:
+            raise HTTPException(status_code=400, detail="Value cannot be empty")
+
+        new_id = facts_store.add_fact(
+            value=value,
+            speaker_id=speaker_id,
+            category=category,
+            key=key,
+            source_text=source_text
+        )
+        return {"success": True, "id": new_id, "value": value}
+    except HTTPException:
+        raise
+    except Exception as e:
+        _log.error(f"[API] Structured fact add failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/api/memory/facts/structured/{fact_id}/history",
+            summary="Get correction history for a fact",
+            description="Traces the full correction chain (superseded_by links) from the given fact through all revisions.")
+def get_fact_correction_history(fact_id: int):
+    """Return the full correction chain for a fact."""
+    try:
+        chain = facts_store.get_fact_history(fact_id)
+        if not chain:
+            raise HTTPException(status_code=404, detail="Fact not found")
+        return {"fact_id": fact_id, "chain": chain, "revisions": len(chain)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        _log.error(f"[API] Correction history query failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/api/memory/stats", summary="Memory statistics",
