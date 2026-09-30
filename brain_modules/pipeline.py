@@ -47,6 +47,7 @@ LAYER_ORDER = [
     "brain_modules.layers.layer_59_app_history",
     "brain_modules.layers.layer_06_personal_filter",
     "brain_modules.layers.layer_07_facts",
+    "brain_modules.layers.layer_075_proactive",
     "brain_modules.layers.layer_08_llm",
 ]
 
