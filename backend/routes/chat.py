@@ -4,8 +4,11 @@ Handles: POST /api/chat
 """
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, AsyncGenerator
+import json
+import asyncio
 import re
 import logging
 
@@ -17,6 +20,7 @@ router = APIRouter()
 class ChatRequest(BaseModel):
     text: str
     speaker_id: Optional[str] = "default"
+    stream: Optional[bool] = False
 
 
 class ChatResponse(BaseModel):
@@ -186,6 +190,42 @@ def chat(req: ChatRequest):
                 set_state("task_results", None)
         except Exception as _e:
             _log.debug(f"State read failed: {_e}")
+
+        if req.stream:
+            async def _event_stream() -> AsyncGenerator[str, None]:
+                try:
+                    meta_payload = {
+                        "actions": action_list,
+                        "file_results": file_results,
+                        "task_results": task_results,
+                    }
+                    yield f"data: {json.dumps(meta_payload)}\n\n"
+
+                    if is_streaming:
+                        _, gen = response
+                        for sentence in gen:
+                            yield f"data: {json.dumps({'token': sentence + ' '})}\n\n"
+                            await asyncio.sleep(0.005)
+                    else:
+                        words = clean_response.split(" ")
+                        for idx, word in enumerate(words):
+                            chunk = word if idx == 0 else " " + word
+                            yield f"data: {json.dumps({'token': chunk})}\n\n"
+                            await asyncio.sleep(0.008)
+
+                    yield "data: [DONE]\n\n"
+                except Exception as stream_err:
+                    yield f"data: {json.dumps({'error': str(stream_err)})}\n\n"
+
+            return StreamingResponse(
+                _event_stream(),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no",
+                }
+            )
 
         return ChatResponse(
             response=clean_response,
