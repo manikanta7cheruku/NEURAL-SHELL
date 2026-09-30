@@ -459,6 +459,260 @@ function FactsTab({ facts, onDelete, searchQuery }) {
   );
 }
 
+// ── Structured Facts Tab (Phase 2) ─────────────────────────────────────────
+
+function StructuredFactsTab({ facts, loading, onAdd, onUpdate, onDelete, onFetchHistory, searchQuery }) {
+  const [adding, setAdding]         = useState(false);
+  const [newValue, setNewValue]     = useState('');
+  const [newCategory, setNewCategory] = useState('manual');
+  const [saving, setSaving]         = useState(false);
+
+  const [editingId, setEditingId]   = useState(null);
+  const [editValue, setEditValue]   = useState('');
+  const [editMode, setEditMode]     = useState('update');
+
+  const [expandedId, setExpandedId] = useState(null);
+  const [history, setHistory]       = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+
+  const CATEGORIES = ['manual', 'identity', 'preference', 'personal', 'explicit', 'correction', 'general'];
+
+  const handleAdd = async () => {
+    if (!newValue.trim()) return;
+    setSaving(true);
+    const result = await onAdd({ value: newValue.trim(), category: newCategory });
+    setSaving(false);
+    if (result.success) {
+      setNewValue('');
+      setNewCategory('manual');
+      setAdding(false);
+    }
+  };
+
+  const startEdit = (fact, mode = 'update') => {
+    setEditingId(fact.id);
+    setEditValue(fact.value);
+    setEditMode(mode);
+  };
+
+  const saveEdit = async () => {
+    if (!editValue.trim() || !editingId) return;
+    setSaving(true);
+    const result = await onUpdate(editingId, editValue.trim(), editMode);
+    setSaving(false);
+    if (result.success) {
+      setEditingId(null);
+      setEditValue('');
+    }
+  };
+
+  const cancelEdit = () => {
+    setEditingId(null);
+    setEditValue('');
+  };
+
+  const toggleHistory = async (id) => {
+    if (expandedId === id) {
+      setExpandedId(null);
+      setHistory([]);
+      return;
+    }
+    setExpandedId(id);
+    setHistoryLoading(true);
+    const chain = await onFetchHistory(id);
+    setHistory(chain);
+    setHistoryLoading(false);
+  };
+
+  const filtered = searchQuery
+    ? facts.filter(f => f.value.toLowerCase().includes(searchQuery.toLowerCase()))
+    : facts;
+
+  if (loading) {
+    return (
+      <div className="py-12 text-center">
+        <p className="text-[11px] text-white/30">Loading structured facts...</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {/* Add row */}
+      {adding ? (
+        <div className="bg-white/[0.02] border border-white/8 rounded-xl p-3
+                        flex items-center gap-2 animate-[cardReveal_200ms_ease-out]">
+          <select value={newCategory} onChange={e => setNewCategory(e.target.value)}
+                  className="bg-black/40 border border-white/10 text-[10px] text-white/70
+                             rounded-md px-2 py-1 outline-none">
+            {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+          <input value={newValue} onChange={e => setNewValue(e.target.value)}
+                 autoFocus
+                 onKeyDown={e => e.key === 'Enter' && handleAdd()}
+                 placeholder="Enter a structured fact..."
+                 className="flex-1 bg-transparent text-[12px] text-white/80
+                            placeholder-white/20 outline-none" />
+          <button onClick={handleAdd} disabled={saving || !newValue.trim()}
+                  className="text-[9px] text-s-accent font-medium px-2 py-1
+                             hover:bg-s-accent/8 rounded transition-colors
+                             disabled:opacity-30">
+            {saving ? 'Saving...' : 'Save'}
+          </button>
+          <button onClick={() => { setAdding(false); setNewValue(''); }}
+                  className="text-white/25 hover:text-white/55 transition-colors">
+            <X size={12} />
+          </button>
+        </div>
+      ) : (
+        <button onClick={() => setAdding(true)}
+                className="flex items-center gap-1.5 text-[9px] text-white/30
+                           hover:text-white/55 transition-colors">
+          <Plus size={11} />
+          Add structured fact
+        </button>
+      )}
+
+      {/* Facts list */}
+      {filtered.length === 0 ? (
+        <div className="py-12 text-center">
+          <p className="text-[11px] text-white/30">
+            {searchQuery ? 'No structured facts match your search' : 'No structured facts stored yet'}
+          </p>
+          <p className="text-[9px] text-white/20 mt-1.5">
+            Chat with Seven and mention preferences, work, or identity details to see them here.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-1.5">
+          {filtered.map(f => (
+            <div key={f.id}
+                 className="bg-white/[0.02] border border-white/[0.05] rounded-xl
+                            hover:border-white/10 group transition-all duration-150">
+              <div className="flex items-start gap-3 px-4 py-3">
+                <div className="flex-1 min-w-0">
+                  {editingId === f.id ? (
+                    <div className="space-y-2">
+                      <input value={editValue} onChange={e => setEditValue(e.target.value)}
+                             autoFocus
+                             onKeyDown={e => e.key === 'Enter' && saveEdit()}
+                             className="w-full bg-black/40 border border-white/15 rounded-md
+                                        text-[12px] text-white/80 px-2 py-1.5 outline-none" />
+                      <div className="flex items-center gap-2">
+                        <label className="text-[9px] text-white/40 flex items-center gap-1">
+                          <input type="radio" name={`mode-${f.id}`} value="update"
+                                 checked={editMode === 'update'}
+                                 onChange={e => setEditMode(e.target.value)} />
+                          Update in place
+                        </label>
+                        <label className="text-[9px] text-white/40 flex items-center gap-1">
+                          <input type="radio" name={`mode-${f.id}`} value="supersede"
+                                 checked={editMode === 'supersede'}
+                                 onChange={e => setEditMode(e.target.value)} />
+                          Supersede (keep history)
+                        </label>
+                        <button onClick={saveEdit} disabled={saving}
+                                className="ml-auto text-[9px] text-s-accent font-medium px-2 py-1
+                                           hover:bg-s-accent/8 rounded transition-colors
+                                           disabled:opacity-30">
+                          {saving ? 'Saving...' : 'Save'}
+                        </button>
+                        <button onClick={cancelEdit}
+                                className="text-white/25 hover:text-white/55 transition-colors">
+                          <X size={12} />
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <p className="text-[12px] text-white/70 leading-relaxed">{f.value}</p>
+                      <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                        <span className="text-[8px] text-s-accent/60 bg-s-accent/6
+                                         border border-s-accent/10 px-1.5 py-0.5 rounded-md
+                                         font-medium uppercase tracking-wide">
+                          {f.category}
+                        </span>
+                        {f.key && (
+                          <span className="text-[8px] text-s-cyan/60 bg-s-cyan/6
+                                           border border-s-cyan/10 px-1.5 py-0.5 rounded-md
+                                           font-medium">
+                            {f.key}
+                          </span>
+                        )}
+                        {f.speaker_id && f.speaker_id !== 'default' && (
+                          <span className="text-[8px] text-white/40 bg-white/[0.04]
+                                           border border-white/6 px-1.5 py-0.5 rounded-md
+                                           font-medium">
+                            {f.speaker_id}
+                          </span>
+                        )}
+                        <span className="text-[8px] text-white/20 font-mono">
+                          {(f.updated_at || f.created_at || '').split(' ')[0]}
+                        </span>
+                        <button onClick={() => toggleHistory(f.id)}
+                                className="text-[8px] text-white/30 hover:text-white/60
+                                           font-mono transition-colors ml-1">
+                          {expandedId === f.id ? 'Hide history' : 'History'}
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+                {editingId !== f.id && (
+                  <div className="flex items-center gap-1 flex-shrink-0 mt-0.5
+                                  opacity-0 group-hover:opacity-100 transition-all duration-150">
+                    <button onClick={() => startEdit(f, 'update')}
+                            className="text-white/15 hover:text-white/50
+                                       p-1 rounded-md hover:bg-white/[0.04]"
+                            title="Edit in place">
+                      <ChevronRight size={11} className="rotate-90" />
+                    </button>
+                    <button onClick={() => onDelete(f.id)}
+                            className="text-white/15 hover:text-white/50
+                                       p-1 rounded-md hover:bg-white/[0.04]"
+                            title="Delete">
+                      <Trash2 size={11} />
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Correction history */}
+              {expandedId === f.id && (
+                <div className="px-4 py-2 border-t border-white/[0.04] bg-black/20">
+                  {historyLoading ? (
+                    <p className="text-[9px] text-white/30">Loading history...</p>
+                  ) : history.length === 0 ? (
+                    <p className="text-[9px] text-white/30">No revision history</p>
+                  ) : (
+                    <div className="space-y-1.5">
+                      <div className="text-[8px] text-white/30 uppercase tracking-widest font-medium mb-1">
+                        Revision Chain ({history.length})
+                      </div>
+                      {history.map((h, i) => (
+                        <div key={h.id} className="flex items-start gap-2 text-[10px]">
+                          <span className="text-white/25 font-mono w-4">#{i + 1}</span>
+                          <span className={h.active ? 'text-white/70' : 'text-white/35 line-through'}>
+                            {h.value}
+                          </span>
+                          <span className="text-white/20 font-mono ml-auto">
+                            {(h.updated_at || h.created_at || '').split(' ')[0]}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 // ── Main Page ──────────────────────────────────────────────────────────────
 
 export default function Memory() {
@@ -470,12 +724,16 @@ export default function Memory() {
   const {
     facts, conversations, totalConvos, stats, loading,
     fetchFacts, fetchConvos, fetchStats, deleteFact, deleteConvo,
+    structuredFacts, structuredTotal, structuredLoading,
+    fetchStructuredFacts, addStructuredFact, updateStructuredFact,
+    deleteStructuredFact, fetchFactHistory,
   } = useMemory();
 
   useEffect(() => {
     fetchFacts();
     fetchConvos();
     fetchStats();
+    fetchStructuredFacts();
   }, []);
 
   if (loading) return <Spinner t="Loading memory..." />;
@@ -528,7 +786,7 @@ export default function Memory() {
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-1 bg-white/[0.02] border border-white/6
                           rounded-lg p-1">
-            {['conversations', 'facts'].map(t => (
+            {['conversations', 'facts', 'structured'].map(t => (
               <button key={t} onClick={() => setTab(t)}
                       className={`px-3.5 py-1.5 rounded-md text-[10px] font-medium
                                   transition-all duration-150 capitalize
@@ -537,7 +795,7 @@ export default function Memory() {
                           : 'text-white/30 hover:text-white/55'}`}>
                 {t}
                 <span className="ml-1.5 text-[7px] font-mono opacity-60">
-                  {t === 'conversations' ? totalConvos : facts.length}
+                  {t === 'conversations' ? totalConvos : t === 'facts' ? facts.length : structuredTotal}
                 </span>
               </button>
             ))}
@@ -569,16 +827,28 @@ export default function Memory() {
         </div>
 
         {/* Content */}
-        {tab === 'conversations' ? (
+        {tab === 'conversations' && (
           <ConversationsTab
             conversations={conversations}
             onDelete={deleteConvo}
             searchQuery={search}
           />
-        ) : (
+        )}
+        {tab === 'facts' && (
           <FactsTab
             facts={facts}
             onDelete={deleteFact}
+            searchQuery={search}
+          />
+        )}
+        {tab === 'structured' && (
+          <StructuredFactsTab
+            facts={structuredFacts}
+            loading={structuredLoading}
+            onAdd={addStructuredFact}
+            onUpdate={updateStructuredFact}
+            onDelete={deleteStructuredFact}
+            onFetchHistory={fetchFactHistory}
             searchQuery={search}
           />
         )}
