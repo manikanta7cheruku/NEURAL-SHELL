@@ -9,12 +9,103 @@ Builds the system prompt dynamically based on:
   - Current date/time
   - Memory context (if any)
   - Web context (if any)
+  - Rolling turn context (if references detected)
 
 This file owns the personality. If Seven sounds wrong, fix it here.
 """
 
 import config
 from datetime import datetime
+
+_REFERENCE_WORDS = {
+    "it", "its", "that", "this", "them", "they", "these", "those",
+    "he", "she", "him", "her", "his", "hers", "their", "theirs",
+    "one", "ones", "same", "such", "there", "then",
+}
+
+_REFERENCE_PHRASES = [
+    "give me an example", "tell me more", "explain that", "explain it",
+    "what about", "how about", "why is that", "why does it", "how does it",
+    "show me another", "another one", "more on that", "elaborate",
+    "keep going", "continue", "and then", "what next", "go on",
+]
+
+
+def _needs_turn_context(input_text: str) -> bool:
+    """
+    Determines whether the current input likely references prior turns.
+    Detects pronouns, deictic markers, elliptical follow-up phrases,
+    or short fragmentary inputs that require context grounding.
+    """
+    text_lower = input_text.lower().strip()
+    if not text_lower:
+        return False
+
+    # Short inputs (under 5 tokens) almost always depend on context
+    tokens = text_lower.split()
+    if len(tokens) <= 4:
+        return True
+
+    # Direct pronoun or deictic hit
+    token_set = set(t.strip(".,?!;:") for t in tokens)
+    if token_set & _REFERENCE_WORDS:
+        return True
+
+    # Follow-up phrase hit
+    for phrase in _REFERENCE_PHRASES:
+        if phrase in text_lower:
+            return True
+
+    return False
+
+
+def _resolve_thread_id(speaker_id: str) -> str:
+    """
+    Normalize speaker_id to match the key brain.py uses when writing turns.
+    Leverages dynamic configuration state without falling back to stale imports.
+    """
+    if speaker_id in ("default", "unknown", None, ""):
+        try:
+            import os, json
+            _cfg_path = os.path.join(os.environ.get('APPDATA', ''), 'SEVEN', 'config.json')
+            if os.path.exists(_cfg_path):
+                with open(_cfg_path, 'r', encoding='utf-8-sig') as _f:
+                    _cfg_data = json.load(_f)
+                _fresh_name = _cfg_data.get('identity', {}).get('user_name', '').strip().lower()
+                if _fresh_name and _fresh_name not in ("admin", "default", "unknown", ""):
+                    return _fresh_name
+        except Exception:
+            pass
+        return "default"
+    return speaker_id.strip().lower()
+
+
+def _build_turn_context(speaker_id: str, limit: int = 3) -> str:
+    """
+    Builds a short context block from the last N conversation turns.
+    Called only when reference resolution is required.
+    """
+    try:
+        from brain_modules.conversation_thread import ConversationThread
+        resolved_id = _resolve_thread_id(speaker_id)
+        turns = ConversationThread.get_turns(resolved_id, limit=limit)
+    except Exception:
+        return ""
+
+    if not turns:
+        return ""
+
+    lines = ["", "RECENT CONVERSATION (for pronoun and reference resolution):"]
+    for user_msg, assistant_msg in turns:
+        # Truncate long assistant responses to keep prompt lean
+        assistant_trim = assistant_msg if len(assistant_msg) <= 240 else assistant_msg[:240] + "..."
+        lines.append(f"User: {user_msg}")
+        lines.append(f"You: {assistant_trim}")
+    lines.append(
+        "Use this context to resolve pronouns (it, that, them) and follow-up questions. "
+        "Do not repeat prior answers verbatim. Build on what was said."
+    )
+    return "\n".join(lines)
 
 
 def _humor_line(level: int) -> str:
@@ -108,6 +199,7 @@ def build_system_prompt(
     tier: str = "free",
     input_text: str = "",
     is_voice: bool = False,
+    speaker_id: str = "default",
 ) -> str:
     """
     Builds the system prompt for the LLM.
@@ -120,7 +212,7 @@ def build_system_prompt(
     cfg        = config.KEY
     identity   = cfg.get('identity', {})
     seven_name = identity.get('name', 'Seven')
-    creator    = identity.get('creator', 'Team Seven')
+    creator    = identity.get('creator', 'Seven Labs')
     _model     = cfg.get('brain', {}).get('model_name', 'a local language model')
 
     humor_instruction   = _humor_line(humor)
@@ -254,37 +346,29 @@ Plans page is in the sidebar if they want to upgrade."""
         "your settings", "your temperature", "how are you configured",
         "what model", "which model", "what llm", "ollama",
         "how smart are you", "your intelligence",
+        "what hardware", "my hardware", "what specs", "my specs",
+        "what version", "current version", "what build", "system specs",
+        "running on", "what device", "what ram", "what gpu", "what cpu",
     ]
     _needs_meta = any(t in _input_lower for t in _meta_triggers)
     meta_module = ""
     if _needs_meta:
+        try:
+            from brain_modules.self_model import describe_self
+            _self_info = describe_self()
+        except Exception:
+            _self_info = f"Identity: {seven_name}, Model: {_model}, Personality: Humor {humor}/100, Honesty {honesty}/100."
+
         meta_module = f"""
-WHAT YOU CAN DO RIGHT NOW — answer naturally, like a person describing themselves.
-Do not list everything. Pick what is relevant to how they asked.
-If they ask generally, give a brief human answer then offer to go deeper on anything.
+ACCURATE SYSTEM DATA (Ground Truth):
+{_self_info}
 
-Current capabilities:
-- Open and close any app by name or voice
-- Control system: volume, brightness, wifi, bluetooth
-- Set reminders, alarms, and timers by voice
-- Create and manage tasks with priorities and due dates
-- Search the web for live information: weather, news, prices, current events
-- Remember facts about the user across sessions
-- Search and answer questions from uploaded documents
-- Manage window layouts, snap windows, save and restore workspaces
-- Voice triggers: custom hotkeys and voice commands that fire actions
-- Schedules: recurring reminders and time-based automations
-
-What you cannot do yet (only mention if they ask about something specific):
-- Control the mouse or click on screen elements
-- Read what is currently on screen
-- Send messages or emails autonomously
-- Write or run code
-- Access phone or mobile
-
-Navigation: Home, Console, Commands, Memory, Schedules, Tasks, Triggers, Knowledge, Settings, Plans.
-Commands section: add file paths, folder paths, URLs and give them custom names to open by voice.
-Personality: Humor {humor}/100, Honesty {honesty}/100. Adjustable in Settings > Brain."""
+CRITICAL RULES FOR SYSTEM & META QUESTIONS:
+- Use ONLY the Accurate System Data above to answer questions about hardware, specs, version, or identity.
+- Do NOT use past conversation memories or recalled facts to answer hardware/version questions.
+- Answer directly in 1 to 2 sentences. No fabrication.
+- If asked about hardware: state the OS, RAM, and GPU from the block above accurately.
+- If asked about version: state the exact version number from the block above."""
 
     # ── Web results instruction — only when web search ran ────────
     web_module = ""
@@ -297,8 +381,13 @@ Price: state the number.
 Never mention the search. Never reference past conversations. Never say "according to".
 Ignore any recalled memories for this response — use only the web results below."""
 
+    # ── Conditional: rolling turn context — only for reference-heavy inputs ──
+    turn_context_module = ""
+    if _needs_turn_context(input_text):
+        turn_context_module = _build_turn_context(speaker_id, limit=3)
+
     return "\n".join(filter(None, [
-        core, time_module, plan_module, meta_module, web_module
+        core, time_module, plan_module, meta_module, web_module, turn_context_module
     ])).strip()
 
 def build_reference_hint(recent_action: dict) -> str:
