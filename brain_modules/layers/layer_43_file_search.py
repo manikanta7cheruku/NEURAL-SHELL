@@ -175,8 +175,25 @@ def process(ctx, deps):
             speech = format_results_for_speech([], _search_query)
             return LayerResult.stop(speech)
 
+        # Decide if we will auto-open the top result
+        _will_open = _has_open_intent or _has_file_intent
+        _opened_idx = 0 if _will_open else None
+
+        # Remember this search in working memory for reference resolution
+        # opened_index tells the resolver which item "it" / "again" refers to
+        try:
+            from brain_modules.dialogue_manager import remember_action
+            remember_action(
+                "file_search",
+                _search_query,
+                results,
+                opened_index=_opened_idx,
+            )
+        except Exception as _mem_err:
+            print(Fore.YELLOW + f"[LAYER43] Memory store skipped: {_mem_err}")
+
         # Open if user asked to open
-        if _has_open_intent or _has_file_intent:
+        if _will_open:
             open_file(results[0]["path"])
             speech = format_results_for_speech(results, _search_query, opened=True)
             return LayerResult.stop(speech)
