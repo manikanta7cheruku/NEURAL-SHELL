@@ -246,13 +246,21 @@ def get_defaults():
                 "medium": "phi3:mini",
                 "low": "qwen2:1.5b",
                 "minimum": "tinyllama"
-            }
+            },
+            "tars_humor": 75,
+            "tars_honesty": 85,
+            "search_max_results": 8,
+            "auto_open_best_match": True,
+            "follow_up_timeout": 90,
+            "prefer_browser_for_unknown": True,
+            "content_search_enabled": True
         },
         "gui": {
             "opacity": 0.8,
             "text_color": "#00FF00"
         },
         "commands": {},
+        "file_search_roots": [],
         "license": {
             "key": "",
             "tier": "free",
