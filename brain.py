@@ -200,6 +200,88 @@ def store_voice_turn(prompt_text, response_text, speaker_id, was_interrupted=Fal
     except Exception as _err:
         print(Fore.YELLOW + f"[BRAIN] Voice memory save skipped: {_err}")
 
+def _execute_resolved_reference(resolved: dict) -> str:
+    """
+    Execute the action pointed to by a resolved reference.
+
+    Handles resolver output shape (dialogue_manager v2.1):
+        {"action": "open",       "target": {...}, "reason": "..."}
+        {"action": "repeat",     "target": {...}, "reason": "..."}
+        {"action": "ambiguous",  "options": [...],"reason": "..."}
+        {"action": "none",       "reason": "..."}
+    """
+    import random
+
+    if not resolved or not isinstance(resolved, dict):
+        return None
+
+    action = resolved.get("action")
+    reason = resolved.get("reason", "")
+
+    # -- No resolution possible: return graceful clarification --
+    if action == "none":
+        return random.choice([
+            f"I lost track of what you meant. Could you say that again?",
+            f"Not sure what to open. {reason.capitalize()}." if reason else "Not sure what you meant.",
+            "Could you tell me which one you want?",
+        ])
+
+    # -- Ambiguous: ask which of the filtered options --
+    if action == "ambiguous":
+        options = resolved.get("options", [])
+        count = len(options)
+        return random.choice([
+            f"I see {count} that match. Which one, top to bottom?",
+            f"Got {count} matches. Tell me the number.",
+            f"There are {count} of those. Which do you want?",
+        ])
+
+    # -- Open action: execute file or app open --
+    if action in ("open", "repeat"):
+        target = resolved.get("target") or {}
+        path = target.get("path")
+        name = target.get("name", "it")
+
+        if not path:
+            return None
+
+        try:
+            from hands.files import open_file
+            ok = open_file(path)
+
+            # Update working memory so subsequent "again" repeats THIS open
+            try:
+                from brain_modules.dialogue_manager import get_last_action, remember_action
+                last = get_last_action()
+                if last and target in last.get("results", []):
+                    new_idx = last["results"].index(target)
+                    remember_action(
+                        last["type"],
+                        last["query"],
+                        last["results"],
+                        opened_index=new_idx,
+                    )
+            except Exception as _mem_err:
+                print(Fore.YELLOW + f"[BRAIN] Memory update after open skipped: {_mem_err}")
+
+            if ok:
+                if action == "repeat":
+                    return random.choice([
+                        "Opening it again.",
+                        "Reopening now.",
+                        "Got it, opening again.",
+                    ])
+                return random.choice([
+                    "Opening it now.",
+                    "Got it, opening.",
+                    "Here you go.",
+                    "Opened.",
+                ])
+            return f"I tried but could not open {name}."
+        except Exception as e:
+            return f"Ran into an issue opening it: {e}"
+
+    return None
 
 def think(prompt_text, speaker_id="default"):
     """Execute pipeline layers and generate assistant response."""
@@ -218,6 +300,31 @@ def think(prompt_text, speaker_id="default"):
                 return _dialogue_reply
     except Exception as _dm_err:
         print(Fore.YELLOW + f"[BRAIN] Dialogue check skipped: {_dm_err}")
+
+    # -- Working memory reference check --
+    # If the user is referring to a recent action's results
+    # ("open the second one", "the last file"), resolve directly and skip
+    # the pipeline entirely. Sub-5ms response for referenced actions.
+    try:
+        from brain_modules.dialogue_manager import (
+            looks_like_reference, resolve_reference
+        )
+        if looks_like_reference(prompt_text):
+            print(Fore.CYAN + f"[BRAIN] Reference detected: '{prompt_text[:50]}'")
+            _resolved = resolve_reference(prompt_text)
+            print(Fore.CYAN + f"[BRAIN] Resolver returned: action={_resolved.get('action')}, reason={_resolved.get('reason','')}")
+            if _resolved:
+                _reply = _execute_resolved_reference(_resolved)
+                if _reply:
+                    print(Fore.GREEN + f"[BRAIN] Reference executed: {prompt_text[:40]}")
+                    _save_conversation(prompt_text, _reply, speaker_id)
+                    return _reply
+                else:
+                    print(Fore.YELLOW + f"[BRAIN] Executor returned None, falling through to pipeline")
+    except Exception as _ref_err:
+        import traceback
+        print(Fore.RED + f"[BRAIN] Reference resolve error: {_ref_err}")
+        traceback.print_exc()
 
     ctx = BrainContext(
         prompt_text=prompt_text,
