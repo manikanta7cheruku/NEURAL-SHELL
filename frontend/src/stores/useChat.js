@@ -26,21 +26,114 @@ const useChat = create((set, get) => ({
         return;
       }
 
-      // Normal chat — send to backend
-      const r = await api.post('/chat', { text });
-      const botMsg = {
-        role: 'assistant',
-        text: r.data.response,
-        actions: r.data.actions || [],
-        fileResults: r.data.file_results || null,
-        taskResults: r.data.task_results || null,
-        time: new Date(),
-      };
-      set((s) => ({ messages: [...s.messages, botMsg], sending: false }));
+      // Normal chat - send to backend with SSE streaming
+      const response = await fetch('http://127.0.0.1:7777/api/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'text/event-stream, application/json',
+        },
+        body: JSON.stringify({ text, stream: true }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Server returned status ${response.status}`);
+      }
+
+      const contentType = response.headers.get('content-type') || '';
+
+      if (contentType.includes('text/event-stream')) {
+        const botMsgIndex = get().messages.length;
+        const initialBotMsg = {
+          role: 'assistant',
+          text: '',
+          actions: [],
+          fileResults: null,
+          taskResults: null,
+          time: new Date(),
+        };
+
+        set((s) => ({ messages: [...s.messages, initialBotMsg] }));
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        let accumulatedText = '';
+        let streamBuffer = '';
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+
+          streamBuffer += decoder.decode(value, { stream: true });
+          const lines = streamBuffer.split('\n');
+          streamBuffer = lines.pop() || '';
+
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed || !trimmed.startsWith('data:')) continue;
+
+            const payloadStr = trimmed.replace(/^data:\s*/, '');
+            if (payloadStr === '[DONE]') break;
+
+            try {
+              const parsed = JSON.parse(payloadStr);
+
+              if (parsed.token) {
+                accumulatedText += parsed.token;
+                set((s) => {
+                  const msgs = [...s.messages];
+                  if (msgs[botMsgIndex]) {
+                    msgs[botMsgIndex] = { ...msgs[botMsgIndex], text: accumulatedText };
+                  }
+                  return { messages: msgs };
+                });
+              }
+
+              if (parsed.actions || parsed.file_results || parsed.task_results) {
+                set((s) => {
+                  const msgs = [...s.messages];
+                  if (msgs[botMsgIndex]) {
+                    msgs[botMsgIndex] = {
+                      ...msgs[botMsgIndex],
+                      actions: parsed.actions || msgs[botMsgIndex].actions,
+                      fileResults: parsed.file_results || msgs[botMsgIndex].fileResults,
+                      taskResults: parsed.task_results || msgs[botMsgIndex].taskResults,
+                    };
+                  }
+                  return { messages: msgs };
+                });
+              }
+            } catch {
+              // Raw string fallback
+              accumulatedText += payloadStr;
+              set((s) => {
+                const msgs = [...s.messages];
+                if (msgs[botMsgIndex]) {
+                  msgs[botMsgIndex] = { ...msgs[botMsgIndex], text: accumulatedText };
+                }
+                return { messages: msgs };
+              });
+            }
+          }
+        }
+
+        set({ sending: false });
+      } else {
+        const data = await response.json();
+        const botMsg = {
+          role: 'assistant',
+          text: data.response || data.text || '',
+          actions: data.actions || [],
+          fileResults: data.file_results || null,
+          taskResults: data.task_results || null,
+          time: new Date(),
+        };
+        set((s) => ({ messages: [...s.messages, botMsg], sending: false }));
+      }
     } catch (e) {
       const errMsg = {
         role: 'assistant',
-        text: e.response?.data?.detail || 'Connection error',
+        text: e.message || 'Connection error',
         error: true,
         time: new Date(),
       };
