@@ -85,7 +85,21 @@ def call_ollama(payload: dict) -> str:
         return "My brain hiccupped. Try again."
 
     except requests.exceptions.ConnectionError:
-        # Ollama process is not running
+        # Attempt auto-recovery
+        print(Fore.YELLOW + "[OLLAMA] Connection failed. Triggering recovery daemon...")
+        try:
+            from brain_modules.recovery_daemon import restart_ollama_service
+            if restart_ollama_service():
+                # Re-attempt the request once
+                try:
+                    retry_resp = requests.post(OLLAMA_URL, json=request_payload, timeout=120)
+                    if retry_resp.status_code == 200:
+                        return retry_resp.json().get("response", "").strip() or "Listening."
+                except Exception as _re_err:
+                    print(Fore.RED + f"[OLLAMA] Post-recovery retry failed: {_re_err}")
+        except Exception as _rec_err:
+            print(Fore.RED + f"[OLLAMA] Recovery invocation failed: {_rec_err}")
+
         print(Fore.RED + "[OLLAMA] Cannot connect. Is Ollama running?")
         return "I can't reach my brain. Run 'ollama serve' in a terminal first."
 
@@ -213,6 +227,38 @@ def stream_sentences(prompt: str, payload: dict):
                 continue
 
     except requests.exceptions.ConnectionError:
+        print(Fore.YELLOW + "[OLLAMA-STREAM] Connection failed. Triggering recovery daemon...")
+        _recovered = False
+        try:
+            from brain_modules.recovery_daemon import restart_ollama_service
+            _recovered = restart_ollama_service()
+        except Exception:
+            pass
+
+        if _recovered:
+            # Yield from a single retry stream
+            try:
+                retry_response = requests.post(
+                    OLLAMA_URL,
+                    json=stream_payload,
+                    timeout=60,
+                    stream=True
+                )
+                if retry_response.status_code == 200:
+                    for line in retry_response.iter_lines():
+                        if not line:
+                            continue
+                        try:
+                            chunk = json.loads(line)
+                            tok = chunk.get("response", "")
+                            if tok:
+                                yield tok
+                        except Exception:
+                            continue
+                    return
+            except Exception as _re_stream_err:
+                print(Fore.RED + f"[OLLAMA-STREAM] Stream recovery attempt failed: {_re_stream_err}")
+
         yield "I can't reach my brain. Run 'ollama serve' first."
 
     except requests.exceptions.Timeout:
