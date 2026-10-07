@@ -95,15 +95,16 @@ def _build_turn_context(speaker_id: str, limit: int = 3) -> str:
     if not turns:
         return ""
 
-    lines = ["", "RECENT CONVERSATION (for pronoun and reference resolution):"]
+    # Bulleted passive-data format prevents 1B completion-parroting reflex
+    lines = ["", "CONVERSATION RECORD FOR REFERENCE (Do not repeat these words verbatim):"]
     for user_msg, assistant_msg in turns:
         # Truncate long assistant responses to keep prompt lean
-        assistant_trim = assistant_msg if len(assistant_msg) <= 240 else assistant_msg[:240] + "..."
-        lines.append(f"User: {user_msg}")
-        lines.append(f"You: {assistant_trim}")
+        assistant_trim = assistant_msg if len(assistant_msg) <= 150 else assistant_msg[:150] + "..."
+        lines.append(f"  * User stated: \"{user_msg}\"")
+        lines.append(f"  * You replied: \"{assistant_trim}\"")
     lines.append(
-        "Use this context to resolve pronouns (it, that, them) and follow-up questions. "
-        "Do not repeat prior answers verbatim. Build on what was said."
+        "Use this record only to understand pronoun references (it, that, cooking, scheduling) "
+        "or direct replies. Never copy these sentences into your response."
     )
     return "\n".join(lines)
 
@@ -200,6 +201,7 @@ def build_system_prompt(
     input_text: str = "",
     is_voice: bool = False,
     speaker_id: str = "default",
+    proactive_hint: str = "",
 ) -> str:
     """
     Builds the system prompt for the LLM.
@@ -214,6 +216,16 @@ def build_system_prompt(
     seven_name = identity.get('name', 'Seven')
     creator    = identity.get('creator', 'Seven Labs')
     _model     = cfg.get('brain', {}).get('model_name', 'a local language model')
+
+    # Query dynamic tone tracking adjustments for this speaker
+    _norm_speaker = _resolve_thread_id(speaker_id)
+    try:
+        from brain_modules.tone_tracker import get_bias
+        _h_bias, _o_bias = get_bias(_norm_speaker)
+        humor = max(0, min(100, humor + _h_bias))
+        honesty = max(0, min(100, honesty + _o_bias))
+    except Exception:
+        pass
 
     humor_instruction   = _humor_line(humor)
     honesty_instruction = _honesty_line(honesty)
@@ -386,8 +398,32 @@ Ignore any recalled memories for this response — use only the web results belo
     if _needs_turn_context(input_text):
         turn_context_module = _build_turn_context(speaker_id, limit=3)
 
+    # ── Conditional: proactive suggestion hint — only when layer_075 fired ──
+    # Positive-framed, permissive. Placed last so it stays fresh in LLM attention
+    # without overriding core identity or memory framing.
+    proactive_module = ""
+    if proactive_hint:
+        proactive_module = f"\nSUGGESTION OPPORTUNITY:\n{proactive_hint}"
+
+    # ── Conditional: follow-up continuation hint from prior turn ────────────
+    # Auto-consumed and cleared to prevent poisoning long threads.
+    followup_module = ""
+    try:
+        from brain_modules.conversation_thread import ConversationThread
+        _resolved = _resolve_thread_id(speaker_id)
+        _followup = ConversationThread.get_metadata(_resolved, "followup_hint")
+        if _followup and isinstance(_followup, dict):
+            _hint_text = _followup.get("hint", "")
+            if _hint_text:
+                followup_module = f"\nCONTINUATION CONTEXT:\n{_hint_text}"
+                # Consume the hint so it fires only once
+                ConversationThread.set_metadata(_resolved, "followup_hint", None)
+    except Exception:
+        pass
+
     return "\n".join(filter(None, [
-        core, time_module, plan_module, meta_module, web_module, turn_context_module
+        core, time_module, plan_module, meta_module, web_module,
+        turn_context_module, proactive_module, followup_module
     ])).strip()
 
 def build_reference_hint(recent_action: dict) -> str:
