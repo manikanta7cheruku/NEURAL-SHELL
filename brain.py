@@ -1,107 +1,70 @@
 """
 PROJECT SEVEN - brain.py (The Orchestrator)
-Version: 2.2 - Stable Monolith Interface
+Version: 3.0
+
+think() runs one user message through the layer pipeline and returns either a
+string, "" (intentional silence) or ("__STREAM__", generator).
+
+WHAT CHANGED IN 3.0:
+    - think(..., stream_mode="sentence"|"token"|"text"): the console asks for
+      real tokens, voice asks for speakable sentences, tools ask for text.
+    - One storage key per person (session.resolve_key) used everywhere.
+    - Only completed LLM replies are persisted. Instant answers (commands,
+      greetings, identity) are never written to conversation memory, and the
+      duplicate fact-extraction enqueue (wrong payload key) is gone.
+    - The model, the hardware probe and (later) the embedder are warmed in the
+      background so the first real message is not the one that pays for them.
+    - The user name is read through a cached lookup, not by parsing
+      config.json on every message.
 """
 
+import logging
 import os
-import sys
+import random
 import re
-from colorama import Fore
+import threading
+
 import colorama
+from colorama import Fore
+
 colorama.init(autoreset=True)
 
 import config
 
-# Top-level safe memory imports
 try:
     from memory import seven_memory
     from memory.mood import mood_engine
-except Exception as _mem_imp_err:
+except Exception:
     seven_memory = None
     mood_engine = None
 
-from brain_modules.pipeline import run as run_pipeline
+from brain_modules import session, speech_acts
 from brain_modules.context import BrainContext
+from brain_modules.pipeline import run as run_pipeline
+
+_log = logging.getLogger("seven.brain")
 
 try:
     from brain_modules.model_selector import select_model
     MODEL_NAME = select_model()
 except Exception as _model_err:
-    print(f"[BRAIN] Model selector failed: {_model_err}. Reading from config.")
+    _log.warning("Model selector failed (%s). Reading from config.", _model_err)
     try:
-        MODEL_NAME = config.KEY['brain']['model_name']
+        MODEL_NAME = config.KEY["brain"]["model_name"]
     except Exception:
         MODEL_NAME = "tinyllama"
 
 print(f"[BRAIN] Active model: {MODEL_NAME}")
 
 USER_NAME = "Admin"
+_name_loaded = False
 
 
 def load_name_from_memory():
-    """Load user name from configuration or stored memory facts."""
+    """Load the owner's name from config, falling back to 'there'."""
     global USER_NAME
-
-    try:
-        import json
-        _cfg_path = os.path.join(os.environ.get('APPDATA', ''), 'SEVEN', 'config.json')
-        if os.path.exists(_cfg_path):
-            with open(_cfg_path, 'r', encoding='utf-8') as _f:
-                _cfg_data = json.load(_f)
-            cfg_name = _cfg_data.get('identity', {}).get('user_name', '').strip()
-            if cfg_name and cfg_name.lower() not in ('admin', ''):
-                USER_NAME = cfg_name
-                print(Fore.GREEN + f"[BRAIN] Name from config: {USER_NAME}")
-                return
-    except Exception as _e:
-        print(Fore.YELLOW + f"[BRAIN] Config name read failed: {_e}")
-
-    try:
-        if seven_memory and hasattr(seven_memory, 'user_facts'):
-            all_facts = seven_memory.user_facts.get()
-            if all_facts and all_facts.get('documents'):
-                for doc in all_facts['documents']:
-                    doc_lower = doc.lower()
-                    if "user's name is" in doc_lower or "user wants to be called" in doc_lower:
-                        name = (doc.split("is")[-1].strip().rstrip(".")
-                                if "name is" in doc_lower
-                                else doc.split("called")[-1].strip().rstrip("."))
-                        if name:
-                            USER_NAME = name
-                            print(Fore.GREEN + f"[BRAIN] Name from memory: {USER_NAME}")
-                            return
-    except Exception as e:
-        print(Fore.YELLOW + f"[BRAIN] Memory name load failed: {e}")
-
-    USER_NAME = "there"
-
-
-def reset_session():
-    """Reset session history and identity cache."""
-    global USER_NAME
-    USER_NAME = "Admin"
-
-    from brain_modules.context_manager import clear_history
-    clear_history()
-
-    from brain_modules.identity_layer import reset_session as identity_reset
-    identity_reset()
-
-    try:
-        from brain_modules.conversation_thread import ConversationThread
-        ConversationThread.clear("default")
-        import config
-        _save_user_id = config.KEY.get("identity", {}).get("user_name", "default").lower() or "default"
-        ConversationThread.clear(_save_user_id)
-    except Exception as _ct_err:
-        print(Fore.YELLOW + f"[BRAIN] Session thread clear failed: {_ct_err}")
-
-    print(Fore.YELLOW + "[BRAIN] Session reset.")
-
-
-# Deferred load of name. Will be called during think() to prevent
-# heavy memory/model loading during Python's import phase on boot.
-_name_loaded = False
+    name = session.get_user_name()
+    USER_NAME = name if name else "there"
 
 
 def ensure_name_loaded():
@@ -111,246 +74,221 @@ def ensure_name_loaded():
         _name_loaded = True
 
 
-_SKIP_GREETINGS = {"hi", "hello", "hey"}
+def _refresh_user_name():
+    """Pick up a name change made in Settings without a restart (cached by file mtime)."""
+    global USER_NAME
+    name = session.get_user_name()
+    if name:
+        USER_NAME = name
 
 
-def save_completed_turn(prompt_text, response_text, speaker_id, source="chat"):
+def reset_session():
+    """Forget session state: history, greeting streaks, caches. Facts are kept."""
+    global USER_NAME
+    key = session.resolve_key("default", USER_NAME)
+    USER_NAME = "Admin"
+    try:
+        from brain_modules import chat_history, learning, social_engine
+        from brain_modules.conversation_thread import ConversationThread
+        chat_history.clear()
+        social_engine.reset()
+        learning.clear_cache()
+        for k in {key, "default"}:
+            ConversationThread.clear(k)
+    except Exception as exc:
+        _log.warning("session reset incomplete: %s", exc)
+    print(Fore.YELLOW + "[BRAIN] Session reset.")
+
+
+def save_completed_turn(prompt_text, response_text, speaker_id, source="chat", persist=True):
     """
-    Unified entry point to record a completed dialogue turn.
-    Saves to ChromaDB, extracts facts, and writes to rolling session thread.
-    Synchronizes streaming chat, voice, and non-streaming responses.
+    Record a completed exchange.
+
+    Always updates the session thread (repetition and follow-up detection).
+    Writes to long-term conversation storage only when persist=True, and does
+    that on the background worker so the reply is never delayed by embedding.
     """
     try:
         if not prompt_text or not response_text:
             return
-
-        p_clean = prompt_text.strip()
-        r_clean = re.sub(r'###\w+:\s*\S+', '', response_text).strip()
-
-        if len(p_clean) <= 3 or not r_clean:
+        p = prompt_text.strip()
+        r = re.sub(r"###\w+:\s*\S+", "", response_text).strip()
+        if len(p) <= 3 or not r:
+            return
+        if speech_acts.is_greeting(speech_acts.normalize(p)):
             return
 
-        if p_clean.lower().strip() in _SKIP_GREETINGS:
-            return
+        key = session.resolve_key(speaker_id, USER_NAME)
 
-        # Unified thread ID resolution using dynamic memory state
-        if speaker_id not in ("default", "unknown") and speaker_id:
-            _save_user_id = speaker_id.strip().lower()
-        elif USER_NAME and USER_NAME.strip().lower() not in ("admin", "default", "unknown", ""):
-            _save_user_id = USER_NAME.strip().lower()
-        else:
-            _save_user_id = "default"
+        from brain_modules.conversation_thread import ConversationThread
+        ConversationThread.add_turn(key, p, r)
 
-        # 1. Add to rolling thread buffer for repetition detection
         try:
-            from brain_modules.conversation_thread import ConversationThread
-            ConversationThread.add_turn(_save_user_id, p_clean, r_clean)
-        except Exception as _ct_err:
-            print(Fore.YELLOW + f"[BRAIN] Session thread save failed: {_ct_err}")
+            from brain_modules.followup_detector import detect_followup
+            followup = detect_followup(r)
+            if followup:
+                ConversationThread.set_metadata(key, "followup_hint", followup)
+        except Exception as exc:
+            _log.debug("follow-up detection skipped: %s", exc)
 
-        # 2. Extract facts via idle worker
-        try:
-            from brain_modules.idle_worker import enqueue
-            enqueue("extract_facts", {"text": p_clean, "speaker_id": _save_user_id})
-        except Exception as _f_err:
-            print(Fore.YELLOW + f"[BRAIN] Facts extraction enqueue failed: {_f_err}")
-
-        # 3. Store conversation in ChromaDB
-        if seven_memory:
-            try:
-                seven_memory.store_conversation(
-                    user_input=p_clean,
-                    seven_response=r_clean,
-                    user_id=_save_user_id,
-                    source=source,
-                )
-                print(Fore.GREEN + f"[BRAIN] Saved completed turn ({source}): '{p_clean[:35]}...'")
-            except Exception as _mem_err:
-                print(Fore.YELLOW + f"[BRAIN] ChromaDB store bypassed: {_mem_err}")
-
-    except Exception as _err:
-        print(Fore.YELLOW + f"[BRAIN] Unified save turn failed: {_err}")
+        if persist:
+            from brain_modules import idle_worker
+            idle_worker.enqueue("store_conversation", {
+                "user_input": p, "response": r, "speaker_key": key, "source": source})
+    except Exception as exc:
+        _log.warning("save_completed_turn failed: %s", exc)
 
 
 def _save_conversation(prompt_text, result, speaker_id):
-    """Save direct non-streaming conversation turn to ChromaDB memory."""
-    if isinstance(result, tuple) and len(result) == 2 and result[0] == "__STREAM__":
-        # Bypassed here; streaming handles its own saves on stream completion callback
+    """Save a non-LLM string answer to the session thread only."""
+    if isinstance(result, tuple):
         return
-    save_completed_turn(prompt_text, result, speaker_id, source="chat")
+    save_completed_turn(prompt_text, result, speaker_id, source="chat", persist=False)
 
 
 def store_voice_turn(prompt_text, response_text, speaker_id, was_interrupted=False):
-    """Save processed streaming voice turns into ChromaDB memory."""
-    _clean = response_text
-    if was_interrupted:
-        _clean = f"[INTERRUPTED] {response_text}"
-    save_completed_turn(prompt_text, _clean, speaker_id, source="voice")
+    """Save a spoken turn. Interrupted replies are not persisted as knowledge."""
+    save_completed_turn(prompt_text, response_text, speaker_id, source="voice",
+                        persist=not was_interrupted)
 
-def _execute_resolved_reference(resolved: dict) -> str:
-    """
-    Execute the action pointed to by a resolved reference.
 
-    Handles resolver output shape (dialogue_manager v2.1):
-        {"action": "open",       "target": {...}, "reason": "..."}
-        {"action": "repeat",     "target": {...}, "reason": "..."}
-        {"action": "ambiguous",  "options": [...],"reason": "..."}
-        {"action": "none",       "reason": "..."}
-    """
-    import random
-
+def _execute_resolved_reference(resolved: dict):
+    """Execute the action a resolved reference points to ("open the second one")."""
     if not resolved or not isinstance(resolved, dict):
         return None
+    action, reason = resolved.get("action"), resolved.get("reason", "")
 
-    action = resolved.get("action")
-    reason = resolved.get("reason", "")
-
-    # -- No resolution possible: return graceful clarification --
     if action == "none":
         return random.choice([
-            f"I lost track of what you meant. Could you say that again?",
+            "I lost track of what you meant. Could you say that again?",
             f"Not sure what to open. {reason.capitalize()}." if reason else "Not sure what you meant.",
             "Could you tell me which one you want?",
         ])
-
-    # -- Ambiguous: ask which of the filtered options --
     if action == "ambiguous":
-        options = resolved.get("options", [])
-        count = len(options)
+        count = len(resolved.get("options", []))
         return random.choice([
             f"I see {count} that match. Which one, top to bottom?",
             f"Got {count} matches. Tell me the number.",
             f"There are {count} of those. Which do you want?",
         ])
-
-    # -- Open action: execute file or app open --
     if action in ("open", "repeat"):
         target = resolved.get("target") or {}
-        path = target.get("path")
-        name = target.get("name", "it")
-
+        path, name = target.get("path"), target.get("name", "it")
         if not path:
             return None
-
         try:
             from hands.files import open_file
             ok = open_file(path)
-
-            # Update working memory so subsequent "again" repeats THIS open
             try:
                 from brain_modules.dialogue_manager import get_last_action, remember_action
                 last = get_last_action()
                 if last and target in last.get("results", []):
-                    new_idx = last["results"].index(target)
-                    remember_action(
-                        last["type"],
-                        last["query"],
-                        last["results"],
-                        opened_index=new_idx,
-                    )
-            except Exception as _mem_err:
-                print(Fore.YELLOW + f"[BRAIN] Memory update after open skipped: {_mem_err}")
-
+                    remember_action(last["type"], last["query"], last["results"],
+                                    opened_index=last["results"].index(target))
+            except Exception as exc:
+                _log.debug("memory update after open skipped: %s", exc)
             if ok:
                 if action == "repeat":
-                    return random.choice([
-                        "Opening it again.",
-                        "Reopening now.",
-                        "Got it, opening again.",
-                    ])
-                return random.choice([
-                    "Opening it now.",
-                    "Got it, opening.",
-                    "Here you go.",
-                    "Opened.",
-                ])
+                    return random.choice(["Opening it again.", "Reopening now.", "Got it, opening again."])
+                return random.choice(["Opening it now.", "Got it, opening.", "Here you go.", "Opened."])
             return f"I tried but could not open {name}."
-        except Exception as e:
-            return f"Ran into an issue opening it: {e}"
-
+        except Exception as exc:
+            return f"Ran into an issue opening it: {exc}"
     return None
 
-def think(prompt_text, speaker_id="default"):
-    """Execute pipeline layers and generate assistant response."""
+
+def think(prompt_text, speaker_id="default", stream_mode="sentence"):
+    """
+    Run the pipeline for one message.
+
+    stream_mode:
+        "sentence"  voice: generator of speakable sentences
+        "token"     console: generator of raw tokens
+        "text"      a finished string
+    """
     global USER_NAME
-    
     ensure_name_loaded()
+    _refresh_user_name()
+    key = session.resolve_key(speaker_id, USER_NAME)
 
-    # Refresh user name from config on every call.
-    # Config can change during runtime via Settings UI without backend restart.
     try:
-        import json
-        _cfg_path = os.path.join(os.environ.get('APPDATA', ''), 'SEVEN', 'config.json')
-        if os.path.exists(_cfg_path):
-            with open(_cfg_path, 'r', encoding='utf-8-sig') as _f:
-                _cfg_data = json.load(_f)
-            _fresh_name = _cfg_data.get('identity', {}).get('user_name', '').strip()
-            if _fresh_name and _fresh_name.lower() not in ('admin', ''):
-                USER_NAME = _fresh_name
-    except Exception:
-        pass
+        from brain_modules.correction_detector import detect_correction
+        from brain_modules.tone_tracker import observe as observe_tone
+        observe_tone(key, prompt_text, bool(detect_correction(prompt_text)))
+    except Exception as exc:
+        _log.debug("tone tracking skipped: %s", exc)
 
-    # -- Dialogue state check --
-    # If Seven is waiting for a clarification response (e.g. "close all chrome?"),
-    # check if this input answers the pending question before running the pipeline.
+    # A pending clarification ("close all chrome windows?") takes the next input.
     try:
-        from brain_modules.dialogue_manager import has_pending, check_pending
+        from brain_modules.dialogue_manager import check_pending, has_pending
         if has_pending():
-            _dialogue_reply = check_pending(prompt_text)
-            if _dialogue_reply:
-                print(Fore.CYAN + f"[BRAIN] Dialogue handled: {prompt_text[:40]}")
-                _save_conversation(prompt_text, _dialogue_reply, speaker_id)
-                return _dialogue_reply
-    except Exception as _dm_err:
-        print(Fore.YELLOW + f"[BRAIN] Dialogue check skipped: {_dm_err}")
+            reply = check_pending(prompt_text)
+            if reply:
+                _save_conversation(prompt_text, reply, speaker_id)
+                return reply
+    except Exception as exc:
+        _log.debug("dialogue check skipped: %s", exc)
 
-    # -- Working memory reference check --
-    # If the user is referring to a recent action's results
-    # ("open the second one", "the last file"), resolve directly and skip
-    # the pipeline entirely. Sub-5ms response for referenced actions.
+    # References to a recent action's results ("open the second one").
     try:
-        from brain_modules.dialogue_manager import (
-            looks_like_reference, resolve_reference
-        )
+        from brain_modules.dialogue_manager import looks_like_reference, resolve_reference
         if looks_like_reference(prompt_text):
-            print(Fore.CYAN + f"[BRAIN] Reference detected: '{prompt_text[:50]}'")
-            _resolved = resolve_reference(prompt_text)
-            print(Fore.CYAN + f"[BRAIN] Resolver returned: action={_resolved.get('action')}, reason={_resolved.get('reason','')}")
-            if _resolved:
-                _reply = _execute_resolved_reference(_resolved)
-                if _reply:
-                    print(Fore.GREEN + f"[BRAIN] Reference executed: {prompt_text[:40]}")
-                    _save_conversation(prompt_text, _reply, speaker_id)
-                    return _reply
-                else:
-                    print(Fore.YELLOW + f"[BRAIN] Executor returned None, falling through to pipeline")
-    except Exception as _ref_err:
-        import traceback
-        print(Fore.RED + f"[BRAIN] Reference resolve error: {_ref_err}")
-        traceback.print_exc()
+            resolved = resolve_reference(prompt_text)
+            reply = _execute_resolved_reference(resolved) if resolved else None
+            if reply:
+                _save_conversation(prompt_text, reply, speaker_id)
+                return reply
+    except Exception as exc:
+        _log.warning("reference resolve error: %s", exc)
 
-    ctx = BrainContext(
-        prompt_text=prompt_text,
-        speaker_id=speaker_id,
-        user_name=USER_NAME
-    )
-
-    deps = {
-        "seven_memory": seven_memory,
-        "mood_engine": mood_engine,
-        "config": config,
-        "model_name": MODEL_NAME,
-    }
+    ctx = BrainContext(prompt_text=prompt_text, speaker_id=speaker_id, user_name=USER_NAME)
+    ctx.stream_mode = stream_mode
+    ctx.speaker_key = key
+    deps = {"seven_memory": seven_memory, "mood_engine": mood_engine,
+            "config": config, "model_name": MODEL_NAME}
 
     result = run_pipeline(ctx, deps)
 
     if ctx.new_user_name:
         USER_NAME = ctx.new_user_name
-
-    _save_conversation(prompt_text, result, speaker_id)
-
+    if isinstance(result, tuple):
+        return result
+    if ctx.answered_by != "layer_08_llm":   # the LLM layer records its own turn
+        _save_conversation(prompt_text, result, speaker_id)
     return result
 
 
+_warmed = False
+
+
+def warm_up():
+    """Load the model, probe hardware and (later) the embedder in the background."""
+    global _warmed
+    if _warmed:
+        return
+    _warmed = True
+    try:
+        from brain_modules import ollama_client, self_model
+        self_model.set_active_model(MODEL_NAME)
+        self_model.prime_async()
+        ollama_client.warmup(MODEL_NAME)
+    except Exception as exc:
+        _log.debug("warm-up skipped: %s", exc)
+
+    def _warm_memory():
+        try:
+            from memory import core as memory_core
+            memory_core._get_instance()
+        except Exception as exc:
+            _log.debug("memory warm-up skipped: %s", exc)
+
+    timer = threading.Timer(25.0, _warm_memory)
+    timer.daemon = True
+    timer.start()
+
+
 def inject_observation(text):
-    pass
+    """Reserved for the perception phase (screen understanding)."""
+
+
+warm_up()

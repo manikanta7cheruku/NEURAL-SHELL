@@ -40,21 +40,16 @@ colorama.init()
 
 # ── Package check ────────────────────────────────────────────────────
 def _packages_ready():
-    python = sys.executable
-    if _app_path:
-        _emb = os.path.join(_app_path, 'python', 'python.exe')
-        if os.path.exists(_emb):
-            python = _emb
-    cflags = 0x08000000 if sys.platform == 'win32' else 0
+    import importlib.util
     for pkg in ['numpy', 'fastapi', 'uvicorn', 'pyttsx3', 'speech_recognition']:
-        result = subprocess.run(
-            [python, '-c', f'import {pkg.replace("-","_")}'],
-            capture_output=True, creationflags=cflags
-        )
-        if result.returncode != 0:
-            print(f"[SYSTEM] Missing package: {pkg}")
+        pkg_clean = pkg.replace('-', '_')
+        try:
+            if importlib.util.find_spec(pkg_clean) is None:
+                print(f"[SYSTEM] Missing package: {pkg}")
+                return False
+        except Exception:
             return False
-    print("[SYSTEM] Core packages ready.")
+    print("[SYSTEM] Core packages verified via metadata search.")
     return True
 
 # ── Electron mode detection ──────────────────────────────────────────
@@ -79,6 +74,50 @@ if not _packages_ready():
     except KeyboardInterrupt:
         os._exit(0)
 
+# ── Instant API Server Boot (Resolves Vite 502/ECONNREFUSED) ────────
+os.environ["SEVEN_PORT_7777_BOUND"] = "1"
+from backend.api_server import start_api_server, set_state as api_set_state
+
+# Kill zombie Python on port 7777 instantly before binding
+try:
+    import socket as _s
+    _t = _s.socket(_s.AF_INET, _s.SOCK_STREAM)
+    _t.settimeout(0.02)
+    _is_bound = _t.connect_ex(("127.0.0.1", 7777)) == 0
+    _t.close()
+    if _is_bound:
+        print(Fore.YELLOW + "[SYSTEM] Port 7777 occupied - freeing system resources...")
+        try:
+            _out = subprocess.check_output(['netstat', '-ano'],
+                creationflags=0x08000000, text=True, timeout=1.5)
+            for _line in _out.splitlines():
+                if ':7777' in _line and 'LISTENING' in _line:
+                    _parts = _line.strip().split()
+                    if _parts:
+                        _zpid = _parts[-1]
+                        if _zpid.isdigit() and int(_zpid) != os.getpid():
+                            subprocess.run(['taskkill', '/pid', str(_zpid), '/f', '/t'],
+                                creationflags=0x08000000,
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL, timeout=1.5)
+            time.sleep(0.05)
+        except Exception:
+            pass
+except Exception:
+    pass
+
+# Start API server immediately so port 7777 is active for Vite/Electron health checks
+try:
+    start_api_server(host="127.0.0.1", port=7777)
+    print(Fore.GREEN + "[SYSTEM] API server up on port 7777")
+except Exception as _e:
+    print(Fore.RED + f"[SYSTEM] API server failed: {_e}")
+    time.sleep(1)
+    try:
+        start_api_server(host="127.0.0.1", port=7777)
+    except Exception:
+        os._exit(1)
+
 # ── Startup validation ──────────────────────────────────────────────
 from main_modules.startup.validator import validate_startup
 _startup_ok, _startup_errors, _startup_warnings = validate_startup()
@@ -93,46 +132,6 @@ if not _startup_ok:
 # ── App entry ────────────────────────────────────────────────────────
 def start_app():
     import json as _json
-    from backend.api_server import start_api_server, set_state as api_set_state
-
-    # Kill zombie Python on port 7777
-    try:
-        import socket as _s
-        _t = _s.socket(_s.AF_INET, _s.SOCK_STREAM)
-        _t.settimeout(0.5)
-        if _t.connect_ex(("127.0.0.1", 7777)) == 0:
-            print(Fore.YELLOW + "[SYSTEM] Port 7777 occupied — killing zombie...")
-            try:
-                _out = subprocess.check_output(['netstat', '-ano'],
-                    creationflags=0x08000000, text=True, timeout=5)
-                for _line in _out.split('\n'):
-                    if ':7777' in _line and 'LISTENING' in _line:
-                        _zpid = _line.split()[-1].strip()
-                        if _zpid.isdigit() and int(_zpid) != os.getpid():
-                            subprocess.run(['taskkill', '/pid', _zpid, '/f'],
-                                creationflags=0x08000000,
-                                stdout=subprocess.DEVNULL,
-                                stderr=subprocess.DEVNULL, timeout=3)
-                time.sleep(1.0)
-            except Exception:
-                pass
-        _t.close()
-    except Exception:
-        pass
-
-    # Start API server
-    try:
-        start_api_server(host="127.0.0.1", port=7777)
-        print(Fore.GREEN + "[SYSTEM] API server up on port 7777")
-    except Exception as _e:
-        print(Fore.RED + f"[SYSTEM] API server failed: {_e}")
-        time.sleep(3)
-        try:
-            start_api_server(host="127.0.0.1", port=7777)
-        except Exception:
-            os._exit(1)
-
-    time.sleep(0.8)
 
     # Check setup status
     _appdata = os.environ.get('APPDATA', os.path.expanduser('~'))

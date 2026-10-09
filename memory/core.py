@@ -414,6 +414,33 @@ class SevenMemory:
         """
         source: "chat" (typed in Console) or "voice" (spoken via microphone)
         """
+        # FIFO rolling eviction for conversations
+        try:
+            current = self.conversations.count()
+            import voice_limits
+            _tier = voice_limits.get_tier()
+            _limits = {"free": 7, "pro": 77, "ultimate": -1}
+            _max_allowed = _limits.get(_tier, 7)
+
+            if _max_allowed != -1 and current >= _max_allowed:
+                print(Fore.CYAN + f"[MEMORY FIFO] Quota limit reached ({current}/{_max_allowed}) for tier '{_tier}'. Evicting oldest conversation.")
+                existing = self.conversations.get()
+                if existing and existing.get("ids") and existing.get("metadatas"):
+                    convs_with_time = []
+                    for idx, cid in enumerate(existing["ids"]):
+                        meta = existing["metadatas"][idx] or {}
+                        ts = meta.get("timestamp", "1970-01-01 00:00:00")
+                        convs_with_time.append((cid, ts))
+
+                    convs_with_time.sort(key=lambda x: x[1])
+                    to_evict_count = (current - _max_allowed) + 1
+                    for i in range(min(to_evict_count, len(convs_with_time))):
+                        oldest_id = convs_with_time[i][0]
+                        self.conversations.delete(ids=[oldest_id])
+                        print(Fore.YELLOW + f"[MEMORY FIFO] Evicted oldest conversation ID: {oldest_id}")
+        except Exception as _limit_err:
+            print(Fore.YELLOW + f"[MEMORY FIFO] Conversation verification bypassed: {_limit_err}")
+
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         memory_id = f"conv_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
         combined_text = f"User said: {user_input} | Seven replied: {seven_response}"
@@ -432,23 +459,32 @@ class SevenMemory:
         print(Fore.CYAN + f"[MEMORY] Stored conversation ({source}): '{user_input[:50]}...'")
 
     def store_fact(self, fact_text, category="general", user_id="default"):
-        # ── Plan limit check ──
+        # FIFO rolling eviction for facts
         try:
             import voice_limits
             current = self.user_facts.count()
-            allowed, _ = voice_limits.check("facts_limit", current)
-            if not allowed:
-                print(Fore.YELLOW +
-                      f"[LIMIT] Fact limit reached ({current}) "
-                      f"tier={voice_limits.get_tier()} — not storing")
-                # Raise so API can catch and return 403
-                raise PermissionError(
-                    f"facts_limit|{voice_limits.get_tier()}|{current}"
-                )
-        except PermissionError:
-            raise
-        except ImportError:
-            pass  # voice_limits not available — allow
+            _tier = voice_limits.get_tier()
+            _limits = {"free": 7, "pro": 77, "ultimate": -1}
+            _max_allowed = _limits.get(_tier, 7)
+
+            if _max_allowed != -1 and current >= _max_allowed:
+                print(Fore.CYAN + f"[MEMORY FIFO] Quota limit reached ({current}/{_max_allowed}) for tier '{_tier}'. Evicting oldest fact.")
+                existing = self.user_facts.get()
+                if existing and existing.get("ids") and existing.get("metadatas"):
+                    facts_with_time = []
+                    for idx, fid in enumerate(existing["ids"]):
+                        meta = existing["metadatas"][idx] or {}
+                        ts = meta.get("timestamp", "1970-01-01 00:00:00")
+                        facts_with_time.append((fid, ts))
+
+                    facts_with_time.sort(key=lambda x: x[1])
+                    to_evict_count = (current - _max_allowed) + 1
+                    for i in range(min(to_evict_count, len(facts_with_time))):
+                        oldest_id = facts_with_time[i][0]
+                        self.user_facts.delete(ids=[oldest_id])
+                        print(Fore.YELLOW + f"[MEMORY FIFO] Evicted oldest fact ID: {oldest_id}")
+        except Exception as _limit_err:
+            print(Fore.YELLOW + f"[MEMORY FIFO] Fact verification bypassed: {_limit_err}")
 
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         fact_id   = f"fact_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
@@ -467,7 +503,7 @@ class SevenMemory:
             }],
             ids=[fact_id]
         )
-        print(Fore.GREEN + f"[MEMORY] Stored fact: '{fact_text}'")  
+        print(Fore.GREEN + f"[MEMORY] Stored fact: '{fact_text}'")   
 
     # =========================================================================
     # SEARCH
@@ -491,8 +527,10 @@ class SevenMemory:
         all_results.extend(conv_results)
 
         all_results.sort(key=lambda x: x["relevance"], reverse=True)
+        # Strict relevance floor for weak local models. Below 0.55 the
+        # facts are semantically loose and will contaminate unrelated answers.
+        all_results = [r for r in all_results if r["relevance"] >= 0.55]
         all_results = all_results[:n_results]
-        all_results = [r for r in all_results if r["relevance"] >= 0.3]
 
         if not all_results:
             return ""
@@ -551,16 +589,26 @@ class SevenMemory:
             return []
 
     def _format_memories(self, results):
-        lines = ["=== RECALLED MEMORIES ==="]
+        """
+        Format recalled memories for LLM injection.
+        Strips timestamps, markers, and User said prefixes because weak local
+        models (1B parameter class) will hallucinate these tokens into responses.
+        Only the clean fact text is passed forward.
+        """
+        lines = []
         for r in results:
-            source_tag = r["source"].upper()
-            timestamp  = r["metadata"].get("timestamp", "unknown date")
-            date_part  = timestamp.split(" ")[0] if " " in timestamp else timestamp
-            text       = r["text"]
+            text = r["text"]
             if "Seven replied:" in text:
                 text = text.split("Seven replied:")[0].rstrip(" |").strip()
-            lines.append(f"[{source_tag}] {text} (from {date_part})")
-        lines.append("=== END MEMORIES ===")
+            if text.startswith("User said:"):
+                text = text[len("User said:"):].strip()
+            if text.startswith("User asked to remember:"):
+                text = text[len("User asked to remember:"):].strip()
+            text = text.strip(" .,;:!?")
+            if text:
+                lines.append(f"- {text}")
+        if not lines:
+            return ""
         return "\n".join(lines)
 
     # =========================================================================
