@@ -1,29 +1,14 @@
 """
-=============================================================================
 main_modules/handlers/trigger_handler.py
 
 Handles ###TRIGGER: and ###WORKSPACE: tags from brain pipeline.
-
-###TRIGGER: action=fire phrase=focus
-  → Looks up trigger by voice phrase
-  → Executes the trigger action
-
-###WORKSPACE: action=save name=Focus
-  → Scans current desktop
-  → Saves workspace to DB
-
-###WORKSPACE: action=restore name=Focus
-  → Loads workspace from DB
-  → Restores all apps in parallel
-
-###WORKSPACE: action=list
-  → Lists all saved workspaces
-  → Speaks the names
-=============================================================================
+Unifies restore logic for both Voice loops and the UI Play (Test) button.
 """
 
 import re
 import json
+import socket
+import time
 import threading
 from colorama import Fore
 from main_modules.handlers.base import BaseHandler
@@ -99,7 +84,6 @@ class WorkspaceHandler(BaseHandler):
                 ctx.speak("No apps to save. Open some apps first.")
                 return
 
-            # Save via API
             import requests
             r = requests.post(
                 "http://127.0.0.1:7777/api/workspaces",
@@ -146,7 +130,6 @@ class WorkspaceHandler(BaseHandler):
 
             ctx.update_status(f"Restoring: {name}", "#00ccff")
 
-            # Smart restore — only open what's missing
             def _do_restore():
                 try:
                     from hands.workspace import smart_restore
@@ -167,7 +150,9 @@ class WorkspaceHandler(BaseHandler):
                     except Exception:
                         pass
 
-                    # Speak result
+                    # Poll for arrangement card visibility after voice restore
+                    _poll_and_fire_arrangement(apps)
+
                     if opened > 0:
                         ctx.speak(f"{name} workspace restored. {opened} apps opened.")
                     else:
@@ -178,7 +163,6 @@ class WorkspaceHandler(BaseHandler):
 
             threading.Thread(target=_do_restore, daemon=True).start()
 
-            # Update use stats
             import requests
             try:
                 requests.post(
@@ -200,7 +184,7 @@ class WorkspaceHandler(BaseHandler):
             if r.status_code == 200:
                 workspaces = r.json()
                 if not workspaces:
-                    ctx.speak("No workspaces saved yet. Say 'save workspace as Focus' to create one.")
+                    ctx.speak("No workspaces saved yet.")
                     return
 
                 names = [w.get("name", "unnamed") for w in workspaces[:5]]
@@ -211,10 +195,7 @@ class WorkspaceHandler(BaseHandler):
                 elif count <= 3:
                     ctx.speak(f"{count} workspaces: {', '.join(names)}.")
                 else:
-                    ctx.speak(
-                        f"{count} workspaces. Most recent: {', '.join(names[:3])}. "
-                        f"Check the Triggers page for all."
-                    )
+                    ctx.speak(f"{count} workspaces. Most recent: {', '.join(names[:3])}.")
             else:
                 ctx.speak("Could not load workspaces.")
 
@@ -223,23 +204,70 @@ class WorkspaceHandler(BaseHandler):
             ctx.speak("Something went wrong loading workspaces.")
 
 
-# ─────────────────────────────────────────────────────────────────────────
-# STANDALONE EXECUTION FUNCTION
-# Used by trigger_daemon.py and fire endpoint
-# ─────────────────────────────────────────────────────────────────────────
+# ── SHARED ARRANGEMENT POLLING ENGINE ─────────────────────────────────────
+
+def _poll_and_fire_arrangement(workspace_apps):
+    """
+    Poller window finder.
+    Checks for open window handles every 1.0s for up to 10 seconds.
+    Ensures Chrome with heavy tabs, VS Code, and WhatsApp actually load
+    their windows before the overlay drops down.
+    """
+    if len(workspace_apps) < 2:
+        return
+
+    def _worker():
+        from trigger_modules.window_finder import get_windows_by_workspace_apps
+        
+        end_time = time.time() + 10.0
+        triggered_wins = []
+        other_wins = []
+
+        while time.time() < end_time:
+            time.sleep(1.0)
+            try:
+                triggered_wins, other_wins = get_windows_by_workspace_apps(workspace_apps)
+                # We need at least 2 windows visible to suggest an arrangement
+                if len(triggered_wins) >= 2:
+                    print(f"[POLLER] Found {len(triggered_wins)} visible windows. Launching card.")
+                    break
+            except Exception:
+                pass
+
+        if not triggered_wins:
+            # Fallback final try: see if we can capture whatever is open
+            try:
+                triggered_wins, other_wins = get_windows_by_workspace_apps(workspace_apps)
+            except Exception:
+                pass
+
+        if not triggered_wins:
+            print("[POLLER] No triggered windows appeared — skipping card.")
+            return
+
+        # Broadcast TCP payload to overlay daemon on port 7891
+        try:
+            payload = {
+                "type": "arrange",
+                "data": {
+                    "windows":    triggered_wins,
+                    "allWindows": other_wins,
+                },
+            }
+            s = socket.create_connection(("127.0.0.1", 7891), timeout=1.0)
+            s.sendall((json.dumps(payload) + "\n").encode("utf-8"))
+            s.recv(256)
+            s.close()
+            print("[POLLER] Arrangement card displayed successfully ✓")
+        except Exception as e:
+            print(f"[POLLER] Card transmit failed: {e}")
+
+    threading.Thread(target=_worker, daemon=True, name="ArrangementPoller").start()
+
+
+# ── STANDALONE EXECUTOR ───────────────────────────────────────────────────
+
 def _inject_into_vscode_terminal(cmd):
-    """
-    Inject a command into VS Code's active integrated terminal.
-
-    Strategy:
-      1. Find running VS Code process to get its working directory
-      2. Focus VS Code window
-      3. Use pyautogui to open terminal if not visible (Ctrl+`) 
-      4. Send the command text + Enter via clipboard paste
-         (clipboard paste is safer than keystroke simulation for special chars)
-
-    Returns (success, message).
-    """
     import time
     import ctypes
 
@@ -249,7 +277,6 @@ def _inject_into_vscode_terminal(cmd):
         import win32gui
         import win32con
 
-        # Step 1: Find VS Code window
         vscode_hwnd = None
 
         def _find_vscode(hwnd, _):
@@ -261,7 +288,6 @@ def _inject_into_vscode_terminal(cmd):
                           title.lower().startswith('● ') or
                           '.js' in title or '.py' in title or
                           'vscode' in title.lower()):
-                # More reliable: check if exe is code.exe
                 try:
                     import win32process
                     _, pid = win32process.GetWindowThreadProcessId(hwnd)
@@ -275,12 +301,10 @@ def _inject_into_vscode_terminal(cmd):
 
         win32gui.EnumWindows(_find_vscode, None)
 
-        # Fallback: find by process name
         if not vscode_hwnd:
             for proc in psutil.process_iter(['pid', 'name']):
                 try:
                     if 'code' in proc.info['name'].lower():
-                        # Find its window
                         def _by_pid(hwnd, pid):
                             nonlocal vscode_hwnd
                             try:
@@ -300,69 +324,41 @@ def _inject_into_vscode_terminal(cmd):
                     continue
 
         if not vscode_hwnd:
-            return False, "VS Code is not open. Open VS Code first."
+            return False, "VS Code is not open."
 
-        # Step 2: Focus VS Code
         win32gui.ShowWindow(vscode_hwnd, win32con.SW_RESTORE)
         win32gui.SetForegroundWindow(vscode_hwnd)
         time.sleep(0.4)
 
-        # Step 3: Open terminal panel if needed (Ctrl+`)
-        # Send Ctrl+` to toggle terminal — if already open it stays open
         pyautogui.hotkey('ctrl', '`')
         time.sleep(0.5)
 
-        # Step 4: Click terminal area to ensure focus
-        # Get window rect and click bottom third (where terminal lives)
         rect = win32gui.GetWindowRect(vscode_hwnd)
         win_x = rect[0]
         win_y = rect[1]
         win_w = rect[2] - rect[0]
         win_h = rect[3] - rect[1]
 
-        # Click in the terminal area (bottom 25% of window, centered)
         click_x = win_x + win_w // 2
         click_y = win_y + int(win_h * 0.82)
         pyautogui.click(click_x, click_y)
         time.sleep(0.3)
 
-        # Step 5: Paste command via clipboard (handles special chars safely)
         import subprocess as _sp
-        # Set clipboard
-        _sp.run(
-            ['clip'],
-            input=cmd.encode('utf-8'),
-            creationflags=0x08000000,
-            check=False
-        )
+        _sp.run(['clip'], input=cmd.encode('utf-8'), creationflags=0x08000000, check=False)
         time.sleep(0.1)
 
-        # Paste and execute
         pyautogui.hotkey('ctrl', 'v')
         time.sleep(0.15)
         pyautogui.press('enter')
 
-        print(f"[TRIGGER] Injected into VS Code terminal: {cmd}")
         return True, f"Sent to VS Code terminal: {cmd[:50]}"
 
-    except ImportError as ie:
-        missing = str(ie).split("'")[1] if "'" in str(ie) else str(ie)
-        return False, f"Missing dependency: {missing}"
     except Exception as e:
-        print(f"[TRIGGER] VS Code inject error: {e}")
-        return False, f"Could not inject into VS Code: {e}"
+        return False, f"Could not inject: {e}"
 
 
 def execute_trigger_action(trigger):
-    """
-    Execute a trigger's action.
-    Returns (success: bool, message: str).
-
-    Used by:
-      - trigger_daemon.py (when hotkey/audio fires)
-      - POST /api/triggers/{id}/fire (manual test)
-      - TriggerHandler (voice command)
-    """
     import os
     import subprocess
     import webbrowser
@@ -373,7 +369,6 @@ def execute_trigger_action(trigger):
 
     try:
         if action_type == "open_app":
-            # Support single app or multiple apps
             apps_list = action_data.get("apps", [])
             single_app = action_data.get("app", "")
             if single_app and not apps_list:
@@ -413,7 +408,7 @@ def execute_trigger_action(trigger):
             for url in urls_list:
                 webbrowser.open(url)
 
-            return True, f"Opened {len(urls_list)} URL{'s' if len(urls_list) > 1 else ''}"
+            return True, f"Opened {len(urls_list)} URL(s)"
 
         elif action_type == "open_file":
             paths_list = action_data.get("paths", [])
@@ -425,17 +420,14 @@ def execute_trigger_action(trigger):
                 return False, "No file specified"
 
             opened = []
-            missing = []
             for path in paths_list:
                 if os.path.exists(path):
                     os.startfile(path)
                     opened.append(path)
-                else:
-                    missing.append(path)
 
             if not opened:
-                return False, f"File not found: {missing[0]}"
-            return True, f"Opened {len(opened)} file{'s' if len(opened) > 1 else ''}"
+                return False, "File not found"
+            return True, f"Opened {len(opened)} file(s)"
 
         elif action_type == "open_folder":
             paths_list = action_data.get("paths", [])
@@ -447,17 +439,14 @@ def execute_trigger_action(trigger):
                 return False, "No folder specified"
 
             opened = []
-            missing = []
             for path in paths_list:
                 if os.path.exists(path):
                     subprocess.Popen(['explorer', path])
                     opened.append(path)
-                else:
-                    missing.append(path)
 
             if not opened:
-                return False, f"Folder not found: {missing[0]}"
-            return True, f"Opened {len(opened)} folder{'s' if len(opened) > 1 else ''}"
+                return False, "Folder not found"
+            return True, f"Opened {len(opened)} folder(s)"
 
         elif action_type == "open_workspace":
             workspace_id   = action_data.get("workspace_id")
@@ -482,10 +471,15 @@ def execute_trigger_action(trigger):
             def _do_smart_restore():
                 try:
                     from hands.workspace import smart_restore
-                    smart_restore(apps)
-                except ImportError:
+                    opened, skipped = smart_restore(apps)
+                except Exception:
                     from hands.workspace import restore
                     restore(apps)
+                    opened, skipped = len(apps), 0
+
+                # ── Polling Arrangement Card ──
+                # Unified trigger path for the UI Play button and standalone daemon
+                _poll_and_fire_arrangement(apps)
 
             import threading
             threading.Thread(target=_do_smart_restore, daemon=True).start()
@@ -503,14 +497,10 @@ def execute_trigger_action(trigger):
                 success, message = _inject_into_vscode_terminal(cmd)
                 return success, message
 
-            # Default: run silently in background
             CREATE_NO_WINDOW = 0x08000000
             subprocess.Popen(
-                cmd,
-                shell=True,
-                creationflags=CREATE_NO_WINDOW,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                cmd, shell=True, creationflags=CREATE_NO_WINDOW,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             )
             return True, f"Executed: {cmd[:50]}"
 
@@ -519,8 +509,6 @@ def execute_trigger_action(trigger):
             if not action:
                 return False, "No action specified"
 
-            # Send to Seven's brain in a background thread
-            # Brain handles all intelligence: app opening, system control, etc.
             import threading as _t
             def _send_to_brain():
                 try:
@@ -530,13 +518,13 @@ def execute_trigger_action(trigger):
                         json={"text": action, "speaker_id": "default"},
                         timeout=60,
                     )
-                except Exception as _e:
-                    print(f"[TRIGGER] seven_action brain error: {_e}")
+                except Exception:
+                    pass
             _t.Thread(target=_send_to_brain, daemon=True).start()
             return True, f"Seven processing: {action}"
 
         else:
-            return False, f"Unknown action type: {action_type}"
+            return False, f"Unknown action type"
 
     except Exception as e:
         return False, str(e)

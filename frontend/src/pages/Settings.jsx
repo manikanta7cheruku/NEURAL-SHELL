@@ -1,10 +1,38 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Activity, ShieldCheck, Layers, Cpu, Radio } from 'lucide-react';
 import useConfig from '../stores/useConfig';
 import api from '../api';
 import PageHeader from '../components/PageHeader';
 import Spinner from '../components/Spinner';
 import BrainSection from './settings/BrainSection';
+
+const LAYER_DISPLAY_NAMES = {
+  'layer_00_input_prep': 'Input Token Preparation',
+  'layer_01_name': 'Dynamic Name Matcher',
+  'layer_02_repetition': 'Repetition Analysis',
+  'layer_03_identity': 'Self-Identity Guard',
+  'layer_38_file_root': 'Workspace Path Resolver',
+  'layer_04_tars': 'TARS Core Executive',
+  'layer_43_file_search': 'Semantic File Search',
+  'layer_45_tasks': 'Task Context Tracker',
+  'layer_45_suggest': 'Smart Suggestion Engine',
+  'layer_45_trigger': 'Action Dispatch Sentinel',
+  'layer_45_scheduler': 'Dynamic Scheduler',
+  'layer_45_battery': 'Host Power Monitor',
+  'layer_45_system': 'Host System Queries',
+  'layer_45_window': 'Vite Window Control',
+  'layer_45_app': 'Application Interactor',
+  'layer_05_memory': 'Semantic Memory Retrieval',
+  'layer_53_knowledge': 'Structured Knowledge Base',
+  'layer_55_web': 'Real-time Web Search',
+  'layer_59_app_history': 'App Execution History',
+  'layer_06_personal_filter': 'Personal Context Guard',
+  'layer_07_facts': 'Passive Fact Extractor',
+  'layer_075_proactive': 'Proactive Tone Engine',
+  'layer_08_llm': 'LLM Cognitive Inference',
+  '__total__': 'Global Core Pipeline'
+};
 
 const TEMPS = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0];
 const TEMP_LABELS = {
@@ -23,8 +51,9 @@ export default function Settings() {
   const [saved,    setSaved]    = useState(false);
 
   // Hardware
-  const [hw,    setHw]    = useState(null);
-  const [speed, setSpeed] = useState(null);
+  const [hw,        setHw]        = useState(null);
+  const [speed,     setSpeed]     = useState(null);
+  const [telemetry, setTelemetry] = useState(null);
 
   // Voice words
   const [voiceWords,       setVoiceWords]       = useState(null);
@@ -62,6 +91,7 @@ export default function Settings() {
     fc();
     api.get('/hardware').then(r => setHw(r.data)).catch(() => {});
     api.get('/speed').then(r => setSpeed(r.data)).catch(() => {});
+    api.get('/health/telemetry').then(r => setTelemetry(r.data)).catch(() => {});
     // Load config FIRST, then voices — prevents race condition
     api.get('/config').then(r => {
       const v = r.data?.voice || {};
@@ -845,8 +875,8 @@ export default function Settings() {
         <div className="grid grid-cols-2 gap-3">
           {hw && (
             <div className="bg-s-card border border-s-border rounded p-4">
-              <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium mb-2">
-                Hardware
+              <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium mb-2 flex items-center gap-1">
+                <Cpu size={10} className="text-s-accent" /> Hardware Specifications
               </div>
               <div className="space-y-1.5">
                 {[
@@ -865,22 +895,74 @@ export default function Settings() {
             </div>
           )}
 
-          <div className="bg-s-card border border-s-border rounded p-4">
-            <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium mb-2">
-              Response Latency
+          <div className="bg-s-card border border-s-border rounded p-4 flex flex-col justify-between">
+            <div>
+              <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium mb-2 flex items-center gap-1">
+                <Activity size={10} className="text-s-accent" /> Response Latency
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {(speed?.count > 0
+                  ? [['Avg', `${speed.avg}ms`], ['Min', `${speed.min}ms`], ['Max', `${speed.max}ms`], ['Samples', speed.count]]
+                  : [['Avg', '—'], ['Min', '—'], ['Max', '—'], ['Samples', '0']]
+                ).map(([k, v]) => (
+                  <div key={k} className="bg-s-bg rounded px-2 py-1 text-center">
+                    <div className="text-[11px] font-mono font-medium text-s-text">{v}</div>
+                    <div className="text-[7.5px] text-s-text-4">{k}</div>
+                  </div>
+                ))}
+              </div>
             </div>
-            <div className="grid grid-cols-2 gap-2">
-              {(speed?.count > 0
-                ? [['Avg', `${speed.avg}ms`], ['Min', `${speed.min}ms`], ['Max', `${speed.max}ms`], ['Samples', speed.count]]
-                : [['Avg', '—'], ['Min', '—'], ['Max', '—'], ['Samples', '0']]
-              ).map(([k, v]) => (
-                <div key={k} className="bg-s-bg rounded px-2 py-1.5 text-center">
-                  <div className="text-[12px] font-mono font-medium text-s-text">{v}</div>
-                  <div className="text-[8px] text-s-text-4">{k}</div>
+            {telemetry && (
+              <div className="mt-3 pt-2.5 border-t border-s-border/40 flex items-center justify-between text-[9px]">
+                <span className="text-s-text-3">Ollama Engine Status</span>
+                <span className={`font-medium px-2 py-0.5 rounded font-mono text-[8px] ${
+                  telemetry.ollama_alive ? 'bg-s-green/10 text-s-green' : 'bg-s-red/10 text-s-red'
+                }`}>
+                  {telemetry.ollama_alive ? 'ONLINE' : 'STANDBY'}
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* NEURAL ENGINE AND PIPELINE DIAGNOSTICS */}
+        <div className="bg-s-card border border-s-border rounded p-4">
+          <div className="flex items-center justify-between mb-3 border-b border-s-border/40 pb-2.5">
+            <div>
+              <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium flex items-center gap-1.5">
+                <Layers size={10} className="text-s-accent" /> Neural Pipeline Performance Diagnostics
+              </div>
+              <div className="text-[9px] text-s-text-4 mt-0.5">
+                Granular latency execution times split across internal logic blocks
+              </div>
+            </div>
+            <div className="text-[8.5px] font-mono text-s-text-3 bg-s-bg px-2 py-1 rounded border border-s-border">
+              Metrics Percentile Status: <span className="text-s-accent font-semibold">p50 / p95</span>
+            </div>
+          </div>
+
+          {telemetry?.layers && telemetry.layers.length > 0 ? (
+            <div className="grid grid-cols-2 gap-x-6 gap-y-2">
+              {telemetry.layers.map(l => (
+                <div key={l.layer} className="flex justify-between items-center py-1 border-b border-s-border/20 last:border-0 hover:bg-s-bg/20 px-1 rounded transition-colors">
+                  <span className="text-[10px] text-s-text-3 font-mono truncate max-w-[170px]" title={l.layer}>
+                    {LAYER_DISPLAY_NAMES[l.layer] || l.layer.replace('layer_', '')}
+                  </span>
+                  <span className="font-mono text-[10px] text-s-text-2">
+                    {l.p50}ms <span className="text-s-text-4">/</span> <span className="text-s-text-3">{l.p95}ms</span>
+                  </span>
                 </div>
               ))}
             </div>
-          </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center py-6 text-center bg-s-bg/40 rounded-lg border border-s-border/30">
+              <Radio size={16} className="text-s-text-4 animate-pulse mb-1.5" />
+              <div className="text-[10px] font-medium text-s-text-3">Diagnostics Standby</div>
+              <p className="text-[8px] text-s-text-4 max-w-[340px] mt-0.5 leading-normal">
+                No active pipeline runs recorded in this session. Send a message to populate real-time latency percentiles.
+              </p>
+            </div>
+          )}
         </div>
 
         {/* ── REFERRAL ── */}

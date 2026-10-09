@@ -30,7 +30,7 @@ except ImportError:
     telemetry = None
 
 # =========================================================================
-# SHARED STATE — Updated by main.py via set_state()
+# SHARED STATE - Updated by main.py via set_state()
 # =========================================================================
 
 _state = {
@@ -68,7 +68,7 @@ def get_state():
 # =========================================================================
 
 def get_current_tier() -> str:
-    """Get the current user's license tier. Always safe — returns 'free' on error."""
+    """Get the current user's license tier. Always safe - returns 'free' on error."""
     try:
         import config
         tier = config.KEY.get("license", {}).get("tier", "free")
@@ -142,28 +142,16 @@ def plan_limit_error(feature_name: str, limit_check: dict) -> HTTPException:
 
 app = FastAPI(
     title="Seven AI Assistant API",
-    version="1.2.7",
+    version="1.3.4",
     description="""
 ## Seven Local AI Voice Assistant
 
 Private, local API for Seven. All data stays on your machine.
-
-### Key endpoints:
-- **POST /api/chat** - Send a message to Seven's brain
-- **GET /api/status** - Check Seven's current state
-- **GET /api/health** - Full system health check
-- **GET /api/tasks** - List all tasks
-- **GET /api/triggers** - List all hotkey/voice triggers
-- **GET /api/memory/conversations** - View conversation history
-- **GET /api/schedules** - List active schedules
-
-### Authentication:
-No authentication required. API is localhost-only (127.0.0.1:7777).
 """,
     docs_url="/api/docs",
     redoc_url="/api/redoc",
     contact={
-        "name": "Manikanta Cheruku",
+        "name": "Seven Labs",
     },
 )
 
@@ -176,7 +164,6 @@ app.add_middleware(
 )
 
 # Rate limiting middleware for /api/chat
-# Prevents runaway frontend loops or scripts from freezing the machine
 import time as _time
 import collections as _collections
 import threading as _threading
@@ -220,10 +207,10 @@ app.add_middleware(ChatRateLimitMiddleware)
 
 @app.get("/")
 def root():
-    """Root endpoint — API info."""
+    """Root endpoint - API info."""
     return {
         "name":    "Seven API",
-        "version": "1.0.0",
+        "version": "1.3.4",
         "status":  "running",
         "docs":    "http://127.0.0.1:7777/api/docs",
         "endpoints": {
@@ -253,6 +240,7 @@ def health_liveness():
 from backend.routes import status as status_routes
 from backend.routes import chat as chat_routes
 from backend.routes import memory as memory_routes
+from backend.routes import files as files_routes
 from backend.routes import schedules as schedules_routes
 from backend.routes import knowledge as knowledge_routes
 from backend.routes import config_routes
@@ -268,43 +256,12 @@ from backend.routes import workspaces as workspaces_routes
 from backend.routes import chrome as chrome_routes
 from backend.routes import health as health_routes
 from backend.routes import panel_extras as panel_extras_routes
-from fastapi import Request
-from fastapi.responses import JSONResponse
 
 app.include_router(health_routes.router)
-
-@app.get("/api/speed")
-def get_system_speed():
-    """Diagnostic endpoint to prevent frontend 404. Returns latency metrics."""
-    return {
-        "success": True,
-        "mode": "local",
-        "latency_ms": 1.2,
-        "processing_speed": "high"
-    }
-
-# Bootstrap restart stub — called by setup wizard after environment setup
-# Real restart is handled by Electron watching Python exit code
-@app.post("/api/bootstrap/restart")
-async def bootstrap_restart():
-    """
-    Called by the setup wizard after first-launch setup completes.
-    Signals Python to restart cleanly so new packages are importable.
-    Electron detects the exit and relaunches Python automatically.
-    """
-    import threading
-    import os
-
-    def _delayed_restart():
-        import time
-        time.sleep(0.5)  # give response time to send
-        os._exit(0)      # clean exit — Electron restarts Python
-
-    threading.Thread(target=_delayed_restart, daemon=True).start()
-    return {"ok": True, "message": "Restarting..."}
 app.include_router(status_routes.router)
 app.include_router(chat_routes.router)
 app.include_router(memory_routes.router)
+app.include_router(files_routes.router)
 app.include_router(schedules_routes.router)
 app.include_router(knowledge_routes.router)
 app.include_router(config_routes.router)
@@ -319,6 +276,36 @@ app.include_router(triggers_routes.router)
 app.include_router(workspaces_routes.router)
 app.include_router(chrome_routes.router)
 app.include_router(panel_extras_routes.router)
+
+
+@app.get("/api/speed")
+def get_system_speed():
+    """Diagnostic endpoint to prevent frontend 404. Returns latency metrics."""
+    return {
+        "success": True,
+        "mode": "local",
+        "latency_ms": 1.2,
+        "processing_speed": "high"
+    }
+
+
+@app.post("/api/bootstrap/restart")
+async def bootstrap_restart():
+    """
+    Called by the setup wizard after first-launch setup completes.
+    Signals Python to restart cleanly so new packages are importable.
+    Electron detects the exit and relaunches Python automatically.
+    """
+    import threading
+    import os
+
+    def _delayed_restart():
+        import time
+        time.sleep(0.5)  # give response time to send
+        os._exit(0)      # clean exit - Electron restarts Python
+
+    threading.Thread(target=_delayed_restart, daemon=True).start()
+    return {"ok": True, "message": "Restarting..."}
 
 
 # =========================================================================
@@ -352,10 +339,8 @@ def start_api_server(host="127.0.0.1", port=7777):
 
     thread = threading.Thread(target=_run, daemon=True, name="SevenAPI")
     thread.start()
-    print(f"[API] Seven API server started on http://{host}:{port}")
-    print(f"[API] Dashboard docs: http://{host}:{port}/api/docs")
 
-    # Start background update checker — runs 15s after startup
+    # Start background update checker - runs 15s after startup
     try:
         try:
             from backend.updater import start_auto_check
@@ -364,8 +349,7 @@ def start_api_server(host="127.0.0.1", port=7777):
             sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
             from updater import start_auto_check
         start_auto_check()
-        print("[API] Update auto-check scheduled")
-    except Exception as e:
-        print(f"[API] Update auto-check failed to start: {e}")
+    except Exception:
+        pass
 
     return thread

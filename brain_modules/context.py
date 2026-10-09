@@ -1,80 +1,89 @@
 """
-=============================================================================
 brain_modules/context.py
 
 Shared context passed to every layer in the brain pipeline.
 
-Contains:
-    - Original prompt_text and speaker_id from main.py
-    - Cleaned input (clean_in, words, first_word)
-    - Classifier flags (is_command, is_greeting, _is_action_cmd)
-    - File word sets (used by multiple layers)
-    - Layer 5 accumulators (memory_context, knowledge_context, web_context)
-    - USER_NAME reference and speaker_name
+Layers read from it and some write to it (the memory layer fills
+memory_facts, the web layer fills web_context, the LLM layer consumes them).
 
-Layers read from this context, and some layers write to it
-(e.g. memory layer writes memory_context which LLM layer uses).
-
-WHY A CONTEXT OBJECT:
-    Alternative: pass 10+ arguments to every layer function.
-    That's fragile and ugly. A context object keeps the API clean.
-    Adding a new field affects ONE class, not every layer signature.
-=============================================================================
+NEW IN THIS VERSION:
+    norm_in        contraction-expanded, punctuation-free input for matching
+    speaker_key    the one storage key from session.resolve_key()
+    stream_mode    "sentence" (voice), "token" (console SSE) or "text" (string)
+    memory_future  semantic retrieval started early, awaited only when needed
+    recall_query   set when the user asked a direct question about a stored fact
+    answered_by    name of the layer that produced the reply
 """
+
+import time
 
 
 class BrainContext:
-    """
-    Runtime context for one call to brain.think().
-    Layers read and mutate this object as they process the input.
-    """
+    """Runtime context for one call to brain.think()."""
 
     def __init__(self, prompt_text, speaker_id, user_name):
-        # ── Inputs from main.py ──────────────────────────────────
+        # Inputs
         self.prompt_text = prompt_text
-        self.speaker_id  = speaker_id
-        self.user_name   = user_name
-
-        # ── Speaker resolution (set by input_prep layer) ─────────
+        self.speaker_id = speaker_id
+        self.user_name = user_name
         self.speaker_name = user_name if user_name else "there"
+        self.speaker_key = ""
+        self.started_at = time.time()
+        self.stream_mode = "sentence"
 
-        # ── Cleaned input (set by input_prep layer) ──────────────
-        self.clean_in   = ""
-        self.words      = []
+        # Cleaned input (layer 0)
+        self.clean_in = ""
+        self.norm_in = ""
+        self.words = []
         self.first_word = ""
 
-        # ── Classifier flags (set by input_prep layer) ───────────
-        self.is_command     = False
-        self.is_greeting    = False
-        self.is_action_cmd  = False
+        # Classifier flags (layer 0)
+        self.is_command = False
+        self.is_greeting = False
+        self.is_action_cmd = False
 
-        # ── File word sets (populated by input_prep layer) ───────
-        # Words that are NEVER app names — always file/folder references.
-        # Used by file search layer AND personal question filter layer.
         self.FILE_WORDS = {
-            "resume", "cv", "pdf", "document", "photo",
-            "image", "screenshot", "video", "invoice",
-            "contract", "presentation", "spreadsheet", "edit", "travel",
+            "resume", "cv", "pdf", "document", "photo", "image", "screenshot",
+            "video", "invoice", "contract", "presentation", "spreadsheet", "edit", "travel",
         }
         self.ALWAYS_FILE_WORDS = {
-            "resume", "cv", "folder", "pdf", "document", "photo",
-            "image", "screenshot", "video", "report", "invoice",
-            "contract", "presentation", "spreadsheet", "edit",
+            "resume", "cv", "folder", "pdf", "document", "photo", "image",
+            "screenshot", "video", "report", "invoice", "contract",
+            "presentation", "spreadsheet", "edit",
         }
 
-        # ── Layer accumulators (set by memory/knowledge/web layers) ──
-        self.memory_context    = ""
+        # Accumulators
+        self.memory_context = ""
+        self.memory_facts = []
+        self.memory_future = None
+        self.recall_query = None
         self.knowledge_context = ""
-        self.web_context       = ""
-        self.web_searched      = False
+        self.web_context = ""
+        self.web_searched = False
 
-        # ── Signal that USER_NAME must be updated in brain.py ────
-        # If a layer wants to update USER_NAME (e.g. name-setting layer),
-        # it sets this. brain.py reads it after pipeline runs.
+        # Signals between layers
         self.new_user_name = None
+        self.llm_note = ""            # legacy, unused by the new LLM layer
+        self.proactive_hint = ""
+        self.inject_capabilities = False
+        self.answered_by = ""
 
-        # ── LLM instruction note injected by mid-pipeline layers ─
-        # Layer 02 uses this to pass a note to layer_08 without
-        # poisoning prompt_text (which gets stored in history).
-        # layer_08 prepends this to the assembled prompt only.
-        self.llm_note = ""
+    def resolve_memory(self, timeout_s: float = 0.45) -> None:
+        """
+        Wait (briefly) for the semantic search started by the memory layer.
+
+        Retrieval overlaps with the web, knowledge and fact layers instead of
+        blocking in front of them. If it is not ready in time the turn simply
+        proceeds without memory; it never stalls the reply.
+        """
+        fut = self.memory_future
+        if fut is None:
+            return
+        self.memory_future = None
+        try:
+            facts = fut.result(timeout=timeout_s)
+        except Exception:
+            facts = []
+        if facts:
+            self.memory_facts = list(facts)
+            self.memory_context = "\n".join(f"- {f}" for f in facts)
