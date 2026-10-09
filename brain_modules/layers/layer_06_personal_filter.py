@@ -1,41 +1,39 @@
 """
-=============================================================================
-LAYER 6: PERSONAL QUESTION FILTER
+LAYER 6: PERSONAL RECALL GUARD
 
-If user asks a personal question ("what sport do I play")
-and there is no memory context for the answer, return "You haven't told me."
+If the user asked a direct question about something they told Seven and no
+fact was found (neither by slot nor by semantic search), say so honestly
+instead of letting the model invent a personal detail.
 
-This prevents the LLM from hallucinating personal details Seven doesn't know.
-
-Guards against blocking file questions like "how many resumes do I have".
-=============================================================================
+BUG FIXED: the old filter fired on ANY question containing "my", so
+"what's wrong with my code" or "how do I clean my keyboard" were answered
+with "You haven't told me that yet." It now acts ONLY on parsed recall
+questions ("what is my favorite X", "what do I like", "where do I live").
 """
+
+import random
 
 from brain_modules.layer_result import LayerResult
 
 
-_PERSONAL_QUESTION_WORDS = [
-    "my", "about me", "do i", "did i", "am i",
-    "i like", "i love", "i play", "i work", "i study"
-]
-
-_QUESTION_STARTS = [
-    "what", "which", "who", "when", "where", "how", "do you know"
-]
+def _unknown_reply(recall) -> str:
+    if recall.kind == "likes":
+        return "You haven't told me what you like yet."
+    if recall.kind == "dislikes":
+        return "You haven't told me what you dislike yet."
+    return random.choice([
+        f"I don't know your {recall.attr} yet. Tell me and I'll remember.",
+        f"You haven't told me your {recall.attr} yet.",
+    ])
 
 
 def process(ctx, deps):
-    clean_in = ctx.clean_in
-
-    is_personal_question = any(w in clean_in for w in _PERSONAL_QUESTION_WORDS)
-    is_question          = any(clean_in.startswith(w) for w in _QUESTION_STARTS)
-
-    _is_file_question = any(fw in clean_in for fw in ctx.FILE_WORDS)
-
-    if (is_question and is_personal_question
-            and not ctx.memory_context
-            and not ctx.is_command
-            and not _is_file_question):
-        return LayerResult.stop("You haven't told me that yet.")
-
-    return LayerResult.pass_through()
+    recall = ctx.recall_query
+    if recall is None:
+        return LayerResult.pass_through()
+    config = deps.get("config")
+    timeout = float(config.KEY.get("memory", {}).get("retrieval_timeout_ms", 450)) / 1000.0 if config else 0.45
+    ctx.resolve_memory(timeout)
+    if ctx.memory_facts:
+        return LayerResult.pass_through()
+    return LayerResult.stop(_unknown_reply(recall))

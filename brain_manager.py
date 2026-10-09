@@ -281,10 +281,18 @@ _latency_history = []
 
 
 def record_latency(duration_ms):
-    """Record a response latency measurement."""
+    """Record a response latency measurement. Also mirrors to structured tracker."""
     _latency_history.append(duration_ms)
     if len(_latency_history) > 50:
         _latency_history.pop(0)
+
+    # Mirror to per-layer tracker under aggregate bucket
+    try:
+        from brain_modules.observability import record_layer_latency, log_event
+        record_layer_latency("__total__", duration_ms)
+        log_event("response_latency", ms=int(duration_ms))
+    except Exception:
+        pass
 
 
 def get_latency_stats():

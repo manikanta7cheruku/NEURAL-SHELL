@@ -1,218 +1,102 @@
 """
 =============================================================================
 PROJECT SEVEN - config.py (Configuration Manager)
-Version: 3.0 (Packaged App + %APPDATA% Migration)
+Version: 3.1
 
-CHANGES FROM V2.0:
-    1. NEW: get_app_data_dir() — resolves %APPDATA%\SEVEN in packaged mode
-    2. NEW: Automatic migration from old ./data/ path to %APPDATA%\SEVEN
-    3. NEW: CONFIG_FILE now lives in %APPDATA%\SEVEN\config.json
-    4. KEPT: All V2.0 API (KEY, save_config, update_config) unchanged
-    5. KEPT: Thread-safe lock
+WHY THIS CHANGED (personal data leak):
+    The previous _migrate_old_data() copied the repository's config.json into
+    each user's %APPDATA%\\SEVEN folder on first launch. That file contained the
+    developer's own email, GitHub shortcut and name, so every installed copy
+    inherited them. This version:
+      - NEVER migrates config.json (defaults come from get_defaults()).
+      - Never migrates anything in a git checkout (SEVEN_DISABLE_MIGRATION=1
+        also turns it off).
+      - Fills missing keys from defaults, so older configs gain new settings.
+      - Forces identity.creator to "Seven Labs".
 
-WHY THIS CHANGE:
-    In a packaged Electron app, the install directory (C:\Program Files\SEVEN)
-    is read-only for standard users. Config, databases, and memory must live
-    in a writable location: %APPDATA%\SEVEN
+API unchanged: KEY, load_config, save_config, update_config, get_defaults,
+get_app_data_dir, get_data_dir, get_memory_dir, get_knowledge_dir, sync_version.
 =============================================================================
 """
 
+import copy
 import json
+import logging
 import os
 import shutil
 import threading
 
+_log = logging.getLogger("seven.config")
 _lock = threading.Lock()
 
 
 # ============================================================================
-# PATH RESOLUTION
+# PATHS
 # ============================================================================
 
 def get_app_data_dir():
-    """
-    Returns the writable app data directory.
-    
-    Packaged:   C:\\Users\\<name>\\AppData\\Roaming\\SEVEN
-    Dev mode:   Same (consistent behavior across environments)
-    
-    Directory is created if it does not exist.
-    """
-    app_data = os.environ.get('APPDATA', os.path.expanduser('~'))
-    app_dir = os.path.join(app_data, 'SEVEN')
+    """Writable per-user directory: %APPDATA%\\SEVEN (created if missing)."""
+    app_dir = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "SEVEN")
     os.makedirs(app_dir, exist_ok=True)
     return app_dir
 
 
 def get_data_dir():
-    """
-    Returns the data subdirectory inside app data dir.
-    Houses: device_id.txt, email.txt, license.db, telemetry.db
-    
-    Path: %APPDATA%\\SEVEN\\data\\
-    """
-    data_dir = os.path.join(get_app_data_dir(), 'data')
-    os.makedirs(data_dir, exist_ok=True)
-    return data_dir
+    """%APPDATA%\\SEVEN\\data: device id, email, license and telemetry databases."""
+    d = os.path.join(get_app_data_dir(), "data")
+    os.makedirs(d, exist_ok=True)
+    return d
 
 
 def get_memory_dir():
-    """
-    Returns ChromaDB memory directory.
-    
-    Path: %APPDATA%\\SEVEN\\seven_data\\memory\\
-    """
-    mem_dir = os.path.join(get_app_data_dir(), 'seven_data', 'memory')
-    os.makedirs(mem_dir, exist_ok=True)
-    return mem_dir
+    """%APPDATA%\\SEVEN\\seven_data\\memory: ChromaDB and the facts store."""
+    d = os.path.join(get_app_data_dir(), "seven_data", "memory")
+    os.makedirs(d, exist_ok=True)
+    return d
 
 
 def get_knowledge_dir():
-    """
-    Returns knowledge base directory.
-    
-    Path: %APPDATA%\\SEVEN\\seven_data\\knowledge\\
-    """
-    know_dir = os.path.join(get_app_data_dir(), 'seven_data', 'knowledge')
-    os.makedirs(know_dir, exist_ok=True)
-    return know_dir
+    """%APPDATA%\\SEVEN\\seven_data\\knowledge: indexed documents."""
+    d = os.path.join(get_app_data_dir(), "seven_data", "knowledge")
+    os.makedirs(d, exist_ok=True)
+    return d
 
 
-# ── Config file lives in app data dir ──
-CONFIG_FILE = os.path.join(get_app_data_dir(), 'config.json')
+CONFIG_FILE = os.path.join(get_app_data_dir(), "config.json")
 
 
 # ============================================================================
-# MIGRATION — Move old ./data/ to %APPDATA%\SEVEN\data\
+# MIGRATION (data files only, never config.json)
 # ============================================================================
+
+def _migration_allowed(script_dir):
+    if os.environ.get("SEVEN_DISABLE_MIGRATION") == "1":
+        return False
+    return not os.path.isdir(os.path.join(script_dir, ".git"))
+
 
 def _migrate_old_data():
-    """
-    One-time migration from legacy path to %APPDATA%\SEVEN\.
-    
-    Runs silently on first launch after upgrade.
-    Only migrates if old path exists AND new path is empty.
-    Safe to call multiple times — skips if already migrated.
-    """
-    # Find old data directory (relative to this script's location)
+    """One-time copy of legacy data files into %APPDATA%. Skipped in dev checkouts."""
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    old_data = os.path.join(script_dir, 'data')
-    old_config = os.path.join(script_dir, 'config.json')
-    new_data = get_data_dir()
-    new_config = CONFIG_FILE
+    if not _migration_allowed(script_dir):
+        return
 
-    migrated_something = False
-
-    # Migrate config.json
-    if os.path.exists(old_config) and not os.path.exists(new_config):
-        try:
-            shutil.copy2(old_config, new_config)
-            print(f"[CONFIG] Migrated config.json → {new_config}")
-            migrated_something = True
-        except Exception as e:
-            print(f"[CONFIG] Migration warning (config): {e}")
-
-    # Migrate data/ folder contents
-    # Skip device_id.txt — never migrate this, always create fresh
+    old_data, new_data = os.path.join(script_dir, "data"), get_data_dir()
     if os.path.exists(old_data):
-        for filename in ['email.txt', 'license.db', 'telemetry.db']:
-            old_file = os.path.join(old_data, filename)
-            new_file = os.path.join(new_data, filename)
-            if os.path.exists(old_file) and not os.path.exists(new_file):
+        for name in ("license.db", "telemetry.db"):
+            src, dst = os.path.join(old_data, name), os.path.join(new_data, name)
+            if os.path.exists(src) and not os.path.exists(dst):
                 try:
-                    shutil.copy2(old_file, new_file)
-                    print(f"[CONFIG] Migrated {filename} → {new_data}")
-                    migrated_something = True
-                except Exception as e:
-                    print(f"[CONFIG] Migration warning ({filename}): {e}")
+                    shutil.copy2(src, dst)
+                except Exception as exc:
+                    _log.warning("migration warning (%s): %s", name, exc)
 
-    # Migrate ChromaDB memory
-    old_memory = os.path.join(script_dir, 'seven_data', 'memory')
-    new_memory = get_memory_dir()
+    old_memory, new_memory = os.path.join(script_dir, "seven_data", "memory"), get_memory_dir()
     if os.path.exists(old_memory) and not os.listdir(new_memory):
         try:
             shutil.copytree(old_memory, new_memory, dirs_exist_ok=True)
-            print(f"[CONFIG] Migrated memory → {new_memory}")
-            migrated_something = True
-        except Exception as e:
-            print(f"[CONFIG] Migration warning (memory): {e}")
-
-    if migrated_something:
-        print("[CONFIG] Data migration complete.")
-
-
-# ============================================================================
-# CONFIG LOAD / SAVE
-# ============================================================================
-
-def load_config():
-    """
-    Load settings from config.json in %APPDATA%\SEVEN\.
-    Falls back to defaults if file is missing or corrupt.
-    """
-    # Run migration first (silent, safe to call every startup)
-    _migrate_old_data()
-
-    if not os.path.exists(CONFIG_FILE):
-        print(f"[CONFIG] No config found. Writing defaults to {CONFIG_FILE}")
-        defaults = get_defaults()
-        try:
-            with open(CONFIG_FILE, 'w') as f:
-                json.dump(defaults, f, indent=4)
-        except Exception as e:
-            print(f"[CONFIG] Could not write defaults: {e}")
-        return defaults
-
-    try:
-        with open(CONFIG_FILE, 'r') as f:
-            data = json.load(f)
-        print(f"[CONFIG] Loaded from {CONFIG_FILE}")
-        return data
-    except Exception as e:
-        print(f"[CONFIG] Corrupt config, using defaults: {e}")
-        return get_defaults()
-
-
-def save_config():
-    """
-    Write current KEY dict back to %APPDATA%\SEVEN\config.json.
-    Thread-safe.
-    """
-    with _lock:
-        try:
-            with open(CONFIG_FILE, 'w') as f:
-                json.dump(KEY, f, indent=4)
-            return True
-        except Exception as e:
-            print(f"[CONFIG] Could not save: {e}")
-            return False
-
-
-def update_config(updates):
-    """
-    Deep-merge updates into KEY and persist to disk.
-    Does not overwrite keys not mentioned in updates.
-    
-    Example:
-        update_config({"brain": {"streaming": True}})
-        → changes only brain.streaming
-    """
-    def _deep_merge(base, override):
-        for key, value in override.items():
-            if key in base and isinstance(base[key], dict) and isinstance(value, dict):
-                _deep_merge(base[key], value)
-            else:
-                base[key] = value
-
-    with _lock:
-        _deep_merge(KEY, updates)
-        try:
-            with open(CONFIG_FILE, 'w') as f:
-                json.dump(KEY, f, indent=4)
-            return True
-        except Exception as e:
-            print(f"[CONFIG] Could not save update: {e}")
-            return False
+        except Exception as exc:
+            _log.warning("migration warning (memory): %s", exc)
 
 
 # ============================================================================
@@ -220,10 +104,7 @@ def update_config(updates):
 # ============================================================================
 
 def get_defaults():
-    """
-    Default configuration. Used when config.json is missing.
-    All values here are safe starting points.
-    """
+    """Clean defaults. Contains no personal data."""
     return {
         "identity": {
             "name": "Seven",
@@ -232,112 +113,153 @@ def get_defaults():
             "wake_words": ["seven", "hey seven"],
             "pause_words": ["not you", "hold on", "wait", "stop listening"],
             "resume_words": ["wake up", "seven", "continue", "start listening"],
-            "shutdown_words": ["go to sleep", "goodbye", "shutdown", "close seven"]
+            "shutdown_words": ["go to sleep", "goodbye", "shutdown", "close seven"],
         },
         "email": "",
         "brain": {
-            "model_name": "llama3",
+            "model_name": "auto",
             "temperature": 0.3,
             "max_history": 10,
-            "streaming": False,
+            "streaming": True,
             "auto_model": True,
-            "model_tiers": {
-                "high": "llama3",
-                "medium": "phi3:mini",
-                "low": "qwen2:1.5b",
-                "minimum": "tinyllama"
-            },
+            "model_tiers": {"high": "llama3", "medium": "phi3:mini",
+                            "low": "qwen2:1.5b", "minimum": "tinyllama"},
             "tars_humor": 75,
             "tars_honesty": 85,
+            "history_ttl_seconds": 1800,
             "search_max_results": 8,
             "auto_open_best_match": True,
             "follow_up_timeout": 90,
             "prefer_browser_for_unknown": True,
-            "content_search_enabled": True
+            "content_search_enabled": True,
         },
-        "gui": {
-            "opacity": 0.8,
-            "text_color": "#00FF00"
-        },
+        "memory": {"min_relevance": 0.70, "retrieval_timeout_ms": 450},
+        "web": {"enabled": True, "max_results": 2, "news_max_results": 2, "timeout": 5},
+        "gui": {"opacity": 0.8, "text_color": "#00FF00"},
         "commands": {},
         "file_search_roots": [],
-        "license": {
-            "key": "",
-            "tier": "free",
-            "verified": False,
-            "expires_at": None
-        },
+        "license": {"key": "", "tier": "free", "verified": False, "expires_at": None},
         "setup_complete": False,
-        "version": "1.1.4"
+        "version": "1.3.3",
     }
 
 
-# ── Load immediately on import ──
+def _fill_defaults(data, defaults):
+    """Recursively add keys missing from data. Existing values always win."""
+    for key, value in defaults.items():
+        if key not in data:
+            data[key] = copy.deepcopy(value)
+        elif isinstance(value, dict) and isinstance(data[key], dict):
+            _fill_defaults(data[key], value)
+    return data
+
+
+def _normalize(data):
+    """Enforce invariants on a loaded config."""
+    identity = data.setdefault("identity", {})
+    identity["name"] = "Seven"
+    identity["creator"] = "Seven Labs"
+    return data
+
+
+# ============================================================================
+# LOAD / SAVE
+# ============================================================================
+
+def load_config():
+    """Load config.json from %APPDATA%\\SEVEN, creating clean defaults if absent."""
+    _migrate_old_data()
+    defaults = get_defaults()
+
+    if not os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, "w", encoding="utf-8") as fh:
+                json.dump(defaults, fh, indent=4)
+        except Exception as exc:
+            _log.warning("could not write defaults: %s", exc)
+        return defaults
+
+    try:
+        with open(CONFIG_FILE, "r", encoding="utf-8-sig") as fh:
+            data = json.load(fh)
+        return _normalize(_fill_defaults(data, defaults))
+    except Exception as exc:
+        _log.warning("corrupt config, using defaults: %s", exc)
+        return defaults
+
+
+def save_config():
+    """Persist KEY to disk. Thread-safe."""
+    with _lock:
+        try:
+            with open(CONFIG_FILE, "w", encoding="utf-8") as fh:
+                json.dump(KEY, fh, indent=4)
+            return True
+        except Exception as exc:
+            _log.warning("could not save: %s", exc)
+            return False
+
+
+def update_config(updates):
+    """Deep-merge updates into KEY and persist. Keys not mentioned are untouched."""
+    def _merge(base, override):
+        for key, value in override.items():
+            if key in base and isinstance(base[key], dict) and isinstance(value, dict):
+                _merge(base[key], value)
+            else:
+                base[key] = value
+
+    with _lock:
+        _merge(KEY, updates)
+        try:
+            with open(CONFIG_FILE, "w", encoding="utf-8") as fh:
+                json.dump(KEY, fh, indent=4)
+            return True
+        except Exception as exc:
+            _log.warning("could not save update: %s", exc)
+            return False
+
+
 KEY = load_config()
 
 
 def sync_version():
-    """
-    Read version from version.txt (written by Electron) or package.json.
-    Updates config.json so home page shows correct version.
-    """
+    """Read the version from version.txt (written by Electron) or package.json."""
     try:
-        import json as _json
-        base     = os.path.dirname(os.path.abspath(__file__))
+        base = os.path.dirname(os.path.abspath(__file__))
         app_path = os.environ.get("SEVEN_APP_PATH", "")
+        found = None
 
-        version_found = None
-
-        # Priority 1: version.txt (Electron writes this on startup)
-        version_txt_candidates = [
-            os.path.join(app_path, "version.txt") if app_path else None,
-            os.path.join(base, "version.txt"),
-            os.path.join(os.path.dirname(base), "version.txt"),
-        ]
-        for vp in version_txt_candidates:
-            if not vp:
-                continue
-            vp = os.path.normpath(vp)
-            if os.path.exists(vp):
+        for vp in (os.path.join(app_path, "version.txt") if app_path else None,
+                   os.path.join(base, "version.txt"),
+                   os.path.join(os.path.dirname(base), "version.txt")):
+            if vp and os.path.exists(vp):
                 try:
-                    with open(vp, "r", encoding="utf-8") as f:
-                        v = f.read().strip().lstrip("\ufeff")
-                    if v:
-                        version_found = v
-                        print("[CONFIG] Version " + v + " from version.txt")
-                        break
+                    with open(vp, "r", encoding="utf-8") as fh:
+                        found = fh.read().strip().lstrip("\ufeff") or None
                 except Exception:
                     continue
+                if found:
+                    break
 
-        # Priority 2: package.json (dev mode or packaged)
-        if not version_found:
-            pkg_candidates = [
-                os.path.join(app_path, "package.json") if app_path else None,
-                os.path.join(base, "package.json"),
-                os.path.join(os.path.dirname(base), "package.json"),
-            ]
-            for p in pkg_candidates:
-                if not p:
-                    continue
-                p = os.path.normpath(p)
-                if os.path.exists(p):
+        if not found:
+            for p in (os.path.join(app_path, "package.json") if app_path else None,
+                      os.path.join(base, "package.json"),
+                      os.path.join(os.path.dirname(base), "package.json")):
+                if p and os.path.exists(p):
                     try:
-                        with open(p, "r", encoding="utf-8") as f:
-                            content = f.read().lstrip("\ufeff")
-                            version_found = _json.loads(content).get("version", "")
-                        if version_found:
-                            print("[CONFIG] Version " + version_found + " from package.json")
-                            break
+                        with open(p, "r", encoding="utf-8") as fh:
+                            found = json.loads(fh.read().lstrip("\ufeff")).get("version", "") or None
                     except Exception:
                         continue
+                    if found:
+                        break
 
-        if version_found and version_found != KEY.get("version", ""):
-            KEY["version"] = version_found
+        if found and found != KEY.get("version", ""):
+            KEY["version"] = found
             save_config()
-            print("[CONFIG] Version updated to " + version_found)
-
-    except Exception as e:
-        print("[CONFIG] Version sync error: " + str(e))
+    except Exception as exc:
+        _log.warning("version sync error: %s", exc)
 
 
 sync_version()

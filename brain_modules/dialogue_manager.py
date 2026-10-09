@@ -315,14 +315,14 @@ def looks_like_reference(user_text: str) -> bool:
         if phrase in clean:
             return True
 
-    # Signal 6: bare pronouns with action verb
+   # Signal 6: bare pronouns with action verb, short input only
     action_verbs = {"open", "show", "play", "run", "launch", "start",
                     "close", "delete", "remove"}
-    if word_set & action_verbs and word_set & _REFERENCE_PRONOUNS:
+    if word_set & action_verbs and word_set & _REFERENCE_PRONOUNS and len(words) <= 6:
         return True
 
-    # Signal 7: "the X" where X is a type filter and only recent search matches
-    if "the " in clean:
+    # Signal 7: "the X" where X is a type filter, short input only
+    if "the " in clean and len(words) <= 6:
         for type_word in _TYPE_FILTERS:
             if f"the {type_word}" in clean:
                 return True
@@ -486,6 +486,52 @@ def format_memory_hint() -> str:
         lines.append(f"  ... and {len(results) - 5} more")
 
     return "\n".join(lines)
+
+
+def should_inject_reference_hint(user_text: str) -> bool:
+    """
+    Strict gate for Layer 08 hint injection.
+    Reference hints prime the LLM to emit ###OPEN tokens even on unrelated
+    questions. Only inject when the input has strong reference signals.
+    Weak signals (bare 'it', 'that') without action verbs are ignored.
+    """
+    if not has_recent_action():
+        return False
+
+    clean = user_text.lower().strip()
+    if not clean:
+        return False
+
+    words = re.findall(r"[a-z0-9]+", clean)
+    word_set = set(words)
+
+    # Strong signals only. Ordinal + short input.
+    if word_set & set(_REFERENCE_ORDINALS.keys()) and len(words) <= 6:
+        return True
+
+    if (word_set & _REFERENCE_LAST or word_set & _REFERENCE_FIRST) and len(words) <= 6:
+        return True
+
+    for phrase in _REFERENCE_REPEAT:
+        if phrase in clean and len(words) <= 6:
+            return True
+
+    for phrase in _REFERENCE_NEGATION:
+        if phrase in clean:
+            return True
+
+    # Action verb + pronoun only (very tight)
+    action_verbs = {"open", "show", "play", "run", "launch", "close", "delete", "remove"}
+    if word_set & action_verbs and word_set & _REFERENCE_PRONOUNS and len(words) <= 6:
+        return True
+
+    # "the pdf" type filter, short input only
+    if "the " in clean and len(words) <= 6:
+        for type_word in _TYPE_FILTERS:
+            if f"the {type_word}" in clean:
+                return True
+
+    return False
 
 
 def clear_memory():
