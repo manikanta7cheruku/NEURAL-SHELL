@@ -54,7 +54,7 @@ export default function BrainSection({ local, set, hw, speed }) {
         Brain Configuration
       </div>
 
-      {/* ─── Model + Temperature row ─── */}
+      {/* Model and Temperature row */}
       <div className="grid grid-cols-2 gap-4">
 
         {/* Model picker */}
@@ -168,7 +168,7 @@ export default function BrainSection({ local, set, hw, speed }) {
         </div>
       </div>
 
-      {/* ─── TARS Personality ─── */}
+      {/* TARS Personality */}
       <div className="mt-4 border-t border-s-border/50 pt-3">
         <div className="flex items-center justify-between mb-2">
           <div className="text-[8px] text-s-text-4 uppercase tracking-widest">Personality</div>
@@ -230,7 +230,7 @@ export default function BrainSection({ local, set, hw, speed }) {
         </div>
       </div>
 
-      {/* ─── Search Behavior ─── */}
+      {/* Search Behavior */}
       <div className="mt-4 border-t border-s-border/50 pt-3">
         <div className="text-[8px] text-s-text-4 uppercase tracking-widest mb-2">
           Search Behavior
@@ -351,7 +351,7 @@ export default function BrainSection({ local, set, hw, speed }) {
         </div>
       </div>
 
-      {/* ─── Streaming toggle ─── */}
+      {/* Streaming toggle */}
       <div className="flex items-center justify-between bg-s-bg rounded px-3 py-2 border border-s-border mt-4">
         <div>
           <div className="text-[12px] text-s-text-2">Streaming</div>
@@ -372,25 +372,6 @@ export default function BrainSection({ local, set, hw, speed }) {
         </button>
       </div>
 
-      {/* Latency stats */}
-      {speed && (
-        <div className="mt-4 border-t border-s-border/50 pt-3">
-          <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium mb-2">
-            Response Latency
-          </div>
-          <div className="grid grid-cols-4 gap-2">
-            {(speed.count > 0
-              ? [['Avg', `${speed.avg}ms`], ['Min', `${speed.min}ms`], ['Max', `${speed.max}ms`], ['Samples', speed.count]]
-              : [['Avg', '—'], ['Min', '—'], ['Max', '—'], ['Samples', '0']]
-            ).map(([k, v]) => (
-              <div key={k} className="bg-s-bg rounded px-2 py-1.5 text-center">
-                <div className="text-[12px] font-mono font-medium text-s-text">{v}</div>
-                <div className="text-[8px] text-s-text-4">{k}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   );
 }

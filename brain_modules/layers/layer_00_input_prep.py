@@ -1,109 +1,98 @@
 """
-=============================================================================
 LAYER 0: INPUT PREPARATION
 
-Runs FIRST. Populates the BrainContext with:
-    - Resolved speaker_name (from voice ID or session USER_NAME)
-    - clean_in (lowercased, punctuation stripped, filler removed)
-    - words, first_word
-    - Classifier flags (is_command, is_greeting, is_action_cmd)
-    - Acknowledgement filter — returns empty string for "ok", "yeah", etc.
+Runs first. Populates the BrainContext with the resolved speaker, the cleaned
+input (clean_in, norm_in, words) and the classifier flags.
 
-This layer never stops the pipeline unless the input is an acknowledgement.
-=============================================================================
+CHANGES:
+    - The old version queried ChromaDB for the speaker's name on EVERY message.
+      That put a database read (and, on the first message, the embedding model
+      load) in front of every reply. Names now come from config and the
+      session module; Chroma is consulted only if it is already loaded.
+    - is_greeting is true only when the WHOLE utterance is a greeting, not
+      whenever the first word is "hi", "hey", "good" ("good idea" is not one).
+    - norm_in is added: contraction-expanded, punctuation-free, matched by
+      whole words everywhere downstream.
 """
 
-from colorama import Fore
+import logging
+
+from brain_modules import session, speech_acts
 from brain_modules.layer_result import LayerResult
 
+_log = logging.getLogger("seven.layer00")
 
-# Pure positive acknowledgements that need no response on voice.
-# Kept minimal - only unambiguous one-word reactions.
-# "no", "never mind", "nah" removed - these are valid conversational inputs.
 _ACKNOWLEDGEMENTS = {
-    "okay", "ok", "alright", "yeah", "yep", "yup",
-    "got it", "understood", "noted",
-    "cool", "nice", "great", "perfect",
+    "okay", "ok", "alright", "yeah", "yep", "yup", "got it", "understood",
+    "noted", "cool", "nice", "great", "perfect",
 }
-
 _FILLER_STARTS = [
-    "and ", "also ", "now ", "then ", "please ",
-    "can you ", "could you ", "hey ",
+    "and ", "also ", "now ", "then ", "please ", "can you ", "could you ",
+    "hey ", "seven ",
 ]
-
 _COMMAND_VERBS = [
-    "open", "close", "start", "kill", "launch",
-    "minimize", "maximize", "maximise", "restore", "snap",
+    "open", "close", "start", "kill", "launch", "minimize", "maximize",
+    "maximise", "restore", "snap",
 ]
-
 _ACTION_CMD_VERBS = [
     "open", "close", "start", "kill", "launch", "minimize", "maximize",
     "maximise", "restore", "snap", "mute", "unmute", "set", "volume",
     "brightness", "play", "pause", "skip", "next", "previous", "stop",
 ]
+_SYSTEM_IDS = {"default", "unknown", "voice_user", "speaker", "user"}
 
-_GREETING_STARTS = ["hi", "hey", "hello", "bye", "goodbye", "good"]
+
+def _enrolled_speaker_name(speaker_id: str):
+    """Name of an enrolled voice profile, read only if memory is already loaded."""
+    try:
+        from memory import core as memory_core
+        inst = getattr(memory_core, "_instance", None)
+        if inst is None:
+            return None
+        facts = inst.user_facts.get(where={"user_id": speaker_id})
+        for doc in (facts or {}).get("documents", []):
+            low = doc.lower()
+            if "name is" in low:
+                name = doc.split("is")[-1].strip().rstrip(".")
+            elif "called" in low:
+                name = doc.split("called")[-1].strip().rstrip(".")
+            else:
+                continue
+            if name:
+                return name
+    except Exception as exc:
+        _log.debug("speaker name lookup skipped: %s", exc)
+    return None
 
 
 def process(ctx, deps):
-    seven_memory = deps.get("seven_memory")
-
-    # ── Resolve speaker name ─────────────────────────────────────
-    # Generic system speaker IDs that should never appear as display names.
-    _SYSTEM_IDS = {"default", "unknown", "voice_user", "speaker", "user"}
-
-    if ctx.speaker_id not in _SYSTEM_IDS:
-        ctx.speaker_name = ctx.speaker_id.title()
-        try:
-            all_facts = seven_memory.user_facts.get(where={"user_id": ctx.speaker_id})
-            if all_facts and all_facts['documents']:
-                for doc in all_facts['documents']:
-                    doc_lower = doc.lower()
-                    if "name is" in doc_lower:
-                        found_name = doc.split("is")[-1].strip().rstrip(".")
-                        if found_name:
-                            ctx.speaker_name = found_name
-                            break
-                    elif "called" in doc_lower:
-                        found_name = doc.split("called")[-1].strip().rstrip(".")
-                        if found_name:
-                            ctx.speaker_name = found_name
-                            break
-        except Exception:
-            pass
+    # Speaker identity
+    if ctx.speaker_id in _SYSTEM_IDS:
+        ctx.speaker_name = ctx.user_name if ctx.user_name else "there"
     else:
-        ctx.speaker_name = ctx.user_name if ctx.user_name else 'there'
+        ctx.speaker_name = _enrolled_speaker_name(ctx.speaker_id) or ctx.speaker_id.title()
+    ctx.speaker_key = session.resolve_key(ctx.speaker_id, ctx.user_name)
 
-    # ── Clean input ──────────────────────────────────────────────
+    # Cleaned input
     clean_in = ctx.prompt_text.lower().strip()
-    clean_in = clean_in.replace("?", "").replace(".", "").replace("!", "")
-    clean_in = clean_in.replace("'", "").replace(",", "")
-
-    # Strip leading filler
-    for _filler in _FILLER_STARTS:
-        if clean_in.startswith(_filler):
-            clean_in = clean_in[len(_filler):].strip()
+    for ch in ("?", ".", "!", "'", ","):
+        clean_in = clean_in.replace(ch, "")
+    for filler in _FILLER_STARTS:
+        if clean_in.startswith(filler):
+            clean_in = clean_in[len(filler):].strip()
             break
 
-    ctx.clean_in   = clean_in
-    ctx.words      = clean_in.split()
+    ctx.clean_in = clean_in
+    ctx.words = clean_in.split()
     ctx.first_word = ctx.words[0] if ctx.words else ""
+    ctx.norm_in = speech_acts.normalize(ctx.prompt_text)
 
-    # ── Short input filter (acknowledgements) ────────────────────
-    if (clean_in in _ACKNOWLEDGEMENTS
-            or (len(ctx.words) == 1 and ctx.words[0] in _ACKNOWLEDGEMENTS)):
-        print(Fore.YELLOW + f"[BRAIN] Acknowledgement filtered: '{clean_in}'")
-        # Empty string = intentional silence for voice loop
+    # Acknowledgements need no reply (intentional silence)
+    if clean_in in _ACKNOWLEDGEMENTS:
         return LayerResult.stop("")
 
-    # ── Classifier flags ─────────────────────────────────────────
-    _has_file_word = any(w in ctx.ALWAYS_FILE_WORDS for w in ctx.words)
-
-    ctx.is_command = (
-        ctx.first_word in _COMMAND_VERBS
-        and not _has_file_word
-    )
-    ctx.is_greeting    = ctx.first_word in _GREETING_STARTS
-    ctx.is_action_cmd  = ctx.first_word in _ACTION_CMD_VERBS
-
+    has_file_word = any(w in ctx.ALWAYS_FILE_WORDS for w in ctx.words)
+    ctx.is_command = ctx.first_word in _COMMAND_VERBS and not has_file_word
+    ctx.is_action_cmd = ctx.first_word in _ACTION_CMD_VERBS
+    ctx.is_greeting = speech_acts.is_greeting(ctx.norm_in)
     return LayerResult.pass_through()

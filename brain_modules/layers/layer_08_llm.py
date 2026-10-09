@@ -1,354 +1,215 @@
 """
-=============================================================================
-LAYER 8: LLM INFERENCE (Ollama)
+LAYER 8: LLM INFERENCE
 
-Final layer. Always stops the pipeline with a response.
+Final layer. Always stops the pipeline.
 
-Two paths:
-    Streaming     → returns ("__STREAM__", generator) to main.py
-    Non-streaming → returns final response string
+HOW A REPLY IS PRODUCED:
+    1. Wait briefly for the semantic memory search started earlier (if any).
+    2. Build structured chat messages (prompt_builder): stable persona first,
+       recent time-limited history, and a reference-only block on the turns
+       that need memory, web, documents or capabilities.
+    3. Stream tokens from Ollama through the sanitizer, which removes role
+       prefixes, echoed tags and any "###" action text.
+    4. Deliver in the mode the caller asked for:
+           "token"    raw token stream (console, Server-Sent Events)
+           "sentence" speakable sentences (voice, first chunk flushed early)
+           "text"     one finished string
+    5. On completion ONLY, record the exchange (history, session thread,
+       latency). A failed or interrupted reply is never stored, so an error
+       message can never become a "memory".
 
-Uses context.memory_context, knowledge_context, web_context accumulated
-by earlier layers. Builds full prompt with system_prompt + those contexts.
-
-Response length adapts to question type:
-    Count triggers  → 200 tokens
-    Long triggers   → 120 tokens
-    Web search      → 80 tokens
-    Default         → 50 tokens
-
-INTERVIEW TALKING POINT:
-    "Layer 8 is where the expensive work happens.
-     Everything before it is designed to avoid reaching this layer.
-     A well-tuned Seven handles 60-70% of inputs without ever calling Ollama.
-     Latency for those responses is under 5 milliseconds."
-=============================================================================
+Measured and logged per turn: time to first token, total time.
 """
 
-import time as _time
-import requests
-from colorama import Fore
+import logging
+import time
+
+from brain_modules import capabilities, chat_history, learning, ollama_client, prompt_builder, speech_acts
 from brain_modules.layer_result import LayerResult
+from brain_modules.response_filter import SentenceChunker, StreamSanitizer, clean_final, is_trailer
+
+_log = logging.getLogger("seven.layer08")
+
+_LONG_TRIGGERS = (
+    "tell me", "explain", "describe", "list", "how does", "how do", "detail",
+    "everything", "all about", "continue", "go on", "more about", "difference between",
+    "opinion on", "thoughts on", "think about", "best way", "advice", "recommend",
+    "suggestion", "write",
+)
+_COUNT_TRIGGERS = ("count", "list them", "name them", "enumerate", "from 1", "1 to", "one to")
+_FALLBACK_EMPTY = "I lost my train of thought. Say that again?"
 
 
-OLLAMA_URL = "http://127.0.0.1:11434/api/generate"
+def _rec(name: str, ms: float) -> None:
+    try:
+        from brain_modules.observability import record_layer_latency
+        record_layer_latency(name, ms)
+    except Exception:
+        pass
 
-# _REASONING_TRIGGERS removed: chain-of-thought disabled for llama3 local.
-# llama3 does not follow [THINK]/[ANSWER] format reliably at 4096 context.
-# Re-enable with llama3.1 or phi3:medium when tested.
 
-_LONG_TRIGGERS = [
-    # These genuinely need longer responses in chat.
-    # Voice path ignores the upper end of these limits anyway.
-    "tell me", "explain", "describe",
-    "list", "how does", "how do",
-    "detail", "everything", "all about", "continue",
-    "go on", "more about",
-    "what can you", "your capabilities",
-    "what are you capable", "what do you do",
-    "what you can do", "capable of",
-    "meaning of", "purpose of", "difference between",
-    "opinion on", "thoughts on", "think about",
-    "feel about", "believe in", "your view",
-    "best way", "advice", "recommend", "suggestion",
-    # Removed: "what is", "what are", "who is", "who was",
-    # "should i", "help me", "how to" — too broad, fires on trivial questions.
-    # "What is 2+2" should not get 200 tokens.
-]
+def _options(ctx, is_voice, humor, profile, model_name):
+    """Generation options. num_ctx stays constant per model so Ollama never reloads it."""
+    norm = ctx.norm_in
+    count = any(speech_acts.has_phrase(norm, t) for t in _COUNT_TRIGGERS)
+    long = any(speech_acts.has_phrase(norm, t) for t in _LONG_TRIGGERS)
+    if is_voice:
+        budget = 160 if count else 100 if long else 70
+    else:
+        budget = 400 if (count or long) else 160 if ctx.web_searched else 240
+    if profile.get("verbosity") == "brief":
+        budget = min(budget, 60 if is_voice else 120)
+    elif profile.get("verbosity") == "detailed":
+        budget = int(budget * 1.5)
 
-_COUNT_TRIGGERS = [
-    "count", "1 to", "one to", "from 1", "from one",
-    "list them", "name them", "enumerate"
-]
+    grounded = ctx.web_searched or bool(ctx.knowledge_context)
+    base = 0.35 if is_voice else 0.3
+    temperature = 0.2 if grounded else min(0.7, round(base + (humor / 100) * 0.35, 2))
+    stops = ["###", "<reference_only>", "</reference_only>"] + (["\n\n"] if is_voice else [])
+    return {
+        "temperature": temperature, "num_predict": budget, "repeat_penalty": 1.1,
+        "repeat_last_n": 64, "top_p": 0.9, "stop": stops,
+        "num_ctx": 2048 if "tinyllama" in (model_name or "").lower() else 4096,
+    }
 
 
 def process(ctx, deps):
-    config     = deps.get("config")
-    model_name = deps.get("model_name")
+    config = deps.get("config")
+    model_name = deps.get("model_name") or config.KEY.get("brain", {}).get("model_name", "llama3")
+    brain_cfg = config.KEY.get("brain", {})
+    mem_cfg = config.KEY.get("memory", {})
+    is_voice = ctx.speaker_id not in ("default",)
+    key = ctx.speaker_key
 
-    # Source detection early.
-    # Voice: speaker_id is a real name or "mani", "priya" etc.
-    # Chat: speaker_id is always "default" from chat.py.
-    _is_voice = ctx.speaker_id not in ("default",)
+    original = ctx.prompt_text
+    if "===" in original and "User asked:" in original:
+        original = original.split("User asked:")[-1].strip()
+    is_visual = "VISUAL_REPORT:" in original
 
-    # Store original input in history.
-    # Use prompt_text directly - never the modified version with injected notes.
-    # llm_note is passed separately so it never enters the history record.
-    _original_input = ctx.prompt_text
-    if "===" in _original_input and "User asked:" in _original_input:
-        _original_input = _original_input.split("User asked:")[-1].strip()
+    ctx.resolve_memory(float(mem_cfg.get("retrieval_timeout_ms", 450)) / 1000.0)
 
-    if "VISUAL_REPORT:" not in _original_input and not ctx.is_action_cmd:
-        try:
-            from brain_modules.context_manager import add_user_turn
-            add_user_turn(ctx.speaker_id, _original_input)
-        except Exception:
-            pass
-
-    # Build system prompt
-    _brain_cfg = config.KEY.get('brain', {})
-    _humor     = int(_brain_cfg.get('tars_humor',   75))
-    _honesty   = int(_brain_cfg.get('tars_honesty', 85))
-
-    from brain_modules.prompt_builder  import build_system_prompt
-    from brain_modules.context_manager import assemble_prompt
-
-    _tier = config.KEY.get("license", {}).get("tier", "free")
-    system_prompt = build_system_prompt(
-        speaker_name = ctx.speaker_name,
-        humor        = _humor,
-        honesty      = _honesty,
-        tier         = _tier,
-        input_text   = ctx.clean_in,
-        is_voice     = _is_voice,
-        speaker_id   = ctx.speaker_id,
-    )
-
-    full_prompt = assemble_prompt(
-        system_prompt     = system_prompt,
-        speaker_id        = ctx.speaker_id,
-        web_context       = ctx.web_context,
-        knowledge_context = ctx.knowledge_context,
-        memory_context    = ctx.memory_context,
-    )
-
-    # Prepend llm_note if layer_02 set one.
-    if ctx.llm_note:
-        full_prompt = ctx.llm_note + "\n\n" + full_prompt
-
-    # Working memory hint: only inject when current input clearly references
-    # the recent action. Blanket injection primes the 1B model to emit
-    # ###OPEN tokens on unrelated questions ("What is React" mistaken for a file).
+    profile = learning.get_profile(key)
+    humor, honesty = int(brain_cfg.get("tars_humor", 75)), int(brain_cfg.get("tars_honesty", 85))
     try:
-        from brain_modules.dialogue_manager import should_inject_reference_hint, get_last_action
-        from brain_modules.prompt_builder import build_reference_hint, build_dialogue_examples
+        from brain_modules.tone_tracker import get_bias
+        h_bias, o_bias = get_bias(key)
+        humor, honesty = max(0, min(100, humor + h_bias)), max(0, min(100, honesty + o_bias))
+    except Exception:
+        pass
+
+    mood_label = "neutral"
+    try:
+        mood_label = deps["mood_engine"].get_label()
+    except Exception:
+        pass
+
+    followup_hint = ""
+    try:
+        from brain_modules.conversation_thread import ConversationThread
+        fu = ConversationThread.get_metadata(key, "followup_hint")
+        if isinstance(fu, dict):
+            followup_hint = fu.get("hint", "")
+            ConversationThread.set_metadata(key, "followup_hint", None)
+    except Exception:
+        pass
+
+    reference_hint = ""
+    try:
+        from brain_modules.dialogue_manager import get_last_action, should_inject_reference_hint
         if should_inject_reference_hint(ctx.clean_in):
-            _recent = get_last_action()
-            _ref_hint = build_reference_hint(_recent)
-            _examples = build_dialogue_examples()
-            if _ref_hint:
-                full_prompt = _ref_hint + _examples + "\n" + full_prompt
-                print(Fore.CYAN + "[LLM] Reference hint injected for strong reference input")
-    except Exception as _hint_err:
-        print(Fore.YELLOW + f"[LLM] Memory hint skipped: {_hint_err}")
+            reference_hint = prompt_builder.build_reference_hint(get_last_action())
+    except Exception:
+        pass
 
-    # Chain-of-thought removed: llama3 at local context sizes does not follow
-    # structured [THINK]/[ANSWER] format reliably. The instruction causes
-    # preamble generation instead of actual reasoning, degrading response quality.
-    # Revisit with phi3:medium or llama3.1 which follow instructions more precisely.
+    history = [] if is_visual else chat_history.get_messages(
+        key, max_age_s=float(brain_cfg.get("history_ttl_seconds", 1800)))
 
-    # Determine response length based on source and question type.
-    needs_long  = any(t in ctx.clean_in for t in _LONG_TRIGGERS)
-    needs_count = any(t in ctx.clean_in for t in _COUNT_TRIGGERS)
+    messages = prompt_builder.build_messages(
+        user_text=original, speaker_name=ctx.speaker_name if ctx.speaker_name != "there" else "",
+        history=history, humor=humor, honesty=honesty,
+        tier=config.KEY.get("license", {}).get("tier", "free"), is_voice=is_voice,
+        profile=profile, mood_label=mood_label, memory_facts=ctx.memory_facts,
+        knowledge_context=ctx.knowledge_context, web_context=ctx.web_context,
+        proactive_hint=ctx.proactive_hint, followup_hint=followup_hint,
+        reference_hint=reference_hint, include_capabilities=ctx.inject_capabilities,
+        capabilities_text=capabilities.describe_for_prompt() if ctx.inject_capabilities else "")
 
-    if _is_voice:
-        # Voice responses must be short and natural.
-        # Human conversation is 1-3 sentences. Never a wall of text.
-        # The model speaks these words — 150 tokens is already ~30 seconds of speech.
-        if needs_count:
-            response_length = 120
-        elif needs_long:
-            response_length = 80
-        elif ctx.web_searched:
-            response_length = 60
-        else:
-            response_length = 50
-    else:
-        # Chat path: user is reading, can handle more detail.
-        if needs_count:
-            response_length = 300
-        elif needs_long:
-            response_length = 200
-        elif ctx.web_searched:
-            response_length = 120
-        else:
-            response_length = 100
+    payload = {"model": model_name, "messages": messages, "keep_alive": "24h",
+               "options": _options(ctx, is_voice, humor, profile, model_name)}
 
-    # Temperature scales with humor setting.
-    # Voice gets slightly higher base temperature for natural speech variation.
-    _humor_level = int(_brain_cfg.get('tars_humor', 75))
-    _base_temp   = 0.35 if _is_voice else 0.3
-    _temperature = round(_base_temp + (_humor_level / 100) * 0.35, 2)
+    mode = ctx.stream_mode
+    if mode == "sentence" and not brain_cfg.get("streaming", True):
+        mode = "text"
+    started = ctx.started_at
 
-    # num_ctx per model capability.
-    # TinyLlama = 2048. llama3 = 8192 but we cap at 4096 for speed.
-    # Others = 4096.
-    _model_lower = (model_name or "").lower()
-    _ctx_window  = 2048 if "tinyllama" in _model_lower else 4096
-
-    # Stop sequences.
-    # Voice gets tighter stops — halt at sentence boundaries aggressively.
-    # Chat gets looser stops — allow paragraphs to form naturally.
-    _base_stops = ["User:", "System:", "Seven:", "(Note", "(note", "Note to self"]
-    _voice_stops = _base_stops + ["\n\n"]
-    _chat_stops  = _base_stops + ["\n\n"]
-
-    payload = {
-        "model":   model_name,
-        "prompt":  full_prompt,
-        "stream":  False,
-        "options": {
-            "temperature":    _temperature,
-            "num_predict":    response_length,
-            "repeat_penalty": 1.3,
-            "stop":           _voice_stops if _is_voice else _chat_stops,
-            "num_ctx":        _ctx_window,
-        }
-    }
-
-    # ── Streaming path ───────────────────────────────────────────
-    # Supports both voice and web UI SSE token streaming
-    use_streaming = (
-        config.KEY.get('brain', {}).get('streaming', True)
-        or ctx.speaker_id != "default"
-    )
-
-    if use_streaming:
-        from brain_modules.ollama_client import stream_sentences
-        start_time  = _time.time()
-        speaker_id  = ctx.speaker_id
-        prompt_text = ctx.prompt_text
-
-        def _sentence_gen():
-            full_reply = []
-            for sentence in stream_sentences(full_prompt, payload):
-                full_reply.append(sentence)
-                yield sentence
-
-            complete_reply = " ".join(full_reply)
-            elapsed = int((_time.time() - start_time) * 1000)
-
-            try:
-                from brain_manager import record_latency
-                record_latency(elapsed)
-            except Exception:
-                pass
-
-            if "VISUAL_REPORT:" not in prompt_text:
-                try:
-                    from brain_modules.context_manager import add_seven_turn
-                    add_seven_turn(speaker_id, complete_reply)
-                except Exception:
-                    pass
-
-                # Dynamic save of completed stream turn to repeat threads and database
-                try:
-                    from brain import save_completed_turn
-                    save_completed_turn(prompt_text, complete_reply, speaker_id, source="chat")
-                except Exception as _save_err:
-                    print(Fore.YELLOW + f"[LLM] Streaming turn save failed: {_save_err}")
-
-        return LayerResult.stop_stream(_sentence_gen())
-
-    # ── Non-streaming path ───────────────────────────────────────
-    start_time = _time.time()
-
-    try:
-        r = requests.post(OLLAMA_URL, json=payload, timeout=120)
-
-        elapsed = int((_time.time() - start_time) * 1000)
+    def _finalize(parts, completed, failed):
+        if not completed or failed or is_visual:
+            return
+        text = "".join(parts).strip()
+        if not text:
+            return
+        total_ms = int((time.time() - started) * 1000)
+        _rec("llm_total", total_ms)
         try:
             from brain_manager import record_latency
-            record_latency(elapsed)
+            record_latency(total_ms)
         except Exception:
             pass
-
-        if r.status_code == 200:
-            reply = r.json().get("response", "").strip() or "Listening."
-            reply = _clean_response(reply)
-
-            if "VISUAL_REPORT:" not in ctx.prompt_text:
-                try:
-                    from brain_modules.context_manager import add_seven_turn
-                    add_seven_turn(ctx.speaker_id, reply)
-                except Exception:
-                    pass
-
-            return LayerResult.stop(reply)
-
-        print(Fore.RED + f"[BRAIN] Ollama status {r.status_code}")
-        return LayerResult.stop("My brain hiccupped. Try again.")
-
-    except requests.exceptions.ConnectionError:
-        print(Fore.RED + "[BRAIN] Cannot connect to Ollama.")
-        # Check if Ollama is installed at all
+        chat_history.add_exchange(key, original, text)
         try:
-            from backend.bootstrap import is_ollama_installed
-            if not is_ollama_installed():
-                return LayerResult.stop(
-                    "The AI engine is not installed yet. "
-                    "Please go to Settings, scroll to the bottom, and click Repair Installation to set it up."
-                )
-        except Exception:
-            pass
-        return LayerResult.stop(
-            "The AI engine is not running. "
-            "Please open the Ollama app from your Start menu, then try again."
-        )
-    except requests.exceptions.Timeout:
-        print(Fore.RED + "[BRAIN] Ollama timeout.")
-        return LayerResult.stop(
-            "The AI engine is taking too long to respond. "
-            "It may still be loading the model. Please wait a moment and try again."
-        )
-    except Exception as e:
-        print(Fore.RED + f"[BRAIN] Unexpected error: {e}")
-        return LayerResult.stop("Something went wrong with my thinking. Please try again.")
+            from brain import save_completed_turn
+            save_completed_turn(original, text, ctx.speaker_id, source="voice" if is_voice else "chat",
+                                persist=True)
+        except Exception as exc:
+            _log.warning("turn save failed: %s", exc)
 
-def _clean_response(text):
-    """
-    Strip robotic trailing phrases that LLMs append regardless of system prompt.
-    These come from RLHF training - the model learned to end responses with
-    assistant-style prompts. We remove them post-generation.
-    Also strips RLHF apology reflex openings that fire on any correction hint.
-    """
-    if not text:
-        return text
+    def _tokens():
+        parts, completed, failed, first_ms = [], False, False, None
+        sanitizer, stream = StreamSanitizer(), None
+        try:
+            stream = ollama_client.stream_chat(payload)
+            for token in stream:
+                if first_ms is None:
+                    first_ms = int((time.time() - started) * 1000)
+                    _rec("llm_first_token", first_ms)
+                    _log.info("first token after %d ms", first_ms)
+                out = sanitizer.feed(token)
+                if out:
+                    parts.append(out)
+                    yield out
+                if sanitizer.stopped:
+                    break
+            tail = sanitizer.flush()
+            if tail:
+                parts.append(tail)
+                yield tail
+            if not parts:
+                failed = True
+                yield _FALLBACK_EMPTY
+            completed = True
+        except ollama_client.OllamaError as err:
+            failed = True
+            msg = (capabilities.fallback_summary() if ctx.inject_capabilities and err.kind != "model_missing"
+                   else ollama_client.friendly_error(err, model_name))
+            _log.warning("ollama error (%s): %s", err.kind, err.message)
+            yield msg
+        finally:
+            if stream is not None:
+                stream.close()
+            _finalize(parts, completed, failed)
 
-    import re
+    def _sentences():
+        chunker = SentenceChunker()
+        for piece in _tokens():
+            for sentence in chunker.feed(piece):
+                if not is_trailer(sentence):
+                    yield sentence
+        for sentence in chunker.flush():
+            if not is_trailer(sentence):
+                yield sentence
 
-    # Strip RLHF apology reflex openings (1B models cannot suppress these)
-    _apology_openers = [
-        r"^you'?re right,?\s*i was wrong\.?\s*",
-        r"^i apologize,?\s*",
-        r"^my apologies,?\s*",
-        r"^you'?re absolutely right,?\s*",
-        r"^i'?m sorry,?\s*",
-        r"^sorry (about|for) (that|the confusion),?\s*",
-    ]
-    for pattern in _apology_openers:
-        text = re.sub(pattern, "", text, flags=re.IGNORECASE).strip()
-
-    if not text:
-        return "Understood."
-
-    _trailers = [
-        "go ahead.", "go ahead",
-        "what do you need?", "what do you need",
-        "what's your next request?", "whats your next request",
-        "how can i help?", "how can i help you?",
-        "is there anything else?", "is there anything else i can help",
-        "let me know if you need anything", "let me know if",
-        "feel free to ask", "feel free to",
-        "anything else?", "anything else i can",
-        "what would you like", "what else can i",
-        "i'm here if you need", "im here if",
-        "just let me know", "just ask if",
-        "what's next?", "whats next",
-        "what can i do for you", "how may i help",
-        "ready when you are", "standing by",
-        "awaiting your", "next command",
-    ]
-
-    text_lower = text.lower().rstrip()
-
-    for trailer in _trailers:
-        if text_lower.endswith(trailer):
-            cut = len(text) - len(trailer)
-            text = text[:cut].rstrip(" .,!-")
-            text_lower = text.lower().rstrip()
-            break
-
-    text = re.sub(r'\s*[/\\]+\s*$', '', text).strip()
-
-    return text.strip()
+    if mode == "token":
+        return LayerResult.stop_stream(_tokens())
+    if mode == "sentence":
+        return LayerResult.stop_stream(_sentences())
+    return LayerResult.stop(clean_final("".join(_tokens())))

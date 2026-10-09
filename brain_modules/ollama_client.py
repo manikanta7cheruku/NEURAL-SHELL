@@ -1,269 +1,232 @@
-# =============================================================================
-# brain_modules/ollama_client.py
-#
-# PURPOSE: The ONLY file in the entire codebase that talks to Ollama.
-#          If you switch LLM providers (e.g. llama.cpp, LM Studio, GPT4All),
-#          you change THIS file only. Nothing else changes.
-#
-# PATTERN: Single Responsibility + Facade
-#          Facade = simple interface (call_ollama, stream_sentences)
-#                   hiding complex HTTP + JSON + error handling underneath.
-#
-# ENGINEERING NOTE:
-#   We use raw requests instead of the ollama Python SDK because:
-#   1. Full control over timeout values (critical for voice latency)
-#   2. Direct access to iter_lines() for streaming
-#   3. No extra dependency to manage in embedded Python
-#
-# INTERVIEW TALKING POINT:
-#   "I separated the LLM client into its own module using the Facade pattern.
-#    This means if we ever swap Ollama for another provider, we change one file.
-#    The rest of brain.py never knows the difference."
-# =============================================================================
+"""
+brain_modules/ollama_client.py
+
+The only module that talks to Ollama.
+
+WHAT CHANGED:
+    - Real token streaming through /api/chat (structured roles) instead of
+      one hand-built "User:/Seven:" text prompt through /api/generate.
+    - One pooled requests.Session, so each turn reuses the TCP connection
+      instead of paying a new handshake.
+    - keep_alive="24h" on EVERY path (the old non-streaming path omitted it,
+      so the model unloaded after Ollama's idle window and the next message
+      paid a multi-second cold load).
+    - Typed errors (OllamaError) so callers produce a clear, friendly message
+      instead of sending an error string through the memory system.
+    - warmup() loads the model into memory before the first message.
+
+The legacy call_ollama() and stream_sentences() are kept for other callers.
+"""
 
 import json
+import logging
+import threading
+from typing import Iterator
+
 import requests
-import colorama
-from colorama import Fore
+from requests.adapters import HTTPAdapter
 
-colorama.init(autoreset=True)
+_log = logging.getLogger("seven.ollama")
 
-# ---------------------------------------------------------------------------
-# OLLAMA ENDPOINT
-# Ollama runs locally on port 11434.
-# The /api/generate endpoint accepts a model name + prompt and returns JSON.
-# ---------------------------------------------------------------------------
-OLLAMA_URL = "http://127.0.0.1:11434/api/generate"
+OLLAMA_BASE = "http://127.0.0.1:11434"
+OLLAMA_URL = f"{OLLAMA_BASE}/api/generate"
+OLLAMA_CHAT_URL = f"{OLLAMA_BASE}/api/chat"
+OLLAMA_PS_URL = f"{OLLAMA_BASE}/api/ps"
+KEEP_ALIVE = "24h"
+CONNECT_TIMEOUT = 3.05
+READ_TIMEOUT = 120
+
+_session = requests.Session()
+_session.mount("http://", HTTPAdapter(pool_connections=2, pool_maxsize=4))
 
 
-def call_ollama(payload: dict) -> str:
-    """
-    Send a prompt to Ollama and return the full text response.
-    This is the NON-STREAMING path — waits for complete response.
+class OllamaError(Exception):
+    """kind is one of: unavailable, timeout, model_missing, http, model."""
 
-    Args:
-        payload (dict): Full Ollama request body.
-                        Must contain: model, prompt, stream=False, options.
+    def __init__(self, kind: str, message: str = ""):
+        super().__init__(message or kind)
+        self.kind = kind
+        self.message = message
 
-    Returns:
-        str: The LLM's response text.
-             Returns a user-friendly error string on failure — never raises.
 
-    ERROR HANDLING STRATEGY:
-        We catch specific exceptions in order of likelihood:
-        1. ConnectionError  — Ollama not running (most common mistake)
-        2. Timeout          — Model too slow for voice use
-        3. Exception        — Anything else (JSON parse, memory, etc.)
-
-        We return strings not raise exceptions because brain.py
-        passes the return value directly to mouth.speak().
-        A crash here would silence Seven completely.
-
-    INTERVIEW NOTE:
-        This is "defensive programming" — assume the external dependency
-        (Ollama) can fail at any time and handle it gracefully.
-    """
+def _try_recover() -> bool:
+    """Ask the recovery daemon to restart Ollama once. Never raises."""
     try:
-        # Keep model resident in VRAM for instant subsequent responses
-        request_payload = {**payload}
-        if "keep_alive" not in request_payload:
-            request_payload["keep_alive"] = "24h"
+        from brain_modules.recovery_daemon import restart_ollama_service
+        return bool(restart_ollama_service())
+    except Exception as exc:
+        _log.warning("Ollama recovery failed: %s", exc)
+        return False
 
-        response = requests.post(
-            OLLAMA_URL,
-            json=request_payload,
-            timeout=120
-        )
 
-        if response.status_code == 200:
-            reply = response.json().get("response", "").strip()
-            # If Ollama returns empty string, return neutral fallback
-            return reply if reply else "Listening."
-
-        # Non-200 from Ollama (e.g. model not found, OOM)
-        print(Fore.RED + f"[OLLAMA] Status {response.status_code}")
-        return "My brain hiccupped. Try again."
-
-    except requests.exceptions.ConnectionError:
-        # Attempt auto-recovery
-        print(Fore.YELLOW + "[OLLAMA] Connection failed. Triggering recovery daemon...")
+def _open_stream(url: str, body: dict) -> requests.Response:
+    """POST with streaming enabled. Retries once after an automatic restart."""
+    for attempt in (0, 1):
         try:
-            from brain_modules.recovery_daemon import restart_ollama_service
-            if restart_ollama_service():
-                # Re-attempt the request once
-                try:
-                    retry_resp = requests.post(OLLAMA_URL, json=request_payload, timeout=120)
-                    if retry_resp.status_code == 200:
-                        return retry_resp.json().get("response", "").strip() or "Listening."
-                except Exception as _re_err:
-                    print(Fore.RED + f"[OLLAMA] Post-recovery retry failed: {_re_err}")
-        except Exception as _rec_err:
-            print(Fore.RED + f"[OLLAMA] Recovery invocation failed: {_rec_err}")
-
-        print(Fore.RED + "[OLLAMA] Cannot connect. Is Ollama running?")
-        return "I can't reach my brain. Run 'ollama serve' in a terminal first."
-
-    except requests.exceptions.Timeout:
-        # Model took too long — common with large models on slow hardware
-        print(Fore.RED + "[OLLAMA] Timeout. Model too slow?")
-        return "My brain took too long. Try again."
-
-    except Exception as e:
-        # Catch-all — JSON parse errors, memory errors, etc.
-        print(Fore.RED + f"[OLLAMA] Unexpected error: {e}")
-        return "Something went wrong with my thinking."
+            resp = _session.post(url, json=body, stream=True, timeout=(CONNECT_TIMEOUT, READ_TIMEOUT))
+        except requests.exceptions.ConnectionError:
+            if attempt == 0 and _try_recover():
+                continue
+            raise OllamaError("unavailable")
+        except requests.exceptions.Timeout:
+            raise OllamaError("timeout")
+        if resp.status_code == 404:
+            detail = ""
+            try:
+                detail = resp.json().get("error", "")
+            except Exception:
+                pass
+            resp.close()
+            raise OllamaError("model_missing", detail)
+        if resp.status_code != 200:
+            code = resp.status_code
+            resp.close()
+            raise OllamaError("http", f"status {code}")
+        return resp
+    raise OllamaError("unavailable")
 
 
-def stream_sentences(prompt: str, payload: dict):
+def stream_chat(payload: dict) -> Iterator[str]:
     """
-    Stream tokens from Ollama and yield complete sentences.
+    Yield tokens from /api/chat as they are generated.
 
-    WHY STREAMING:
-        Without streaming, Seven waits for the full response before speaking.
-        With streaming, Seven speaks the first sentence while thinking the rest.
-        This reduces perceived latency from ~3s to ~0.8s for the user.
-
-    HOW IT WORKS:
-        1. Send request with stream=True to Ollama
-        2. Ollama sends one JSON line per token (Server-Sent Events style)
-        3. We buffer tokens until we hit a sentence boundary (. ! ?)
-        4. We yield each complete sentence immediately
-        5. main.py calls mouth.speak(sentence) per yield
-
-    SENTENCE BOUNDARY DETECTION:
-        We check if the character after . ! ? is a space or end of buffer.
-        This prevents false splits on:
-        - Decimals: "3.14" — no space after dot
-        - Abbreviations: "Dr." — caught by "no space" rule most of the time
-        This is heuristic, not perfect. Good enough for voice.
-
-    YIELD PATTERN (Generator):
-        Using yield makes this a Python generator.
-        Callers use: for sentence in stream_sentences(...)
-        Memory efficient — we never hold the full response in RAM.
-
-    Args:
-        prompt (str): Not used directly — payload contains the full prompt.
-                      Kept for API consistency.
-        payload (dict): Full Ollama request body.
-
-    Yields:
-        str: One complete sentence at a time.
-
-    INTERVIEW NOTE:
-        "I used Python generators for streaming because they are lazy —
-         they produce values on demand without storing everything in memory.
-         This is the same pattern used in file reading, database cursors,
-         and any time you process data larger than RAM."
+    payload: {"model", "messages", "options", ...}. stream and keep_alive are
+    filled in. Raises OllamaError before or during the stream.
     """
-    # Force streaming on and ensure model remains pinned in VRAM
-    stream_payload = {**payload, "stream": True}
-    if "keep_alive" not in stream_payload:
-        stream_payload["keep_alive"] = "24h"
-
-    # Token buffer — accumulates characters until a sentence boundary
-    buffer = ""
-
-    # Characters that end a sentence
-    sentence_endings = {'.', '!', '?'}
-
+    body = dict(payload)
+    body["stream"] = True
+    body.setdefault("keep_alive", KEEP_ALIVE)
+    resp = _open_stream(OLLAMA_CHAT_URL, body)
     try:
-        response = requests.post(
-            OLLAMA_URL,
-            json=stream_payload,
-            timeout=60,
-            stream=True  # Keep HTTP connection open for chunked response
-        )
-
-        if response.status_code != 200:
-            yield "My brain hiccupped. Try again."
-            return
-
-        # iter_lines() reads one JSON line at a time from the stream
-        # This is how Ollama sends Server-Sent Events
-        for line in response.iter_lines():
+        for line in resp.iter_lines():
             if not line:
-                continue  # Skip empty keep-alive lines
-
+                continue
             try:
                 chunk = json.loads(line)
-                token = chunk.get("response", "")  # One token (word piece)
-                done  = chunk.get("done", False)    # True on last chunk
-
-                # Accumulate token into buffer
-                if token:
-                    buffer += token
-
-                # Scan buffer for sentence boundaries
-                # We want: "Hello world. " → yield "Hello world."
-                # We avoid: "3.14" → no yield (no space after dot)
-                if buffer:
-                    last_boundary = -1
-                    for i, ch in enumerate(buffer):
-                        if ch in sentence_endings:
-                            # Check character after boundary
-                            if i + 1 < len(buffer) and buffer[i + 1] == ' ':
-                                last_boundary = i + 1  # Include the space
-                            elif i + 1 >= len(buffer):
-                                last_boundary = i + 1  # End of buffer
-
-                    # Yield everything up to last boundary
-                    if last_boundary > 0:
-                        sentence = buffer[:last_boundary].strip()
-                        buffer   = buffer[last_boundary:].strip()
-                        # Guard: skip single chars and empty strings
-                        if sentence and len(sentence) > 1:
-                            yield sentence
-
-                if done:
-                    # Flush remaining buffer as final sentence
-                    if buffer.strip():
-                        yield buffer.strip()
-                    break
-
-            except json.JSONDecodeError:
-                # Malformed JSON chunk — skip and continue
-                # This can happen on the very last "done" line from some Ollama versions
+            except ValueError:
                 continue
-
+            if chunk.get("error"):
+                raise OllamaError("model", str(chunk["error"]))
+            token = (chunk.get("message") or {}).get("content", "")
+            if token:
+                yield token
+            if chunk.get("done"):
+                break
     except requests.exceptions.ConnectionError:
-        print(Fore.YELLOW + "[OLLAMA-STREAM] Connection failed. Triggering recovery daemon...")
-        _recovered = False
+        raise OllamaError("unavailable")
+    except requests.exceptions.Timeout:
+        raise OllamaError("timeout")
+    finally:
+        resp.close()
+
+
+def chat_once(payload: dict) -> str:
+    """Collect a whole reply as one string."""
+    return "".join(stream_chat(payload)).strip()
+
+
+def warmup(model: str) -> None:
+    """Load the model into memory in the background so the first message is fast."""
+    if not model:
+        return
+
+    def _worker():
         try:
-            from brain_modules.recovery_daemon import restart_ollama_service
-            _recovered = restart_ollama_service()
+            _session.post(OLLAMA_CHAT_URL,
+                          json={"model": model, "messages": [], "keep_alive": KEEP_ALIVE},
+                          timeout=(CONNECT_TIMEOUT, 180))
+            _log.info("Model %s warmed", model)
+        except Exception as exc:
+            _log.debug("warmup skipped: %s", exc)
+
+    threading.Thread(target=_worker, daemon=True, name="OllamaWarmup").start()
+
+
+def loaded_models() -> list:
+    """Models currently resident in memory (Ollama /api/ps). [] on failure."""
+    try:
+        r = _session.get(OLLAMA_PS_URL, timeout=(1.5, 2.5))
+        if r.status_code == 200:
+            return [m.get("name", "") for m in r.json().get("models", [])]
+    except Exception:
+        pass
+    return []
+
+
+def friendly_error(err: OllamaError, model: str = "") -> str:
+    """Human message for an OllamaError. Never stored in memory."""
+    if err.kind == "unavailable":
+        try:
+            from backend.bootstrap import is_ollama_installed
+            if not is_ollama_installed():
+                return ("The AI engine isn't installed yet. Open Settings, scroll to the bottom "
+                        "and click Repair Installation.")
         except Exception:
             pass
+        return "My AI engine isn't running. Open Ollama from the Start menu and try again."
+    if err.kind == "timeout":
+        return "The model is taking too long. It may still be loading. Give it a moment and try again."
+    if err.kind == "model_missing":
+        name = model or "the selected model"
+        return f"The model {name} isn't installed. Pick another in Settings, or run: ollama pull {name}"
+    return "Something went wrong with my thinking. Try again."
 
-        if _recovered:
-            # Yield from a single retry stream
+
+# ---------------------------------------------------------------------------
+# Legacy API (kept for callers that still use /api/generate)
+# ---------------------------------------------------------------------------
+
+def call_ollama(payload: dict) -> str:
+    """Non-streaming /api/generate call. Returns text or a friendly error string."""
+    body = {**payload, "stream": False}
+    body.setdefault("keep_alive", KEEP_ALIVE)
+    try:
+        r = _session.post(OLLAMA_URL, json=body, timeout=(CONNECT_TIMEOUT, READ_TIMEOUT))
+        if r.status_code == 200:
+            return r.json().get("response", "").strip() or "Listening."
+        return "My brain hiccupped. Try again."
+    except requests.exceptions.ConnectionError:
+        if _try_recover():
             try:
-                retry_response = requests.post(
-                    OLLAMA_URL,
-                    json=stream_payload,
-                    timeout=60,
-                    stream=True
-                )
-                if retry_response.status_code == 200:
-                    for line in retry_response.iter_lines():
-                        if not line:
-                            continue
-                        try:
-                            chunk = json.loads(line)
-                            tok = chunk.get("response", "")
-                            if tok:
-                                yield tok
-                        except Exception:
-                            continue
-                    return
-            except Exception as _re_stream_err:
-                print(Fore.RED + f"[OLLAMA-STREAM] Stream recovery attempt failed: {_re_stream_err}")
-
-        yield "I can't reach my brain. Run 'ollama serve' first."
-
+                r = _session.post(OLLAMA_URL, json=body, timeout=(CONNECT_TIMEOUT, READ_TIMEOUT))
+                if r.status_code == 200:
+                    return r.json().get("response", "").strip() or "Listening."
+            except Exception as exc:
+                _log.warning("retry failed: %s", exc)
+        return friendly_error(OllamaError("unavailable"))
     except requests.exceptions.Timeout:
-        yield "My brain took too long. Try again."
+        return friendly_error(OllamaError("timeout"))
+    except Exception as exc:
+        _log.error("call_ollama failed: %s", exc)
+        return friendly_error(OllamaError("http"))
 
-    except Exception as e:
-        print(Fore.RED + f"[OLLAMA] Stream error: {e}")
-        yield "Something went wrong with my thinking."
+
+def stream_sentences(prompt: str, payload: dict) -> Iterator[str]:
+    """Legacy: stream /api/generate output as sentences."""
+    from brain_modules.response_filter import SentenceChunker
+    body = {**payload, "stream": True}
+    body.setdefault("keep_alive", KEEP_ALIVE)
+    chunker = SentenceChunker()
+    try:
+        resp = _open_stream(OLLAMA_URL, body)
+    except OllamaError as err:
+        yield friendly_error(err)
+        return
+    try:
+        for line in resp.iter_lines():
+            if not line:
+                continue
+            try:
+                chunk = json.loads(line)
+            except ValueError:
+                continue
+            for sentence in chunker.feed(chunk.get("response", "")):
+                yield sentence
+            if chunk.get("done"):
+                break
+        for sentence in chunker.flush():
+            yield sentence
+    except requests.exceptions.RequestException:
+        yield friendly_error(OllamaError("unavailable"))
+    finally:
+        resp.close()

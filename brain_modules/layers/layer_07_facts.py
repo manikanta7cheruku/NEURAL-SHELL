@@ -1,58 +1,81 @@
 """
-=============================================================================
-LAYER 7: FACT EXTRACTION (ASYNC)
+LAYER 7: LEARNING
 
-Enqueues fact extraction and correction detection into the idle worker.
-Non-blocking: enqueue returns in under 1ms so chat latency stays flat.
+Learns from what the user says, without slowing the reply.
 
-Also detects correction intents ("actually, it's PostgreSQL not MySQL")
-and enqueues them for structured supersede handling in facts_store.
+    1. STYLE FEEDBACK ("keep answers short", "stop joking") is applied to the
+       user's profile immediately and acknowledged in one short line.
+    2. CORRECTIONS ("actually it's Vue, not React") replace the stored value.
+    3. FACTS ("remember that my favorite framework is React", "I live in X")
+       are validated by the extractor and written to SQLite synchronously
+       (about a millisecond). The semantic-index write is queued for the
+       background worker.
 
-Runs silently - does not affect the response.
-Skips commands, greetings, action commands, visual reports.
-=============================================================================
+An EXPLICIT "remember ..." gets a brief acknowledgement and stops here
+("Got it."), so no model call is spent on it. Implicit statements are learned
+silently and the conversation continues naturally.
 """
 
-from colorama import Fore
+import logging
+import random
+
+from brain_modules import correction_detector, fact_extractor, learning, speech_acts
 from brain_modules.layer_result import LayerResult
-from brain_modules import idle_worker
-from brain_modules import correction_detector
+
+_log = logging.getLogger("seven.layer07")
+
+
+def _ack(results, facts) -> str:
+    changed = [(r, f) for r, f in zip(results, facts) if r["status"] == "updated"]
+    if changed:
+        r, f = changed[0]
+        return f"Got it. Changed from {r['previous']} to {f.value}."
+    if all(r["status"] == "unchanged" for r in results):
+        return "Yep, I already had that."
+    return random.choice(["Got it.", "Noted.", "Okay, remembered."])
 
 
 def process(ctx, deps):
-    if ("VISUAL_REPORT:" in ctx.prompt_text
-            or ctx.is_command or ctx.is_greeting or ctx.is_action_cmd):
+    if ("VISUAL_REPORT:" in ctx.prompt_text or ctx.is_command
+            or ctx.is_greeting or ctx.is_action_cmd):
         return LayerResult.pass_through()
 
-    config = deps.get("config")
+    text, key = ctx.prompt_text or "", ctx.speaker_key
 
-    speaker_uid = (
-        ctx.speaker_id if ctx.speaker_id not in ("default", "unknown")
-        else config.KEY.get("identity", {}).get("user_name", "default").lower() or "default"
-    )
-
-    user_text = ctx.prompt_text or ""
-
-    # 1. Detect correction intent and enqueue if found
+    # 1. Style feedback
     try:
-        correction = correction_detector.detect_correction(user_text)
-        if correction:
-            idle_worker.enqueue("apply_correction", {
-                "speaker_id": speaker_uid,
-                "old_value":  correction.get("old_value"),
-                "new_value":  correction.get("new_value"),
-                "raw_text":   correction.get("raw_text"),
-            })
-    except Exception as _corr_err:
-        print(Fore.YELLOW + f"[LAYER07] Correction detect skipped: {_corr_err}")
+        signals = learning.detect_style_feedback(text)
+        if signals:
+            learning.apply_style_signals(key, signals)
+            if len(ctx.norm_in.split()) <= 10:
+                return LayerResult.stop(learning.acknowledgement(signals))
+    except Exception as exc:
+        _log.debug("style feedback skipped: %s", exc)
 
-    # 2. Enqueue heuristic fact extraction (runs on background thread)
     try:
-        idle_worker.enqueue("extract_facts", {
-            "user_input": user_text,
-            "speaker_id": speaker_uid,
-        })
-    except Exception as _fact_err:
-        print(Fore.YELLOW + f"[LAYER07] Fact enqueue skipped: {_fact_err}")
+        from memory import fact_service
+    except Exception as exc:
+        _log.debug("fact service unavailable: %s", exc)
+        return LayerResult.pass_through()
+
+    # 2. Corrections
+    try:
+        corr = correction_detector.detect_correction(text)
+        if corr and corr.get("old_value") and corr.get("new_value"):
+            res = fact_service.apply_correction(key, corr["old_value"], corr["new_value"], text)
+            if res:
+                return LayerResult.stop(f"Fixed. {corr['new_value']} it is.")
+    except Exception as exc:
+        _log.debug("correction skipped: %s", exc)
+
+    # 3. Facts
+    try:
+        facts = fact_extractor.extract_facts(text)
+        if facts:
+            results = [fact_service.remember(key, f, source_text=text) for f in facts]
+            if any(f.explicit for f in facts):
+                return LayerResult.stop(_ack(results, facts))
+    except Exception as exc:
+        _log.warning("fact learning failed: %s", exc)
 
     return LayerResult.pass_through()

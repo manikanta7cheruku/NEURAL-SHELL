@@ -3,9 +3,9 @@ import { useNavigate }                  from 'react-router-dom';
 import {
   Bell, Brain, Calendar, Check, CheckCircle2,
   CheckSquare, ChevronRight, Circle, Clock,
-  Copy, Cpu, Flag, MemoryStick, Plus,
-  Repeat, Share2, Timer, TrendingUp, Zap,
-  AlertCircle,
+  Copy, Cpu, Flag, Layers, MemoryStick, Plus,
+  Repeat, Share2, ShieldCheck, Timer, TrendingUp,
+  Zap, AlertCircle,
 } from 'lucide-react';
 import useStatus  from '../stores/useStatus';
 import useTasks   from '../stores/useTasks';

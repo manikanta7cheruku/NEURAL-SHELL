@@ -1,6 +1,6 @@
 """
 main_modules/startup/validator.py
-Startup validation — checks all critical dependencies before Seven launches.
+Startup validation - checks all critical dependencies before Seven launches.
 Moved from main.py to keep the controller lean.
 """
 
@@ -23,11 +23,11 @@ def validate_startup():
         s.close()
         print("[STARTUP] Ollama: running")
     except Exception:
-        print("[STARTUP] Ollama offline — checking installation to auto-start...")
+        print("[STARTUP] Ollama offline - checking installation to auto-start...")
         try:
             from backend.bootstrap import is_ollama_installed, start_ollama
             if is_ollama_installed():
-                print("[STARTUP] Ollama is installed — starting service in background...")
+                print("[STARTUP] Ollama is installed - starting service in background...")
                 import threading
                 threading.Thread(target=start_ollama, daemon=True, name="OllamaBoot").start()
             else:
@@ -54,62 +54,65 @@ def validate_startup():
             errors.append(f"config.json is corrupted: {_ce}\n  Fix: Delete {_cfg_path} and restart.")
 
     # Check 3: Port 7777
-    try:
-        _ps = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        _ps.settimeout(1)
-        _result = _ps.connect_ex(("127.0.0.1", 7777))
-        _ps.close()
-        if _result == 0:
-            print("[STARTUP] Port 7777 in use - attempting to free it...")
-            max_attempts = 5
-            for attempt in range(1, max_attempts + 1):
-                try:
-                    import subprocess as _sp
-                    import time as _pt
-                    # Find PIDs listening on port 7777
-                    _kill = _sp.run(['netstat', '-ano'], capture_output=True, text=True)
-                    pids = []
-                    for _line in _kill.stdout.splitlines():
-                        if '7777' in _line and 'LISTENING' in _line:
-                            _parts = _line.strip().split()
-                            _pid = _parts[-1]
-                            if _pid and _pid.isdigit() and int(_pid) != os.getpid():
-                                pids.append(int(_pid))
-                    if not pids:
-                        # No processes found, break out to check port again
-                        break
-                    # Kill each PID with tree kill
-                    for _pid in pids:
-                        print(f"[STARTUP] Attempt {attempt}: Killing PID {_pid} and child processes")
-                        _sp.run(['taskkill', '/PID', str(_pid), '/T', '/F'], capture_output=True)
-                    # Wait for processes to terminate
-                    _pt.sleep(3)
-                    # Verify PIDs are gone
-                    alive_pids = []
-                    for _pid in pids:
-                        out = _sp.run(['tasklist', '/FI', f'PID eq {_pid}'], capture_output=True, text=True)
-                        if str(_pid) in out.stdout:
-                            alive_pids.append(_pid)
-                    if not alive_pids:
-                        # All killed, break to check port
-                        break
-                    else:
-                        print(f"[STARTUP] Attempt {attempt}: PIDs {alive_pids} still alive, retrying...")
-                except Exception as _kill_err:
-                    print(f"[STARTUP] Could not free port 7777: {_kill_err}")
-            # Final check: see if port is still in use
-            _ps_check = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            _ps_check.settimeout(1)
-            _result_check = _ps_check.connect_ex(("127.0.0.1", 7777))
-            _ps_check.close()
-            if _result_check == 0:
-                errors.append("Port 7777 is still in use. Restart your computer.")
+    if os.environ.get("SEVEN_PORT_7777_BOUND") == "1":
+        print("[STARTUP] Port 7777: already bound by main process")
+    else:
+        try:
+            _ps = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            _ps.settimeout(1)
+            _result = _ps.connect_ex(("127.0.0.1", 7777))
+            _ps.close()
+            if _result == 0:
+                print("[STARTUP] Port 7777 in use - attempting to free it...")
+                max_attempts = 5
+                for attempt in range(1, max_attempts + 1):
+                    try:
+                        import subprocess as _sp
+                        import time as _pt
+                        # Find PIDs listening on port 7777
+                        _kill = _sp.run(['netstat', '-ano'], capture_output=True, text=True)
+                        pids = []
+                        for _line in _kill.stdout.splitlines():
+                            if '7777' in _line and 'LISTENING' in _line:
+                                _parts = _line.strip().split()
+                                _pid = _parts[-1]
+                                if _pid and _pid.isdigit() and int(_pid) != os.getpid():
+                                    pids.append(int(_pid))
+                        if not pids:
+                            # No processes found, break out to check port again
+                            break
+                        # Kill each PID with tree kill
+                        for _pid in pids:
+                            print(f"[STARTUP] Attempt {attempt}: Killing PID {_pid} and child processes")
+                            _sp.run(['taskkill', '/PID', str(_pid), '/T', '/F'], capture_output=True)
+                        # Wait for processes to terminate
+                        _pt.sleep(3)
+                        # Verify PIDs are gone
+                        alive_pids = []
+                        for _pid in pids:
+                            out = _sp.run(['tasklist', '/FI', f'PID eq {_pid}'], capture_output=True, text=True)
+                            if str(_pid) in out.stdout:
+                                alive_pids.append(_pid)
+                        if not alive_pids:
+                            # All killed, break to check port
+                            break
+                        else:
+                            print(f"[STARTUP] Attempt {attempt}: PIDs {alive_pids} still alive, retrying...")
+                    except Exception as _kill_err:
+                        print(f"[STARTUP] Could not free port 7777: {_kill_err}")
+                # Final check: see if port is still in use
+                _ps_check = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                _ps_check.settimeout(1)
+                _result_check = _ps_check.connect_ex(("127.0.0.1", 7777))
+                _ps_check.close()
+                if _result_check == 0:
+                    errors.append("Port 7777 is still in use. Restart your computer.")
+                else:
+                    print("[STARTUP] Port 7777: freed successfully")
             else:
-                print("[STARTUP] Port 7777: freed successfully")
-        else:
-            print("[STARTUP] Port 7777: available")
-    except Exception as _pe:
-        print(f"[STARTUP] Port check failed: {_pe}")
+                print("[STARTUP] Port 7777: available")
+        except Exception as _pe:
+            print(f"[STARTUP] Port check failed: {_pe}")
 
     # Check 4: Disk space
     try:

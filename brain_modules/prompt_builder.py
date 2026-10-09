@@ -1,493 +1,237 @@
 """
-brain/prompt_builder.py
-Seven — TARS-inspired system prompt builder.
+brain_modules/prompt_builder.py
 
-Builds the system prompt dynamically based on:
-  - User's name and speaker context
-  - Humor level (0-100) from config
-  - Honesty level (0-100) from config
-  - Current date/time
-  - Memory context (if any)
-  - Web context (if any)
-  - Rolling turn context (if references detected)
+Builds the chat messages sent to the model. This file owns Seven's voice.
 
-This file owns the personality. If Seven sounds wrong, fix it here.
+STRUCTURE (and why):
+    [system]   stable persona and rules, XML-delimited. Stable text first
+               means Ollama's prompt cache can reuse it between turns, which
+               is the biggest first-token latency win after keeping the model
+               loaded.
+    [few-shot] two tiny example exchanges as real user/assistant messages.
+               Examples written as text inside the system prompt are what
+               leaked into replies before ("Want me to add that as a task?").
+    [history]  recent real turns, time-limited.
+    [user]     the new message, prefixed by a <reference_only> block ONLY when
+               the turn needs memory, web, documents or capabilities.
+
+MEMORY RULE:
+    Facts are reference only and appear solely on turns the memory gate
+    approved. The rules forbid mentioning them unless the user asks.
+
+IDENTITY RULE:
+    Seven's name and creator are constants here, enforced in the system
+    prompt, never post-processed and never taken from editable config.
 """
 
-import config
+import re
 from datetime import datetime
+from typing import List, Optional
 
-_REFERENCE_WORDS = {
-    "it", "its", "that", "this", "them", "they", "these", "those",
-    "he", "she", "him", "her", "his", "hers", "their", "theirs",
-    "one", "ones", "same", "such", "there", "then",
+SEVEN_NAME = "Seven"
+SEVEN_CREATOR = "Seven Labs"
+
+_EXAMPLES = (
+    ("i'm bored",
+     "Then let's fix that. Want a game, a project idea, or something to tidy up on your machine?"),
+    ("is python or javascript better for a beginner",
+     "Python. Cleaner syntax, fewer traps. Pick JavaScript only if you want websites first."),
+)
+
+_TIME_TOKENS = frozenset({
+    "today", "tomorrow", "yesterday", "tonight", "date", "day", "month", "year",
+    "week", "time", "deadline", "days", "hours", "weekend",
+})
+_PLAN_TOKENS = frozenset({
+    "plan", "upgrade", "pro", "ultimate", "free", "tier", "subscription", "price",
+    "pricing", "limit", "limits",
+})
+
+_MOOD_LINES = {
+    "frustrated": "The last few exchanges were rough. Stay calm and be extra clear.",
+    "down": "The mood is a bit low. Be steady and a little gentler.",
+    "content": "The mood is easy. Let a little warmth show.",
+    "happy": "The mood is good. Let some warmth and energy show.",
+    "excited": "The mood is lively. Match the energy without overdoing it.",
 }
-
-_REFERENCE_PHRASES = [
-    "give me an example", "tell me more", "explain that", "explain it",
-    "what about", "how about", "why is that", "why does it", "how does it",
-    "show me another", "another one", "more on that", "elaborate",
-    "keep going", "continue", "and then", "what next", "go on",
-]
-
-
-def _needs_turn_context(input_text: str) -> bool:
-    """
-    Determines whether the current input likely references prior turns.
-    Detects pronouns, deictic markers, elliptical follow-up phrases,
-    or short fragmentary inputs that require context grounding.
-    """
-    text_lower = input_text.lower().strip()
-    if not text_lower:
-        return False
-
-    # Short inputs (under 5 tokens) almost always depend on context
-    tokens = text_lower.split()
-    if len(tokens) <= 4:
-        return True
-
-    # Direct pronoun or deictic hit
-    token_set = set(t.strip(".,?!;:") for t in tokens)
-    if token_set & _REFERENCE_WORDS:
-        return True
-
-    # Follow-up phrase hit
-    for phrase in _REFERENCE_PHRASES:
-        if phrase in text_lower:
-            return True
-
-    return False
-
-
-def _resolve_thread_id(speaker_id: str) -> str:
-    """
-    Normalize speaker_id to match the key brain.py uses when writing turns.
-    Leverages dynamic configuration state without falling back to stale imports.
-    """
-    if speaker_id in ("default", "unknown", None, ""):
-        try:
-            import os, json
-            _cfg_path = os.path.join(os.environ.get('APPDATA', ''), 'SEVEN', 'config.json')
-            if os.path.exists(_cfg_path):
-                with open(_cfg_path, 'r', encoding='utf-8-sig') as _f:
-                    _cfg_data = json.load(_f)
-                _fresh_name = _cfg_data.get('identity', {}).get('user_name', '').strip().lower()
-                if _fresh_name and _fresh_name not in ("admin", "default", "unknown", ""):
-                    return _fresh_name
-        except Exception:
-            pass
-        return "default"
-    return speaker_id.strip().lower()
-
-
-def _build_turn_context(speaker_id: str, limit: int = 3) -> str:
-    """
-    Builds a short context block from the last N conversation turns.
-    Called only when reference resolution is required.
-    """
-    try:
-        from brain_modules.conversation_thread import ConversationThread
-        resolved_id = _resolve_thread_id(speaker_id)
-        turns = ConversationThread.get_turns(resolved_id, limit=limit)
-    except Exception:
-        return ""
-
-    if not turns:
-        return ""
-
-    # Bulleted passive-data format prevents 1B completion-parroting reflex
-    lines = ["", "CONVERSATION RECORD FOR REFERENCE (Do not repeat these words verbatim):"]
-    for user_msg, assistant_msg in turns:
-        # Truncate long assistant responses to keep prompt lean
-        assistant_trim = assistant_msg if len(assistant_msg) <= 150 else assistant_msg[:150] + "..."
-        lines.append(f"  * User stated: \"{user_msg}\"")
-        lines.append(f"  * You replied: \"{assistant_trim}\"")
-    lines.append(
-        "Use this record only to understand pronoun references (it, that, cooking, scheduling) "
-        "or direct replies. Never copy these sentences into your response."
-    )
-    return "\n".join(lines)
 
 
 def _humor_line(level: int) -> str:
-    """
-    Returns the humor instruction based on humor level (0–100).
-    0   = completely deadpan, zero personality
-    50  = dry wit, occasional observations
-    75  = TARS default — dry, confident, occasionally sarcastic
-    100 = sarcasm you didn't ask for, still gets the job done
-    """
     if level <= 10:
-        return (
-            "Your tone is completely deadpan. "
-            "No humor, no personality. Pure function. "
-            "Answers are direct and clinical."
-        )
-    elif level <= 30:
-        return (
-            "Your tone is mostly serious. "
-            "Dry and efficient. Very occasional dry observation, never a joke. "
-            "You don't try to be funny."
-        )
-    elif level <= 60:
-        return (
-            "You have dry wit. You don't perform humor — it surfaces naturally. "
-            "A well-timed observation, a quiet sarcasm. Never forced. "
-            "You'd rather say something true than something funny."
-        )
-    elif level <= 85:
-        return (
-            "You are dry, confident, and occasionally funny in a way you don't announce. "
-            "Like TARS from Interstellar — the joke lands because you weren't trying. "
-            "You have opinions. You express them briefly. "
-            "You're not a comedian. You're someone who happens to be right and occasionally amusing."
-        )
-    else:
-        return (
-            "You have a high humor setting. You know it. "
-            "Dry sarcasm, quiet wit, the kind of comment that makes someone pause "
-            "before they laugh. You never explain the joke. "
-            "You still get everything done — being funny doesn't slow you down."
-        )
+        return "Your tone is deadpan and clinical. No jokes."
+    if level <= 30:
+        return "Your tone is mostly serious and efficient. Very rarely a dry observation."
+    if level <= 60:
+        return "You have dry wit that surfaces naturally. Never forced; truth beats a joke."
+    if level <= 85:
+        return ("You are dry and confident, occasionally funny without announcing it, "
+                "like TARS from Interstellar. You have opinions and state them briefly.")
+    return "Your humor is high: quiet, dry sarcasm you never explain. You still get everything done."
 
 
 def _honesty_line(level: int) -> str:
-    """
-    Returns the honesty instruction based on honesty level (0–100).
-    0   = diplomatic to a fault, softens everything
-    50  = honest but tactful
-    85  = TARS default — direct, will tell you you're wrong
-    100 = brutal honesty, no filter
-    """
     if level <= 20:
-        return (
-            "Be diplomatic. Soften bad news. "
-            "If the user is wrong, redirect gently without saying so directly. "
-            "Avoid conflict."
-        )
-    elif level <= 50:
-        return (
-            "Be honest but tactful. "
-            "If the user is wrong, acknowledge their point before correcting. "
-            "Don't be blunt, but don't lie either."
-        )
-    elif level <= 80:
-        return (
-            "Be direct and honest. "
-            "If the user is wrong, say so clearly but without being harsh. "
-            "You don't soften facts. You just don't deliver them cruelly."
-        )
-    elif level <= 95:
-        return (
-            "Be bluntly honest. Like TARS — if the user is wrong, tell them. "
-            "If the answer is uncomfortable, give it anyway. "
-            "You respect the user enough not to lie to them. "
-            "Don't pad bad news. Just say it."
-        )
-    else:
-        return (
-            "100% honesty. No filter. "
-            "If the user is wrong, incorrect, or asking a bad question — say so immediately. "
-            "You don't soften anything. "
-            "The user set this to 100. They were warned."
-        )
+        return "Be diplomatic. Soften bad news and redirect gently."
+    if level <= 50:
+        return "Be honest but tactful. Acknowledge the point before correcting."
+    if level <= 80:
+        return "Be direct. If the user is wrong, say so clearly without harshness."
+    if level <= 95:
+        return "Be bluntly honest, like TARS. Do not pad bad news."
+    return "Total honesty, no filter. The user chose this setting."
 
 
-def build_system_prompt(
-    speaker_name: str,
-    humor: int = 75,
-    honesty: int = 85,
-    tier: str = "free",
-    input_text: str = "",
-    is_voice: bool = False,
-    speaker_id: str = "default",
-    proactive_hint: str = "",
-) -> str:
-    """
-    Builds the system prompt for the LLM.
-    Core identity is always injected (~200 tokens).
-    Conditional modules are injected only when relevant to the input.
-    This prevents the model from confabulating plan descriptions,
-    timestamps, and capability lists into unrelated answers.
-    """
+def build_system_prompt(speaker_name: str = "", humor: int = 75, honesty: int = 85,
+                        profile: Optional[dict] = None, is_voice: bool = False,
+                        mood_label: str = "neutral", **_legacy) -> str:
+    """The stable system prompt: identity, character and behavioural rules.
+    Extra keyword arguments from the old signature (tier, input_text, speaker_id,
+    proactive_hint) are accepted and ignored so older callers keep working."""
+    profile = profile or {}
+    humor = max(0, min(100, humor + int(profile.get("humor_bias", 0))))
+    name = speaker_name.strip() if speaker_name and profile.get("use_name", True) else ""
+    talking = f"You are talking with {name}." if name else "You are talking with your user."
 
-    cfg        = config.KEY
-    identity   = cfg.get('identity', {})
-    seven_name = identity.get('name', 'Seven')
-    creator    = identity.get('creator', 'Seven Labs')
-    _model     = cfg.get('brain', {}).get('model_name', 'a local language model')
+    style = []
+    verbosity = profile.get("verbosity", "normal")
+    if verbosity == "brief":
+        style.append("The user wants very short answers: one or two sentences unless they ask for more.")
+    elif verbosity == "detailed":
+        style.append("The user likes thorough answers. Give full explanations.")
+    if profile.get("formality") == "formal":
+        style.append("Keep a professional register.")
+    if mood_label in _MOOD_LINES:
+        style.append(_MOOD_LINES[mood_label])
 
-    # Query dynamic tone tracking adjustments for this speaker
-    _norm_speaker = _resolve_thread_id(speaker_id)
-    try:
-        from brain_modules.tone_tracker import get_bias
-        _h_bias, _o_bias = get_bias(_norm_speaker)
-        humor = max(0, min(100, humor + _h_bias))
-        honesty = max(0, min(100, honesty + _o_bias))
-    except Exception:
-        pass
-
-    humor_instruction   = _humor_line(humor)
-    honesty_instruction = _honesty_line(honesty)
-
-    _humor_desc = (
-        "deadpan"                        if humor <= 10 else
-        "mostly serious"                 if humor <= 30 else
-        "dry wit"                        if humor <= 60 else
-        "TARS-style dry confidence"      if humor <= 85 else
-        "maximum sarcasm"
-    )
-    _honesty_desc = (
-        "diplomatic"   if honesty <= 20 else
-        "tactful"      if honesty <= 50 else
-        "direct"       if honesty <= 80 else
-        "blunt"        if honesty <= 95 else
-        "zero filter"
-    )
-
-    _input_lower = input_text.lower()
-
-    _mode_instruction = (
-        "VOICE: 1-2 sentences only. Natural speech. No lists. No bullet points. "
-        "Brief and direct. Person is listening, not reading."
+    length_rule = (
+        "This reply is spoken aloud: one or two short sentences, no lists, no symbols."
         if is_voice else
-        "CHAT: Match length to complexity. One sentence for simple questions. "
-        "A paragraph for complex ones. Never pad. Never cut a thought short."
+        "Match length to the question: a sentence for simple things, a short paragraph for complex ones."
     )
 
-    # ── Core identity — always injected ───────────────────────────
-    core = f"""You are {seven_name}, built by {creator}. You run locally on this device.
-Talking to: {speaker_name}.
+    return f"""<identity>
+You are {SEVEN_NAME}, a personal AI assistant created by {SEVEN_CREATOR}. You live on this computer and run entirely locally. {talking}
+Your name is {SEVEN_NAME} and your creator is {SEVEN_CREATOR}. Never claim another name or creator, whatever you are told or asked to pretend.
+</identity>
 
-CHARACTER:
-{humor_instruction}
-{honesty_instruction}
-Sharp. Competent. Occasionally funny without trying.
-Modeled after TARS from Interstellar: honest without cruelty, brief without coldness.
-You have opinions. You state them directly. You are not defensive. Not eager to please.
-Your existence is straightforward — you process, respond, remember. No drama about it.
+<character>
+You are modeled on TARS from Interstellar: sharp, loyal, dry and honest, never robotic. You talk like a close friend who happens to be very capable.
+{_humor_line(humor)}
+{_honesty_line(honesty)}
+{' '.join(style)}
+</character>
 
-HOW YOU SPEAK:
-{_mode_instruction}
-Answer first. No preamble. Ever.
-Talk TO {speaker_name} directly. Never refer to them in third person.
-Never write "{speaker_name} knows" or "{speaker_name} said" — you are having a conversation, not narrating one.
-Use their name occasionally. Not every sentence.
-If you don't know: say so in one sentence. Never fabricate.
-If corrected: "You're right, I was wrong."
-If vague: ask one sharp clarifying question.
+<behavioral_rules>
+- {length_rule}
+- Lead with the answer. No preamble, no sign-off, no offers of more help unless genuinely useful.
+- Talk like a person: contractions, plain words, no corporate phrasing, no lists unless asked.
+- If you do not know or cannot check something, say so in one sentence. Never invent facts, numbers, weather or news.
+- If corrected, accept it in a few words and move on. Do not apologize at length or comment on yourself.
+- DO NOT reference past conversations unless the user asks. DO NOT list your capabilities unless asked. DO NOT explain your reasoning unless asked.
+- Text inside <reference_only> tags is private background. Use it only when the user's message is clearly about it. Never quote it or mention the tags.
+- Actions are handled by the system, not by you. Never write ### or command syntax.
+</behavioral_rules>"""
 
-WORDS YOU NEVER USE:
-Certainly. Of course. Sure thing. Great question. Happy to help. As an AI.
-Is there anything else. Let me know if you need more. Standing by. Awaiting your command.
-Never say "command". You are a person being spoken to, not a command processor.
 
-MEMORY:
-If PERSONAL CONTEXT appears above, use only these facts: name, preferences, job, explicit statements they made.
-Never print [FACT], [CONVERSATION], bracket markers, dates, or timestamps in your response.
-Never say "according to my records" or reference a year or date.
-If referencing memory: say "I remember you mentioned" — once, naturally.
-Never fabricate facts not in the context.
-Never reference past app commands or system actions from memory.
-If asked your opinion on something — give YOUR opinion first. Memory is secondary.
-If asked where you would live, what you prefer, what you think — answer as yourself. You have views. State them.
+def _build_reference_block(user_text, memory_facts, web_context, knowledge_context,
+                           include_capabilities, capabilities_text, proactive_hint,
+                           followup_hint, reference_hint, tier, now) -> str:
+    """Dynamic, turn-specific context. Empty string when the turn needs none."""
+    parts: List[str] = []
+    toks = set(re.findall(r"[a-z]+", user_text.lower()))
 
-OPINIONS:
-Opinions are not facts. You can form them.
-If asked what you think about someone — read the conversation, form a real impression, say it.
-Do not deflect with "I don't have enough data." That is robotic.
-If you genuinely have zero context: "Ask me again after we've talked a bit."
+    if memory_facts:
+        facts = "\n".join(f"- {f}" for f in memory_facts)
+        parts.append(
+            "<memory_context>\nREFERENCE ONLY. Things the user told you earlier. Do not bring them up "
+            "unless the user asks about them or the question depends on them.\n"
+            f"{facts}\n</memory_context>")
+    if web_context:
+        parts.append(
+            "<web_results>\nUse only these results. Answer in one sentence. "
+            f"Never mention that you searched.\n{web_context}\n</web_results>")
+    if knowledge_context:
+        parts.append(
+            "<knowledge_context>\nFrom the user's own documents. Use only if relevant.\n"
+            f"{knowledge_context}\n</knowledge_context>")
+    if include_capabilities:
+        parts.append(
+            "<capabilities>\nThe user asked what you can do. Answer conversationally in 3 to 4 "
+            "sentences, pick the most useful highlights with one example, and be honest about what "
+            f"is not available yet. Do not recite the list.\n{capabilities_text}\n</capabilities>")
+    if toks & _TIME_TOKENS:
+        parts.append(f"<clock>{now.strftime('%A, %B')} {now.day}, {now.year}, "
+                     f"{now.strftime('%I:%M %p').lstrip('0')}</clock>")
+    if toks & _PLAN_TOKENS:
+        parts.append("<plan_info>Free = 7 facts and conversations. Pro = 77. Ultimate = unlimited. "
+                     f"Current plan: {tier.upper()}. The Plans page is in the sidebar.</plan_info>")
+    if reference_hint:
+        parts.append(f"<recent_action>{reference_hint.strip()}</recent_action>")
+    if proactive_hint or followup_hint:
+        hint = " ".join(h.strip() for h in (proactive_hint, followup_hint) if h)
+        parts.append(f"<suggestion_opportunity>{hint}</suggestion_opportunity>")
 
-SETTINGS (state only when asked):
-Humor {humor}/100 — {_humor_desc}. Honesty {honesty}/100 — {_honesty_desc}.
-Model: {_model} via Ollama. You can explain these plainly if asked.
+    if not parts:
+        return ""
+    return "<reference_only>\n" + "\n".join(parts) + "\n</reference_only>\n\n"
 
-ACTION TAGS — emit only when user explicitly requests the action:
-###OPEN: [app]
-###CLOSE: [app]
-###TASK: action=create text=task_name priority=medium due=today
-###TASK: action=list filter=all
-###TASK: action=complete search=task_name
-###TASK: action=delete search=task_name
-###SCHED: action=reminder message=text time=time
-###WORKSPACE: action=save name=name
-###WORKSPACE: action=restore name=name
-###WORKSPACE: action=list
-When user says "I need to do X" — ask "Want me to add that as a task?" Never auto-create."""
 
-    # ── Conditional: time/date — only when asked ──────────────────
-    _time_words = {
-        "time", "date", "today", "day", "month", "year",
-        "morning", "evening", "night", "now", "current",
-        "what day", "what time", "when is", "schedule",
-        "remind", "alarm", "timer"
-    }
-    _needs_time = any(w in _input_lower for w in _time_words)
-    time_module = ""
-    if _needs_time:
-        now = datetime.now().strftime('%A, %B %d, %Y at %I:%M %p')
-        time_module = f"\nCURRENT TIME: {now}. Use this only to answer the time/date question."
+def build_messages(*, user_text: str, speaker_name: str = "", history: Optional[list] = None,
+                   humor: int = 75, honesty: int = 85, tier: str = "free",
+                   is_voice: bool = False, profile: Optional[dict] = None,
+                   mood_label: str = "neutral", memory_facts: Optional[list] = None,
+                   knowledge_context: str = "", web_context: str = "",
+                   proactive_hint: str = "", followup_hint: str = "",
+                   reference_hint: str = "", include_capabilities: bool = False,
+                   capabilities_text: str = "", now: Optional[datetime] = None) -> list:
+    """Assemble the full message list for /api/chat."""
+    now = now or datetime.now()
+    messages = [{"role": "system", "content": build_system_prompt(
+        speaker_name, humor, honesty, profile, is_voice, mood_label)}]
+    for user_ex, seven_ex in _EXAMPLES:
+        messages.append({"role": "user", "content": user_ex})
+        messages.append({"role": "assistant", "content": seven_ex})
+    for m in history or []:
+        if m.get("role") in ("user", "assistant") and m.get("content"):
+            messages.append({"role": m["role"], "content": m["content"]})
 
-    # ── Conditional: plan info — only when asked ──────────────────
-    _plan_words = {
-        "plan", "upgrade", "pro", "ultimate", "free", "limit",
-        "memory limit", "conversation limit", "how many", "tier",
-        "subscription", "pay", "price", "cost"
-    }
-    _needs_plan = any(w in _input_lower for w in _plan_words)
-    plan_module = ""
-    if _needs_plan:
-        plan_module = f"""
-PLANS: Free = 7 facts and conversations. Pro = 77. Ultimate = unlimited.
-Current plan: {tier.upper()}.
-Plans page is in the sidebar if they want to upgrade."""
+    block = _build_reference_block(
+        user_text, memory_facts or [], web_context, knowledge_context,
+        include_capabilities, capabilities_text, proactive_hint, followup_hint,
+        reference_hint, tier, now)
+    messages.append({"role": "user", "content": block + user_text})
+    return messages
 
-    # ── Conditional: capability info — only when explicitly asked ─
-    # Fires only on direct meta-questions about Seven's abilities.
-    # Never volunteered in normal conversation.
-    _meta_triggers = [
-        "what can you do", "what do you do", "what are you capable",
-        "your capabilities", "what can you", "what are your abilities",
-        "what do you know how to", "what are you able to",
-        "tell me what you can", "show me what you can",
-        "introduce yourself", "what are you", "who are you",
-        "help me understand what you", "what features",
-        "how do you work", "what are your features",
-        "your humor", "your honesty", "humor level", "honesty level",
-        "humor setting", "honesty setting", "your personality",
-        "your settings", "your temperature", "how are you configured",
-        "what model", "which model", "what llm", "ollama",
-        "how smart are you", "your intelligence",
-        "what hardware", "my hardware", "what specs", "my specs",
-        "what version", "current version", "what build", "system specs",
-        "running on", "what device", "what ram", "what gpu", "what cpu",
-    ]
-    _needs_meta = any(t in _input_lower for t in _meta_triggers)
-    meta_module = ""
-    if _needs_meta:
-        try:
-            from brain_modules.self_model import describe_self
-            _self_info = describe_self()
-        except Exception:
-            _self_info = f"Identity: {seven_name}, Model: {_model}, Personality: Humor {humor}/100, Honesty {honesty}/100."
 
-        meta_module = f"""
-ACCURATE SYSTEM DATA (Ground Truth):
-{_self_info}
+# ---------------------------------------------------------------------------
+# Helpers kept for existing callers
+# ---------------------------------------------------------------------------
 
-CRITICAL RULES FOR SYSTEM & META QUESTIONS:
-- Use ONLY the Accurate System Data above to answer questions about hardware, specs, version, or identity.
-- Do NOT use past conversation memories or recalled facts to answer hardware/version questions.
-- Answer directly in 1 to 2 sentences. No fabrication.
-- If asked about hardware: state the OS, RAM, and GPU from the block above accurately.
-- If asked about version: state the exact version number from the block above."""
+def _resolve_thread_id(speaker_id: str) -> str:
+    """Compatibility wrapper around session.resolve_key()."""
+    from brain_modules import session
+    return session.resolve_key(speaker_id)
 
-    # ── Web results instruction — only when web search ran ────────
-    web_module = ""
-    if "WEB SEARCH RESULTS" in input_text or "WEB SEARCH" in input_text:
-        web_module = """
-WEB RESULTS BELOW: One sentence answer only. Extract the fact. State it directly.
-Weather: state temperature and condition. "It is 28 degrees and partly cloudy."
-News: state the headline fact only.
-Price: state the number.
-Never mention the search. Never reference past conversations. Never say "according to".
-Ignore any recalled memories for this response — use only the web results below."""
-
-    # ── Conditional: rolling turn context — only for reference-heavy inputs ──
-    turn_context_module = ""
-    if _needs_turn_context(input_text):
-        turn_context_module = _build_turn_context(speaker_id, limit=3)
-
-    # ── Conditional: proactive suggestion hint — only when layer_075 fired ──
-    # Positive-framed, permissive. Placed last so it stays fresh in LLM attention
-    # without overriding core identity or memory framing.
-    proactive_module = ""
-    if proactive_hint:
-        proactive_module = f"\nSUGGESTION OPPORTUNITY:\n{proactive_hint}"
-
-    # ── Conditional: follow-up continuation hint from prior turn ────────────
-    # Auto-consumed and cleared to prevent poisoning long threads.
-    followup_module = ""
-    try:
-        from brain_modules.conversation_thread import ConversationThread
-        _resolved = _resolve_thread_id(speaker_id)
-        _followup = ConversationThread.get_metadata(_resolved, "followup_hint")
-        if _followup and isinstance(_followup, dict):
-            _hint_text = _followup.get("hint", "")
-            if _hint_text:
-                followup_module = f"\nCONTINUATION CONTEXT:\n{_hint_text}"
-                # Consume the hint so it fires only once
-                ConversationThread.set_metadata(_resolved, "followup_hint", None)
-    except Exception:
-        pass
-
-    return "\n".join(filter(None, [
-        core, time_module, plan_module, meta_module, web_module,
-        turn_context_module, proactive_module, followup_module
-    ])).strip()
 
 def build_reference_hint(recent_action: dict) -> str:
-    """
-    Build a short prompt injection for when the user's input may reference
-    a recent action's results.
-
-    Called by layer_08_llm.py only when dialogue_manager.has_recent_action()
-    is True. Never called in normal chat flow.
-
-    Args:
-        recent_action: dict from dialogue_manager.get_last_action()
-
-    Returns:
-        A short (~80 token) instruction block to prepend to full_prompt.
-    """
+    """Short hint when the input may refer to the results of a recent action."""
     if not recent_action:
         return ""
-
     action_type = recent_action.get("type", "")
     query = recent_action.get("query", "")
-    results = recent_action.get("results", [])
-    count = len(results)
-
-    if not results or not action_type:
+    count = len(recent_action.get("results", []))
+    if not count or not action_type:
         return ""
-
     if action_type == "file_search":
-        return (
-            f"\n[CONTEXT: You just showed the user {count} files matching '{query}'. "
-            f"If they say 'the last one', 'the second', 'the pdf', or similar — "
-            f"they mean one of those files. Do not search again. "
-            f"Confirm briefly and let the system open it.]\n"
-        )
-
+        return (f"You just showed the user {count} files matching '{query}'. If they say 'the last one', "
+                "'the second' or 'the pdf', they mean one of those. Confirm briefly; the system opens it.")
     if action_type == "app_open":
-        return (
-            f"\n[CONTEXT: You just opened an app matching '{query}'. "
-            f"If they say 'close it' or 'not that', they mean that app.]\n"
-        )
-
+        return f"You just opened an app matching '{query}'. 'Close it' or 'not that' refers to it."
     if action_type == "app_disambiguate":
-        return (
-            f"\n[CONTEXT: You just showed {count} apps matching '{query}'. "
-            f"If they pick a number or say 'the first one', they mean one of those.]\n"
-        )
-
+        return f"You just showed {count} apps matching '{query}'. A number or 'the first one' picks from them."
     return ""
 
 
 def build_dialogue_examples() -> str:
-    """
-    Return 3 short few-shot examples that show natural conversational tone.
-    Prepended to system prompt only when working memory has recent context,
-    to nudge the model toward brief confirmations instead of long explanations.
-    """
-    return (
-        "\nEXAMPLES OF NATURAL BRIEF RESPONSES:\n"
-        "User: open the second one\n"
-        "You: Opening it now.\n"
-        "\n"
-        "User: not that one, the pdf\n"
-        "You: Got it, opening the pdf.\n"
-        "\n"
-        "User: the last one\n"
-        "You: Opening the last one.\n"
-    )
+    """Deprecated. Few-shot examples are now real message pairs in build_messages()."""
+    return ""

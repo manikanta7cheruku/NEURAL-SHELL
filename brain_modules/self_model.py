@@ -1,62 +1,58 @@
 """
-Seven Self-Model & Runtime Ground Truth
-Inspects the real host machine and runtime environment.
-Cached for 60 seconds to prevent disk/WMI overhead.
+brain_modules/self_model.py
+
+Seven's ground truth about itself and the machine it runs on.
+
+BUGS FIXED:
+    - The license tier was read from cfg["tier"] but the config stores it at
+      license.tier, so every user showed as "free".
+    - The active model came from a stale config key instead of the model the
+      brain actually selected.
+    - Creator is a constant now, never taken from editable config
+      ("Team Seven" in an old config used to leak into answers).
+    - Hardware detection shells out to nvidia-smi (up to 2 seconds). It is now
+      primed in a background thread at startup so no user message pays for it.
 """
 
+import logging
 import os
-import sys
 import platform
 import subprocess
+import threading
 import time
-from typing import Dict, Any
+from typing import Any, Dict
 
-_CACHE: Dict[str, Any] = {}
-_CACHE_TIMESTAMP = 0.0
-_CACHE_TTL_SECONDS = 60.0
+from brain_modules.capabilities import CAPABILITIES
+
+SEVEN_NAME = "Seven"
+SEVEN_CREATOR = "Seven Labs"
+
+_log = logging.getLogger("seven.self_model")
+_lock = threading.Lock()
+_hw_cache: Dict[str, Any] = {}
+_hw_ts = 0.0
+_HW_TTL = 300.0
+_active_model = ""
+
+
+def set_active_model(name: str) -> None:
+    """Called by brain.py once the model has been selected."""
+    global _active_model
+    _active_model = name or ""
 
 
 def _detect_gpu() -> tuple:
-    """Detects GPU name and total VRAM in GB."""
-    # Method 1: nvidia-smi command (most reliable on Windows for NVIDIA)
+    """(name, vram_gb). Falls back to ('Integrated Graphics', 0.0)."""
+    flags = 0x08000000 if os.name == "nt" else 0
     try:
-        smi_out = subprocess.check_output(
+        out = subprocess.check_output(
             ["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"],
-            timeout=2,
-            creationflags=0x08000000 if os.name == "nt" else 0
-        ).decode("utf-8").strip()
-        if smi_out:
-            line = smi_out.splitlines()[0]
-            parts = [p.strip() for p in line.split(",")]
-            name = parts[0]
-            vram_gb = round(float(parts[1]) / 1024.0, 1)
-            return name, vram_gb
+            timeout=2, creationflags=flags, stderr=subprocess.DEVNULL).decode("utf-8").strip()
+        if out:
+            parts = [p.strip() for p in out.splitlines()[0].split(",")]
+            return parts[0], round(float(parts[1]) / 1024.0, 1)
     except Exception:
         pass
-
-    # Method 2: torch.cuda
-    try:
-        import torch
-        if torch.cuda.is_available():
-            name = torch.cuda.get_device_name(0)
-            vram_bytes = torch.cuda.get_device_properties(0).total_memory
-            vram_gb = round(vram_bytes / (1024 ** 3), 1)
-            return name, vram_gb
-    except Exception:
-        pass
-
-    # Method 3: Windows WMI fallback
-    if platform.system() == "Windows":
-        try:
-            import wmi
-            w = wmi.WMI()
-            for controller in w.Win32_VideoController():
-                name = controller.Name
-                if name and "virtual" not in name.lower() and "basic" not in name.lower():
-                    return name, 0.0
-        except Exception:
-            pass
-
     return "Integrated Graphics", 0.0
 
 
@@ -67,93 +63,65 @@ def _detect_hardware() -> Dict[str, Any]:
         ram_gb = round(psutil.virtual_memory().total / (1024 ** 3), 1)
     except Exception:
         pass
-
-    cpu_name = platform.processor() or "Unknown CPU"
-    cpu_cores = os.cpu_count() or 4
     gpu_name, vram_gb = _detect_gpu()
-
-    return {
-        "ram_gb": ram_gb,
-        "cpu_name": cpu_name,
-        "cpu_cores": cpu_cores,
-        "gpu_name": gpu_name,
-        "vram_gb": vram_gb,
-    }
+    return {"ram_gb": ram_gb, "cpu_name": platform.processor() or "Unknown CPU",
+            "cpu_cores": os.cpu_count() or 4, "gpu_name": gpu_name, "vram_gb": vram_gb}
 
 
-def get_runtime_state(force_refresh: bool = False) -> Dict[str, Any]:
-    """Returns ground-truth hardware, version, model, and capabilities."""
-    global _CACHE, _CACHE_TIMESTAMP
+def get_hardware(force: bool = False) -> Dict[str, Any]:
+    """Cached hardware facts. Call prime_async() at startup to pre-fill."""
+    global _hw_cache, _hw_ts
+    with _lock:
+        if not force and _hw_cache and time.time() - _hw_ts < _HW_TTL:
+            return dict(_hw_cache)
+    hw = _detect_hardware()
+    with _lock:
+        _hw_cache, _hw_ts = hw, time.time()
+    return dict(hw)
 
-    now = time.time()
-    if not force_refresh and _CACHE and (now - _CACHE_TIMESTAMP < _CACHE_TTL_SECONDS):
-        return _CACHE
 
-    # Load version and tier from config if available
-    version = "1.3.3"
-    license_tier = "free"
-    model_name = "llama3.2:1b"
-    app_path = os.environ.get("SEVEN_APP_PATH", os.getcwd())
-    user_data_path = os.path.join(os.environ.get("APPDATA", ""), "SEVEN")
+def prime_async() -> None:
+    """Detect hardware in the background so the first question about it is instant."""
+    threading.Thread(target=get_hardware, daemon=True, name="SelfModelPrime").start()
 
+
+def _version() -> str:
     try:
-        config_path = os.path.join(user_data_path, "config.json")
-        if os.path.exists(config_path):
-            import json
-            with open(config_path, "r", encoding="utf-8") as f:
-                cfg = json.load(f)
-                version = cfg.get("version", version)
-                license_tier = cfg.get("tier", license_tier)
-                model_name = cfg.get("model", model_name)
+        import config
+        v = str(config.KEY.get("version", "")).strip()
+        if v:
+            return v
     except Exception:
         pass
+    return "1.3.3"
 
-    state = {
-        "name": "Seven",
-        "version": version,
-        "creator": "Seven Labs",
-        "model_name": model_name,
-        "license_tier": license_tier,
+
+def get_runtime_state() -> Dict[str, Any]:
+    """Ground truth used by identity answers. Never raises."""
+    tier, model = "free", _active_model
+    try:
+        import config
+        tier = config.KEY.get("license", {}).get("tier", "free") or "free"
+        if not model:
+            model = config.KEY.get("brain", {}).get("model_name", "") or ""
+    except Exception:
+        pass
+    return {
+        "name": SEVEN_NAME,
+        "creator": SEVEN_CREATOR,
+        "version": _version(),
+        "model_name": model or "a local model",
+        "license_tier": tier,
         "os": f"{platform.system()} {platform.release()}",
-        "hardware": _detect_hardware(),
-        "app_path": app_path,
-        "user_data_path": user_data_path,
-        "capabilities": [
-            "voice and text interaction",
-            "local system automation",
-            "semantic long-term memory",
-            "window management",
-            "application control",
-            "task scheduling",
-            "local document intelligence",
-            "real-time web search",
-        ],
-        "limitations": [
-            "no direct financial transactions",
-            "local execution bounded by host hardware",
-            "free tier limits conversations and stored facts",
-        ],
+        "hardware": get_hardware(),
+        "capabilities": [c["title"] for c in CAPABILITIES],
     }
 
-    _CACHE = state
-    _CACHE_TIMESTAMP = now
-    return state
 
-
-def describe_self() -> str:
-    """Returns formatted block for system prompt injection."""
-    st = get_runtime_state()
-    hw = st["hardware"]
-    gpu_desc = f"{hw['gpu_name']} ({hw['vram_gb']}GB VRAM)" if hw["gpu_name"] != "Integrated Graphics" else "Integrated Graphics"
-
-    return (
-        f"[SYSTEM IDENTITY & GROUND TRUTH]\n"
-        f"Name: {st['name']}\n"
-        f"Version: {st['version']}\n"
-        f"Creator: {st['creator']}\n"
-        f"Active Model: {st['model_name']}\n"
-        f"Operating System: {st['os']}\n"
-        f"Host Hardware: {hw['ram_gb']}GB RAM, CPU: {hw['cpu_name']} ({hw['cpu_cores']} cores), GPU: {gpu_desc}\n"
-        f"Capabilities: {', '.join(st['capabilities'])}\n"
-        f"Rule: Always use the exact specs above when asked about your system, hardware, version, or identity."
-    )
+def describe_hardware() -> str:
+    """One natural sentence about the host machine."""
+    hw = get_hardware()
+    gpu = (f"{hw['gpu_name']} with {hw['vram_gb']} GB of VRAM"
+           if hw["vram_gb"] else hw["gpu_name"])
+    return (f"{hw['ram_gb']} GB of RAM, {hw['cpu_name']} with {hw['cpu_cores']} cores, "
+            f"and {gpu}.")
