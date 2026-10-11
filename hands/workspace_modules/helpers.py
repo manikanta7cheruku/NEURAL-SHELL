@@ -29,7 +29,9 @@ def find_chrome_profile_dir(chrome_base, profile_name):
     if not os.path.exists(chrome_base):
         return None
 
-    clean_pname = (profile_name or "default").strip().lower()
+    clean_pname = (profile_name or "").strip().lower()
+    if not clean_pname:
+        return "Default"
 
     # Step 1: Query Chrome's Master Local State cache
     local_state_path = os.path.join(chrome_base, "Local State")
@@ -39,47 +41,50 @@ def find_chrome_profile_dir(chrome_base, profile_name):
                 state = json.load(f)
             info_cache = state.get("profile", {}).get("info_cache", {})
 
-            # Exact folder key match
-            for pdir in info_cache:
-                if pdir.lower() == clean_pname:
-                    return pdir
-
-            # Match by email, user_name, or display name
+            # Try exact match on email, display name, gaia name first (avoid folder name collision for 'default')
             for pdir, info in info_cache.items():
-                email = (info.get("user_name") or info.get("signin", {}).get("login", "") or "").lower()
-                dname = (info.get("name") or "").lower()
-                gname = (info.get("gaia_name") or "").lower()
+                email = (info.get("user_name") or info.get("signin", {}).get("login", "") or "").lower().strip()
+                dname = (info.get("name") or "").lower().strip()
+                gname = (info.get("gaia_name") or "").lower().strip()
 
                 if clean_pname in (email, email.split("@")[0], dname, gname):
                     return pdir
-                if clean_pname and (clean_pname in email or clean_pname in dname):
+
+            # Fuzzy match
+            for pdir, info in info_cache.items():
+                email = (info.get("user_name") or "").lower()
+                dname = (info.get("name") or "").lower()
+                if clean_pname in email or clean_pname in dname or dname in clean_pname:
                     return pdir
         except Exception:
             pass
 
     # Step 2: Query individual profile Preferences
-    for item in os.listdir(chrome_base):
-        if item != "Default" and not item.startswith("Profile"):
-            continue
-        if item.lower() == clean_pname:
-            return item
-        prefs = os.path.join(chrome_base, item, "Preferences")
-        if not os.path.exists(prefs):
-            continue
-        try:
+    try:
+        for item in os.listdir(chrome_base):
+            if item != "Default" and not item.startswith("Profile"):
+                continue
+            prefs = os.path.join(chrome_base, item, "Preferences")
+            if not os.path.exists(prefs):
+                continue
             with open(prefs, "r", encoding="utf-8") as f:
                 data = json.load(f)
             for acc in data.get("account_info", []):
-                email = acc.get("email", "").lower()
+                email = acc.get("email", "").lower().strip()
                 if clean_pname in email or email.split("@")[0] == clean_pname:
                     return item
-            pname = (data.get("profile", {}).get("name") or "").lower()
+            pname = (data.get("profile", {}).get("name") or "").lower().strip()
             if pname == clean_pname:
                 return item
-        except Exception:
-            continue
+    except Exception:
+        pass
 
-    # Step 3: Default fallback
+    # Step 3: Exact directory name match (fallback)
+    for item in os.listdir(chrome_base):
+        if item.lower() == clean_pname:
+            return item
+
+    # Step 4: Default fallback
     if os.path.exists(os.path.join(chrome_base, "Default")):
         return "Default"
 
