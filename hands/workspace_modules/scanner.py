@@ -159,12 +159,22 @@ def _classify(exe_name, exe_path, title, win_info, proc):
     """Classify a window into an app config."""
 
     if exe_name in BROWSERS:
+        profile_dir = "Default"
+        try:
+            cmdline = proc.cmdline()
+            for arg in cmdline:
+                if arg.startswith("--profile-directory="):
+                    profile_dir = arg.split("=", 1)[1]
+                    break
+        except Exception:
+            pass
         return {
             "type": BROWSERS[exe_name],
             "name": app_name(title, exe_name),
             "exe_path": exe_path,
             "tabs": [],
             "profile_name": "",
+            "profile_dir": profile_dir,
             "window": win_info,
             "_is_browser": True,
         }
