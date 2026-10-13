@@ -31,8 +31,7 @@ def enrich_chrome(apps):
     browser_type = browser_entries[0].get("type", "chrome")
     exe_path     = browser_entries[0].get("exe_path", "")
 
-    # Collect profile_dir from original entries (set by document_capture.py)
-    # This maps Chrome PIDs to their --profile-directory= cmdline arg
+    # Collect profile_dir and pid from original entries
     _pid_to_profile_dir = {}
     for b in browser_entries:
         pd = b.get("profile_dir", "")
@@ -43,6 +42,65 @@ def enrich_chrome(apps):
     for entry in browser_entries:
         if entry in apps:
             apps.remove(entry)
+
+    # Build on-disk profile database for smart pigeonhole allocation
+    _chrome_base = os.path.join(
+        os.environ.get("LOCALAPPDATA", ""),
+        "Google", "Chrome", "User Data"
+    )
+    pdir_info = {}
+    if os.path.exists(_chrome_base):
+        try:
+            for item in os.listdir(_chrome_base):
+                if item == "Default" or item.startswith("Profile"):
+                    prefs_path = os.path.join(_chrome_base, item, "Preferences")
+                    if os.path.exists(prefs_path):
+                        with open(prefs_path, "r", encoding="utf-8") as f:
+                            prefs = json.loads(f.read())
+                        emails = [acc.get("email", "").lower().strip() for acc in prefs.get("account_info", [])]
+                        pname = (prefs.get("profile", {}).get("name") or "").lower().strip()
+                        uname = (prefs.get("profile", {}).get("user_name") or "").lower().strip()
+                        pdir_info[item] = {
+                            "emails": emails,
+                            "profile_name": pname,
+                            "user_name": uname
+                        }
+        except Exception:
+            pass
+
+    # Pigeonhole Allocation Stage 1: Explicit match on emails/names
+    pdir_matches = {}
+    for prof in profile_tabs.keys():
+        prof_lower = prof.lower().strip()
+        matched_dir = None
+
+        for pdir, info in pdir_info.items():
+            if any(prof_lower == email or prof_lower == email.split("@")[0] for email in info["emails"]):
+                matched_dir = pdir
+                break
+            if prof_lower == info["profile_name"] or prof_lower == info["user_name"] or prof_lower == info["user_name"].split("@")[0]:
+                matched_dir = pdir
+                break
+
+        if matched_dir:
+            pdir_matches[prof] = matched_dir
+
+    # Pigeonhole Allocation Stage 2: Match remaining keys to unused open directories
+    unmatched_keys = [k for k in profile_tabs.keys() if k not in pdir_matches]
+    used_dirs = set(pdir_matches.values())
+    open_dirs_unmatched = [d for d in _pid_to_profile_dir.values() if d not in used_dirs]
+
+    for k in unmatched_keys:
+        if open_dirs_unmatched:
+            pdir_matches[k] = open_dirs_unmatched.pop(0)
+        else:
+            remaining_dirs = [d for d in pdir_info.keys() if d not in used_dirs and d not in pdir_matches.values()]
+            if remaining_dirs:
+                pdir_matches[k] = remaining_dirs[0]
+            elif k.lower() == "default":
+                pdir_matches[k] = "Default"
+            else:
+                pdir_matches[k] = "Default"
 
     total = 0
     for prof, tabs in profile_tabs.items():
@@ -63,47 +121,13 @@ def enrich_chrome(apps):
             continue
         total += len(clean)
         tab_count = len(clean)
-        # Resolve profile_dir: saved from cmdline > resolve from Local State
-        _resolved_dir = ""
 
-        # Method 1: Match from captured --profile-directory= cmdline args
-        for _pid, _pd in _pid_to_profile_dir.items():
-            _pd_lower = _pd.lower()
-            _prof_lower = prof.lower()
-            if _pd_lower == _prof_lower or \
-               _pd_lower in _prof_lower or \
-               _prof_lower in _pd_lower:
-                _resolved_dir = _pd
-                break
+        # Resolve correct profile_dir from our pigeonhole allocation matches
+        _resolved_dir = pdir_matches.get(prof, "")
 
-        # Method 2: Check if any original browser entry already has profile_dir
+        # Fallback if somehow still unresolved
         if not _resolved_dir:
-            for b in browser_entries:
-                _bpd = b.get("profile_dir", "")
-                if _bpd:
-                    _resolved_dir = _bpd
-                    break
-
-        # Method 3: Resolve from Chrome's Local State file
-        if not _resolved_dir:
-            try:
-                _chrome_base = os.path.join(
-                    os.environ.get("LOCALAPPDATA", ""),
-                    "Google", "Chrome", "User Data"
-                )
-                from hands.workspace_modules.helpers import find_chrome_profile_dir
-                _resolved_dir = find_chrome_profile_dir(_chrome_base, prof) or ""
-            except Exception:
-                pass
-
-        # Method 4: If profile name looks like a directory name, use it directly
-        if not _resolved_dir and prof:
-            _chrome_base = os.path.join(
-                os.environ.get("LOCALAPPDATA", ""),
-                "Google", "Chrome", "User Data"
-            )
-            if os.path.isdir(os.path.join(_chrome_base, prof)):
-                _resolved_dir = prof
+            _resolved_dir = "Default"
 
         apps.append({
             "type":         browser_type,
@@ -115,7 +139,7 @@ def enrich_chrome(apps):
             "profile_dir":  _resolved_dir,
             "window":       {"title": f"Chrome - {prof}"},
         })
-        print(Fore.CYAN + f"  Chrome profile '{prof}': {tab_count} tabs")
+        print(Fore.CYAN + f"  Chrome profile '{prof}': {tab_count} tabs (dir: {_resolved_dir})")
 
     print(Fore.GREEN + f"[WORKSPACE] Chrome: {total} tabs, "
           f"{len(profile_tabs)} profiles")
