@@ -7,14 +7,42 @@ URL normalization and matching for smart tab deduplication.
 def normalize_url(url: str) -> str:
     """
     Normalize URL for comparison.
-    Strips www, trailing slashes, fragments, query params for base URLs.
+    Strips www, trailing slashes, fragments, and transient query parameters (like YouTube timestamp &t=).
     """
-    url = url.strip().rstrip("/")
+    if not url:
+        return ""
+    url = url.strip()
     if "#" in url:
         url = url[:url.index("#")]
-    url = url.lower()
-    url = url.replace("://www.", "://")
-    return url
+    
+    try:
+        from urllib.parse import urlparse, parse_qsl, urlencode, urlunparse
+        parsed = urlparse(url)
+        scheme = parsed.scheme.lower()
+        netloc = parsed.netloc.lower()
+        if netloc.startswith("www."):
+            netloc = netloc[4:]
+        path = parsed.path.rstrip("/")
+        
+        # Transient query parameters to strip for matching
+        transient_params = {
+            "t", "time", "index", "feature", "ab_channel", "pp", "start_radio",
+            "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "fbclid", "gclid"
+        }
+        
+        q_params = []
+        for k, v in parse_qsl(parsed.query, keep_blank_values=True):
+            if k.lower() not in transient_params:
+                q_params.append((k.lower(), v))
+        
+        q_params.sort()
+        new_query = urlencode(q_params)
+        normalized = urlunparse((scheme, netloc, path, "", new_query, ""))
+        return normalized.lower()
+    except Exception:
+        url = url.lower().rstrip("/")
+        url = url.replace("://www.", "://")
+        return url
 
 
 def extract_domain(url: str) -> str:
