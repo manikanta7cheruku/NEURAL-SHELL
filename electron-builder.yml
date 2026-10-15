@@ -92,7 +92,7 @@ extraResources:
 # ── Windows — x64 only ──
 win:
   target:
-    - target: nsis
+    - target: dir
       arch:
         - x64
   icon: electron/icon.ico
@@ -119,7 +119,9 @@ nsis:
   displayLanguageSelector: false
   include: electron/installer.nsh
   license: null
-  # Force detailed extraction logs so the user knows it hasn't frozen
   warningsAsErrors: false
+  # Detailed file list during install (pairs with ShowInstDetails in installer.nsh)
+  # Progress bar still driven by NSIS sections; details prevent "frozen" feel
+  differentialPackage: false
 
 # win-unpacked is cleaned automatically by npm run clean before next build
