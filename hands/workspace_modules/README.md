@@ -46,65 +46,70 @@ When a workspace trigger fires (via hotkey, voice command, or schedule), the res
 ## Architecture Diagram
 
 Architecture Diagram
-┌──────────────────────────────────────────────────────────────────┐
-│                         TRIGGER EVENT                             │
-│                 (Hotkey / Voice / Schedule / Panel)               │
-└──────────────────────────────┬───────────────────────────────────┘
-                               │
-                               ▼
-┌──────────────────────────────────────────────────────────────────┐
-│ trigger_modules/executor.py                                      │
-│ _exec_open_workspace(workspace_id)                                │
-│                                                                  │
-│ • Loads workspace configuration from SQLite                      │
-│ • Checks whether the Seven backend is alive (50ms socket probe)   │
-│ • Marks _browser_closed per profile if browser exe is not running│
-│ • Calls hands.workspace.smart_restore(apps_config)                │
-└──────────────────────────────┬───────────────────────────────────┘
-                               │
-                               ▼
-┌──────────────────────────────────────────────────────────────────┐
-│ restore.py — smart_restore(apps_config)                          │
-│                                                                  │
-│ PHASE 1: SCAN CURRENT DESKTOP                                     │
-│                                                                  │
-│ ┌────────────────┐ ┌────────────────┐ ┌────────────────────────┐ │
-│ │ scanner.py     │ │ chrome_utils   │ │ chrome_utils            │ │
-│ │ scan_current() │ │ get_profiles() │ │ get_tabs_per_profile()  │ │
-│ │                │ │ (Local State)  │ │ (HTTP → cache → disk)   │ │
-│ └───────┬────────┘ └───────┬────────┘ └───────────┬────────────┘ │
-│         └──────────────────┼───────────────────────┘              │
-│                            ▼                                      │
-│ ┌──────────────────────────────────────────────────────────────┐  │
-│ │ Build deduplication sets:                                    │  │
-│ │ open_exes, open_ws_paths, open_folders, open_profiles,       │  │
-│ │ open_chrome_urls_norm, per_profile_urls                      │  │
-│ └──────────────────────────────────────────────────────────────┘  │
-│                            │                                      │
-│                            ▼                                      │
-│ PHASE 2: DIFF SAVED STATE AGAINST CURRENT STATE                   │
-│                                                                  │
-│ • Browser  → Per-profile tab dedup (exact + fuzzy URL match)     │
-│ • VS Code  → Workspace path + executable match                   │
-│ • Explorer → Folder path + window title match                    │
-│ • Terminal → Window title + working directory match              │
-│ • UWP      → Protocol URI + application name match               │
-│ • Generic  → Executable + process name + window title match      │
-│                            │                                      │
-│                            ▼                                      │
-│ PHASE 3: RESTORE MISSING APPLICATIONS                             │
-│                                                                  │
-│ ┌──────────────────────────────────────────────────────────────┐  │
-│ │ app_restorers.py — restore_one(cfg)                          │  │
-│ │                                                              │  │
-│ │ • _restore_browser()  — Chrome / Edge / Brave / Firefox      │  │
-│ │ • _restore_vscode()   — VS Code workspaces                   │  │
-│ │ • _restore_terminal() — PowerShell / CMD / Windows Terminal  │  │
-│ │ • _restore_explorer() — File Explorer folders                │  │
-│ │ • _restore_uwp()      — Universal Windows apps               │  │
-│ │ • _restore_generic()  — Other executable applications        │  │
-│ └──────────────────────────────────────────────────────────────┘  │
-└──────────────────────────────────────────────────────────────────┘
+
+The workspace restore process follows three phases: scan the current desktop, compare it with the saved workspace, and restore only missing applications.
+
+flowchart TD
+    A(["Trigger Event<br/>Hotkey · Voice · Schedule · Panel"])
+
+    B["trigger_modules/executor.py<br/>_exec_open_workspace(workspace_id)<br/><br/>Load workspace config from SQLite<br/>Probe backend availability<br/>Determine browser state per profile<br/>Call smart_restore(apps_config)"]
+
+    C["restore.py<br/>smart_restore(apps_config)"]
+
+    subgraph SCAN["Phase 1 — Scan Current Desktop"]
+        direction TB
+        D["scanner.py<br/>scan_current()<br/><br/>Enumerate visible windows"]
+        E["chrome_utils.py<br/>get_profiles()<br/><br/>Read Chrome Local State"]
+        F["chrome_utils.py<br/>get_tabs_per_profile()<br/><br/>Fetch tabs via HTTP, cache, or disk"]
+
+        G["Build deduplication sets<br/>open_exes · open_ws_paths · open_folders<br/>open_profiles · open_chrome_urls_norm<br/>per_profile_urls"]
+
+        D --> G
+        E --> G
+        F --> G
+    end
+
+    subgraph DIFF["Phase 2 — Compare Saved and Current State"]
+        direction TB
+        H["Browser<br/>Per-profile URL matching"]
+        I["VS Code<br/>Workspace path + executable"]
+        J["Explorer<br/>Folder path + window title"]
+        K["Terminal<br/>Window title + working directory"]
+        L["UWP<br/>Protocol URI + app name"]
+        M["Generic apps<br/>Executable + process + window title"]
+    end
+
+    subgraph RESTORE["Phase 3 — Restore Missing Applications"]
+        direction TB
+        N["app_restorers.py<br/>restore_one(cfg)"]
+        O["Browser Restorer<br/>Chrome · Edge · Brave · Firefox"]
+        P["VS Code Restorer"]
+        Q["Terminal Restorer<br/>PowerShell · CMD · Windows Terminal"]
+        R["Explorer Restorer"]
+        S["UWP App Restorer"]
+        T["Generic App Restorer"]
+
+        N --> O
+        N --> P
+        N --> Q
+        N --> R
+        N --> S
+        N --> T
+    end
+
+    A --> B
+    B --> C
+    C --> SCAN
+    SCAN --> DIFF
+    DIFF --> N
+
+    classDef trigger fill:#dbeafe,stroke:#2563eb,color:#1e3a8a
+    classDef process fill:#f3e8ff,stroke:#9333ea,color:#581c87
+    classDef phase fill:#dcfce7,stroke:#16a34a,color:#14532d
+
+    class A trigger
+    class B,C,G,N process
+    class D,E,F,H,I,J,K,L,M,O,P,Q,R,S,T phase
 
 ## Module Inventory
 
