@@ -253,30 +253,84 @@ def delete_workspace(workspace_id: int):
 
 
 @router.post("/api/workspaces/scan")
-def scan_current_workspace():
+async def scan_current_workspace():
     """
     Scan currently open windows and return workspace snapshot.
-    User previews it then decides to save with a name.
+    Runs in a background thread so the FastAPI event loop stays
+    responsive (frontend can keep receiving other requests).
+
+    User previews the result then decides to save with a name.
+    """
+    import asyncio
+
+    def _do_scan():
+        try:
+            from hands.workspace import scan_current
+            apps = scan_current()
+
+            # Remove internal fields before sending to frontend
+            clean_apps = []
+            for app in apps:
+                clean = {k: v for k, v in app.items() if k != "pid"}
+                clean_apps.append(clean)
+
+            return {
+                "success":     True,
+                "app_count":   len(clean_apps),
+                "apps":        clean_apps,
+                "scanned_at":  datetime.now().isoformat(),
+            }
+        except Exception as e:
+            print(Fore.RED + f"[WORKSPACES] scan error: {e}")
+            return {
+                "success":   False,
+                "app_count": 0,
+                "apps":      [],
+                "error":     str(e),
+            }
+
+    # Run the blocking scan on a thread pool so the event loop
+    # can serve other requests (like the frontend's name input).
+    result = await asyncio.to_thread(_do_scan)
+
+    if not result.get("success"):
+        raise HTTPException(status_code=500, detail=result.get("error", "Scan failed"))
+
+    return result
+
+@router.post("/api/workspaces/restore-live")
+def restore_workspace_live(body: dict):
+    """
+    Restore a workspace using apps + custom positions from the preview UI.
+    Called when user drags tiles in the preview and clicks Restore.
+
+    Body: { apps: [...], workspace_name: str }
     """
     try:
-        from hands.workspace import scan_current
-        apps = scan_current()
+        apps = body.get("apps", [])
+        name = body.get("workspace_name", "Live Workspace")
 
-        # Remove internal fields before sending to frontend
-        clean_apps = []
-        for app in apps:
-            clean = {k: v for k, v in app.items() if k != "pid"}
-            clean_apps.append(clean)
+        if not apps:
+            return {"success": False, "message": "No apps in preview"}
+
+        import threading
+        from hands.workspace import smart_restore
+
+        threading.Thread(
+            target=smart_restore,
+            args=(apps,),
+            daemon=True
+        ).start()
 
         return {
-            "success":     True,
-            "app_count":   len(clean_apps),
-            "apps":        clean_apps,
-            "scanned_at":  datetime.now().isoformat(),
+            "success": True,
+            "workspace": name,
+            "app_count": len(apps),
+            "message": f"Restoring {name} with custom positions",
         }
 
     except Exception as e:
-        print(Fore.RED + f"[WORKSPACES] scan error: {e}")
+        print(Fore.RED + f"[WORKSPACES] restore-live error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
