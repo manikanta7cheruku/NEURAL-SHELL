@@ -45,61 +45,66 @@ When a workspace trigger fires (via hotkey, voice command, or schedule), the res
 
 ## Architecture Diagram
 
-┌─────────────────────────────────────────────────────────────────┐
-│ TRIGGER EVENT │
-│ (Hotkey / Voice / Schedule / Panel) │
-└──────────────────────────┬──────────────────────────────────────┘
-│
-▼
+Architecture Diagram
 ┌──────────────────────────────────────────────────────────────────┐
-│ trigger_modules/executor.py │
-│ _exec_open_workspace(workspace_id) │
-│ • Loads workspace config from SQLite │
-│ • Checks if Seven backend is alive (50ms socket probe) │
-│ • Marks _browser_closed per profile if browser exe not running │
-│ • Calls hands.workspace.smart_restore(apps_config) │
-└──────────────────────────┬───────────────────────────────────────┘
-│
-▼
+│                         TRIGGER EVENT                             │
+│                 (Hotkey / Voice / Schedule / Panel)               │
+└──────────────────────────────┬───────────────────────────────────┘
+                               │
+                               ▼
 ┌──────────────────────────────────────────────────────────────────┐
-│ restore.py — smart_restore(apps_config) │
-│ │
-│ Phase 1: SCAN CURRENT DESKTOP │
-│ ┌─────────────┐ ┌──────────────┐ ┌────────────────────────┐ │
-│ │ scanner.py │ │ chrome_utils │ │ chrome_utils │ │
-│ │ scan_current │ │ get_profiles │ │ get_tabs_per_profile │ │
-│ │ (win32gui) │ │ (Local State)│ │ (HTTP → cache → disk) │ │
-│ └──────┬───────┘ └──────┬───────┘ └───────────┬────────────┘ │
-│ │ │ │ │
-│ ▼ ▼ ▼ │
-│ ┌─────────────────────────────────────────────────────────┐ │
-│ │ Build dedup sets: │ │
-│ │ open_exes, open_ws_paths, open_folders, open_profiles, │ │
-│ │ open_chrome_urls_norm, per_profile_urls │ │
-│ └─────────────────────────────────────────────────────────┘ │
-│ │
-│ Phase 2: DIFF SAVED vs CURRENT │
-│ For each app in workspace config: │
-│ • Browser → per-profile tab dedup (exact + fuzzy URL match) │
-│ • VS Code → workspace path + exe match │
-│ • Explorer → folder path + title match │
-│ • Terminal → window title + working_dir match │
-│ • UWP → protocol + name match │
-│ • Generic → exe + process name + window title match │
-│ │
-│ Phase 3: RESTORE MISSING │
-│ ┌──────────────────────────────────────────────────────┐ │
-│ │ app_restorers.py — restore_one(cfg) │ │
-│ │ • _restore_browser() — Chrome/Edge/Brave/Firefox │ │
-│ │ • _restore_vscode() — VS Code workspaces │ │
-│ │ • _restore_terminal() — PowerShell/CMD/WT │ │
-│ │ • _restore_explorer() — File Explorer folders │ │
-│ │ • _restore_uwp() — Universal Windows apps │ │
-│ │ • _restore_generic() — Any other .exe │ │
-│ └──────────────────────────────────────────────────────┘ │
+│ trigger_modules/executor.py                                      │
+│ _exec_open_workspace(workspace_id)                                │
+│                                                                  │
+│ • Loads workspace configuration from SQLite                      │
+│ • Checks whether the Seven backend is alive (50ms socket probe)   │
+│ • Marks _browser_closed per profile if browser exe is not running│
+│ • Calls hands.workspace.smart_restore(apps_config)                │
+└──────────────────────────────┬───────────────────────────────────┘
+                               │
+                               ▼
+┌──────────────────────────────────────────────────────────────────┐
+│ restore.py — smart_restore(apps_config)                          │
+│                                                                  │
+│ PHASE 1: SCAN CURRENT DESKTOP                                     │
+│                                                                  │
+│ ┌────────────────┐ ┌────────────────┐ ┌────────────────────────┐ │
+│ │ scanner.py     │ │ chrome_utils   │ │ chrome_utils            │ │
+│ │ scan_current() │ │ get_profiles() │ │ get_tabs_per_profile()  │ │
+│ │                │ │ (Local State)  │ │ (HTTP → cache → disk)   │ │
+│ └───────┬────────┘ └───────┬────────┘ └───────────┬────────────┘ │
+│         └──────────────────┼───────────────────────┘              │
+│                            ▼                                      │
+│ ┌──────────────────────────────────────────────────────────────┐  │
+│ │ Build deduplication sets:                                    │  │
+│ │ open_exes, open_ws_paths, open_folders, open_profiles,       │  │
+│ │ open_chrome_urls_norm, per_profile_urls                      │  │
+│ └──────────────────────────────────────────────────────────────┘  │
+│                            │                                      │
+│                            ▼                                      │
+│ PHASE 2: DIFF SAVED STATE AGAINST CURRENT STATE                   │
+│                                                                  │
+│ • Browser  → Per-profile tab dedup (exact + fuzzy URL match)     │
+│ • VS Code  → Workspace path + executable match                   │
+│ • Explorer → Folder path + window title match                    │
+│ • Terminal → Window title + working directory match              │
+│ • UWP      → Protocol URI + application name match               │
+│ • Generic  → Executable + process name + window title match      │
+│                            │                                      │
+│                            ▼                                      │
+│ PHASE 3: RESTORE MISSING APPLICATIONS                             │
+│                                                                  │
+│ ┌──────────────────────────────────────────────────────────────┐  │
+│ │ app_restorers.py — restore_one(cfg)                          │  │
+│ │                                                              │  │
+│ │ • _restore_browser()  — Chrome / Edge / Brave / Firefox      │  │
+│ │ • _restore_vscode()   — VS Code workspaces                   │  │
+│ │ • _restore_terminal() — PowerShell / CMD / Windows Terminal  │  │
+│ │ • _restore_explorer() — File Explorer folders                │  │
+│ │ • _restore_uwp()      — Universal Windows apps               │  │
+│ │ • _restore_generic()  — Other executable applications        │  │
+│ └──────────────────────────────────────────────────────────────┘  │
 └──────────────────────────────────────────────────────────────────┘
-
----
 
 ## Module Inventory
 
