@@ -46,70 +46,81 @@ When a workspace trigger fires (via hotkey, voice command, or schedule), the res
 ## Architecture Diagram
 
 Architecture Diagram
+flowchart TB
+    A([" Trigger Event<br/>Hotkey · Voice · Schedule · Panel"])
 
-The workspace restore process follows three phases: scan the current desktop, compare it with the saved workspace, and restore only missing applications.
+    B["Workspace Executor<br/>trigger_modules/executor.py<br/>_exec_open_workspace()"]
 
-flowchart TD
-    A(["Trigger Event<br/>Hotkey · Voice · Schedule · Panel"])
+    C["Restore Orchestrator<br/>restore.py<br/>smart_restore()"]
 
-    B["trigger_modules/executor.py<br/>_exec_open_workspace(workspace_id)<br/><br/>Load workspace config from SQLite<br/>Probe backend availability<br/>Determine browser state per profile<br/>Call smart_restore(apps_config)"]
-
-    C["restore.py<br/>smart_restore(apps_config)"]
-
-    subgraph SCAN["Phase 1 — Scan Current Desktop"]
-        direction TB
-        D["scanner.py<br/>scan_current()<br/><br/>Enumerate visible windows"]
-        E["chrome_utils.py<br/>get_profiles()<br/><br/>Read Chrome Local State"]
-        F["chrome_utils.py<br/>get_tabs_per_profile()<br/><br/>Fetch tabs via HTTP, cache, or disk"]
-
-        G["Build deduplication sets<br/>open_exes · open_ws_paths · open_folders<br/>open_profiles · open_chrome_urls_norm<br/>per_profile_urls"]
-
-        D --> G
-        E --> G
-        F --> G
+    subgraph PHASE1["PHASE 1 — SCAN"]
+        direction LR
+        D["Desktop Scanner<br/>scanner.py"]
+        E["Chrome Profiles<br/>chrome_utils.py"]
+        F["Live Tabs<br/>HTTP · Cache · Disk"]
     end
 
-    subgraph DIFF["Phase 2 — Compare Saved and Current State"]
-        direction TB
-        H["Browser<br/>Per-profile URL matching"]
-        I["VS Code<br/>Workspace path + executable"]
-        J["Explorer<br/>Folder path + window title"]
-        K["Terminal<br/>Window title + working directory"]
-        L["UWP<br/>Protocol URI + app name"]
-        M["Generic apps<br/>Executable + process + window title"]
+    G["Build Current-State Index<br/>Open Apps · Windows · Folders<br/>Normalized URLs · Per-Profile URLs"]
+
+    subgraph PHASE2["PHASE 2 — COMPARE"]
+        direction LR
+        H["Browser<br/>Per-Profile URL Matching"]
+        I["VS Code<br/>Workspace Matching"]
+        J["Explorer<br/>Folder Matching"]
+        K["Terminal<br/>Title + Working Directory"]
+        L["UWP / Generic Apps<br/>Protocol + Process Matching"]
     end
 
-    subgraph RESTORE["Phase 3 — Restore Missing Applications"]
-        direction TB
-        N["app_restorers.py<br/>restore_one(cfg)"]
-        O["Browser Restorer<br/>Chrome · Edge · Brave · Firefox"]
-        P["VS Code Restorer"]
-        Q["Terminal Restorer<br/>PowerShell · CMD · Windows Terminal"]
-        R["Explorer Restorer"]
-        S["UWP App Restorer"]
-        T["Generic App Restorer"]
+    M{"Application or tab<br/>already open?"}
 
-        N --> O
-        N --> P
-        N --> Q
-        N --> R
-        N --> S
-        N --> T
+    N["Skip Existing Items"]
+    O["Restore Missing Items<br/>app_restorers.py"]
+
+    subgraph PHASE3["PHASE 3 — RESTORE"]
+        direction LR
+        P["Browser Restorer"]
+        Q["VS Code Restorer"]
+        R["Terminal Restorer"]
+        S["Explorer / UWP / Generic Restorers"]
     end
 
-    A --> B
-    B --> C
-    C --> SCAN
-    SCAN --> DIFF
-    DIFF --> N
+    A --> B --> C
+    C --> D
+    C --> E
+    C --> F
+    D --> G
+    E --> G
+    F --> G
+    G --> H
+    G --> I
+    G --> J
+    G --> K
+    G --> L
+    H --> M
+    I --> M
+    J --> M
+    K --> M
+    L --> M
+    M -->|Yes| N
+    M -->|No| O
+    O --> P
+    O --> Q
+    O --> R
+    O --> S
 
-    classDef trigger fill:#dbeafe,stroke:#2563eb,color:#1e3a8a
-    classDef process fill:#f3e8ff,stroke:#9333ea,color:#581c87
-    classDef phase fill:#dcfce7,stroke:#16a34a,color:#14532d
+    classDef trigger fill:#dbeafe,stroke:#2563eb,color:#1e3a8a,stroke-width:2px
+    classDef engine fill:#ede9fe,stroke:#7c3aed,color:#4c1d95,stroke-width:2px
+    classDef scan fill:#d1fae5,stroke:#059669,color:#064e3b
+    classDef compare fill:#fef3c7,stroke:#d97706,color:#78350f
+    classDef restore fill:#ffedd5,stroke:#ea580c,color:#7c2d12
+    classDef decision fill:#fce7f3,stroke:#db2777,color:#831843
 
     class A trigger
-    class B,C,G,N process
-    class D,E,F,H,I,J,K,L,M,O,P,Q,R,S,T phase
+    class B,C,G engine
+    class D,E,F scan
+    class H,I,J,K,L compare
+    class O,P,Q,R,S,N restore
+    class M decision
 
 ## Module Inventory
 
