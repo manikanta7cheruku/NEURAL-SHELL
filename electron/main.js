@@ -849,16 +849,23 @@ function freePort7777Sync() {
 function purgeLingeringDaemonsAsync() {
   if (process.platform !== 'win32') return;
   // Run in background — do NOT block the main thread.
-  // Uses tasklist (fast, ~50ms) instead of WMI (slow, ~2-5s).
+  //
+  // NOTE: Get-Process has no CommandLine property (it's always $null on
+  // Windows PowerShell), so the previous Where-Object match never matched
+  // anything and this never actually killed a lingering daemon.
+  // Get-CimInstance Win32_Process does expose CommandLine.
+  //
+  // panel_host.js / overlay_daemon.js are launched via SEVEN.exe (Electron),
+  // not python.exe, so they were never relevant to this python-only filter
+  // and have been dropped from the pattern.
   const targets = [
     'trigger_daemon.py', 'schedule_daemon.py',
-    'panel_server.py', 'panel_host.js', 'overlay_daemon.js'
+    'panel_server.py', 'offline_tab_listener.py'
   ];
-  const filters = targets.map(t => `tasklist /FI "IMAGENAME eq python*" /V /FO CSV`)
-    .join(' & ');
+  const pattern = targets.join('|').replace(/\./g, '\\.');
 
   exec(
-    `powershell -NoProfile -Command "Get-Process python*,pythonw* -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -match '(${targets.join('|')})' } | Stop-Process -Force -ErrorAction SilentlyContinue"`,
+    `powershell -NoProfile -WindowStyle Hidden -Command "Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^python(w)?\\.exe$' -and $_.CommandLine -match '${pattern}' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"`,
     { windowsHide: true, timeout: 5000 },
     (err) => {
       if (!err) console.log('[STARTUP] Background daemon cleanup complete.');
