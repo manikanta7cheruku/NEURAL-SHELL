@@ -1,17 +1,16 @@
 """
 hands/core.py
-Public interface for app control.
+Public interface for app control and system functions.
 
-This module is a thin re-export shim.
-All implementation lives in:
-  hands/app_launcher.py  - open_app and launch utilities
+This module acts as a re-export shim.
+All implementations live in:
+  hands/app_launcher.py  - open_app, focus_target_window, and launch utilities
   hands/app_closer.py    - close_app and process utilities
 
 Importing from hands.core continues to work identically.
-No external file needs to change.
 """
 
-from hands.app_launcher import open_app
+from hands.app_launcher import open_app, focus_target_window
 from hands.app_closer   import close_app
 import webbrowser
 import pyautogui
@@ -26,7 +25,7 @@ def search_web(query: str) -> bool:
 
 
 def system_control(command: str) -> bool:
-    """Basic system media/volume/screenshot control."""
+    """Basic system media, volume, and screenshot control."""
     cmd = command.lower()
     if "volume up"   in cmd: pyautogui.press("volumeup",   presses=5)
     elif "volume down" in cmd: pyautogui.press("volumedown", presses=5)
