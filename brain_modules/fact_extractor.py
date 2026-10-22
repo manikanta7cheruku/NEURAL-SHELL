@@ -37,6 +37,8 @@ class ExtractedFact:
     category: str
     confidence: float
     explicit: bool = False
+    supersedes: Optional[str] = None   # old value this statement replaces ("prefer X over Y")
+    kind: Optional[str] = None         # movie, language, framework ...
 
 
 _INTERROGATIVES = frozenset({
@@ -92,6 +94,27 @@ _PLAYABLES = frozenset({
     "valorant", "minecraft", "fifa", "poker", "carrom",
 })
 
+_KIND_CANON = {"film": "movie", "series": "show", "dish": "food"}
+_KIND_LEXICON = {
+    "language": {"python", "javascript", "typescript", "java", "rust", "go", "golang", "c++", "c#",
+                 "kotlin", "swift", "ruby", "php", "dart", "scala", "haskell", "lua", "sql", "r", "julia"},
+    "framework": {"react", "vue", "angular", "svelte", "django", "flask", "fastapi", "nextjs", "next.js",
+                  "express", "spring", "laravel", "rails"},
+    "editor": {"vscode", "vim", "neovim", "emacs", "pycharm", "intellij", "sublime", "notepad++"},
+}
+_KIND_WORDS = ("movie|film|song|book|show|series|game|language|band|album|podcast|food|dish|sport|"
+               "team|app|tool|editor|framework|library")
+
+
+def kind_of(value: str) -> Optional[str]:
+    """Best-effort kind of a value from a small lexicon ('JavaScript' -> 'language')."""
+    v = (value or "").strip().lower()
+    for kind, words in _KIND_LEXICON.items():
+        if v in words:
+            return kind
+    return None
+
+
 _RE_EXPLICIT = re.compile(
     r"^(?:(?:please|pls|hey|ok|okay)[,\s]+)*"
     r"(?:(?:i\s+want\s+you\s+to|i\s+need\s+you\s+to|can\s+you|could\s+you|would\s+you|"
@@ -104,6 +127,13 @@ _RE_MY_ATTR = re.compile(
     r"^my\s+(?P<attr>[a-z][a-z' \-]{1,40}?)\s+(?:is|are|was|were)\s+(?P<val>.+)$",
     re.IGNORECASE,
 )
+_RE_PREFER_OVER = re.compile(
+    r"^i\s+(?:now\s+|actually\s+)?prefer\s+(?P<new>.+?)\s+(?:over|to|rather than|instead of)\s+(?P<old>.+)$",
+    re.IGNORECASE)
+_RE_LIKE_KIND = re.compile(
+    rf"^i\s+(?:really\s+|absolutely\s+)?(?P<verb>love|like|enjoy|adore|prefer|hate|dislike)\s+"
+    rf"(?:the\s+)?(?P<kind>{_KIND_WORDS})\s+(?P<val>.+)$", re.IGNORECASE)
+_RE_BECAUSE = re.compile(r"^(?P<main>.+?)\s*,?\s+because\s+(?P<why>.+)$", re.IGNORECASE)
 _RE_LIKE = re.compile(
     r"^i\s+(?:really\s+|absolutely\s+|do\s+)?"
     r"(?P<verb>love|like|enjoy|adore|prefer|hate|dislike)\s+(?P<val>.+)$",
@@ -127,7 +157,7 @@ _RE_LEADING_FILLER = re.compile(
     r"well[,\s]+|actually[,\s]+)+",
     re.IGNORECASE,
 )
-_RE_SPLIT = re.compile(r"(?<=[.!;])\s+|\s+(?:and|but)\s+(?=my\s|i\s)", re.IGNORECASE)
+_RE_SPLIT = re.compile(r"(?<=[.!;])\s+|,?\s+(?:and|but)\s+(?=my\s|i\s|i'm\s|i\u2019m\s|i am\s)", re.IGNORECASE)
 
 
 def slug(text: str) -> str:
@@ -167,7 +197,7 @@ def valid_name(name: str) -> Optional[str]:
     if not 1 <= len(toks) <= 3:
         return None
     for t in toks:
-        if not re.fullmatch(r"[A-Za-z][A-Za-z'\-]+", t) or len(t) < 2:
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9'\-]*", t) or len(t) < 2 or len(t) > 20:
             return None
         if t.lower() in _INTERROGATIVES | _PRONOUNS | _FILLER | {"called", "named", "name", "is"}:
             return None
@@ -208,7 +238,7 @@ def _fact(key, value, text, category, confidence, explicit=False) -> Optional[Ex
     return ExtractedFact(key, value, text, category, confidence, explicit)
 
 
-def _parse_statement(sentence: str, explicit: bool) -> Optional[ExtractedFact]:
+def _parse_statement(sentence: str, explicit: bool, kind_hint: Optional[str] = None) -> Optional[ExtractedFact]:
     """Parse one declarative sentence into at most one fact."""
     s = sentence.strip().rstrip(".!;")
     conf_hi = 0.95 if explicit else 0.85
@@ -222,20 +252,34 @@ def _parse_statement(sentence: str, explicit: bool) -> Optional[ExtractedFact]:
             return _fact(slug(attr), val, f"User's {attr} {verb} {val}", "preference", conf_hi, explicit)
         return None
 
-    m = _RE_LIKE.match(s)
+    m = _RE_PREFER_OVER.match(s)
     if m:
-        val = clean_value(m.group("val"))
+        new, old = clean_value(m.group("new")), clean_value(m.group("old"))
+        if new and old and new.lower() != old.lower():
+            kind = kind_of(new) or kind_of(old) or kind_hint
+            key = f"likes:{kind}:{slug(new)}" if kind else f"likes:{slug(new)}"
+            return ExtractedFact(key, new, f"User prefers {new} over {old}", "preference", 0.9,
+                                 explicit, supersedes=old, kind=kind)
+        return None
+
+    m = _RE_LIKE_KIND.match(s) or _RE_LIKE.match(s)
+    if m:
+        gd = m.groupdict()
+        val = clean_value(gd["val"])
         if not val or re.search(r"\byou\b", val, re.IGNORECASE):
             return None
         first = val.lower().split()[0]
         if first in _BAD_LIKE_START or val.lower().startswith("the way"):
             return None
-        verb = m.group("verb").lower()
-        negative = verb in ("hate", "dislike")
-        cls = "dislikes" if negative else "likes"
+        kind = (gd.get("kind") or "").lower() or kind_of(val) or kind_hint
+        kind = _KIND_CANON.get(kind, kind) if kind else None
+        verb = gd["verb"].lower()
+        cls = "dislikes" if verb in ("hate", "dislike") else "likes"
         verb_s = {"love": "loves", "like": "likes", "enjoy": "enjoys", "adore": "adores",
                   "prefer": "prefers", "hate": "hates", "dislike": "dislikes"}[verb]
-        return _fact(f"{cls}:{slug(val)}", val, f"User {verb_s} {val}", "preference", 0.8, explicit)
+        key = f"{cls}:{kind}:{slug(val)}" if kind else f"{cls}:{slug(val)}"
+        text = f"User {verb_s} the {kind} {val}" if kind else f"User {verb_s} {val}"
+        return ExtractedFact(key, val, text, "preference", 0.8, explicit, kind=kind)
 
     m = _RE_WORK_AT.match(s)
     if m and clean_value(m.group("val")):
@@ -296,7 +340,32 @@ def _parse_statement(sentence: str, explicit: bool) -> Optional[ExtractedFact]:
     return None
 
 
-def extract_facts(text: str) -> List[ExtractedFact]:
+def _parse_with_reason(sentence: str, explicit: bool, kind_hint: Optional[str]) -> List[ExtractedFact]:
+    """Parse one sentence; a 'because ...' clause becomes a separate reason fact."""
+    m = _RE_BECAUSE.match(sentence)
+    main, why = (m.group("main"), m.group("why")) if m else (sentence, None)
+    fact = _parse_statement(main, explicit, kind_hint)
+    if not fact:
+        return []
+    out = [fact]
+    if why:
+        why = why.strip().rstrip(".!;")
+        if 2 <= len(why.split()) <= 25 and "?" not in why:
+            out.append(ExtractedFact(f"reason:{fact.key}", why, f"User's reason ({fact.text}): {why}",
+                                     "reason", 0.85, explicit))
+    return out
+
+
+def reason_fact(slot_key: str, answer: str) -> Optional[ExtractedFact]:
+    """Turn a user's answer to 'why?' into a reason fact for that slot."""
+    why = (answer or "").strip().rstrip(".!;")
+    if not 2 <= len(why.split()) <= 40 or "?" in why:
+        return None
+    return ExtractedFact(f"reason:{slot_key}", why, f"User's reason for {slot_key.replace('_', ' ')}: {why}",
+                         "reason", 0.85, True)
+
+
+def extract_facts(text: str, kind_hint: Optional[str] = None) -> List[ExtractedFact]:
     """
     Extract zero or more validated facts from one user utterance.
     Questions, imperatives and over-long inputs always return [].
@@ -315,9 +384,7 @@ def extract_facts(text: str) -> List[ExtractedFact]:
             return []
         facts = []
         for sentence in _RE_SPLIT.split(body):
-            f = _parse_statement(_RE_LEADING_FILLER.sub("", sentence.strip()), explicit=True)
-            if f:
-                facts.append(f)
+            facts.extend(_parse_with_reason(_RE_LEADING_FILLER.sub("", sentence.strip()), True, kind_hint))
         if facts:
             return _dedupe(facts)
         if len(body.split()) < 2 or not clean_value(body):
@@ -334,9 +401,7 @@ def extract_facts(text: str) -> List[ExtractedFact]:
         s = _RE_LEADING_FILLER.sub("", sentence.strip())
         if not s or speech_acts.is_question(s):
             continue
-        f = _parse_statement(s, explicit=False)
-        if f:
-            facts.append(f)
+        facts.extend(_parse_with_reason(s, False, kind_hint))
     return _dedupe(facts)
 
 
@@ -347,6 +412,11 @@ def _dedupe(facts: List[ExtractedFact]) -> List[ExtractedFact]:
             seen.add(f.key)
             out.append(f)
     return out
+
+
+def split_sentences(text: str) -> List[str]:
+    """Sentence-level split used by goal extraction too."""
+    return [x.strip() for x in _RE_SPLIT.split(text or "") if x and x.strip()]
 
 
 def looks_like_statement(text: str) -> bool:

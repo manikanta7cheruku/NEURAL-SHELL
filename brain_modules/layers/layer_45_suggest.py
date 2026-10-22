@@ -51,6 +51,13 @@ def process(ctx, deps):
     _suggest_text = _suggest_text.strip('.,!-:;')
 
     if _suggest_text and len(_suggest_text) > 2:
+        # "I need to finish the report" is also a statement of what the user is trying to achieve. This layer
+        # answers before the facts layer runs, so record that goal here (idempotent; nothing is added as a task).
+        try:
+            from brain_modules import goals
+            goals.learn(ctx.speaker_key, ctx.resolved_text or ctx.prompt_text, getattr(ctx, "user_msg_id", None))
+        except Exception:
+            pass
         return LayerResult.stop(
             f'Want me to add "{_suggest_text}" as a task? '
             f'Say "add task {_suggest_text}" to save it.'

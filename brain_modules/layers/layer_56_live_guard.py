@@ -1,34 +1,56 @@
 """
 LAYER 5.6: LIVE-DATA GUARD
 
-Runs right after web search. If the user asked for live information
-(weather, news, prices, scores) and no web results arrived, Seven says it
-cannot check, instead of letting the model fabricate weather or headlines.
+When a question needs fresh information and the web lookup did not succeed,
+say exactly why instead of letting the model make something up:
+
+    offline   "I have no internet right now, so I can't check that."
+    disabled  web lookups are switched off in Settings
+    error     the search service did not respond
+    empty     the search found nothing reliable
+
+Time-sensitive questions (weather, news, prices, scores, "latest", "today") are
+answered with the honest limit. For other questions the model may answer from
+general knowledge, but is told the web was unavailable and must label it.
 """
 
 import random
 
-from brain_modules import memory_gate, speech_acts
+from brain_modules import memory_gate
 from brain_modules.layer_result import LayerResult
 
-_EDUCATIONAL = ("what causes", "how does", "why does", "explain", "what is the difference")
+_TOPIC = {"weather": "weather", "news": "news", "prices": "prices", "scores": "scores"}
 
-_REPLIES = {
-    "weather": ["I can't check live weather right now. A weather app will beat any guess from me.",
-                "No live weather access at the moment, so I won't guess."],
-    "news": ["I can't pull live news right now, and I'd rather not guess at headlines."],
-    "prices": ["I can't check live prices right now. I'd only be guessing."],
-    "scores": ["I can't check live scores right now."],
-}
+
+def _message(outcome, topic: str) -> str:
+    what = f"the live {topic}" if topic in _TOPIC.values() else "that"
+    if outcome.status == "offline":
+        return random.choice([f"I have no internet right now, so I can't check {what}.",
+                              f"I'm offline at the moment, so I can't look up {what}."])
+    if outcome.status == "disabled":
+        return f"Web lookups are switched off in my settings, so I can't check {what}."
+    if outcome.status == "error":
+        return f"The search service didn't respond, so I can't confirm {what} right now."
+    return f"I searched but found nothing reliable for {what}."
 
 
 def process(ctx, deps):
-    if ctx.web_searched or ctx.web_context or ctx.is_command or "VISUAL_REPORT:" in ctx.prompt_text:
+    outcome = ctx.web_outcome
+    if ctx.is_command or ctx.web_searched or "VISUAL_REPORT:" in ctx.prompt_text:
         return LayerResult.pass_through()
-    topic = memory_gate.live_topic(ctx.norm_in)
-    if not topic or ctx.norm_in.startswith(_EDUCATIONAL):
+    norm = ctx.norm_in
+    topic = memory_gate.live_topic(norm)
+    needed = bool(outcome and outcome.needed) or bool(topic)
+    failed = outcome is None or outcome.status in ("offline", "disabled", "error", "empty", "not_needed")
+    if not needed or not failed or norm.startswith(("what causes", "how does", "why does", "explain")):
         return LayerResult.pass_through()
-    config = deps.get("config")
-    if config and not config.KEY.get("web", {}).get("enabled", True):
-        return LayerResult.stop(f"Web lookups are switched off in my settings, so I can't check live {topic}.")
-    return LayerResult.stop(random.choice(_REPLIES[topic]))
+    if outcome is None or outcome.status == "not_needed":
+        outcome = type("O", (), {"status": "error"})()   # live topic but no search attempted
+        if topic:
+            return LayerResult.stop(_message(outcome, topic))
+        return LayerResult.pass_through()
+    if topic or memory_gate.time_sensitive(norm):
+        return LayerResult.stop(_message(outcome, topic or "information"))
+    ctx.hints.append(f"Web lookup was unavailable ({outcome.status}). If you answer, say it comes from your "
+                     "built-in knowledge and may be out of date.")
+    return LayerResult.pass_through()

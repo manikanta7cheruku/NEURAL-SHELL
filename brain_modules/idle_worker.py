@@ -85,7 +85,25 @@ def _job_migrate(payload: Dict[str, Any]) -> None:
     _log.info("legacy memory migration: %s", stats)
 
 
+def _job_reflect(payload: Dict[str, Any]) -> None:
+    from brain_modules import reflection
+    reflection.summarize_pending()
+
+
+def _job_consolidate(payload: Dict[str, Any]) -> None:
+    from brain_modules import reflection
+    reflection.consolidate()
+
+
+def _job_import_legacy(payload: Dict[str, Any]) -> None:
+    from brain_modules import reflection
+    reflection.import_legacy_conversations()
+
+
 _HANDLERS = {
+    "reflect": _job_reflect,
+    "consolidate": _job_consolidate,
+    "import_legacy": _job_import_legacy,
     "learn": _job_learn,
     "extract_facts": _job_learn,           # legacy name
     "apply_correction": _job_apply_correction,
@@ -123,8 +141,9 @@ def _ensure_started() -> None:
         _worker = threading.Thread(target=_loop, name="SevenIdleWorker", daemon=True)
         _worker.start()
         _started = True
-        for job_type in ("migrate", "reindex"):
-            timer = threading.Timer(_STARTUP_JOBS_DELAY, enqueue, args=(job_type, {}))
+        for job_type, delay in (("migrate", _STARTUP_JOBS_DELAY), ("reindex", _STARTUP_JOBS_DELAY),
+                                ("import_legacy", 90.0), ("reflect", 120.0), ("consolidate", 300.0)):
+            timer = threading.Timer(delay, enqueue, args=(job_type, {}))
             timer.daemon = True
             timer.start()
 

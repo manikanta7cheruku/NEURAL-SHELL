@@ -68,6 +68,23 @@ class BrainContext:
         self.inject_capabilities = False
         self.answered_by = ""
 
+        # Conversation + reasoning (v3)
+        self.conversation_id = ""
+        self.thread_key = ""
+        self.user_msg_id = None
+        self.storage_error = ""
+        self.state = None
+        self.resolved_text = ""
+        self.resolution_kind = None
+        self.ambiguity = None
+        self.hints = []
+        self.intent = None
+        self.web_outcome = None
+        self.decision = None
+        self.prefix_acks = []
+        self.mood_label = "neutral"
+        self.confirmed = False
+
     def resolve_memory(self, timeout_s: float = 0.45) -> None:
         """
         Wait (briefly) for the semantic search started by the memory layer.
