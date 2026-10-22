@@ -252,20 +252,29 @@ export default function TriggerForm({ initial, onSave, onCancel, workspaces }) {
                 ))}
               </select>
 
-              <label className="flex items-center gap-2 px-3 py-2 rounded-lg
-                                bg-white/[0.02] border border-white/6 cursor-pointer
-                                hover:bg-white/[0.04] transition-all">
+              <div className="flex items-center gap-2 px-3 py-2 rounded-lg
+                              bg-white/[0.015] border border-white/5
+                              opacity-55 cursor-not-allowed relative">
                 <input type="checkbox"
-                       checked={showPreview}
-                       onChange={e => setShowPreview(e.target.checked)}
-                       className="accent-s-accent" />
+                       checked={false}
+                       disabled
+                       className="accent-white/20 cursor-not-allowed" />
                 <div className="flex-1">
-                  <p className="text-[10px] text-white/70 font-medium">Show live preview</p>
-                  <p className="text-[8.5px] text-white/35 mt-0.5">
-                    Preview window shows where each app will land. Drag tiles to reposition before restoring.
+                  <div className="flex items-center gap-2">
+                    <p className="text-[10px] text-white/45 font-medium">Show live preview</p>
+                    <span className="text-[7.5px] font-bold tracking-widest
+                                     px-1.5 py-0.5 rounded
+                                     bg-amber-500/12 border border-amber-500/25
+                                     text-amber-300/85 uppercase">
+                      Coming Soon
+                    </span>
+                  </div>
+                  <p className="text-[8.5px] text-white/30 mt-0.5">
+                    Visual preview lets you drag app tiles to reposition before restoring.
+                    Currently in development — enable in the next release.
                   </p>
                 </div>
-              </label>
+              </div>
             </div>
           )}
           {actionType === 'run_command' && (

@@ -87,9 +87,9 @@ def process(ctx, deps):
         elif _has_task_list:
             return _handle_list(ctx, clean_in)
         elif _has_task_done:
-            return _handle_done(ctx, clean_in)
+            return _handle_done(ctx, clean_in, deps)
         elif _has_task_delete:
-            return _handle_delete(ctx, clean_in)
+            return _handle_delete(ctx, clean_in, deps)
     except Exception as _e:
         print(Fore.YELLOW + f"[BRAIN] Task detection error: {_e}")
         return LayerResult.pass_through()
@@ -157,31 +157,38 @@ def _handle_list(ctx, clean_in):
     return LayerResult.stop(f"###TASK: action=list filter={_filter}")
 
 
-def _handle_done(ctx, clean_in):
-    _search = clean_in
-    for _trigger in sorted(_TASK_DONE_TRIGGERS, key=len, reverse=True):
-        if _trigger in _search:
-            _search = _search.replace(_trigger, "").strip()
+def _strip(clean_in, triggers):
+    search = clean_in
+    for trigger in sorted(triggers, key=len, reverse=True):
+        if trigger in search:
+            search = search.replace(trigger, "").strip()
             break
-    for _art in ["the ", "my ", "a "]:
-        if _search.startswith(_art):
-            _search = _search[len(_art):].strip()
+    for art in ["the ", "my ", "a "]:
+        if search.startswith(art):
+            search = search[len(art):].strip()
+    return search
 
-    _search_tag = _search.replace(" ", "|||") if _search else "task"
+
+def _lifecycle_reply(ctx, deps, action, search, clean_in):
+    """Complete/delete go through the shared resolver: nothing is claimed until a real task was found."""
+    from brain_modules import lifecycle
+    narrative = lifecycle.is_narrative(clean_in)
+    reply = lifecycle.handle_task_command(ctx, deps, action, search, narrative)
+    if reply is not None:
+        return LayerResult.stop(reply)
+    if narrative or not search:
+        return LayerResult.pass_through()           # "I finished my run": a statement, not a task command
+    # Explicit command but the task list could not be read here: let the executor check the database itself;
+    # its receipt corrects this wording if nothing was updated.
     ctx.is_command = True
-    return LayerResult.stop(f"Got it. ###TASK: action=complete search={_search_tag}")
+    tag = search.replace(" ", "|||")
+    verb = "Marking it done" if action == "complete" else "Removing it"
+    return LayerResult.stop(f"{verb}. ###TASK: action={action} search={tag}")
 
 
-def _handle_delete(ctx, clean_in):
-    _search = clean_in
-    for _trigger in sorted(_TASK_DELETE_TRIGGERS, key=len, reverse=True):
-        if _trigger in _search:
-            _search = _search.replace(_trigger, "").strip()
-            break
-    for _art in ["the ", "my ", "a "]:
-        if _search.startswith(_art):
-            _search = _search[len(_art):].strip()
+def _handle_done(ctx, clean_in, deps=None):
+    return _lifecycle_reply(ctx, deps or {}, "complete", _strip(clean_in, _TASK_DONE_TRIGGERS), clean_in)
 
-    _search_tag = _search.replace(" ", "|||") if _search else "task"
-    ctx.is_command = True
-    return LayerResult.stop(f"Removing it. ###TASK: action=delete search={_search_tag}")
+
+def _handle_delete(ctx, clean_in, deps=None):
+    return _lifecycle_reply(ctx, deps or {}, "delete", _strip(clean_in, _TASK_DELETE_TRIGGERS), clean_in)

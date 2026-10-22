@@ -142,15 +142,17 @@ def get_plan_usage():
 
     try:
         from memory import seven_memory
-        all_facts   = seven_memory.user_facts.get()
-        facts_count = len(all_facts["documents"]) if all_facts and all_facts.get("documents") else 0
+        all_facts = None
+        from memory import facts_store as _fs
+        facts_count = _fs.count_facts()
     except Exception:
         facts_count = 0
 
     try:
         from memory import seven_memory
-        all_convos  = seven_memory.conversations.get()
-        convo_count = len(all_convos["documents"]) if all_convos and all_convos.get("documents") else 0
+        all_convos = None
+        from memory import conversation_store as _cs
+        convo_count = _cs.count_conversations()
     except Exception:
         convo_count = 0
 

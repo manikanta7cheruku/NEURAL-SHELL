@@ -1,21 +1,22 @@
 """
 PROJECT SEVEN - brain.py (The Orchestrator)
-Version: 3.0
+Version: 4.0
 
-think() runs one user message through the layer pipeline and returns either a
-string, "" (intentional silence) or ("__STREAM__", generator).
+think() runs one user message through the layer pipeline and returns a string,
+"" (intentional silence) or ("__STREAM__", generator).
 
-WHAT CHANGED IN 3.0:
-    - think(..., stream_mode="sentence"|"token"|"text"): the console asks for
-      real tokens, voice asks for speakable sentences, tools ask for text.
-    - One storage key per person (session.resolve_key) used everywhere.
-    - Only completed LLM replies are persisted. Instant answers (commands,
-      greetings, identity) are never written to conversation memory, and the
-      duplicate fact-extraction enqueue (wrong payload key) is gone.
-    - The model, the hardware probe and (later) the embedder are warmed in the
-      background so the first real message is not the one that pays for them.
-    - The user name is read through a cached lookup, not by parsing
-      config.json on every message.
+NEW IN 4.0:
+    - Real conversations: every call belongs to a conversation id (client
+      supplied or the current one). Short-term context is keyed by
+      "<speaker>#<conversation>", so a NEW CHAT is clean while long-term facts
+      stay available. The user message is saved to the transcript FIRST; if
+      storage fails the caller is told instead of being lied to.
+    - Compound messages: a name statement followed by more ("My name is 77.
+      Remember that ...") no longer drops the rest; acknowledgements are
+      prefixed to the final reply.
+    - Action receipts feed back: results update working memory, outcomes are
+      recorded, and a failed-then-corrected launch can become a confirmed alias.
+    - Risky actions can ask for confirmation (request_confirmation).
 """
 
 import logging
@@ -38,15 +39,18 @@ except Exception:
     seven_memory = None
     mood_engine = None
 
-from brain_modules import session, speech_acts
+from brain_modules import conversation_state, session, speech_acts
 from brain_modules.context import BrainContext
 from brain_modules.pipeline import run as run_pipeline
 
 _log = logging.getLogger("seven.brain")
 
 try:
-    from brain_modules.model_selector import select_model
-    MODEL_NAME = select_model()
+    if os.environ.get("SEVEN_TEST") == "1":
+        MODEL_NAME = "test-model"
+    else:
+        from brain_modules.model_selector import select_model
+        MODEL_NAME = select_model()
 except Exception as _model_err:
     _log.warning("Model selector failed (%s). Reading from config.", _model_err)
     try:
@@ -57,14 +61,15 @@ except Exception as _model_err:
 print(f"[BRAIN] Active model: {MODEL_NAME}")
 
 USER_NAME = "Admin"
+EXTRA_DEPS: dict = {}     # dependency injection point (tests inject a fake web provider here)
 _name_loaded = False
+_CAP_OF_TAG = {"OPEN": "apps", "CLOSE": "apps", "WINDOW": "windows", "SYS": "system", "SCHED": "reminders",
+               "TASK": "tasks"}
 
 
 def load_name_from_memory():
-    """Load the owner's name from config, falling back to 'there'."""
     global USER_NAME
-    name = session.get_user_name()
-    USER_NAME = name if name else "there"
+    USER_NAME = session.get_user_name() or "there"
 
 
 def ensure_name_loaded():
@@ -75,7 +80,6 @@ def ensure_name_loaded():
 
 
 def _refresh_user_name():
-    """Pick up a name change made in Settings without a restart (cached by file mtime)."""
     global USER_NAME
     name = session.get_user_name()
     if name:
@@ -83,9 +87,8 @@ def _refresh_user_name():
 
 
 def reset_session():
-    """Forget session state: history, greeting streaks, caches. Facts are kept."""
+    """Forget short-term state for every chat (history, streaks, pending questions). Facts are kept."""
     global USER_NAME
-    key = session.resolve_key("default", USER_NAME)
     USER_NAME = "Admin"
     try:
         from brain_modules import chat_history, learning, social_engine
@@ -93,44 +96,63 @@ def reset_session():
         chat_history.clear()
         social_engine.reset()
         learning.clear_cache()
-        for k in {key, "default"}:
-            ConversationThread.clear(k)
+        conversation_state.reset()
+        ConversationThread._threads.clear()
     except Exception as exc:
         _log.warning("session reset incomplete: %s", exc)
-    print(Fore.YELLOW + "[BRAIN] Session reset.")
 
 
-def save_completed_turn(prompt_text, response_text, speaker_id, source="chat", persist=True):
+def new_conversation(speaker_id: str = "default", title=None) -> str:
+    """Start a clean chat. The old one stays saved; long-term memory is untouched."""
+    from memory import conversation_store
+    ensure_name_loaded()
+    return conversation_store.create_conversation(session.resolve_key(speaker_id, USER_NAME), title)
+
+
+def resolve_conversation(speaker_id: str = "default", conversation_id=None) -> str:
+    """The conversation a message will belong to (client id if valid, else the current chat)."""
+    from memory import conversation_store
+    ensure_name_loaded()
+    return conversation_store.ensure(session.resolve_key(speaker_id, USER_NAME), conversation_id)
+
+
+def get_trace(speaker_id: str, conversation_id: str) -> dict:
+    key = session.resolve_key(speaker_id, USER_NAME)
+    return dict(conversation_state.get(f"{key}#{conversation_id}").trace)
+
+
+def save_completed_turn(prompt_text, response_text, speaker_id, source="chat", persist=True,
+                        conversation_id=None, thread_key=None):
     """
-    Record a completed exchange.
-
-    Always updates the session thread (repetition and follow-up detection).
-    Writes to long-term conversation storage only when persist=True, and does
-    that on the background worker so the reply is never delayed by embedding.
+    Record a finished exchange: transcript (always), session thread (for
+    repetition and follow-ups) and, when persist=True, the legacy Chroma
+    conversation document used by the Memory page (written on the worker).
     """
     try:
         if not prompt_text or not response_text:
             return
         p = prompt_text.strip()
         r = re.sub(r"###\w+:\s*\S+", "", response_text).strip()
-        if len(p) <= 3 or not r:
-            return
-        if speech_acts.is_greeting(speech_acts.normalize(p)):
-            return
-
         key = session.resolve_key(speaker_id, USER_NAME)
-
+        tkey = thread_key or (f"{key}#{conversation_id}" if conversation_id else key)
+        if conversation_id and r:
+            try:
+                from memory import conversation_store
+                conversation_store.add_message(conversation_id, "assistant", r, source=source)
+            except Exception as exc:
+                _log.warning("assistant message not saved: %s", exc)
+                conversation_state.get(tkey).trace["storage_error"] = str(exc)
+        if len(p) <= 3 or not r or speech_acts.is_greeting(speech_acts.normalize(p)):
+            return
         from brain_modules.conversation_thread import ConversationThread
-        ConversationThread.add_turn(key, p, r)
-
+        ConversationThread.add_turn(tkey, p, r)
         try:
             from brain_modules.followup_detector import detect_followup
             followup = detect_followup(r)
             if followup:
-                ConversationThread.set_metadata(key, "followup_hint", followup)
+                ConversationThread.set_metadata(tkey, "followup_hint", followup)
         except Exception as exc:
             _log.debug("follow-up detection skipped: %s", exc)
-
         if persist:
             from brain_modules import idle_worker
             idle_worker.enqueue("store_conversation", {
@@ -139,38 +161,73 @@ def save_completed_turn(prompt_text, response_text, speaker_id, source="chat", p
         _log.warning("save_completed_turn failed: %s", exc)
 
 
-def _save_conversation(prompt_text, result, speaker_id):
-    """Save a non-LLM string answer to the session thread only."""
-    if isinstance(result, tuple):
-        return
-    save_completed_turn(prompt_text, result, speaker_id, source="chat", persist=False)
-
-
 def store_voice_turn(prompt_text, response_text, speaker_id, was_interrupted=False):
-    """Save a spoken turn. Interrupted replies are not persisted as knowledge."""
-    save_completed_turn(prompt_text, response_text, speaker_id, source="voice",
-                        persist=not was_interrupted)
+    save_completed_turn(prompt_text, response_text, speaker_id, source="voice", persist=not was_interrupted)
 
+
+# ---- actions: receipts, learning from outcomes, confirmation -------------
+
+def note_receipts(speaker_id: str, conversation_id: str, receipts: list):
+    """
+    Feed action receipts back into Seven. Records outcomes (tool reliability),
+    updates working memory (for "did that work?"), and offers to learn an
+    alias when a failed launch was followed by a verified different one.
+    Returns an optional follow-up question to append to the reply.
+    """
+    key = session.resolve_key(speaker_id, USER_NAME)
+    tkey = f"{key}#{conversation_id}"
+    st = conversation_state.get(tkey)
+    st.last_receipts = [r.to_dict() if hasattr(r, "to_dict") else r for r in receipts]
+    question = None
+    try:
+        from memory import learning_store
+        for r in st.last_receipts:
+            cap = _CAP_OF_TAG.get(r["kind"].upper(), r["kind"].lower())
+            learning_store.record_outcome(key, "action", cap, r["status"], f"{r['kind']} {r['target']} {r['detail']}",
+                                          conversation_id)
+            if r["kind"].upper() == "OPEN":
+                if r["status"] == "failed":
+                    st.last_failed_open = (r["target"], st.turn)
+                elif r["status"] == "success" and r.get("verified") and st.last_failed_open:
+                    bad, turn = st.last_failed_open
+                    if st.turn - turn <= 3 and bad.lower() != r["target"].lower():
+                        conversation_state.set_pending(st, "alias_confirm", {"alias": bad, "target": r["target"]}, 3)
+                        question = f"By the way, want me to remember that \"{bad}\" means {r['target']}?"
+                    st.last_failed_open = None
+    except Exception as exc:
+        _log.debug("receipt learning skipped: %s", exc)
+    return question
+
+
+def needs_confirmation(kind: str, arg: str) -> bool:
+    """High-risk actions pause for a yes (configurable under agent.confirm_risky)."""
+    if not config.KEY.get("agent", {}).get("confirm_risky", True):
+        return False
+    return (kind == "CLOSE" and arg.strip().upper().startswith("ALL_")) or (
+        kind == "SYS" and "airplane_on" in arg)
+
+
+def request_confirmation(speaker_id: str, conversation_id: str, tags: str, description: str) -> str:
+    key = session.resolve_key(speaker_id, USER_NAME)
+    st = conversation_state.get(f"{key}#{conversation_id}")
+    conversation_state.set_pending(st, "confirm_action", {"tags": tags}, ttl=2)
+    return f"{description} Say yes to confirm."
+
+
+# ---- references to earlier results (unchanged behavior) ------------------
 
 def _execute_resolved_reference(resolved: dict):
-    """Execute the action a resolved reference points to ("open the second one")."""
     if not resolved or not isinstance(resolved, dict):
         return None
     action, reason = resolved.get("action"), resolved.get("reason", "")
-
     if action == "none":
-        return random.choice([
-            "I lost track of what you meant. Could you say that again?",
-            f"Not sure what to open. {reason.capitalize()}." if reason else "Not sure what you meant.",
-            "Could you tell me which one you want?",
-        ])
+        return random.choice(["I lost track of what you meant. Could you say that again?",
+                              f"Not sure what to open. {reason.capitalize()}." if reason else "Not sure what you meant.",
+                              "Could you tell me which one you want?"])
     if action == "ambiguous":
         count = len(resolved.get("options", []))
-        return random.choice([
-            f"I see {count} that match. Which one, top to bottom?",
-            f"Got {count} matches. Tell me the number.",
-            f"There are {count} of those. Which do you want?",
-        ])
+        return random.choice([f"I see {count} that match. Which one, top to bottom?",
+                              f"Got {count} matches. Tell me the number."])
     if action in ("open", "repeat"):
         target = resolved.get("target") or {}
         path, name = target.get("path"), target.get("name", "it")
@@ -188,28 +245,67 @@ def _execute_resolved_reference(resolved: dict):
             except Exception as exc:
                 _log.debug("memory update after open skipped: %s", exc)
             if ok:
-                if action == "repeat":
-                    return random.choice(["Opening it again.", "Reopening now.", "Got it, opening again."])
-                return random.choice(["Opening it now.", "Got it, opening.", "Here you go.", "Opened."])
+                return random.choice(["Opening it again.", "Reopening now."] if action == "repeat"
+                                     else ["Opening it now.", "Got it, opening.", "Here you go.", "Opened."])
             return f"I tried but could not open {name}."
         except Exception as exc:
             return f"Ran into an issue opening it: {exc}"
     return None
 
 
-def think(prompt_text, speaker_id="default", stream_mode="sentence"):
+def _migrate_speaker_key(old: str, new: str) -> None:
+    """The owner just set a name: keep everything learned so far (the key is derived from the name)."""
+    try:
+        from memory import conversation_store, fact_service, facts_store, learning_store
+        moved = facts_store.rename_speaker(old, new)
+        conversation_store.rename_speaker(old, new)
+        learning_store.rename_speaker(old, new)
+        if moved:
+            from brain_modules import idle_worker
+            idle_worker.enqueue("reindex", {})
+    except Exception as exc:
+        _log.warning("speaker key migration failed: %s", exc)
+
+
+# ---- the main entry point ------------------------------------------------
+
+def _prefix_stream(acks: str, gen):
+    yield acks + " "
+    for piece in gen:
+        yield piece
+
+
+def _with_prefix(ctx, result):
+    acks = " ".join(ctx.prefix_acks).strip()
+    if not acks:
+        return result
+    if isinstance(result, tuple):
+        return (result[0], _prefix_stream(acks, result[1]))
+    return f"{acks} {result}".strip()
+
+
+def think(prompt_text, speaker_id="default", stream_mode="sentence", conversation_id=None):
     """
     Run the pipeline for one message.
 
-    stream_mode:
-        "sentence"  voice: generator of speakable sentences
-        "token"     console: generator of raw tokens
-        "text"      a finished string
+    stream_mode: "sentence" (voice), "token" (console), "text" (a string).
+    conversation_id: the chat this message belongs to (None = current chat).
     """
     global USER_NAME
     ensure_name_loaded()
     _refresh_user_name()
     key = session.resolve_key(speaker_id, USER_NAME)
+
+    conv_id, storage_error, user_msg_id = "", "", None
+    try:
+        from memory import conversation_store
+        conv_id = conversation_store.ensure(key, conversation_id)
+        user_msg_id = conversation_store.add_message(
+            conv_id, "user", prompt_text, source="voice" if speaker_id != "default" else "chat")
+    except Exception as exc:
+        storage_error = str(exc)
+        _log.warning("transcript not saved: %s", exc)
+    tkey = f"{key}#{conv_id}" if conv_id else key
 
     try:
         from brain_modules.correction_detector import detect_correction
@@ -218,43 +314,53 @@ def think(prompt_text, speaker_id="default", stream_mode="sentence"):
     except Exception as exc:
         _log.debug("tone tracking skipped: %s", exc)
 
-    # A pending clarification ("close all chrome windows?") takes the next input.
+    def _done(reply):
+        save_completed_turn(prompt_text, reply, speaker_id, source="chat", persist=False,
+                            conversation_id=conv_id, thread_key=tkey)
+        conversation_state.get(tkey).trace = {"answered_by": "dialogue", "storage_error": storage_error}
+        return reply
+
     try:
         from brain_modules.dialogue_manager import check_pending, has_pending
         if has_pending():
             reply = check_pending(prompt_text)
             if reply:
-                _save_conversation(prompt_text, reply, speaker_id)
-                return reply
+                return _done(reply)
     except Exception as exc:
         _log.debug("dialogue check skipped: %s", exc)
-
-    # References to a recent action's results ("open the second one").
     try:
         from brain_modules.dialogue_manager import looks_like_reference, resolve_reference
         if looks_like_reference(prompt_text):
             resolved = resolve_reference(prompt_text)
             reply = _execute_resolved_reference(resolved) if resolved else None
             if reply:
-                _save_conversation(prompt_text, reply, speaker_id)
-                return reply
+                return _done(reply)
     except Exception as exc:
         _log.warning("reference resolve error: %s", exc)
 
     ctx = BrainContext(prompt_text=prompt_text, speaker_id=speaker_id, user_name=USER_NAME)
-    ctx.stream_mode = stream_mode
-    ctx.speaker_key = key
-    deps = {"seven_memory": seven_memory, "mood_engine": mood_engine,
-            "config": config, "model_name": MODEL_NAME}
+    ctx.stream_mode, ctx.speaker_key = stream_mode, key
+    ctx.conversation_id, ctx.thread_key = conv_id, tkey
+    ctx.user_msg_id, ctx.storage_error = user_msg_id, storage_error
+    deps = {"seven_memory": seven_memory, "mood_engine": mood_engine, "config": config, "model_name": MODEL_NAME}
+    deps.update(EXTRA_DEPS)
 
-    result = run_pipeline(ctx, deps)
-
+    result = _with_prefix(ctx, run_pipeline(ctx, deps))
     if ctx.new_user_name:
         USER_NAME = ctx.new_user_name
+        new_key = session.resolve_key(speaker_id, USER_NAME)
+        if new_key != key:
+            _migrate_speaker_key(key, new_key)
+    st = conversation_state.get(tkey)
     if isinstance(result, tuple):
+        st.trace.setdefault("storage_error", storage_error)
         return result
-    if ctx.answered_by != "layer_08_llm":   # the LLM layer records its own turn
-        _save_conversation(prompt_text, result, speaker_id)
+    if ctx.answered_by != "layer_08_llm":
+        st.trace = {"answered_by": ctx.answered_by, "intent": getattr(ctx.intent, "label", None),
+                    "storage_error": storage_error, "confirmed": ctx.confirmed}
+        save_completed_turn(prompt_text, result, speaker_id, source="chat", persist=False,
+                            conversation_id=conv_id, thread_key=tkey)
+        conversation_state.observe_reply(st, result or "")
     return result
 
 
@@ -262,16 +368,17 @@ _warmed = False
 
 
 def warm_up():
-    """Load the model, probe hardware and (later) the embedder in the background."""
+    """Load the model, probe hardware, refresh the app map and (later) the embedder in the background."""
     global _warmed
-    if _warmed:
+    if _warmed or os.environ.get("SEVEN_TEST") == "1":
         return
     _warmed = True
     try:
-        from brain_modules import ollama_client, self_model
+        from brain_modules import app_map, ollama_client, self_model
         self_model.set_active_model(MODEL_NAME)
         self_model.prime_async()
         ollama_client.warmup(MODEL_NAME)
+        threading.Thread(target=app_map.refresh_if_stale, daemon=True, name="AppMapRefresh").start()
     except Exception as exc:
         _log.debug("warm-up skipped: %s", exc)
 

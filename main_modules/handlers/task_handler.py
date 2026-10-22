@@ -155,14 +155,23 @@ class TaskHandler(BaseHandler):
         except Exception as _pt_err:
             print(Fore.YELLOW + f"[TASKS] Panel trigger failed: {_pt_err}")
 
+    @staticmethod
+    def _find(params, search):
+        """An id from the resolver is exact (never fuzzy-searched); otherwise fall back to a text search."""
+        try:
+            tid = params.get("id", "")
+            if tid.isdigit():
+                from brain_modules.lifecycle import SqliteTaskStore
+                return SqliteTaskStore().get(int(tid))
+            from backend.routes.tasks import db_find_task_by_text
+            return db_find_task_by_text(search)
+        except Exception:
+            return None
+
     def _handle_complete(self, params, ctx):
         search = params.get("search", "").replace("|||", " ").replace("_", " ")
 
-        try:
-            from backend.routes.tasks import db_find_task_by_text
-            found = db_find_task_by_text(search)
-        except Exception:
-            found = None
+        found = self._find(params, search)
 
         if not found:
             ctx.mouth.speak(
@@ -198,11 +207,7 @@ class TaskHandler(BaseHandler):
     def _handle_delete(self, params, ctx):
         search = params.get("search", "").replace("|||", " ").replace("_", " ")
 
-        try:
-            from backend.routes.tasks import db_find_task_by_text
-            found = db_find_task_by_text(search)
-        except Exception:
-            found = None
+        found = self._find(params, search)
 
         if not found:
             ctx.mouth.speak(f"Could not find a task matching '{search}'.")

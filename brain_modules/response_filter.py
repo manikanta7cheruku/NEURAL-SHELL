@@ -20,7 +20,7 @@ from typing import List
 
 _TAG_RE = re.compile(
     r"</?(?:reference_only|memory_context|identity|character|behavioral_rules|web_results|"
-    r"knowledge_context|capabilities|recent_action|suggestion_opportunity|clock|plan_info|user_message)>",
+    r"knowledge_context|capabilities|recent_action|suggestion_opportunity|clock|plan_info|user_message|user_goals|conversation_notes|evidence_status)>",
     re.IGNORECASE,
 )
 _HEAD_PREFIX_RE = re.compile(r"^\s*(?:seven|assistant)\s*:\s*", re.IGNORECASE)

@@ -501,7 +501,22 @@ def send_ping(force_server=False):
     _session["last_save_time"]      = now
 
 
+def _telemetry_enabled():
+    try:
+        import config as _cfg
+        return bool(_cfg.KEY.get("privacy", {}).get("telemetry_enabled", True))
+    except Exception:
+        return True
+
+
 def start_telemetry():
+    if not _telemetry_enabled():
+        print("[TELEMETRY] Disabled by user setting")
+        return
+    _start_telemetry_impl()
+
+
+def _start_telemetry_impl():
     """
     Start telemetry system.
     1. Init local DBs

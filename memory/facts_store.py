@@ -37,6 +37,12 @@ _NEW_COLUMNS = {
     "mentions": "INTEGER DEFAULT 1",
     "indexed": "INTEGER DEFAULT 0",
     "chroma_id": "TEXT",
+    "valid_from": "TEXT",
+    "valid_to": "TEXT",
+    "status": "TEXT",
+    "origin": "TEXT DEFAULT 'explicit'",
+    "source_msg_id": "INTEGER",
+    "conversation_id": "TEXT",
 }
 
 
@@ -127,7 +133,9 @@ def _init_schema() -> None:
 
 def upsert_fact(speaker_id: str, key: str, raw_value: str, text: str,
                 category: str = "general", source_text: Optional[str] = None,
-                confidence: float = 0.8) -> Dict[str, Any]:
+                confidence: float = 0.8, origin: str = "explicit",
+                source_msg_id: Optional[int] = None, conversation_id: Optional[str] = None,
+                status: str = "current") -> Dict[str, Any]:
     """
     Atomically write a value into a slot.
 
@@ -160,13 +168,15 @@ def upsert_fact(speaker_id: str, key: str, raw_value: str, text: str,
 
         cur = conn.execute(
             "INSERT INTO facts (speaker_id, category, key, value, raw_value, source_text, "
-            "created_at, updated_at, confidence, mentions, indexed, active) "
-            "VALUES (?,?,?,?,?,?,?,?,?,1,0,1)",
-            (speaker_id, category, key, text.strip(), raw_value.strip(), source_text, now, now, confidence))
+            "created_at, updated_at, confidence, mentions, indexed, active, valid_from, status, "
+            "origin, source_msg_id, conversation_id) "
+            "VALUES (?,?,?,?,?,?,?,?,?,1,0,1,?,?,?,?,?)",
+            (speaker_id, category, key, text.strip(), raw_value.strip(), source_text, now, now,
+             confidence, now, status, origin, source_msg_id, conversation_id))
         new_id = cur.lastrowid
         if row:
-            conn.execute("UPDATE facts SET active=0, superseded_by=?, updated_at=? WHERE id=?",
-                         (new_id, now, row["id"]))
+            conn.execute("UPDATE facts SET active=0, superseded_by=?, updated_at=?, valid_to=?, "
+                         "status='former' WHERE id=?", (new_id, now, now, row["id"]))
         conn.execute("COMMIT")
         return {"status": "updated" if row else "created", "id": new_id,
                 "previous": row["raw_value"] if row else None,
@@ -238,12 +248,13 @@ def update_fact(fact_id: int, new_value: str) -> bool:
         conn.close()
 
 
-def deactivate(fact_id: int) -> bool:
+def deactivate(fact_id: int, status: str = "deleted") -> bool:
     """Soft delete. History is kept; the fact stops being recalled."""
     _init_schema()
     conn = _get_conn()
     try:
-        cur = conn.execute("UPDATE facts SET active=0, updated_at=? WHERE id=?", (_now(), fact_id))
+        cur = conn.execute("UPDATE facts SET active=0, updated_at=?, valid_to=COALESCE(valid_to, ?), "
+                           "status=? WHERE id=?", (_now(), _now(), status, fact_id))
         conn.commit()
         return cur.rowcount > 0
     finally:
@@ -289,6 +300,19 @@ def _rows(query: str, params: tuple = ()) -> List[Dict[str, Any]]:
 def get_by_id(fact_id: int) -> Optional[Dict[str, Any]]:
     rows = _rows("SELECT * FROM facts WHERE id=?", (fact_id,))
     return rows[0] if rows else None
+
+
+def get_history(speaker_id: str, key: str) -> List[Dict[str, Any]]:
+    """Every version of a slot, oldest first (former values included, deleted excluded)."""
+    return _rows("SELECT * FROM facts WHERE speaker_id=? AND key=? AND COALESCE(status,'') != 'deleted' "
+                 "ORDER BY id ASC", (speaker_id, key))
+
+
+def slots_with_history(speaker_id: str) -> List[str]:
+    """Slot keys that have more than one version."""
+    rows = _rows("SELECT key FROM facts WHERE speaker_id=? AND key IS NOT NULL AND category!='style' "
+                 "AND COALESCE(status,'') != 'deleted' GROUP BY key HAVING COUNT(*)>1", (speaker_id,))
+    return [r["key"] for r in rows]
 
 
 def get_active_by_key(speaker_id: str, key: str) -> Optional[Dict[str, Any]]:
@@ -405,5 +429,19 @@ def meta_set(k: str, v: str) -> None:
     try:
         conn.execute("INSERT INTO meta (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v=excluded.v", (k, v))
         conn.commit()
+    finally:
+        conn.close()
+
+
+def rename_speaker(old: str, new: str) -> int:
+    """Move every fact from one speaker key to another (the owner set or changed their name)."""
+    if not old or not new or old == new:
+        return 0
+    _init_schema()
+    conn = _get_conn()
+    try:
+        cur = conn.execute("UPDATE facts SET speaker_id=?, indexed=0 WHERE speaker_id=?", (new, old))
+        conn.commit()
+        return cur.rowcount
     finally:
         conn.close()

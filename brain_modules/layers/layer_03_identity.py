@@ -49,11 +49,6 @@ _ORIGIN = (
     r"where are you from", r"where do you (?:come from|live|run)", r"where were you (?:made|built)",
     r"where are you", r"where are you based",
 )
-_PRIVACY = re.compile(
-    r"\b(?:is my data|are my (?:chats|conversations|files))\b.*\b(?:safe|private|secure)\b|"
-    r"\bdo you (?:send|share|upload|collect|sell) (?:my |any )?(?:data|conversations|information|files)\b|"
-    r"\bare you (?:private|spying on me)\b|\bdo you need (?:the )?internet\b")
-
 _USER_NAME = (
     r"what is my name", r"who am i", r"do you (?:know|remember) my name",
     r"do you know who i am", r"what do you call me", r"what did i say my name was",
@@ -148,10 +143,7 @@ def process(ctx, deps=None) -> LayerResult:
             "your name" in norm and len(norm.split()) <= 8 and not activity):
         return LayerResult.stop(_identity_reply())
     if _fullmatch_any(_ORIGIN, norm):
-        return LayerResult.stop("I run locally on this machine. Seven Labs built me; nothing about you leaves it.")
-    if _PRIVACY.search(norm):
-        return LayerResult.stop(
-            "Everything stays on this machine. What I learn about you is stored locally and never sent anywhere.")
+        return LayerResult.stop("I run locally on this machine. Seven Labs built me.")
 
     state = None
     if _fullmatch_any(_VERSION, norm):

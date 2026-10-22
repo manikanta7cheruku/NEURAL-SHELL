@@ -23,6 +23,7 @@ RECONCILIATION:
 import logging
 import os
 import re
+from datetime import datetime
 from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Any, Dict, List, Optional
 
@@ -61,13 +62,9 @@ def _chroma_facts(load: bool = True):
 
 
 def _fact_limit() -> int:
-    """Per-tier fact cap (-1 = unlimited). Mirrors the existing plan limits."""
-    try:
-        import voice_limits
-        tier = voice_limits.get_tier()
-    except Exception:
-        tier = "free"
-    return {"free": 7, "pro": 77, "ultimate": -1}.get(tier, 7)
+    """Fact cap (-1 = unlimited). Single source: memory/limits.py."""
+    from memory import limits
+    return limits.fact_limit()
 
 
 # --------------------------------------------------------------------------
@@ -91,14 +88,27 @@ def _enforce_limit(speaker_key: str, keep_id: int) -> int:
 
 
 def remember(speaker_key: str, fact: ExtractedFact, source_text: str = "",
-             index: bool = True) -> Dict[str, Any]:
+             index: bool = True, source_msg_id: Optional[int] = None,
+             conversation_id: Optional[str] = None, origin: str = "explicit") -> Dict[str, Any]:
     """
     Persist one fact. SQLite is written before this returns; the semantic
-    index update is queued for the background worker.
+    index update is queued for the background worker. A statement such as
+    "I prefer X over Y" also replaces an existing slot holding Y, keeping Y
+    as the former value.
     """
     result = facts_store.upsert_fact(
         speaker_key, fact.key, fact.value, fact.text, category=fact.category,
-        source_text=source_text, confidence=fact.confidence)
+        source_text=source_text, confidence=fact.confidence, origin=origin,
+        source_msg_id=source_msg_id, conversation_id=conversation_id)
+    if getattr(fact, "supersedes", None):
+        try:
+            result["superseded"] = apply_correction(
+                speaker_key, fact.supersedes, fact.value, source_text, source_msg_id=source_msg_id,
+                conversation_id=conversation_id, exclude_key=fact.key)
+            if result["superseded"]:
+                result["superseded"]["old_value"] = fact.supersedes
+        except Exception as exc:
+            _log.debug("supersede step skipped: %s", exc)
     if result["status"] != "unchanged":
         result["evicted"] = _enforce_limit(speaker_key, result["id"])
         if index:
@@ -188,11 +198,163 @@ def _join(values: List[str]) -> str:
     return ", ".join(values[:-1]) + " and " + values[-1]
 
 
-def answer_recall(speaker_key: str, recall) -> Optional[str]:
+_FMT = "%Y-%m-%d %H:%M:%S"
+
+
+def _when(ts: Optional[str], with_time: bool = False) -> str:
+    """Human phrase for a stored timestamp: 'today', 'yesterday', 'on Oct 7'."""
+    try:
+        dt = datetime.strptime(ts or "", _FMT)
+    except ValueError:
+        return ""
+    today, d = datetime.now().date(), dt.date()
+    if d == today:
+        base = "today"
+    elif (today - d).days == 1:
+        base = "yesterday"
+    elif d.year == today.year:
+        base = f"on {dt.strftime('%b')} {d.day}"
+    else:
+        base = f"on {dt.strftime('%b')} {d.day}, {d.year}"
+    return base + (f" at {dt.strftime('%I:%M %p').lstrip('0')}" if with_time else "")
+
+
+def _slot_candidates(speaker_key: str, recall) -> List[str]:
+    """Slot keys that match what the question is about (by key vocabulary, not keywords)."""
+    keys = []
+    wanted = set((recall.key or "").split("_")) - {""}
+    for k in [recall.key, *recall.aliases]:
+        if k and facts_store.get_history(speaker_key, k):
+            keys.append(k)
+    if wanted:
+        for r in facts_store.all_active(speaker_key):
+            k = r.get("key") or ""
+            if not k or r.get("category") in ("style", "reason") or k in keys:
+                continue
+            parts = set(k.replace(":", "_").split("_"))
+            if wanted <= parts:
+                keys.append(k)
+    return keys
+
+
+def _resolve_slot(speaker_key: str, recall, state) -> Optional[str]:
+    cands = _slot_candidates(speaker_key, recall)
+    if recall.key and not cands:
+        return None          # the question names something we have no slot for: never guess another one
+    # Prefer a slot that actually changed, then the most recently recalled one.
+    changed = [k for k in cands if len(facts_store.get_history(speaker_key, k)) > 1]
+    if changed:
+        return changed[0]
+    if cands:
+        return cands[0]
+    last = getattr(state, "last_recalled", None) if state is not None else None
+    if last and last.get("key"):
+        return last["key"]
+    slots = facts_store.slots_with_history(speaker_key)
+    return slots[0] if len(slots) == 1 else None
+
+
+def _note_recalled(state, slot: str, row_id: Optional[int]) -> None:
+    if state is not None:
+        state.last_recalled = {"key": slot, "row_id": row_id}
+
+
+def answer_history(speaker_key: str, recall, state=None) -> Optional[str]:
+    """Current versus former values of one slot, with dates and no invented motives."""
+    slot = _resolve_slot(speaker_key, recall, state)
+    if not slot:
+        return None
+    rows = facts_store.get_history(speaker_key, slot)
+    if not rows:
+        return None
+    current = next((r for r in reversed(rows) if r["active"]), rows[-1])
+    formers = [r for r in rows if r["id"] != current["id"]]
+    _note_recalled(state, slot, current["id"])
+    if not formers:
+        return f"That hasn't changed. You've only told me {current['raw_value']}."
+    names = [r["raw_value"] for r in formers]
+    before = names[-1] if len(names) == 1 else ", then ".join(names)
+    changed = _when(formers[-1].get("valid_to"))
+    when = f" You changed it {changed}." if changed else ""
+    if recall.kind == "timeline":
+        return f"Right now it's {current['raw_value']}. Before that, {before}.{when}"
+    return f"Before {current['raw_value']}, it was {before}.{when}"
+
+
+def answer_provenance(speaker_key: str, state=None) -> str:
+    """How and when Seven learned the last thing it talked about, from stored evidence."""
+    last = getattr(state, "last_recalled", None) if state is not None else None
+    if not last or not last.get("key"):
+        return "I'm not sure which thing you mean. Ask me about one of your preferences first."
+    rows = facts_store.get_history(speaker_key, last["key"])
+    if not rows:
+        return "I don't have a record of that anymore."
+    current = next((r for r in reversed(rows) if r["active"]), rows[-1])
+    first = rows[0]
+    if len(rows) > 1:
+        text = (f"You first told me {first['raw_value']} {_when(first['created_at'])}, then changed it to "
+                f"{current['raw_value']} {_when(current['created_at'], True)}.")
+    elif current.get("created_at"):
+        text = f"You told me {_when(current['created_at'], True)}."
+    else:
+        return "I have it saved, but I can't tell when you said it."
+    origin = (current.get("origin") or "explicit")
+    text += (" That came from what you said, not from a guess." if origin == "explicit"
+             else " I inferred that; you never said it directly.")
+    mid = current.get("source_msg_id")
+    if mid:
+        try:
+            from memory import conversation_store
+            msg = conversation_store.get_message(int(mid))
+            if msg and msg.get("conversation_title"):
+                text += f" It was in the chat \"{msg['conversation_title']}\"."
+        except Exception:
+            pass
+    return text
+
+
+def answer_reason(speaker_key: str, recall, state=None) -> Optional[str]:
+    """The user's stated reason for a preference, or None when they never gave one."""
+    slots = _slot_candidates(speaker_key, recall)
+    last = getattr(state, "last_recalled", None) if state is not None else None
+    if last and last.get("key"):
+        slots.append(last["key"])
+    for slot in slots:
+        row = facts_store.get_active_by_key(speaker_key, f"reason:{slot}")
+        if row and row.get("raw_value"):
+            return f"You said it's because {row['raw_value']}."
+    return None
+
+
+def reason_slot(speaker_key: str, recall, state=None) -> Optional[str]:
+    """Which slot a 'why' question is about (so an answer can be stored against it)."""
+    slots = _slot_candidates(speaker_key, recall)
+    if slots:
+        return slots[0]
+    last = getattr(state, "last_recalled", None) if state is not None else None
+    return last.get("key") if last else None
+
+
+def answer_recall(speaker_key: str, recall, state=None) -> Optional[str]:
     """
     Answer a RecallQuery from stored slots. Returns the reply text or None.
     Terse by design: "What is my favorite framework?" -> "React."
     """
+    if recall.kind in ("history", "timeline"):
+        return answer_history(speaker_key, recall, state)
+    if recall.kind == "provenance":
+        return answer_provenance(speaker_key, state)
+    if recall.kind == "reason":
+        return answer_reason(speaker_key, recall, state)
+    if recall.kind == "typed_likes":
+        rows = _reconcile(facts_store.list_by_prefix(speaker_key, recall.key))
+        values = [r["raw_value"] for r in rows if r.get("raw_value")][:6]
+        if values:
+            verb = recall.target if recall.target in ("love", "like", "enjoy") else "like"
+            return f"You've told me you {verb} {_join(values)}."
+        fav = facts_store.get_active_by_key(speaker_key, f"favorite_{recall.attr}")
+        return f"{fav['raw_value']}." if fav and fav.get("raw_value") else None
+
     if recall.kind in ("likes", "dislikes"):
         rows = _reconcile(facts_store.list_by_prefix(speaker_key, f"{recall.kind}:"))
         values = [r["raw_value"] for r in rows if r.get("raw_value")][:6]
@@ -207,6 +369,7 @@ def answer_recall(speaker_key: str, recall) -> Optional[str]:
     value = rows[0].get("raw_value") or ""
     if not value:
         return None
+    _note_recalled(state, rows[0].get("key") or recall.key, rows[0].get("id"))
     if recall.key == "age":
         return f"You're {value}."
     return f"{value}."
@@ -263,7 +426,9 @@ def _has_token(haystack: str, needle: str) -> bool:
 
 
 def apply_correction(speaker_key: str, old_value: str, new_value: str,
-                     raw_text: str = "") -> Optional[Dict[str, Any]]:
+                     raw_text: str = "", source_msg_id: Optional[int] = None,
+                     conversation_id: Optional[str] = None,
+                     exclude_key: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """
     Replace a previously stored value. Only a fact that really contains the old
     value (as a whole token) is changed; ambiguous or missing matches do nothing.
@@ -271,7 +436,8 @@ def apply_correction(speaker_key: str, old_value: str, new_value: str,
     if not old_value or not new_value or len(old_value) < 2:
         return None
     candidates = [r for r in facts_store.all_active(speaker_key)
-                  if r.get("category") != "style" and r.get("key")
+                  if r.get("category") != "style" and r.get("key") and r["key"] != exclude_key
+                  and not r["key"].startswith(("reason:", "likes:", "dislikes:"))
                   and (_has_token(r.get("raw_value") or "", old_value)
                        or _has_token(r["value"], old_value))]
     if not candidates:
@@ -282,7 +448,8 @@ def apply_correction(speaker_key: str, old_value: str, new_value: str,
                else re.sub(re.escape(old_value), new_value, raw_old, flags=re.IGNORECASE))
     new_text = re.sub(re.escape(old_value), new_value, target["value"], flags=re.IGNORECASE)
     fact = ExtractedFact(target["key"], new_raw, new_text, target["category"], 0.9, True)
-    result = remember(speaker_key, fact, source_text=raw_text)
+    result = remember(speaker_key, fact, source_text=raw_text, source_msg_id=source_msg_id,
+                      conversation_id=conversation_id)
     result["text"] = new_text
     return result
 
