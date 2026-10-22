@@ -44,8 +44,8 @@ OFFLINE_GRACE_DAYS = 30
 # -1 means unlimited
 TIER_FEATURES = {
     "free": {
-        "conversation_history": 7,
-        "facts_limit": 7,
+        "conversation_history": -1,
+        "facts_limit": -1,
         "tasks": -1,         # Unlimited
         "triggers": 7,
         "workspaces": -1,    # Unlimited
@@ -63,8 +63,8 @@ TIER_FEATURES = {
         "max_devices": 1
     },
     "pro": {
-        "conversation_history": 77,
-        "facts_limit": 77,
+        "conversation_history": -1,
+        "facts_limit": -1,
         "tasks": -1,         # Unlimited
         "triggers": 77,
         "workspaces": -1,    # Unlimited

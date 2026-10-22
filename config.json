@@ -1,20 +1,15 @@
 {
     "identity": {
         "name": "Seven",
-        "creator": "Team Seven",
-        "wake_words": [
-            "seven",
-            "hey seven"
-        ],
-        "stop_words": [
-            "stop",
-            "shut up",
-            "pause"
-        ],
-        "user_name": "Cheruku"
+        "creator": "Seven Labs",
+        "user_name": "",
+        "wake_words": ["seven", "hey seven"],
+        "pause_words": ["not you", "hold on", "wait", "stop listening"],
+        "resume_words": ["wake up", "seven", "continue", "start listening"],
+        "shutdown_words": ["go to sleep", "goodbye", "shutdown", "close seven"]
     },
     "brain": {
-        "model_name": "llama3",
+        "model_name": "auto",
         "temperature": 0.3,
         "max_history": 10,
         "streaming": true,
@@ -24,22 +19,18 @@
             "medium": "phi3:mini",
             "low": "qwen2:1.5b",
             "minimum": "tinyllama"
-        }
+        },
+        "tars_humor": 75,
+        "tars_honesty": 85,
+        "history_ttl_seconds": 1800
     },
-    "vision": {
-        "model_name": "llava"
+    "memory": {
+        "min_relevance": 0.70,
+        "retrieval_timeout_ms": 450
     },
-    "voice_id": {
-        "enabled": true,
-        "similarity_threshold": 0.82,
-        "default_speaker": "mani"
-    },
-    "gui": {
-        "opacity": 0.8,
-        "bg_color": "#000000",
-        "text_color": "#00FF00",
-        "font_size": 12
-    },
+    "vision": {"model_name": "llava"},
+    "voice_id": {"enabled": false, "similarity_threshold": 0.82, "default_speaker": ""},
+    "gui": {"opacity": 0.8, "bg_color": "#000000", "text_color": "#00FF00", "font_size": 12},
     "paths": {
         "screenshot_folder": "./screenshots",
         "log_file": "./chat_log.txt",
@@ -47,34 +38,13 @@
     },
     "interrupt": {
         "enabled": true,
-        "words": [
-            "stop",
-            "seven",
-            "hey seven",
-            "shut up",
-            "hold on",
-            "wait",
-            "pause"
-        ],
+        "words": ["stop", "seven", "hey seven", "shut up", "hold on", "wait", "pause"],
         "listen_during_speech": true,
         "interrupt_cooldown": 1.5
     },
-    "web": {
-        "enabled": true,
-        "max_results": 2,
-        "news_max_results": 2,
-        "timeout": 5
-    },
-    "windows": {
-        "enabled": true,
-        "snap_gap": 0,
-        "default_monitor": 0
-    },
-    "system": {
-        "enabled": true,
-        "volume_step": 10,
-        "brightness_step": 10
-    },
+    "web": {"enabled": true, "max_results": 2, "news_max_results": 2, "timeout": 5},
+    "windows": {"enabled": true, "snap_gap": 0, "default_monitor": 0},
+    "system": {"enabled": true, "volume_step": 10, "brightness_step": 10},
     "scheduler": {
         "enabled": true,
         "check_interval": 15,
@@ -110,36 +80,12 @@
             "recorder": "soundrecorder:",
             "voice recorder": "soundrecorder:",
             "youtube": "https://www.youtube.com/",
-            "browser": "chrome",
-            "github": "https://github.com/manikanta7cheruku"
+            "browser": "chrome"
         },
         "app_paths": {},
-        "failed_apps": [
-            {
-                "timestamp": "2026-03-23 21:52:58",
-                "phrase": "youtube",
-                "attempted": "youtube",
-                "error": "YOUTUBE is not running"
-            },
-            {
-                "timestamp": "2026-03-23 21:54:36",
-                "phrase": "youtube",
-                "attempted": "youtube.com",
-                "error": "YOUTUBE COM is not running"
-            },
-            {
-                "timestamp": "2026-03-24 22:31:47",
-                "phrase": "folder",
-                "attempted": "folder",
-                "error": "FOLDER is not running"
-            }
-        ]
+        "failed_apps": []
     },
-    "license": {
-        "key": "",
-        "tier": "free",
-        "verified": false
-    },
+    "license": {"key": "", "tier": "free", "verified": false},
     "updates": {
         "auto_check": true,
         "check_interval_hours": 24,
@@ -149,12 +95,7 @@
         "channel": "stable"
     },
     "setup_complete": false,
-    "version": "1.10",
-    "email": "jacksonnote24@gmail.com",
-    "voice": {
-        "engine": "sapi",
-        "voice_id": "1",
-        "voice_index": 1,
-        "speed": 165
-}
+    "version": "1.3.3",
+    "email": "",
+    "voice": {"engine": "sapi", "voice_id": "1", "voice_index": 1, "speed": 165}
 }
