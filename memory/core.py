@@ -419,8 +419,7 @@ class SevenMemory:
             current = self.conversations.count()
             import voice_limits
             _tier = voice_limits.get_tier()
-            _limits = {"free": 7, "pro": 77, "ultimate": -1}
-            _max_allowed = _limits.get(_tier, 7)
+            _max_allowed = -1  # conversation and fact limits removed (see memory/limits.py)
 
             if _max_allowed != -1 and current >= _max_allowed:
                 print(Fore.CYAN + f"[MEMORY FIFO] Quota limit reached ({current}/{_max_allowed}) for tier '{_tier}'. Evicting oldest conversation.")
@@ -464,8 +463,7 @@ class SevenMemory:
             import voice_limits
             current = self.user_facts.count()
             _tier = voice_limits.get_tier()
-            _limits = {"free": 7, "pro": 77, "ultimate": -1}
-            _max_allowed = _limits.get(_tier, 7)
+            _max_allowed = -1  # conversation and fact limits removed (see memory/limits.py)
 
             if _max_allowed != -1 and current >= _max_allowed:
                 print(Fore.CYAN + f"[MEMORY FIFO] Quota limit reached ({current}/{_max_allowed}) for tier '{_tier}'. Evicting oldest fact.")
