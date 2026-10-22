@@ -33,13 +33,22 @@ _log = logging.getLogger("seven.identity")
 _NAME_RE = re.compile(
     r"^(?:(?:hey|ok|okay|hi)\s+seven[,\s]+|please\s+|seven[,\s]+)?"
     r"(?:my name is(?: now)?|my name's|i am called|i'm called|people call me|you can call me|"
-    r"call me|change my name to|rename me to)\s+(?P<name>.+)$",
-    re.IGNORECASE,
+    r"call me|change my name to|rename me to)\s+(?P<name>[^.!?;,]{1,40})(?P<rest>.*)$",
+    re.IGNORECASE | re.DOTALL,
 )
 _NOT_NAMES = frozenset({
     "later", "back", "when", "tomorrow", "maybe", "please", "soon", "now", "today",
     "tonight", "if", "crazy", "stupid", "names", "again", "anything", "whatever",
 })
+
+
+def name_remainder(prompt_text: str) -> str:
+    """Text after the name clause: 'My name is 77. Remember that ...' -> 'Remember that ...'."""
+    m = _NAME_RE.match((prompt_text or "").strip())
+    if not m:
+        return ""
+    rest = m.group("rest").lstrip(" .,!?;")
+    return re.sub(r"^(?:and|also|then)\s+", "", rest, flags=re.IGNORECASE).strip()
 
 
 def reset_session() -> None:
@@ -58,7 +67,7 @@ def handle_name_setting(prompt_text, clean_in, speaker_id, speaker_name,
     raw = (prompt_text or "").strip()
     if not raw or speech_acts.is_question(raw):
         return None
-    m = _NAME_RE.match(raw.rstrip(".!"))
+    m = _NAME_RE.match(raw)
     if not m:
         return None
 

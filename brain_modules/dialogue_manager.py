@@ -234,16 +234,16 @@ def has_recent_action() -> bool:
 # -- Reference patterns (generous, catches natural human phrasing) --
 
 _REFERENCE_ORDINALS = {
-    "first": 0, "1st": 0, "one": 0,
-    "second": 1, "2nd": 1, "two": 1,
-    "third": 2, "3rd": 2, "three": 2,
-    "fourth": 3, "4th": 3, "four": 3,
-    "fifth": 4, "5th": 4, "five": 4,
-    "sixth": 5, "6th": 5, "six": 5,
-    "seventh": 6, "7th": 6, "seven": 6,
-    "eighth": 7, "8th": 7, "eight": 7,
-    "ninth": 8, "9th": 8, "nine": 8,
-    "tenth": 9, "10th": 9, "ten": 9,
+    "first": 0, "1st": 0,
+    "second": 1, "2nd": 1,
+    "third": 2, "3rd": 2,
+    "fourth": 3, "4th": 3,
+    "fifth": 4, "5th": 4,
+    "sixth": 5, "6th": 5,
+    "seventh": 6, "7th": 6,
+    "eighth": 7, "8th": 7,
+    "ninth": 8, "9th": 8,
+    "tenth": 9, "10th": 9,
 }
 
 _REFERENCE_LAST = {"last", "final", "bottom", "latest", "newest"}
@@ -302,7 +302,7 @@ def looks_like_reference(user_text: str) -> bool:
     # Signal 3: numeric reference like "open 2" or "the 3rd"
     if re.search(r"\b(?:number\s+)?(\d+)(?:st|nd|rd|th)?\b", clean):
         # Only if command is short - "open 2" yes, "essay on 2024" no
-        if len(words) <= 5:
+        if len(words) <= 5 and (word_set & {"open", "show", "play", "run", "launch", "number", "pick", "choose", "select"}):
             return True
 
     # Signal 4: repeat words
@@ -398,7 +398,7 @@ def resolve_reference(user_text: str) -> dict:
 
     # -- NUMERIC (open 2, the 3rd) --
     num_match = re.search(r"\b(?:number\s+)?(\d+)(?:st|nd|rd|th)?\b", clean)
-    if num_match and len(words) <= 6:
+    if num_match and len(words) <= 6 and (word_set & {"open", "show", "play", "run", "launch", "number", "pick", "choose", "select"}):
         n = int(num_match.group(1))
         idx = n - 1
         if 0 <= idx < len(results):

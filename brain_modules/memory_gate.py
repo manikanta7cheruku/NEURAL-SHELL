@@ -24,6 +24,7 @@ class RecallQuery:
     attr: str                 # human phrase, e.g. "favorite framework"
     key: str                  # fact slot, e.g. "favorite_framework"
     aliases: tuple = ()       # alternative slots to try
+    target: str = ""          # extra: verb (typed_likes) or the thing asked about (reason)
 
 
 _ATTR_ALIASES = {
@@ -84,6 +85,72 @@ def _attr_query(attr_phrase: str) -> Optional[RecallQuery]:
     return RecallQuery("attr", attr, key, tuple(aliases))
 
 
+_KINDS = {"movie": "movie", "film": "movie", "song": "song", "book": "book", "show": "show",
+          "series": "show", "game": "game", "food": "food", "band": "band", "album": "album",
+          "podcast": "podcast", "sport": "sport"}
+_HIST_RE = re.compile(r"\b(?:before|previously|earlier|originally|formerly|used to|previous|former|original)\b")
+_CUR_RE = re.compile(r"\b(?:now|currently|current|these days)\b")
+_RE_PROV = re.compile(
+    r"^(?:and )?(?:how do you know|where did you (?:get|learn|hear)|when did i (?:tell|say|mention)|"
+    r"when was that|did i (?:tell|say)|how did you learn)\b.*$")
+_BAD_ATTR_WORDS = {"is", "are", "and", "how", "what", "why", "who", "when", "where", "was", "were", "does", "do"}
+_RE_WHICH = re.compile(
+    r"^(?:which|what) (?P<attr>[a-z ]{2,40}?) (?:do|did) i (?P<verb>prefer|like|love|use|choose|favor|enjoy)\b.*$")
+_RE_WHAT_DID = re.compile(r"^what (?:did|do) i (?:prefer|like|love|use|choose)(?: (?P<attr>[a-z ]{2,40}?))?"
+                          r"(?: (?:before|previously|earlier|originally))?(?: now)?$")
+_RE_WAS_MY = re.compile(r"^what (?:was|were) my (?:(?:previous|former|old|earlier|original|last) )?"
+                        r"(?P<attr>[a-z ]{2,40}?)(?: (?:before|previously|earlier|originally))?$")
+_RE_WHY = re.compile(r"^why (?:did|do|would) i (?:choose|pick|prefer|like|love|use|switch to|go with|select|"
+                     r"change|switch)(?: (?P<target>.+))?$|^why is (?P<target2>.+) my (?:favorite|preferred)\b.*$|"
+                     r"^what(?: is|was)? the reason (?:i|for)\b.*$")
+
+
+def _clean_attr_words(attr: str) -> str:
+    drop = {"the", "most", "now", "currently", "and", "what", "did", "i", "that", "this", "those", "these",
+            "my", "before", "previously", "earlier", "originally", "formerly", "used", "to", "for", "about", "of"}
+    words = [w for w in attr.split() if w not in drop]
+    return " ".join(words[:4])
+
+
+def _parse_extended(norm: str) -> Optional[RecallQuery]:
+    """History, provenance, reason and typed-preference questions."""
+    if _RE_PROV.match(norm) and len(norm.split()) <= 16 and (
+            {"that", "this", "it", "me"} & set(norm.split())):
+        return RecallQuery("provenance", "", "")
+    m = _RE_WHY.match(norm)
+    if m:
+        target = m.group("target") or m.group("target2") or ""
+        return RecallQuery("reason", _clean_attr_words(target), fact_extractor.slug(_clean_attr_words(target)),
+                           target=target)
+    m = _RE_WHICH.match(norm)
+    if m and set(m.group("attr").split()) & _BAD_ATTR_WORDS:
+        m = None
+    if m:
+        attr, verb = _clean_attr_words(m.group("attr")), m.group("verb")
+        if attr in _KINDS and verb in ("like", "love", "enjoy") and not _HIST_RE.search(norm):
+            kind = _KINDS[attr]
+            return RecallQuery("typed_likes", kind, f"likes:{kind}:", target=verb)
+        if _HIST_RE.search(norm):
+            return RecallQuery("timeline" if _CUR_RE.search(norm) else "history", attr, fact_extractor.slug(attr))
+        return _attr_query(attr)
+    m = _RE_WHAT_DID.match(norm)
+    if m and _HIST_RE.search(norm) and not set((m.group("attr") or "").split()) & _BAD_ATTR_WORDS:
+        attr = _clean_attr_words(m.group("attr") or "")
+        return RecallQuery("history", attr, fact_extractor.slug(attr))
+    m = _RE_WAS_MY.match(norm)
+    if m and not set(m.group("attr").split()) & _BAD_ATTR_WORDS:
+        attr = _clean_attr_words(m.group("attr"))
+        return RecallQuery("history", attr, fact_extractor.slug(attr))
+    return None
+
+
+def time_sensitive(norm: str) -> bool:
+    """True when stale knowledge would be misleading (live topics, 'latest', 'today')."""
+    toks = set(norm.split())
+    return bool(live_topic(norm)) or bool(toks & {"latest", "current", "currently", "today", "tonight",
+                                                   "breaking", "recent", "recently", "now"})
+
+
 def parse_recall_query(norm: str) -> Optional[RecallQuery]:
     """
     Parse a normalised question into a RecallQuery, or None.
@@ -92,6 +159,9 @@ def parse_recall_query(norm: str) -> Optional[RecallQuery]:
     """
     if not norm:
         return None
+    ext = _parse_extended(norm)
+    if ext is not None:
+        return ext
     m = _RE_ATTR.match(norm) or _RE_ATTR2.match(norm)
     if m:
         return _attr_query(m.group("attr"))
