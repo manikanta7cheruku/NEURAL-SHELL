@@ -11,20 +11,20 @@ import Spinner from '../components/Spinner';
 
 const FEATURES = {
   free: [
-    '7 facts remembered',
-    '7 conversations saved',
+    'Unlimited facts remembered',
+    'Unlimited conversation history',
     'Unlimited tasks',
     '7 triggers & hotkeys',
-    '3 schedules',
+    '7 schedules',
     '1 knowledge file',
     'Basic window control'
   ],
   pro: [
-    '77 facts remembered',
-    '77 conversations saved',
+    'Unlimited facts remembered',
+    'Unlimited conversation history',
     'Unlimited tasks',
     '77 triggers & hotkeys',
-    '20 schedules',
+    '77 schedules',
     '7 knowledge files',
     'Advanced window control',
     'Memory search'
@@ -52,12 +52,12 @@ const DETAILED_FEATURES = {
     description: "Perfect for trying out Seven's core features",
     details: [
       {
-        feature: "7 Facts Remembered",
+        feature: "Unlimited Facts Remembered",
         example: "Seven remembers: 'My favorite color is blue', 'I work at Google', 'My birthday is Jan 15'"
       },
       {
-        feature: "7 Conversations Saved",
-        example: "Last 7 chat histories are kept — older ones are deleted"
+        feature: "Unlimited Conversation History",
+        example: "Every chat is saved on your device and searchable, nothing is deleted to make room"
       },
       {
         feature: "1 Knowledge File",
@@ -82,15 +82,15 @@ const DETAILED_FEATURES = {
     description: "For daily Seven users who need more memory and control",
     details: [
       {
-        feature: "77 Facts & Conversations",
-        example: "10x more memory — Seven remembers your preferences, work details, family info"
+        feature: "Unlimited Facts & Conversations",
+        example: "Seven remembers your preferences, work details and the people in your life, for as long as you want"
       },
       {
         feature: "7 Knowledge Files",
         example: "Upload course notes, work docs, research papers — ask Seven anything about them"
       },
       {
-        feature: "17 Schedules",
+        feature: "77 Schedules",
         example: "Morning alarms, work reminders, meeting alerts, medication schedules"
       },
       {
@@ -530,7 +530,7 @@ export default function Plans() {
             </div>
             <div className="mt-3 bg-s-bg border border-s-border rounded p-3">
               <p className="text-[10px] text-s-text-3 mb-2">
-                💡 <strong>Ultimate users get early access</strong> to all Phase 2 features when released (Q2 2025)
+                💡 <strong>Ultimate users get early access</strong> to all Phase 2 features when released
               </p>
               <p className="text-[9px] text-s-text-4">
                 Phase 1 users who upgrade to Ultimate before Phase 2 launch get a{' '}

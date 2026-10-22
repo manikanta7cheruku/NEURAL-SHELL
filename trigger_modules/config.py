@@ -122,50 +122,17 @@ LOCK_FILE = os.path.join(APPDATA, 'SEVEN', 'trigger_daemon.lock')
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# DB PATH RESOLUTION
-# Priority 1: local seven_data (dev mode, has actual triggers)
-# Priority 2: APPDATA seven_data (installed mode)
+# DB PATH RESOLUTION — Uses seven_paths to guarantee 100% synchronization
+# with the FastAPI backend across both dev and production packaged modes.
 # ─────────────────────────────────────────────────────────────────────────
-LOCAL_SEVEN_DATA = os.path.join(PROJECT_ROOT, 'seven_data')
-LOCAL_DB         = os.path.join(LOCAL_SEVEN_DATA, 'triggers.db')
-APPDATA_SEVEN    = os.path.join(APPDATA, 'SEVEN', 'seven_data')
-APPDATA_DB       = os.path.join(APPDATA_SEVEN, 'triggers.db')
+try:
+    from seven_paths import paths as _paths
+    SEVEN_DATA = _paths._seven_data
+except Exception:
+    SEVEN_DATA = os.path.join(APPDATA, 'SEVEN', 'seven_data')
 
-
-def _resolve_db_path():
-    """Find the correct triggers.db and its parent folder."""
-    def _has_triggers(db_path):
-        if not os.path.exists(db_path):
-            return False
-        try:
-            import sqlite3 as _sq
-            c = _sq.connect(db_path, timeout=2)
-            count = c.execute(
-                "SELECT COUNT(*) FROM sqlite_master "
-                "WHERE type='table' AND name='triggers'"
-            ).fetchone()[0]
-            c.close()
-            return count > 0
-        except Exception:
-            return False
-
-    if _has_triggers(LOCAL_DB):
-        print(f"[TRIGGER DAEMON] Using LOCAL DB: {LOCAL_DB}")
-        return LOCAL_DB, LOCAL_SEVEN_DATA
-
-    if _has_triggers(APPDATA_DB):
-        print(f"[TRIGGER DAEMON] Using APPDATA DB: {APPDATA_DB}")
-        return APPDATA_DB, APPDATA_SEVEN
-
-    if os.path.exists(LOCAL_SEVEN_DATA):
-        print(f"[TRIGGER DAEMON] Defaulting to LOCAL (no triggers yet): {LOCAL_DB}")
-        return LOCAL_DB, LOCAL_SEVEN_DATA
-
-    print(f"[TRIGGER DAEMON] Defaulting to APPDATA: {APPDATA_DB}")
-    return APPDATA_DB, APPDATA_SEVEN
-
-
-TRIGGERS_DB, SEVEN_DATA = _resolve_db_path()
+os.makedirs(SEVEN_DATA, exist_ok=True)
+TRIGGERS_DB   = os.path.join(SEVEN_DATA, 'triggers.db')
 RELOAD_SIGNAL = os.path.join(SEVEN_DATA, 'trigger_reload.signal')
 
 
