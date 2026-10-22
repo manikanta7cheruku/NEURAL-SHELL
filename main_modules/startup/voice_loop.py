@@ -94,6 +94,9 @@ def run_voice_loop(ctx, config, app_ui, api_set_state, safe_mode_file):
                 return True
         return False
 
+    def _control_match(text, phrases, max_words=4):
+        return len(text.split()) <= max_words and _word_match(text, phrases)
+
     def _get_voice_control_words():
         _identity = config.KEY.get("identity", {})
         _wake     = _identity.get("wake_words", DEFAULT_WAKE_WORDS)
@@ -277,7 +280,8 @@ def run_voice_loop(ctx, config, app_ui, api_set_state, safe_mode_file):
                 "thanks for watching", "thank you for watching",
                 ".", "..", "...", " ", ""
             }
-            if text_lower in _hallucinations or len(text_lower) < 2:
+            from brain_modules.dialogue_manager import has_pending as _has_pending
+            if (text_lower in _hallucinations and not _has_pending()) or len(text_lower) < 2:
                 continue
 
             if interrupt_context["was_interrupted"]:
@@ -291,7 +295,7 @@ def run_voice_loop(ctx, config, app_ui, api_set_state, safe_mode_file):
                             f"I was interrupted while answering: '{old_input}'. "
                             f"I had said: '{old_response}'. Continue naturally."
                         )
-                        response = ctx.brain.think(resume_prompt, speaker_id="default")
+                        response = ctx.brain.think(resume_prompt, speaker_id="default", stream_mode="text")
                         if response:
                             speak_with_interrupt(response)
                     else:
@@ -321,12 +325,12 @@ def run_voice_loop(ctx, config, app_ui, api_set_state, safe_mode_file):
                 handle_voice_enrollment_command(ctx, api_set_state)
                 continue
 
-            if _word_match(text_lower, KILL_WORDS):
+            if _control_match(text_lower, KILL_WORDS):
                 ctx.mouth.speak("Systems offline. Goodbye.")
                 app_ui.close()
                 os._exit(0)
 
-            if _word_match(text_lower, WAKE_WORDS):
+            if not is_active and _control_match(text_lower, WAKE_WORDS):
                 if not is_active:
                     is_active = True
                     ctx.mouth.speak("Listening.")
@@ -335,7 +339,7 @@ def run_voice_loop(ctx, config, app_ui, api_set_state, safe_mode_file):
                         _silence_watcher.set_paused(False)
                 continue
 
-            if is_active and _word_match(text_lower, PAUSE_WORDS):
+            if is_active and _control_match(text_lower, PAUSE_WORDS):
                 is_active = False
                 ctx.mouth.speak("Standing by.")
                 app_ui.update_status("PAUSED", "#555555")

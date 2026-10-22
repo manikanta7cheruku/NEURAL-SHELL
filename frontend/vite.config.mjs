@@ -9,6 +9,19 @@ export default defineConfig({
     host: '127.0.0.1',
     port: 5173,
     strictPort: true,
+    watch: {
+      ignored: [
+        '**/backend/**',
+        '**/main_modules/**',
+        '**/seven_data/**',
+        '**/logs/**',
+        '**/.venv/**',
+        '**/venv/**',
+        '**/db.sqlite3**',
+        '**/*.py',
+        '**/*.pyc'
+      ]
+    },
     proxy: {
       '/api': {
         target: 'http://127.0.0.1:7777',

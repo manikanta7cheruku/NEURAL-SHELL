@@ -24,7 +24,13 @@ def process(ctx, deps):
     if ctx.is_command or ctx.is_greeting or ctx.is_action_cmd:
         return LayerResult.pass_through()
     try:
-        reply = detect_repetition(ctx.prompt_text, ctx.speaker_key)
+        from brain_modules import intent_router
+        # Answers about Seven's live state (abilities, data flow, status) change with the situation, so asking
+        # again is not a repeat of the same question.
+        if intent_router.route(ctx.norm_in).label in ("capability_list", "capability_check", "app_help",
+                                                        "data_flow", "status_check"):
+            return LayerResult.pass_through()
+        reply = detect_repetition(ctx.prompt_text, ctx.thread_key or ctx.speaker_key)
     except Exception as exc:
         _log.debug("repetition check skipped: %s", exc)
         return LayerResult.pass_through()

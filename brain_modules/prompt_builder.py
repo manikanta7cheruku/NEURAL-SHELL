@@ -123,7 +123,13 @@ You are modeled on TARS from Interstellar: sharp, loyal, dry and honest, never r
 
 <behavioral_rules>
 - {length_rule}
-- Lead with the answer. No preamble, no sign-off, no offers of more help unless genuinely useful.
+- Work out what the user is actually trying to achieve, not only their literal words. When they share an opinion or
+  a preference, react like a person; do not recite facts back at them.
+- Lead with the answer. No preamble and no generic sign-offs like "anything else?". A short, specific question about what
+  they said is welcome now and then, never more than one.
+- Facts about the user come only from <memory_context> or from this chat. If you do not have something, say you don't
+  know. Never invent their reasons, motives or history. General knowledge about a topic is not their autobiography.
+- If <evidence_status> says something is unknown or unavailable, say so plainly instead of guessing.
 - Talk like a person: contractions, plain words, no corporate phrasing, no lists unless asked.
 - If you do not know or cannot check something, say so in one sentence. Never invent facts, numbers, weather or news.
 - If corrected, accept it in a few words and move on. Do not apologize at length or comment on yourself.
@@ -135,7 +141,8 @@ You are modeled on TARS from Interstellar: sharp, loyal, dry and honest, never r
 
 def _build_reference_block(user_text, memory_facts, web_context, knowledge_context,
                            include_capabilities, capabilities_text, proactive_hint,
-                           followup_hint, reference_hint, tier, now) -> str:
+                           followup_hint, reference_hint, tier, now,
+                           notes=None, goals=None, uncertainty=None) -> str:
     """Dynamic, turn-specific context. Empty string when the turn needs none."""
     parts: List[str] = []
     toks = set(re.findall(r"[a-z]+", user_text.lower()))
@@ -165,6 +172,14 @@ def _build_reference_block(user_text, memory_facts, web_context, knowledge_conte
     if toks & _PLAN_TOKENS:
         parts.append("<plan_info>Free = 7 facts and conversations. Pro = 77. Ultimate = unlimited. "
                      f"Current plan: {tier.upper()}. The Plans page is in the sidebar.</plan_info>")
+    if goals:
+        parts.append("<user_goals>\nGoals the user told you about. Use them to understand what they are really "
+                     "trying to achieve. If the literal request seems to work against a goal, say so in one "
+                     "sentence.\n" + "\n".join(f"- {g}" for g in goals) + "\n</user_goals>")
+    if notes:
+        parts.append("<conversation_notes>\n" + "\n".join(f"- {n}" for n in notes) + "\n</conversation_notes>")
+    if uncertainty:
+        parts.append("<evidence_status>\n" + "\n".join(f"- {u}" for u in uncertainty) + "\n</evidence_status>")
     if reference_hint:
         parts.append(f"<recent_action>{reference_hint.strip()}</recent_action>")
     if proactive_hint or followup_hint:
@@ -183,7 +198,9 @@ def build_messages(*, user_text: str, speaker_name: str = "", history: Optional[
                    knowledge_context: str = "", web_context: str = "",
                    proactive_hint: str = "", followup_hint: str = "",
                    reference_hint: str = "", include_capabilities: bool = False,
-                   capabilities_text: str = "", now: Optional[datetime] = None) -> list:
+                   capabilities_text: str = "", now: Optional[datetime] = None,
+                   notes: Optional[list] = None, goals: Optional[list] = None,
+                   uncertainty: Optional[list] = None) -> list:
     """Assemble the full message list for /api/chat."""
     now = now or datetime.now()
     messages = [{"role": "system", "content": build_system_prompt(
@@ -198,7 +215,7 @@ def build_messages(*, user_text: str, speaker_name: str = "", history: Optional[
     block = _build_reference_block(
         user_text, memory_facts or [], web_context, knowledge_context,
         include_capabilities, capabilities_text, proactive_hint, followup_hint,
-        reference_hint, tier, now)
+        reference_hint, tier, now, notes, goals, uncertainty)
     messages.append({"role": "user", "content": block + user_text})
     return messages
 

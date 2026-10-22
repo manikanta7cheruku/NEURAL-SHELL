@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openSevenTasks: () => ipcRenderer.send('panel-open-seven-tasks'),
   setPinned:      (pinned) => ipcRenderer.send('panel-set-pinned', !!pinned),
   navigateTo:     (route) => ipcRenderer.send('navigate-to', route),
+  openMainAppWithRoute: (route) => ipcRenderer.send('open-main-app-with-route', route),
 
   nativeBlur: process.argv.includes('--native-blur'),
   hotkey:     argValue('--panel-hotkey=') || 'Alt+Shift+T',

@@ -1,6 +1,6 @@
 {
     "name": "vii-desktop",
-    "version": "1.3.3",
+    "version": "1.3.4",
     "description": "SEVEN — Private AI Voice Assistant",
     "productName": "SEVEN",
     "author": {
@@ -11,12 +11,13 @@
     "scripts": {
         "kill": "taskkill /F /IM SEVEN.exe /IM pythonw.exe /IM python.exe /IM Electron.exe /T 2>nul 1>nul & timeout /t 3 > nul",
         "clean": "rmdir /S /Q dist-electron 2>nul & echo cleaned",
-        "build": "npm run kill && npm run clean && npm run build:frontend && npx electron-builder --config electron-builder.yml --x64",
         "dev": "npm run kill-dev-ports && SET SEVEN_BACKEND_EXTERNALLY_STARTED=1 && concurrently \"npm run backend:dev\" \"npm run frontend:dev\" \"npm run electron:dev\"",
         "kill-dev-ports": "node -e \"try { const p = require('child_process').execSync('netstat -ano').toString().split('\\n').find(l => l.includes(':5173') && l.includes('LISTENING')); if (p) { const pid = p.trim().split(/\\s+/).pop(); if (pid && !isNaN(pid)) require('child_process').execSync('taskkill /F /PID ' + pid, {stdio:'ignore'}); } } catch(e) {}\"",
         "frontend:dev": "cd frontend && npm run dev",
         "electron:dev": "wait-on http://127.0.0.1:5173 && electron .",
-        "build:frontend": "cd frontend && npm run build",
+        "build:manifest": "python scripts/build_app_manifest.py",
+        "build:frontend": "python scripts/build_app_manifest.py && cd frontend && npm run build",
+        "build:installer": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-installer.ps1",
         "build:full": "node scripts/build.js",
         "dist": "npm run build:frontend && electron-builder --config frontend/electron-builder.yml",
         "dist:full": "node scripts/build.js",
@@ -26,7 +27,7 @@
     "devDependencies": {
         "concurrently": "^9.1.0",
         "electron": "^33.0.0",
-        "electron-builder": "^25.0.0",
+        "electron-builder": "^26.13.0",
         "wait-on": "^8.0.0"
     },
     "dependencies": {

@@ -1,38 +1,30 @@
 """
-=============================================================================
 LAYER 1: NAME SETTING
 
-Detects "my name is X" / "call me X" and saves name to memory.
-Returns confirmation immediately. Does not hit LLM.
-
-Uses existing brain_modules/identity_layer.py handle_name_setting().
-=============================================================================
+"My name is 77" saves the name. If the same message says more ("My name is 77.
+Remember that my favorite language is Python"), the rest is NOT dropped: it
+continues through the pipeline and the name acknowledgement is put in front of
+the final reply.
 """
 
+from brain_modules import identity_layer
 from brain_modules.layer_result import LayerResult
-from brain_modules.identity_layer import handle_name_setting
+from brain_modules.layers import layer_00_input_prep as prep
 
 
 def process(ctx, deps):
     seven_memory = deps.get("seven_memory")
-
-    name_result = handle_name_setting(
-        ctx.prompt_text,
-        ctx.clean_in,
-        ctx.speaker_id,
-        ctx.speaker_name,
-        seven_memory,
-        ctx.user_name
-    )
-
-    if name_result is None:
+    result = identity_layer.handle_name_setting(
+        ctx.prompt_text, ctx.clean_in, ctx.speaker_id, ctx.speaker_name, seven_memory, ctx.user_name)
+    if result is None:
         return LayerResult.pass_through()
-
-    # handle_name_setting returns either a string or (new_name, response) tuple
-    if isinstance(name_result, tuple):
-        new_name, response = name_result
-        ctx.new_user_name = new_name  # brain.py will apply this to global USER_NAME
-        ctx.speaker_name  = new_name
-        return LayerResult.stop(response)
-
-    return LayerResult.stop(name_result)
+    new_name, response = result
+    ctx.new_user_name = new_name
+    ctx.speaker_name = new_name
+    rest = identity_layer.name_remainder(ctx.prompt_text)
+    if rest and len(rest.split()) >= 3:
+        ctx.prefix_acks.append(response)
+        ctx.prompt_text = rest
+        prep.prepare(ctx)
+        return LayerResult.pass_through()
+    return LayerResult.stop(response)

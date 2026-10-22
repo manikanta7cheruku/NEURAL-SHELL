@@ -17,8 +17,42 @@ router = APIRouter()
 @router.get("/api/health", summary="System health check",
             description="Lightweight liveness probe. Returns 200 if the API server is running. Used by frontend to detect backend availability.")
 def health_check():
-    """Fast liveness check — no heavy imports, no DB queries. Returns in under 5ms."""
+    """Fast liveness check - no heavy imports, no DB queries. Returns in under 5ms."""
     return {"ok": True, "status": "running", "version": _get_version()}
+
+
+@router.get("/api/health/telemetry", summary="Real-time system telemetry and layer performance",
+            description="Returns latency percentiles, per-layer execution breakdown, and core resource states.")
+def health_telemetry():
+    """
+    Gathers structured layer latencies and system performance.
+    Designed for the frontend dashboard telemetry panel. Returns in under 25ms.
+    """
+    import brain_manager
+
+    layer_stats = []
+    try:
+        from brain_modules.observability import get_all_layer_stats
+        layer_stats = get_all_layer_stats()
+    except Exception:
+        pass
+
+    global_latency = brain_manager.get_latency_stats()
+    hardware_summary = brain_manager.get_hardware_summary()
+
+    return {
+        "ok": True,
+        "timestamp": time.time(),
+        "version": _get_version(),
+        "latency": global_latency,
+        "layers": layer_stats,
+        "hardware": {
+            "gpu": hardware_summary.get("gpu", {}),
+            "ram_gb": hardware_summary.get("ram_gb", 0),
+            "cpu_cores": hardware_summary.get("cpu", {}).get("cores", 0),
+        },
+        "ollama_alive": _check_ollama().get("ok", False),
+    }
 
 
 @router.get("/api/health/full", summary="Full system health check",

@@ -3,41 +3,39 @@ LAYER 8: LLM INFERENCE
 
 Final layer. Always stops the pipeline.
 
-HOW A REPLY IS PRODUCED:
-    1. Wait briefly for the semantic memory search started earlier (if any).
-    2. Build structured chat messages (prompt_builder): stable persona first,
-       recent time-limited history, and a reference-only block on the turns
-       that need memory, web, documents or capabilities.
-    3. Stream tokens from Ollama through the sanitizer, which removes role
-       prefixes, echoed tags and any "###" action text.
-    4. Deliver in the mode the caller asked for:
-           "token"    raw token stream (console, Server-Sent Events)
-           "sentence" speakable sentences (voice, first chunk flushed early)
-           "text"     one finished string
-    5. On completion ONLY, record the exchange (history, session thread,
-       latency). A failed or interrupted reply is never stored, so an error
-       message can never become a "memory".
-
-Measured and logged per turn: time to first token, total time.
+How a reply is produced:
+    1. Wait briefly for background memory retrieval (never longer than the
+       configured timeout).
+    2. decision_policy decides chat / grounded / deep and records what is
+       UNCERTAIN, which is passed to the model as plain-text evidence status.
+    3. Structured chat messages are built (stable persona first, time-limited
+       history, then a reference-only block only on turns that need it).
+    4. Tokens stream from Ollama through the sanitizer. Delivery modes:
+           "token" console SSE, "sentence" voice, "text" one string.
+    5. The curiosity engine may append ONE grounded follow-up question.
+    6. Only a completed reply is recorded (history, transcript, trace). Failed
+       or interrupted replies are never stored, so an error can never become
+       a memory.
 """
 
 import logging
 import time
 
-from brain_modules import capabilities, chat_history, learning, ollama_client, prompt_builder, speech_acts
+from brain_modules import (brain_settings, capabilities, chat_history, conversation_state as cs, curiosity,
+                           decision_policy, goals, learning, ollama_client, prompt_builder, speech_acts)
 from brain_modules.layer_result import LayerResult
 from brain_modules.response_filter import SentenceChunker, StreamSanitizer, clean_final, is_trailer
 
 _log = logging.getLogger("seven.layer08")
 
-_LONG_TRIGGERS = (
-    "tell me", "explain", "describe", "list", "how does", "how do", "detail",
-    "everything", "all about", "continue", "go on", "more about", "difference between",
-    "opinion on", "thoughts on", "think about", "best way", "advice", "recommend",
-    "suggestion", "write",
-)
-_COUNT_TRIGGERS = ("count", "list them", "name them", "enumerate", "from 1", "1 to", "one to")
-_FALLBACK_EMPTY = "I lost my train of thought. Say that again?"
+_LONG = ("tell me", "explain", "describe", "list", "how does", "how do", "detail", "everything", "all about",
+         "continue", "go on", "more about", "difference between", "opinion on", "thoughts on", "think about",
+         "best way", "advice", "recommend", "suggestion", "write")
+_COUNT = ("count", "list them", "name them", "enumerate", "from 1", "1 to", "one to")
+_EARLIER = ("last time", "earlier", "we talked", "we discussed", "i told you", "i mentioned", "remember when",
+            "a while ago", "yesterday", "last week")
+_EMPTY = "I lost my train of thought. Say that again?"
+_UNSUPPORTED = "I don't have that in what you've told me, so I won't guess."
 
 
 def _rec(name: str, ms: float) -> None:
@@ -48,71 +46,79 @@ def _rec(name: str, ms: float) -> None:
         pass
 
 
-def _options(ctx, is_voice, humor, profile, model_name):
-    """Generation options. num_ctx stays constant per model so Ollama never reloads it."""
+def _budget(ctx, is_voice, profile, multiplier) -> int:
     norm = ctx.norm_in
-    count = any(speech_acts.has_phrase(norm, t) for t in _COUNT_TRIGGERS)
-    long = any(speech_acts.has_phrase(norm, t) for t in _LONG_TRIGGERS)
+    count = any(speech_acts.has_phrase(norm, t) for t in _COUNT)
+    long = any(speech_acts.has_phrase(norm, t) for t in _LONG)
     if is_voice:
-        budget = 160 if count else 100 if long else 70
+        base = 160 if count else 100 if long else 70
     else:
-        budget = 400 if (count or long) else 160 if ctx.web_searched else 240
+        base = 400 if (count or long) else 160 if ctx.web_searched else 240
     if profile.get("verbosity") == "brief":
-        budget = min(budget, 60 if is_voice else 120)
+        base = min(base, 60 if is_voice else 120)
     elif profile.get("verbosity") == "detailed":
-        budget = int(budget * 1.5)
+        base = int(base * 1.5)
+    return int(base * multiplier)
 
-    grounded = ctx.web_searched or bool(ctx.knowledge_context)
-    base = 0.35 if is_voice else 0.3
-    temperature = 0.2 if grounded else min(0.7, round(base + (humor / 100) * 0.35, 2))
-    stops = ["###", "<reference_only>", "</reference_only>"] + (["\n\n"] if is_voice else [])
-    return {
-        "temperature": temperature, "num_predict": budget, "repeat_penalty": 1.1,
-        "repeat_last_n": 64, "top_p": 0.9, "stop": stops,
-        "num_ctx": 2048 if "tinyllama" in (model_name or "").lower() else 4096,
-    }
+
+def _earlier_snippets(ctx):
+    """Search OTHER conversations only when the user points at the past."""
+    if not any(speech_acts.has_phrase(ctx.norm_in, p) for p in _EARLIER):
+        return []
+    try:
+        from memory import conversation_store
+        hits = conversation_store.search(ctx.speaker_key, ctx.resolved_text or ctx.prompt_text, limit=3,
+                                         exclude_conv=ctx.conversation_id)
+    except Exception as exc:
+        _log.debug("history search skipped: %s", exc)
+        return []
+    notes = []
+    for h in hits:
+        who = "the user said" if h["role"] == "user" else "Seven replied"
+        notes.append(f'From an earlier chat ("{h.get("title") or "untitled"}", {h["ts"][:10]}) {who}: '
+                     f'"{h["content"][:160]}". This is what was said, not verified truth.')
+    return notes
 
 
 def process(ctx, deps):
     config = deps.get("config")
     model_name = deps.get("model_name") or config.KEY.get("brain", {}).get("model_name", "llama3")
     brain_cfg = config.KEY.get("brain", {})
-    mem_cfg = config.KEY.get("memory", {})
     is_voice = ctx.speaker_id not in ("default",)
     key = ctx.speaker_key
+    tkey = ctx.thread_key or key
+    st = ctx.state or cs.get(tkey)
 
     original = ctx.prompt_text
     if "===" in original and "User asked:" in original:
         original = original.split("User asked:")[-1].strip()
     is_visual = "VISUAL_REPORT:" in original
 
-    ctx.resolve_memory(float(mem_cfg.get("retrieval_timeout_ms", 450)) / 1000.0)
+    ctx.resolve_memory(float(brain_settings.get_effective(config, "memory.retrieval_timeout_ms")) / 1000.0)
+    decision = decision_policy.decide(ctx, config)
+    ctx.decision = decision
+    if decision.mode == "clarify" and decision.clarify:
+        return LayerResult.stop(decision.clarify)
 
     profile = learning.get_profile(key)
-    humor, honesty = int(brain_cfg.get("tars_humor", 75)), int(brain_cfg.get("tars_honesty", 85))
+    humor = int(brain_settings.get_effective(config, "brain.tars_humor"))
+    honesty = int(brain_settings.get_effective(config, "brain.tars_honesty"))
     try:
         from brain_modules.tone_tracker import get_bias
-        h_bias, o_bias = get_bias(key)
-        humor, honesty = max(0, min(100, humor + h_bias)), max(0, min(100, honesty + o_bias))
-    except Exception:
-        pass
-
-    mood_label = "neutral"
-    try:
-        mood_label = deps["mood_engine"].get_label()
+        hb, ob = get_bias(key)
+        humor, honesty = max(0, min(100, humor + hb)), max(0, min(100, honesty + ob))
     except Exception:
         pass
 
     followup_hint = ""
     try:
         from brain_modules.conversation_thread import ConversationThread
-        fu = ConversationThread.get_metadata(key, "followup_hint")
+        fu = ConversationThread.get_metadata(tkey, "followup_hint")
         if isinstance(fu, dict):
             followup_hint = fu.get("hint", "")
-            ConversationThread.set_metadata(key, "followup_hint", None)
+            ConversationThread.set_metadata(tkey, "followup_hint", None)
     except Exception:
         pass
-
     reference_hint = ""
     try:
         from brain_modules.dialogue_manager import get_last_action, should_inject_reference_hint
@@ -122,25 +128,42 @@ def process(ctx, deps):
         pass
 
     history = [] if is_visual else chat_history.get_messages(
-        key, max_age_s=float(brain_cfg.get("history_ttl_seconds", 1800)))
+        tkey, max_age_s=float(brain_settings.get_effective(config, "brain.history_ttl_seconds")))
+    ctx.had_history = bool(history)
+    goal_titles = [g["title"] for g in goals.relevant(key, ctx.resolved_text or original)]
+    notes = list(dict.fromkeys(ctx.hints)) + _earlier_snippets(ctx)
 
     messages = prompt_builder.build_messages(
         user_text=original, speaker_name=ctx.speaker_name if ctx.speaker_name != "there" else "",
         history=history, humor=humor, honesty=honesty,
-        tier=config.KEY.get("license", {}).get("tier", "free"), is_voice=is_voice,
-        profile=profile, mood_label=mood_label, memory_facts=ctx.memory_facts,
-        knowledge_context=ctx.knowledge_context, web_context=ctx.web_context,
-        proactive_hint=ctx.proactive_hint, followup_hint=followup_hint,
+        tier=config.KEY.get("license", {}).get("tier", "free"), is_voice=is_voice, profile=profile,
+        mood_label=ctx.mood_label, memory_facts=ctx.memory_facts, knowledge_context=ctx.knowledge_context,
+        web_context=ctx.web_context, proactive_hint=ctx.proactive_hint, followup_hint=followup_hint,
         reference_hint=reference_hint, include_capabilities=ctx.inject_capabilities,
-        capabilities_text=capabilities.describe_for_prompt() if ctx.inject_capabilities else "")
+        capabilities_text=capabilities.describe_for_prompt() if ctx.inject_capabilities else "",
+        notes=notes, goals=goal_titles, uncertainty=decision.uncertainty)
 
-    payload = {"model": model_name, "messages": messages, "keep_alive": "24h",
-               "options": _options(ctx, is_voice, humor, profile, model_name)}
+    grounded = bool(ctx.web_searched or ctx.knowledge_context or ctx.inject_capabilities)
+    gen = brain_settings.generation(config, is_voice, decision, grounded)
+    reasoning = brain_settings.get_effective(config, "brain.reasoning_model")
+    model = reasoning if (decision.mode == "deep" and reasoning) else model_name
+    options = {
+        "temperature": gen["temperature"], "num_predict": _budget(ctx, is_voice, profile, gen["token_multiplier"]),
+        "repeat_penalty": 1.1, "repeat_last_n": 64, "top_p": 0.9,
+        "stop": ["###", "<reference_only>", "</reference_only>"] + (["\n\n"] if is_voice else []),
+        "num_ctx": 2048 if "tinyllama" in (model or "").lower() else 4096,
+    }
+    payload = {"model": model, "messages": messages, "keep_alive": "24h", "options": options}
 
     mode = ctx.stream_mode
-    if mode == "sentence" and not brain_cfg.get("streaming", True):
+    if mode == "sentence" and not brain_settings.get_effective(config, "brain.streaming"):
         mode = "text"
     started = ctx.started_at
+    sources = [n for n, v in (("memory", ctx.memory_facts), ("web", ctx.web_searched),
+                              ("documents", ctx.knowledge_context), ("goals", goal_titles),
+                              ("earlier_chats", any(n.startswith("From an earlier chat") for n in notes))) if v]
+    st.trace = {"intent": getattr(ctx.intent, "label", None), "mode": decision.mode, "sources": sources,
+                "uncertainty": bool(decision.uncertainty), "model": model, "answered_by": "layer_08_llm"}
 
     def _finalize(parts, completed, failed):
         if not completed or failed or is_visual:
@@ -150,16 +173,25 @@ def process(ctx, deps):
             return
         total_ms = int((time.time() - started) * 1000)
         _rec("llm_total", total_ms)
+        st.trace["total_ms"] = total_ms
         try:
             from brain_manager import record_latency
             record_latency(total_ms)
         except Exception:
             pass
-        chat_history.add_exchange(key, original, text)
+        chat_history.add_exchange(tkey, original, text)
+        cs.observe_reply(st, text)
+        if decision_policy.unsupported_personal_claim(text, ctx):
+            try:
+                from memory import learning_store
+                learning_store.record_outcome(key, "answer", "unsupported_claim", "failed", text[:160],
+                                              ctx.conversation_id)
+            except Exception:
+                pass
         try:
             from brain import save_completed_turn
             save_completed_turn(original, text, ctx.speaker_id, source="voice" if is_voice else "chat",
-                                persist=True)
+                                persist=True, conversation_id=ctx.conversation_id, thread_key=tkey)
         except Exception as exc:
             _log.warning("turn save failed: %s", exc)
 
@@ -171,8 +203,8 @@ def process(ctx, deps):
             for token in stream:
                 if first_ms is None:
                     first_ms = int((time.time() - started) * 1000)
+                    st.trace["first_token_ms"] = first_ms
                     _rec("llm_first_token", first_ms)
-                    _log.info("first token after %d ms", first_ms)
                 out = sanitizer.feed(token)
                 if out:
                     parts.append(out)
@@ -185,14 +217,18 @@ def process(ctx, deps):
                 yield tail
             if not parts:
                 failed = True
-                yield _FALLBACK_EMPTY
+                yield _EMPTY
+            else:
+                q = curiosity.pick_question(ctx, config, "".join(parts))
+                if q:
+                    parts.append(" " + q)
+                    yield " " + q
             completed = True
         except ollama_client.OllamaError as err:
             failed = True
-            msg = (capabilities.fallback_summary() if ctx.inject_capabilities and err.kind != "model_missing"
-                   else ollama_client.friendly_error(err, model_name))
             _log.warning("ollama error (%s): %s", err.kind, err.message)
-            yield msg
+            yield (capabilities.fallback_summary() if ctx.inject_capabilities and err.kind != "model_missing"
+                   else ollama_client.friendly_error(err, model))
         finally:
             if stream is not None:
                 stream.close()
@@ -212,4 +248,7 @@ def process(ctx, deps):
         return LayerResult.stop_stream(_tokens())
     if mode == "sentence":
         return LayerResult.stop_stream(_sentences())
-    return LayerResult.stop(clean_final("".join(_tokens())))
+    text = clean_final("".join(_tokens()))
+    if decision_policy.unsupported_personal_claim(text, ctx):
+        return LayerResult.stop(_UNSUPPORTED)
+    return LayerResult.stop(text)
