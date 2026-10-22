@@ -21,8 +21,17 @@ except Exception as _pe:
         os.path.dirname(os.path.abspath(__file__)))), "seven_data")
 
 os.makedirs(_SEVEN_DATA, exist_ok=True)
-TASKS_DB = os.path.join(_SEVEN_DATA, "tasks.db")
+# SEVEN_TASKS_DB lets the test harness point this module at a temporary file before import,
+# so tests never read or write the user's real tasks.
+TASKS_DB = os.environ.get("SEVEN_TASKS_DB") or os.path.join(_SEVEN_DATA, "tasks.db")
 print(Fore.GREEN + f"[TASKS] DB: {TASKS_DB}")
+
+
+def set_db_path(path: str) -> str:
+    """Point the module at another tasks database. Used by tests; returns the previous path."""
+    global TASKS_DB
+    previous, TASKS_DB = TASKS_DB, path
+    return previous
 
 router = APIRouter()
 
