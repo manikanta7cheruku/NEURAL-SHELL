@@ -113,6 +113,14 @@ def get_hardware():
         return _get_safe_hardware_onboarding()
 
 
+@router.get("/api/system/info", summary="Live machine readings",
+            description="Processor, memory, graphics, drives, OS and uptime. The same readings Seven uses "
+                        "to answer questions about this computer.")
+def get_system_info():
+    from brain_modules import system_info
+    return system_info.snapshot()
+
+
 @router.get("/api/speed")
 def get_speed():
     """Get latency statistics safely."""

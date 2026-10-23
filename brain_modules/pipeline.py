@@ -27,6 +27,7 @@ LAYER_ORDER = [
     "brain_modules.layers.layer_025_social",
     "brain_modules.layers.layer_02_repetition",
     "brain_modules.layers.layer_03_identity",
+    "brain_modules.layers.layer_034_settings",
     "brain_modules.layers.layer_035_router",
     "brain_modules.layers.layer_38_file_root",
     "brain_modules.layers.layer_04_tars",

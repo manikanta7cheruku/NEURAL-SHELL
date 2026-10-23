@@ -60,6 +60,49 @@ except Exception as _model_err:
 
 print(f"[BRAIN] Active model: {MODEL_NAME}")
 
+
+def _configured_model() -> str:
+    try:
+        return (config.KEY.get("brain", {}).get("model_name") or "auto").strip()
+    except Exception:
+        return "auto"
+
+
+_model_cfg_seen = _configured_model()
+
+
+def current_model() -> str:
+    """
+    The model for this message. MODEL_NAME is chosen at startup; when Settings
+    or a chat request changes brain.model_name, re-select it here so the change
+    applies to the next reply instead of after a restart.
+    """
+    global MODEL_NAME, _model_cfg_seen
+    cfg = _configured_model()
+    if cfg == _model_cfg_seen:
+        return MODEL_NAME
+    _model_cfg_seen = cfg
+    if os.environ.get("SEVEN_TEST") == "1":          # no Ollama in tests
+        MODEL_NAME = cfg if cfg.lower() != "auto" else "test-model"
+        return MODEL_NAME
+    try:
+        from brain_modules.model_selector import select_model
+        MODEL_NAME = select_model()
+    except Exception as exc:
+        _log.warning("model re-selection failed (%s); using the configured name", exc)
+        if cfg.lower() != "auto":
+            MODEL_NAME = cfg
+    _model_cfg_seen = _configured_model()      # an "auto" pick is written back to config
+    _log.info("model switched to %s", MODEL_NAME)
+    try:
+        from brain_modules import ollama_client, self_model
+        self_model.set_active_model(MODEL_NAME)
+        threading.Thread(target=ollama_client.warmup, args=(MODEL_NAME,), daemon=True,
+                         name="ModelSwitchWarmup").start()
+    except Exception as exc:
+        _log.debug("warm-up after model switch skipped: %s", exc)
+    return MODEL_NAME
+
 USER_NAME = "Admin"
 EXTRA_DEPS: dict = {}     # dependency injection point (tests inject a fake web provider here)
 _name_loaded = False
@@ -342,7 +385,7 @@ def think(prompt_text, speaker_id="default", stream_mode="sentence", conversatio
     ctx.stream_mode, ctx.speaker_key = stream_mode, key
     ctx.conversation_id, ctx.thread_key = conv_id, tkey
     ctx.user_msg_id, ctx.storage_error = user_msg_id, storage_error
-    deps = {"seven_memory": seven_memory, "mood_engine": mood_engine, "config": config, "model_name": MODEL_NAME}
+    deps = {"seven_memory": seven_memory, "mood_engine": mood_engine, "config": config, "model_name": current_model()}
     deps.update(EXTRA_DEPS)
 
     result = _with_prefix(ctx, run_pipeline(ctx, deps))

@@ -64,7 +64,12 @@ def _detect_hardware() -> Dict[str, Any]:
     except Exception:
         pass
     gpu_name, vram_gb = _detect_gpu()
-    return {"ram_gb": ram_gb, "cpu_name": platform.processor() or "Unknown CPU",
+    try:
+        from brain_modules.system_info import cpu_name
+        cpu = cpu_name()
+    except Exception:
+        cpu = platform.processor() or "Unknown CPU"
+    return {"ram_gb": ram_gb, "cpu_name": cpu,
             "cpu_cores": os.cpu_count() or 4, "gpu_name": gpu_name, "vram_gb": vram_gb}
 
 
@@ -86,14 +91,9 @@ def prime_async() -> None:
 
 
 def _version() -> str:
-    try:
-        import config
-        v = str(config.KEY.get("version", "")).strip()
-        if v:
-            return v
-    except Exception:
-        pass
-    return "1.3.3"
+    """The installed version (version.txt), not the one in config.json, which is written once at setup."""
+    from seven_utils.version import get_version
+    return get_version()
 
 
 def get_runtime_state() -> Dict[str, Any]:
