@@ -123,7 +123,9 @@ def _task_action(params: dict) -> None:
         due_raw, due_date = params.get("due", "").replace("_", " ").lower(), None
         if due_raw:
             try:
-                if "today" in due_raw or "tonight" in due_raw:
+                if re.fullmatch(r"\d{4}-\d{2}-\d{2}", due_raw):
+                    due_date = due_raw
+                elif "today" in due_raw or "tonight" in due_raw:
                     due_date = date.today().isoformat()
                 elif "tomorrow" in due_raw:
                     due_date = (date.today() + timedelta(days=1)).isoformat()
@@ -195,6 +197,22 @@ def _execute_actions(action_list, full_response, speaker_id) -> List[action_rece
         params = _params(chunk)
         if params:
             _run("TASK", params.get("action", ""), lambda p=params: _task_action(p))
+    # Triggers and workspaces resolved by the brain (brain_modules/productivity.py) carry their id,
+    # and run through the same functions as the Play buttons on the Triggers page.
+    for chunk in re.findall(r"###TRIGGER:\s*(.*?)(?=###|$)", full_response, re.DOTALL):
+        params = _params(chunk)
+        if params.get("action") == "fire" and params.get("id", "").isdigit():
+            def _fire(p=params):
+                from backend.routes.triggers import fire_trigger
+                return fire_trigger(int(p["id"]))
+            _run("TRIGGER", params.get("phrase", "").replace("|||", " "), _fire)
+    for chunk in re.findall(r"###WORKSPACE:\s*(.*?)(?=###|$)", full_response, re.DOTALL):
+        params = _params(chunk)
+        if params.get("action") == "restore" and params.get("id", "").isdigit():
+            def _restore(p=params):
+                from backend.routes.workspaces import restore_workspace
+                return restore_workspace(int(p["id"]))
+            _run("WORKSPACE", params.get("name", "").replace("|||", " "), _restore)
     for cmd_type, arg in re.findall(r"###(OPEN|CLOSE):\s*(.*?)(?=###|$)", full_response, re.DOTALL):
         target = arg.replace('"', "").replace("'", "").replace(",", "").replace(".", "").strip()
         if not target:

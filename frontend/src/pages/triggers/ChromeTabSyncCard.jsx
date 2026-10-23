@@ -21,7 +21,7 @@ function TabPreview() {
       <button onClick={loadTabs} disabled={loading}
               className="flex items-center gap-2 w-full px-3 py-2
                          bg-white/[0.02] border border-white/6 rounded-lg
-                         text-[9px] text-white/50 font-medium
+                         text-[11.5px] text-white/50 font-medium
                          hover:bg-white/[0.04] hover:text-white/70
                          disabled:opacity-30 transition-all">
         <Globe size={10} className="flex-shrink-0" />
@@ -29,7 +29,7 @@ function TabPreview() {
           {loading ? 'Loading tabs...' : expanded ? 'Hide all tabs' : 'View all synced tabs'}
         </span>
         {tabs.length > 0 && (
-          <span className="text-[7.5px] text-white/30 font-mono">{tabs.length}</span>
+          <span className="text-[11px] text-white/30 font-mono">{tabs.length}</span>
         )}
       </button>
 
@@ -47,7 +47,7 @@ function TabPreview() {
             return Object.entries(grouped).map(([profile, profileTabs]) => (
               <div key={profile}>
                 <div className="px-3 py-1.5 border-b border-white/5 sticky top-0 bg-[#0a0a0c]">
-                  <span className="text-[8px] text-white/40 font-semibold uppercase tracking-wider">
+                  <span className="text-[11px] text-white/40 font-semibold">
                     {profile} · {profileTabs.length} tabs
                   </span>
                 </div>
@@ -63,8 +63,8 @@ function TabPreview() {
                                              border-b border-white/[0.03] last:border-0
                                              hover:bg-white/[0.02] transition-colors">
                       <div className="flex-1 min-w-0">
-                        <p className="text-[9px] text-white/60 truncate">{title}</p>
-                        {domain && <p className="text-[7.5px] text-white/25 font-mono truncate">{domain}</p>}
+                        <p className="text-[11.5px] text-white/60 truncate">{title}</p>
+                        {domain && <p className="text-[11px] text-white/25 font-mono truncate">{domain}</p>}
                       </div>
                       <div className="flex items-center gap-1 flex-shrink-0">
                         {tab.pinned    && <span className="text-[6px] text-white/20 bg-white/[0.04] px-1 py-0.5 rounded">PIN</span>}
@@ -79,7 +79,7 @@ function TabPreview() {
         </div>
       )}
       {expanded && tabs.length === 0 && (
-        <p className="mt-1.5 text-[8px] text-white/25 px-3 py-2
+        <p className="mt-1.5 text-[11px] text-white/25 px-3 py-2
                       bg-white/[0.01] border border-white/5 rounded-lg">
           No tabs synced yet.
         </p>
@@ -161,7 +161,7 @@ export default function ChromeTabSyncCard() {
   if (status?.connected && status?.profile_count > 0) {
     const profiles = status.profile_details || [];
     return (
-      <div className="mb-4 bg-white/[0.015] border border-white/8 rounded-2xl overflow-hidden">
+      <div className="mb-4 bg-white/[0.015] border border-white/8 rounded-lg overflow-hidden">
         <div className="p-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -171,13 +171,13 @@ export default function ChromeTabSyncCard() {
               </div>
               <div>
                 <h4 className="text-[11px] font-semibold text-white/80">Chrome Tab Sync</h4>
-                <p className="text-[9px] text-green-400 mt-0.5">
+                <p className="text-[11.5px] text-green-400 mt-0.5">
                   {status.total_tabs || 0} total tabs · {status.profile_count || 0} profile{status.profile_count !== 1 ? 's' : ''}
                 </p>
               </div>
             </div>
             <button onClick={() => setExpanded(p => !p)}
-                    className="text-[8px] text-white/30 hover:text-white/60 transition-colors
+                    className="text-[11px] text-white/30 hover:text-white/60 transition-colors
                                px-2 py-1 rounded bg-white/[0.03] border border-white/6 hover:bg-white/[0.06]">
               {expanded ? 'Hide' : 'Manage'}
             </button>
@@ -192,43 +192,43 @@ export default function ChromeTabSyncCard() {
                   <div className="flex items-center gap-2.5">
                     <div className={`w-6 h-6 rounded-md flex items-center justify-center
                                     ${p.active ? 'bg-s-accent/8 border border-s-accent/12' : 'bg-white/[0.03] border border-white/6'}`}>
-                      <span className={`text-[9px] font-bold ${p.active ? 'text-s-accent' : 'text-white/30'}`}>{i + 1}</span>
+                      <span className={`text-[11.5px] font-bold ${p.active ? 'text-s-accent' : 'text-white/30'}`}>{i + 1}</span>
                     </div>
                     <div>
-                      <p className="text-[10px] text-white/70 font-medium">{p.name}</p>
-                      <p className="text-[8px] text-white/30">{p.tabs} tab{p.tabs !== 1 ? 's' : ''} · {p.windows} window{p.windows !== 1 ? 's' : ''}</p>
+                      <p className="text-[12px] text-white/70 font-medium">{p.name}</p>
+                      <p className="text-[11px] text-white/30">{p.tabs} tab{p.tabs !== 1 ? 's' : ''} · {p.windows} window{p.windows !== 1 ? 's' : ''}</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-1">
                     {p.active
-                      ? <><div className="w-1.5 h-1.5 rounded-full bg-green-400" /><span className="text-[7.5px] text-green-400/70">live</span></>
-                      : <><div className="w-1.5 h-1.5 rounded-full bg-white/20" /><span className="text-[7.5px] text-white/25">cached</span></>}
+                      ? <><div className="w-1.5 h-1.5 rounded-full bg-green-400" /><span className="text-[11px] text-green-400/70">live</span></>
+                      : <><div className="w-1.5 h-1.5 rounded-full bg-white/20" /><span className="text-[11px] text-white/25">cached</span></>}
                   </div>
                 </div>
               ))}
             </div>
             <TabPreview />
             <div className="px-3 py-2.5 bg-white/[0.015] border border-dashed border-white/8 rounded-lg">
-              <p className="text-[9px] text-white/50 font-medium mb-1.5">Add another Chrome profile</p>
-              <p className="text-[8px] text-white/30 leading-relaxed mb-2">
+              <p className="text-[11.5px] text-white/50 font-medium mb-1.5">Add another Chrome profile</p>
+              <p className="text-[11px] text-white/30 leading-relaxed mb-2">
                 Open Chrome → chrome://extensions → Developer mode → Load unpacked → paste path below
               </p>
               <div className="flex items-center gap-2">
                 <code onClick={copyPath} title="Click to copy"
-                      className="text-[8px] text-s-accent bg-s-accent/6 border border-s-accent/12
+                      className="text-[11px] text-s-accent bg-s-accent/6 border border-s-accent/12
                                  px-2 py-1 rounded font-mono select-all break-all flex-1
                                  cursor-pointer hover:bg-s-accent/10 transition-colors">
                   {extPath}
                 </code>
                 <button onClick={copyPath}
-                        className="text-[8px] text-white/30 hover:text-s-accent px-2 py-1 rounded
+                        className="text-[11px] text-white/30 hover:text-s-accent px-2 py-1 rounded
                                    bg-white/[0.03] border border-white/6 hover:bg-s-accent/8
                                    hover:border-s-accent/12 transition-all flex-shrink-0">
                   Copy
                 </button>
               </div>
             </div>
-            <button onClick={handleDisable} className="text-[8px] text-white/15 hover:text-white/40 transition-colors">
+            <button onClick={handleDisable} className="text-[11px] text-white/15 hover:text-white/40 transition-colors">
               Remove Tab Sync
             </button>
           </div>
@@ -239,14 +239,14 @@ export default function ChromeTabSyncCard() {
 
   if (step > 0) {
     return (
-      <div className="mb-4 bg-white/[0.015] border border-s-accent/15 rounded-2xl p-5">
+      <div className="mb-4 bg-white/[0.015] border border-s-accent/15 rounded-lg p-5">
         <div className="flex items-center gap-3 mb-4">
           <div className="w-8 h-8 rounded-lg bg-s-accent/10 border border-s-accent/20 flex items-center justify-center">
             <Globe size={14} className="text-s-accent" />
           </div>
           <div>
             <h4 className="text-[12px] font-semibold text-white/90">Setup Chrome Tab Sync</h4>
-            <p className="text-[9px] text-white/40 mt-0.5">One-time setup per Chrome profile · 30 seconds</p>
+            <p className="text-[11.5px] text-white/40 mt-0.5">One-time setup per Chrome profile · 30 seconds</p>
           </div>
         </div>
         <div className="space-y-3 ml-2">
@@ -255,12 +255,12 @@ export default function ChromeTabSyncCard() {
             <>Toggle <span className="text-white/90 font-medium">Developer mode</span> ON</>,
             <>Click <span className="text-white/90 font-medium">Load unpacked</span> → paste path:<br />
               <div className="flex items-center gap-2 mt-1.5">
-                <code onClick={copyPath} className="text-[8px] text-s-accent bg-s-accent/6 border border-s-accent/12
+                <code onClick={copyPath} className="text-[11px] text-s-accent bg-s-accent/6 border border-s-accent/12
                                                     px-2 py-1 rounded font-mono select-all break-all flex-1
                                                     cursor-pointer hover:bg-s-accent/10 transition-colors">
                   {extPath}
                 </code>
-                <button onClick={copyPath} className="text-[8px] text-white/30 hover:text-s-accent px-2 py-1 rounded
+                <button onClick={copyPath} className="text-[11px] text-white/30 hover:text-s-accent px-2 py-1 rounded
                                                       bg-white/[0.03] border border-white/6 flex-shrink-0">Copy</button>
               </div>
             </>,
@@ -268,17 +268,17 @@ export default function ChromeTabSyncCard() {
             <div key={i} className="flex items-start gap-3">
               <div className="w-5 h-5 rounded-full bg-s-accent/15 border border-s-accent/25
                               flex items-center justify-center flex-shrink-0 mt-0.5">
-                <span className="text-[9px] text-s-accent font-bold">{i + 1}</span>
+                <span className="text-[11.5px] text-s-accent font-bold">{i + 1}</span>
               </div>
-              <p className="text-[10px] text-white/70">{content}</p>
+              <p className="text-[12px] text-white/70">{content}</p>
             </div>
           ))}
         </div>
         <div className="mt-4 pt-3 border-t border-white/5 flex items-center gap-2">
           <div className="w-3 h-3 border-2 border-s-accent/30 border-t-s-accent rounded-full animate-spin" />
-          <span className="text-[9px] text-white/40">Waiting for extension to connect...</span>
+          <span className="text-[11.5px] text-white/40">Waiting for extension to connect...</span>
         </div>
-        <button onClick={() => setStep(0)} className="mt-3 text-[8px] text-white/15 hover:text-white/40 transition-colors">
+        <button onClick={() => setStep(0)} className="mt-3 text-[11px] text-white/15 hover:text-white/40 transition-colors">
           Cancel
         </button>
       </div>
@@ -286,7 +286,7 @@ export default function ChromeTabSyncCard() {
   }
 
   return (
-    <div className="mb-4 bg-white/[0.015] border border-white/8 rounded-2xl p-4">
+    <div className="mb-4 bg-white/[0.015] border border-white/8 rounded-lg p-4">
       <div className="flex items-start justify-between gap-4">
         <div className="flex items-start gap-3">
           <div className="w-8 h-8 rounded-lg bg-white/[0.04] border border-white/8
@@ -295,21 +295,21 @@ export default function ChromeTabSyncCard() {
           </div>
           <div>
             <h4 className="text-[11px] font-semibold text-white/80">Chrome Tab Sync</h4>
-            <p className="text-[9px] text-white/40 mt-1 leading-relaxed max-w-[350px]">
+            <p className="text-[11.5px] text-white/40 mt-1 leading-relaxed max-w-[350px]">
               Save and restore all Chrome tabs across all your accounts.
             </p>
-            <p className="text-[8px] text-white/20 mt-1 italic">100% local · 30-second one-time setup</p>
+            <p className="text-[11px] text-white/20 mt-1 italic">100% local · 30-second one-time setup</p>
           </div>
         </div>
         <button onClick={handleEnable} disabled={loading}
                 className="flex items-center gap-1.5 px-3.5 py-2 flex-shrink-0
-                           bg-s-accent/8 border border-s-accent/15 text-[10px] text-s-accent
+                           bg-s-accent/8 border border-s-accent/15 text-[12px] text-s-accent
                            font-medium rounded-lg hover:bg-s-accent/15 disabled:opacity-30 transition-all">
           {loading ? 'Preparing...' : 'Setup'}
         </button>
       </div>
       {setupError && (
-        <p className="mt-2 text-[8px] text-white/40 px-1">{setupError}</p>
+        <p className="mt-2 text-[11px] text-white/40 px-1">{setupError}</p>
       )}
     </div>
   );

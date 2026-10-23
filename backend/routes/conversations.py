@@ -32,12 +32,14 @@ class Feedback(BaseModel):
 
 
 @router.get("/api/conversations")
-def list_conversations(q: str = "", limit: int = 50, offset: int = 0):
+def list_conversations(q: str = "", limit: int = 50, offset: int = 0, everyone: bool = False):
+    """everyone=true lists every speaker's chats (owner, older 'default' history, enrolled voices)."""
     from memory import conversation_store as cstore
+    key = None if everyone else _key()
     if q.strip():
-        return {"query": q, "results": cstore.search(_key(), q, limit)}
-    return {"conversations": cstore.list_conversations(_key(), limit, offset),
-            "total": cstore.count_conversations(_key())}
+        return {"query": q, "results": cstore.search(key, q, limit)}
+    return {"conversations": cstore.list_conversations(key, limit, offset),
+            "total": cstore.count_conversations(key)}
 
 
 @router.post("/api/conversations")
@@ -53,10 +55,10 @@ def current():
 
 
 @router.get("/api/conversations/{conv_id}")
-def open_chat(conv_id: str, limit: int = 300, before_id: Optional[int] = None):
+def open_chat(conv_id: str, limit: int = 300, before_id: Optional[int] = None, everyone: bool = False):
     from memory import conversation_store as cstore
     conv = cstore.get_conversation(conv_id)
-    if not conv or conv["speaker_key"] != _key():
+    if not conv or (not everyone and conv["speaker_key"] != _key()):
         raise HTTPException(404, "Conversation not found")
     return {"conversation": conv, "messages": cstore.get_messages(conv_id, limit, before_id)}
 

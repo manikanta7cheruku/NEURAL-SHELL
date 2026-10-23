@@ -28,10 +28,10 @@ export default function WorkspaceCard({ workspace, onRestore, onDelete }) {
               {workspace.name}
             </h3>
             {workspace.description && (
-              <p className="text-[9px] text-white/35 mt-0.5">{workspace.description}</p>
+              <p className="text-[11.5px] text-white/35 mt-0.5">{workspace.description}</p>
             )}
           </div>
-          <span className="text-[9px] text-white/40 bg-white/[0.03] border border-white/6
+          <span className="text-[11.5px] text-white/40 bg-white/[0.03] border border-white/6
                            px-2 py-0.5 rounded-md font-mono flex items-center gap-1 flex-shrink-0">
             <Layout size={8} /> {apps.length}
           </span>
@@ -40,7 +40,7 @@ export default function WorkspaceCard({ workspace, onRestore, onDelete }) {
         <div className="flex flex-wrap gap-1 mb-3 max-h-[80px] overflow-y-auto
                         scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
           {apps.map((app, i) => (
-            <span key={i} className="text-[8px] text-white/35 bg-[#0a0a0c]
+            <span key={i} className="text-[11px] text-white/35 bg-[#0a0a0c]
                                       border border-white/5 px-1.5 py-0.5 rounded">
               {app.name || app.type}
             </span>
@@ -48,7 +48,7 @@ export default function WorkspaceCard({ workspace, onRestore, onDelete }) {
         </div>
 
         <div className="flex items-center justify-between pt-2.5 border-t border-white/5">
-          <span className="text-[8px] text-white/25 flex items-center gap-0.5">
+          <span className="text-[11px] text-white/25 flex items-center gap-0.5">
             <RotateCcw size={7} /> {workspace.use_count || 0} restores
           </span>
           <div className={`flex items-center gap-1 transition-opacity duration-200
@@ -56,7 +56,7 @@ export default function WorkspaceCard({ workspace, onRestore, onDelete }) {
             <button onClick={handleRestore} disabled={restoring}
                     className="flex items-center gap-1 px-2.5 py-1 rounded-lg
                                bg-s-accent/8 border border-s-accent/15
-                               text-[8.5px] text-s-accent font-medium
+                               text-[11px] text-s-accent font-medium
                                hover:bg-s-accent/15 transition-all disabled:opacity-30">
               <RotateCcw size={9} />
               {restoring ? 'Opening...' : 'Restore'}

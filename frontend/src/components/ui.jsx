@@ -2,7 +2,7 @@
  * Shared UI primitives. Every redesigned page builds on these so spacing,
  * type sizes and interaction states stay consistent across the app.
  *
- * Type scale:  page title 18 · section title 14 · body 13 · secondary 12 · meta 11
+ * Type scale:  page title 15 · section title 13 · body 12.5 · secondary 11.5 · meta 11
  */
 import { forwardRef, useEffect, useId, useRef, useState } from 'react';
 import { Check, AlertCircle, Info, X, Loader2 } from 'lucide-react';
@@ -15,15 +15,15 @@ import { useToasts } from '../lib/toast';
 export function PageShell({ title, description, actions, children, toolbar }) {
   return (
     <div className="h-full flex flex-col bg-s-bg">
-      <header className="shrink-0 px-8 pt-6 pb-5 border-b border-s-border">
+      <header className="shrink-0 px-6 pt-4 pb-3.5 border-b border-s-border">
         <div className="flex items-start justify-between gap-6">
           <div className="min-w-0">
-            <h1 className="text-[18px] font-semibold text-s-text tracking-[-0.015em]">{title}</h1>
-            {description && <p className="text-[13px] text-s-text-3 mt-1">{description}</p>}
+            <h1 className="text-[15px] font-semibold text-s-text tracking-[-0.01em]">{title}</h1>
+            {description && <p className="text-[12px] text-s-text-3 mt-0.5">{description}</p>}
           </div>
           {actions && <div className="flex items-center gap-2 shrink-0">{actions}</div>}
         </div>
-        {toolbar && <div className="mt-5">{toolbar}</div>}
+        {toolbar && <div className="mt-3.5">{toolbar}</div>}
       </header>
       <div className="flex-1 min-h-0 overflow-y-auto">{children}</div>
     </div>
@@ -35,14 +35,14 @@ export function PageShell({ title, description, actions, children, toolbar }) {
 export function Section({ title, description, actions, children, tone, id }) {
   return (
     <section id={id}
-             className={cx('rounded-xl border bg-s-surface shadow-[var(--s-shadow)]',
+             className={cx('rounded-lg border bg-s-surface shadow-[var(--s-shadow)]',
                            tone === 'danger' ? 'border-s-red/25' : 'border-s-border')}>
       {(title || actions) && (
-        <div className="flex items-start justify-between gap-4 px-5 pt-4 pb-3.5">
+        <div className="flex items-start justify-between gap-4 px-4 pt-3 pb-2.5">
           <div className="min-w-0">
-            {title && <h2 className={cx('text-[14px] font-semibold',
+            {title && <h2 className={cx('text-[13px] font-semibold',
                                         tone === 'danger' ? 'text-s-red' : 'text-s-text')}>{title}</h2>}
-            {description && <p className="text-[12px] text-s-text-3 mt-0.5 leading-relaxed">{description}</p>}
+            {description && <p className="text-[11.5px] text-s-text-3 mt-0.5 leading-relaxed">{description}</p>}
           </div>
           {actions && <div className="flex items-center gap-2 shrink-0">{actions}</div>}
         </div>
@@ -54,10 +54,10 @@ export function Section({ title, description, actions, children, tone, id }) {
 
 export function Row({ label, description, children, stacked, htmlFor }) {
   return (
-    <div className={cx('px-5 py-4', stacked ? 'space-y-3' : 'flex items-center justify-between gap-6')}>
+    <div className={cx('px-4 py-2.5', stacked ? 'space-y-2' : 'flex items-center justify-between gap-6')}>
       <div className="min-w-0">
-        <label htmlFor={htmlFor} className="block text-[13px] font-medium text-s-text">{label}</label>
-        {description && <p className="text-[12px] text-s-text-3 mt-0.5 leading-relaxed max-w-[520px]">{description}</p>}
+        <label htmlFor={htmlFor} className="block text-[12.5px] font-medium text-s-text">{label}</label>
+        {description && <p className="text-[11.5px] text-s-text-3 mt-0.5 leading-relaxed max-w-[520px]">{description}</p>}
       </div>
       {children && <div className={stacked ? '' : 'shrink-0'}>{children}</div>}
     </div>
@@ -65,7 +65,7 @@ export function Row({ label, description, children, stacked, htmlFor }) {
 }
 
 export function Body({ children, className }) {
-  return <div className={cx('px-5 py-4', className)}>{children}</div>;
+  return <div className={cx('px-4 py-3', className)}>{children}</div>;
 }
 
 // ── Controls ────────────────────────────────────────────────────────────────
@@ -74,12 +74,12 @@ export function Toggle({ checked, onChange, disabled, label }) {
   return (
     <button type="button" role="switch" aria-checked={!!checked} aria-label={label} disabled={disabled}
             onClick={() => onChange(!checked)}
-            className={cx('relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors duration-150',
+            className={cx('relative inline-flex h-[18px] w-8 shrink-0 items-center rounded-full transition-colors duration-200',
                           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-s-accent/60 focus-visible:ring-offset-2 focus-visible:ring-offset-s-bg',
                           checked ? 'bg-s-accent' : 'bg-s-border-l',
                           disabled && 'opacity-40 cursor-not-allowed')}>
-      <span className={cx('inline-block h-4 w-4 rounded-full bg-s-on-accent shadow-sm transition-transform duration-150',
-                          checked ? 'translate-x-[18px]' : 'translate-x-0.5')} />
+      <span className={cx('inline-block h-[14px] w-[14px] rounded-full bg-s-on-accent shadow-sm transition-transform duration-200 ease-out',
+                          checked ? 'translate-x-[16px]' : 'translate-x-[2px]')} />
     </button>
   );
 }
@@ -88,7 +88,7 @@ export function Toggle({ checked, onChange, disabled, label }) {
  * Range slider. onChange fires while dragging (for live labels); onCommit fires once
  * on release with (newValue, valueBeforeTheDrag), so autosave runs once per change.
  */
-export function Slider({ value, min, max, step = 1, onChange, onCommit, format = v => v, marks, width = 'w-56', label }) {
+export function Slider({ value, min, max, step = 1, onChange, onCommit, format = v => v, marks, width = 'w-52', label }) {
   const [local, setLocal] = useState(value);
   const [seen, setSeen] = useState(value);
   const start = useRef(value);                                     // value when this interaction began
@@ -110,7 +110,7 @@ export function Slider({ value, min, max, step = 1, onChange, onCommit, format =
                onPointerDown={begin} onKeyDown={e => { if (!e.repeat) begin(); }} onFocus={begin}
                onChange={e => { const v = Number(e.target.value); setLocal(v); if (onCommit) onChange?.(v); }}
                onPointerUp={commit} onMouseUp={commit} onTouchEnd={commit} onKeyUp={commit} onBlur={commit} />
-        <span className="w-12 text-right text-[12px] tabular-nums text-s-text-2">{format(local)}</span>
+        <span className="w-11 text-right text-[11.5px] tabular-nums text-s-text-2">{format(local)}</span>
       </div>
       {marks && (
         <div className="flex justify-between mt-1.5 pr-[60px] text-[11px] text-s-text-4">
@@ -130,7 +130,7 @@ export function Segmented({ value, options, onChange, size = 'md' }) {
           <button key={String(o.value)} type="button" role="radio" aria-checked={active}
                   onClick={() => onChange(o.value)}
                   className={cx('rounded-md font-medium transition-colors duration-150',
-                                size === 'sm' ? 'px-2.5 h-6 text-[12px]' : 'px-3 h-7 text-[12px]',
+                                size === 'sm' ? 'px-2 h-[22px] text-[11.5px]' : 'px-2.5 h-6 text-[12px]',
                                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-s-accent/60',
                                 active ? 'bg-s-surface text-s-text shadow-[var(--s-shadow)] ring-1 ring-s-border' : 'text-s-text-3 hover:text-s-text-2')}>
             {o.label}
@@ -144,7 +144,7 @@ export function Segmented({ value, options, onChange, size = 'md' }) {
 export function Select({ value, onChange, options, className, id, disabled }) {
   return (
     <select id={id} value={value} disabled={disabled} onChange={e => onChange(e.target.value)}
-            className={cx('h-8 rounded-lg border border-s-border bg-s-bg px-2.5 pr-8 text-[13px] text-s-text',
+            className={cx('h-7 rounded-md border border-s-border bg-s-bg px-2 pr-7 text-[12px] text-s-text',
                           'focus:border-s-accent focus:ring-2 focus:ring-s-accent/20 disabled:opacity-50', className)}>
       {options.map(o => (
         typeof o === 'string'
@@ -162,7 +162,7 @@ export function Select({ value, onChange, options, className, id, disabled }) {
 export function Input({ className, ...props }) {
   return (
     <input {...props}
-           className={cx('h-8 rounded-lg border border-s-border bg-s-bg px-3 text-[13px] text-s-text placeholder:text-s-text-4',
+           className={cx('h-7 rounded-md border border-s-border bg-s-bg px-2.5 text-[12px] text-s-text placeholder:text-s-text-4',
                          'focus:border-s-accent focus:ring-2 focus:ring-s-accent/20 disabled:opacity-50', className)} />
   );
 }
@@ -178,12 +178,12 @@ export const Button = forwardRef(function Button(
   { variant = 'secondary', size = 'md', icon: Icon, loading, children, className, ...props }, ref) {
   return (
     <button ref={ref} type="button" {...props} disabled={props.disabled || loading}
-            className={cx('inline-flex items-center justify-center gap-1.5 rounded-lg font-medium whitespace-nowrap',
+            className={cx('inline-flex items-center justify-center gap-1.5 rounded-md font-medium whitespace-nowrap',
                           'transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed',
                           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-s-accent/60',
-                          size === 'sm' ? 'h-7 px-2.5 text-[12px]' : 'h-8 px-3.5 text-[13px]',
+                          size === 'sm' ? 'h-6 px-2 text-[11.5px]' : 'h-7 px-3 text-[12px]',
                           BUTTON[variant], className)}>
-      {loading ? <Loader2 size={14} className="animate-spin" /> : Icon && <Icon size={14} />}
+      {loading ? <Loader2 size={13} className="animate-spin" /> : Icon && <Icon size={13} />}
       {children}
     </button>
   );
@@ -207,9 +207,9 @@ export function Badge({ tone = 'neutral', children, className }) {
 
 export function Stat({ label, value, hint }) {
   return (
-    <div className="rounded-xl border border-s-border bg-s-surface px-4 py-3.5 shadow-[var(--s-shadow)]">
-      <div className="text-[12px] text-s-text-3">{label}</div>
-      <div className="mt-1 text-[20px] font-semibold text-s-text tabular-nums tracking-[-0.01em]">{value}</div>
+    <div className="rounded-lg border border-s-border bg-s-surface px-3.5 py-2.5 shadow-[var(--s-shadow)]">
+      <div className="text-[11.5px] text-s-text-3">{label}</div>
+      <div className="mt-0.5 text-[17px] font-semibold text-s-text tabular-nums tracking-[-0.01em]">{value}</div>
       {hint && <div className="mt-0.5 text-[11px] text-s-text-4 truncate">{hint}</div>}
     </div>
   );
@@ -217,14 +217,14 @@ export function Stat({ label, value, hint }) {
 
 export function EmptyState({ icon: Icon, title, description, action }) {
   return (
-    <div className="flex flex-col items-center justify-center text-center py-16 px-6">
+    <div className="flex flex-col items-center justify-center text-center py-12 px-6">
       {Icon && (
         <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-xl border border-s-border bg-s-surface">
           <Icon size={18} className="text-s-text-3" />
         </div>
       )}
-      <p className="text-[14px] font-medium text-s-text">{title}</p>
-      {description && <p className="mt-1 max-w-sm text-[13px] text-s-text-3 leading-relaxed">{description}</p>}
+      <p className="text-[13px] font-medium text-s-text">{title}</p>
+      {description && <p className="mt-1 max-w-sm text-[12px] text-s-text-3 leading-relaxed">{description}</p>}
       {action && <div className="mt-5">{action}</div>}
     </div>
   );
