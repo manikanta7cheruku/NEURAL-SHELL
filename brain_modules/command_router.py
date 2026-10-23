@@ -169,14 +169,23 @@ def _build_window_tag(clean_in, is_desktop_cmd, is_notarget_cmd, is_layout,
         else:
             mode = "split"
 
-        # Extract app names by removing layout keywords
+        # "chrome and file explorer" keeps multi-word names together; a bare
+        # list ("quad chrome code notepad explorer") falls back to one word each.
         noise = ["put", "and", "side", "by", "split", "screen", "view",
                  "stack", "quad", "tile", "arrange", "on", "the", "in",
-                 "with", "next", "to", "beside", "layout"]
-        apps = [w for w in words if w not in noise and len(w) > 1]
+                 "with", "next", "to", "beside", "layout", "please", "can", "you"]
+        body = re.sub(r"\b(side by side|split screen|split view|next to each other|on screen)\b", " ", clean_in)
+        if re.search(r"\band\b|,", body):
+            apps = []
+            for part in re.split(r"\band\b|,", body):
+                name = " ".join(w for w in part.split() if w not in noise)
+                if name:
+                    apps.append(name)
+        else:
+            apps = [w for w in words if w not in noise and len(w) > 1]
 
         if len(apps) >= 2:
-            targets = ",".join(apps)
+            targets = ",".join(a.replace(" ", "|||") for a in apps)
             return f"action=layout mode={mode} targets={targets}"
         return None
 
@@ -283,11 +292,12 @@ def _build_window_tag(clean_in, is_desktop_cmd, is_notarget_cmd, is_layout,
         for pw in pos_words:
             if after_snap.endswith(pw):
                 target = after_snap[:-(len(pw))].strip()
-                target = target.rstrip(" to the").rstrip(" to").strip()
+                # A suffix, not a character set: rstrip(" to the") turned "chrome" into "chrom".
+                target = re.sub(r"\s+(to\s+the|to|on\s+the|on)$", "", target).strip()
                 if target:
-                    return f"action=snap target={target} position={pw}"
+                    return f"action=snap target={target.replace(' ', '|||')} position={pw}"
 
-        return f"action=snap target={after_snap} position=left"
+        return f"action=snap target={after_snap.replace(' ', '|||')} position=left"
 
     # --- PIN / ALWAYS ON TOP ---
     # "pin chrome", "keep notepad on top"
@@ -956,7 +966,12 @@ def _build_system_tag(clean_in):
         or ("internet" in clean_in
             and any(w in words for w in ["connect", "status", "on", "off"]))
     )
+    # "is wifi on", "is bluetooth connected" ask for the status; they must not flip it.
+    is_question = bool(words) and (words[0] in ("is", "are", "whats", "what", "check", "do", "does", "am")
+                                   or "status" in words)
     if has_wifi:
+        if is_question:
+            return "action=wifi_status"
         if any(w in words for w in ["off", "disable", "disconnect", "kill", "stop"]):
             return "action=wifi_off"
         if any(w in words for w in ["on", "enable", "connect", "start"]):
@@ -967,6 +982,8 @@ def _build_system_tag(clean_in):
     # BLUETOOTH
     # =================================================================
     if "bluetooth" in clean_in:
+        if is_question:
+            return "action=bluetooth_status"
         if any(w in words for w in ["off", "disable", "disconnect", "kill", "stop"]):
             return "action=bluetooth_off"
         if any(w in words for w in ["on", "enable", "connect", "start"]):
