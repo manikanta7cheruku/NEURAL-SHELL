@@ -51,6 +51,7 @@ class ChatResponse(BaseModel):
     task_results: Optional[dict] = None
     conversation_id: Optional[str] = None
     meta: Optional[dict] = None
+    receipts: List[dict] = []
 
 
 def _sse(obj) -> str:
@@ -345,7 +346,7 @@ def chat(req: ChatRequest):
             return StreamingResponse(_stream_text(clean, meta, conv_id), media_type="text/event-stream",
                                      headers=_SSE_HEADERS)
         return ChatResponse(response=clean, actions=actions, file_results=files, task_results=tasks,
-                            conversation_id=conv_id, meta=trace)
+                            conversation_id=conv_id, meta=trace, receipts=receipts)
     except HTTPException:
         raise
     except Exception as exc:
