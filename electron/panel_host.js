@@ -140,7 +140,7 @@ function stopPanelServer() {
 // whatever is behind it, rounded by the OS). Elsewhere it falls back to a
 // transparent window with a CSS glass card.
 
-const PANEL_W = 360;
+const PANEL_W = 344;
 const NATIVE_GLASS = process.platform === 'win32' && (() => {
   try { return parseInt(require('os').release().split('.')[2], 10) >= 22621; } catch { return false; }
 })();
@@ -151,7 +151,7 @@ let _hadFocus = false;   // auto-close on click-away only after the panel really
 
 function panelBounds() {
   const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
-  const h = Math.min(760, area.height - 24);
+  const h = Math.min(560, area.height - 24);   // compact: the list scrolls inside
   return NATIVE_GLASS
     ? { width: PANEL_W, height: h, x: area.x + area.width - PANEL_W - 12, y: area.y + 12 }
     : { width: PANEL_W + 32, height: h + 20, x: area.x + area.width - PANEL_W - 28, y: area.y + 2 };
