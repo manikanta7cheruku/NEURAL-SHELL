@@ -895,7 +895,13 @@ if (!gotTheLock) {
 
     // CRITICAL: Free port 7777 synchronously (fast netstat, ~100ms).
     // This is the ONLY thing that must block — prevents EADDRINUSE.
-    freePort7777Sync();
+    // Not when the backend was started separately (npm run dev): it is already up in a couple of
+    // seconds now, and this used to kill it, leaving the app on "Backend Unreachable".
+    if ((process.env.SEVEN_BACKEND_EXTERNALLY_STARTED || '').trim() === '1') {
+      console.log('[STARTUP] Backend started externally; leaving port 7777 alone.');
+    } else {
+      freePort7777Sync();
+    }
 
     // Clean up lingering daemons in background (non-blocking).
     // Uses PowerShell Get-Process instead of WMI — 10x faster and

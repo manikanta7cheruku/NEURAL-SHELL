@@ -185,7 +185,9 @@ body.native-glass #panel {
 .footer-btn.accent { color: #fff; background: linear-gradient(180deg, rgba(var(--accent-rgb), 0.95), rgba(79, 70, 229, 0.95)); border-color: rgba(165, 180, 252, 0.35); box-shadow: 0 6px 18px -6px rgba(var(--accent-rgb), 0.7); }
 .footer-btn.accent:hover { filter: brightness(1.08); }
 .footer-btn.danger:hover { color: var(--danger); border-color: rgba(248, 113, 113, 0.35); background: rgba(248, 113, 113, 0.1); }
-.footer-hint { margin-left: auto; font: 500 10.5px var(--mono); color: var(--text-dim); }
+.footer-hint { margin-left: auto; font: 500 10.5px var(--mono); color: var(--text-dim); white-space: nowrap; }
+.footer-btn { white-space: nowrap; }
+@media (max-width: 340px) { .footer-hint { display: none; } .footer-btn { flex: 1; justify-content: center; } }
 
 /* ══════ CARDS (shared) ══════ */
 .task-card, .trigger-card, .sched-card {
