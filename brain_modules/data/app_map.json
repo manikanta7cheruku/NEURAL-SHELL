@@ -1,6 +1,6 @@
 {
   "app_map_version": 1,
-  "source_hash": "5d7073c821a8a133",
+  "source_hash": "6158a7ad0406d45d",
   "pages": [
     {
       "id": "home",
@@ -112,13 +112,18 @@
       "purpose": "",
       "controls": [
         {
-          "label": "unsure, said so",
-          "description": "Drop to add to your knowledge",
+          "label": "Not certain",
+          "description": "",
           "file": "Console.jsx"
         },
         {
-          "label": "Console",
-          "description": "Same brain as voice. Saved on this computer.",
+          "label": "Seven",
+          "description": "",
+          "file": "Console.jsx"
+        },
+        {
+          "label": "What can I help with?",
+          "description": "Ask anything, type / for commands, or drop a document to learn from it.",
           "file": "Console.jsx"
         },
         {
@@ -132,8 +137,8 @@
           "file": "Console.jsx"
         },
         {
-          "label": "What are we working on?",
-          "description": "Type a message, use a / command, or drop a file to learn from it.",
+          "label": "Commands",
+          "description": "Runs on this computer. Enter to send, Shift+Enter for a new line, / for commands.",
           "file": "Console.jsx"
         }
       ],
@@ -206,6 +211,11 @@
           "label": "Voice",
           "description": "",
           "file": "Memory.jsx"
+        },
+        {
+          "label": "Interrupted",
+          "description": "",
+          "file": "Memory.jsx"
         }
       ],
       "keywords": [
@@ -224,11 +234,21 @@
       "route": "/schedules",
       "component": "Schedules",
       "title": "Schedules",
-      "purpose": "",
+      "purpose": "Reminders, alarms, timers and events, grouped by day. They fire even when the app is closed",
       "controls": [
         {
-          "label": "overdue",
-          "description": "",
+          "label": "New schedule",
+          "description": "Create a reminder, alarm, timer or event. Type a time like 5pm, tomorrow 9am or in 30 min.",
+          "file": "Schedules.jsx"
+        },
+        {
+          "label": "Repeat",
+          "description": "Make a schedule repeat every day, on weekdays, or on one day each week.",
+          "file": "Schedules.jsx"
+        },
+        {
+          "label": "Cancel a schedule",
+          "description": "Hover it and press the trash icon.",
           "file": "Schedules.jsx"
         },
         {
@@ -242,47 +262,45 @@
           "file": "Schedules.jsx"
         },
         {
+          "label": "Duration in minutes",
+          "description": "",
+          "file": "Schedules.jsx"
+        },
+        {
+          "label": "When",
+          "description": "",
+          "file": "Schedules.jsx"
+        },
+        {
           "label": "Repeat",
           "description": "",
           "file": "Schedules.jsx"
         },
         {
-          "label": "Cancel",
+          "label": "Missed",
           "description": "",
           "file": "Schedules.jsx"
         },
         {
-          "label": "Schedules",
+          "label": "New schedule",
           "description": "",
           "file": "Schedules.jsx"
         },
         {
-          "label": "New Schedule",
-          "description": "",
-          "file": "Schedules.jsx"
-        },
-        {
-          "label": "Schedule Limit Reached",
-          "description": "",
-          "file": "Schedules.jsx"
-        },
-        {
-          "label": "No schedules yet",
-          "description": "Create a reminder, alarm, timer, or event. Seven fires it whether the app is open or closed.",
-          "file": "Schedules.jsx"
-        },
-        {
-          "label": "Create Schedule",
-          "description": "",
-          "file": "Schedules.jsx"
-        },
-        {
-          "label": "Recent",
+          "label": "Recently fired",
           "description": "",
           "file": "Schedules.jsx"
         }
       ],
-      "keywords": [],
+      "keywords": [
+        "schedules",
+        "reminders",
+        "alarms",
+        "timers",
+        "events",
+        "repeat",
+        "recurring"
+      ],
       "sections": []
     },
     {
@@ -290,25 +308,35 @@
       "route": "/tasks",
       "component": "Tasks",
       "title": "Tasks",
-      "purpose": "",
+      "purpose": "Your to-do list: add tasks with a due date, priority, notes and subtasks, then tick them off",
       "controls": [
+        {
+          "label": "Add a task",
+          "description": "Type in the box at the top and press Enter. Set a priority, due date, notes or subtasks before adding.",
+          "file": "Tasks.jsx"
+        },
+        {
+          "label": "Complete a task",
+          "description": "Tick the circle next to it. You have a few seconds to undo.",
+          "file": "Tasks.jsx"
+        },
+        {
+          "label": "Edit a task",
+          "description": "Click a task to open its notes and subtasks, or double-click the title to rename it.",
+          "file": "Tasks.jsx"
+        },
         {
           "label": "Clear",
           "description": "",
           "file": "Tasks.jsx"
         },
         {
-          "label": "Done",
+          "label": "Cancel",
           "description": "",
           "file": "Tasks.jsx"
         },
         {
-          "label": "Subtasks",
-          "description": "",
-          "file": "Tasks.jsx"
-        },
-        {
-          "label": "to completed",
+          "label": "Add task",
           "description": "",
           "file": "Tasks.jsx"
         },
@@ -318,37 +346,20 @@
           "file": "Tasks.jsx"
         },
         {
-          "label": "Set date",
-          "description": "",
-          "file": "Tasks.jsx"
-        },
-        {
-          "label": "Add description",
-          "description": "",
-          "file": "Tasks.jsx"
-        },
-        {
-          "label": "Add",
-          "description": "",
-          "file": "Tasks.jsx"
-        },
-        {
-          "label": "Description",
-          "description": "",
-          "file": "Tasks.jsx"
-        },
-        {
-          "label": "Cancel",
-          "description": "",
-          "file": "Tasks.jsx"
-        },
-        {
-          "label": "Tasks",
+          "label": "Completed",
           "description": "",
           "file": "Tasks.jsx"
         }
       ],
-      "keywords": [],
+      "keywords": [
+        "tasks",
+        "todo",
+        "to do",
+        "checklist",
+        "due",
+        "overdue",
+        "subtasks"
+      ],
       "sections": []
     },
     {
@@ -356,50 +367,58 @@
       "route": "/triggers",
       "component": "Triggers",
       "title": "Triggers",
-      "purpose": "",
+      "purpose": "Shortcuts that launch apps, sites, files, folders, workspaces or commands from a hotkey, a voice phrase or finger snaps",
       "controls": [
         {
-          "label": "Seven Task Panel Hotkey",
-          "description": "Global shortcut to open the task panel from anywhere",
+          "label": "New trigger",
+          "description": "Pick what it does, then how to start it: a hotkey, a voice phrase or snaps.",
           "file": "Triggers.jsx"
         },
         {
-          "label": "Triggers",
+          "label": "Test a trigger",
+          "description": "Hover a trigger and press the play icon.",
+          "file": "Triggers.jsx"
+        },
+        {
+          "label": "Workspaces",
+          "description": "Save the apps and windows you have open, then restore them in one step.",
+          "file": "Triggers.jsx"
+        },
+        {
+          "label": "Turn all on",
           "description": "",
           "file": "Triggers.jsx"
         },
         {
-          "label": "Enable All",
+          "label": "Turn all off",
           "description": "",
           "file": "Triggers.jsx"
         },
         {
-          "label": "Disable All",
+          "label": "New trigger",
           "description": "",
           "file": "Triggers.jsx"
         },
         {
-          "label": "New Trigger",
+          "label": "Plan limit reached.",
           "description": "",
           "file": "Triggers.jsx"
         },
         {
-          "label": "Plan limit warning",
-          "description": "",
-          "file": "Triggers.jsx"
-        },
-        {
-          "label": "No triggers yet",
-          "description": "Create a trigger to launch apps, open workspaces, or run commands with a hotkey, voice command, or snap.",
-          "file": "Triggers.jsx"
-        },
-        {
-          "label": "Create Trigger",
+          "label": "Dismiss",
           "description": "",
           "file": "Triggers.jsx"
         }
       ],
-      "keywords": [],
+      "keywords": [
+        "triggers",
+        "hotkeys",
+        "shortcuts",
+        "voice commands",
+        "snap",
+        "workspaces",
+        "automation"
+      ],
       "sections": []
     },
     {
