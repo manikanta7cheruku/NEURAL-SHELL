@@ -7,6 +7,8 @@ Fallback: Query GitHub CDN directly (ensures high availability).
 """
 
 import os
+import time
+from time import strftime as _strftime   # functions below import time locally
 import json
 import threading
 import requests
@@ -26,6 +28,7 @@ _state = {
     "download_path":     None,
     "error":             None,
     "info":              None,
+    "last_checked":      None,
 }
 
 
@@ -183,6 +186,7 @@ def check_for_updates(force=False):
                     _state["update_available"] = True
                     _state["info"]             = override
                     _state["checking"]         = False
+                    _state["last_checked"] = _strftime("%Y-%m-%dT%H:%M:%S")
                     print("[UPDATER] Override active: " + ov)
                     return
             except Exception:
@@ -237,6 +241,7 @@ def check_for_updates(force=False):
                     }
                     print("[UPDATER] Update available from Render: " + data.get("version", ""))
                     _state["checking"] = False
+                    _state["last_checked"] = _strftime("%Y-%m-%dT%H:%M:%S")
                     return
         except Exception as se:
             print(f"[UPDATER] Render check skipped: {se}")
@@ -259,6 +264,7 @@ def check_for_updates(force=False):
                 if not latest_version:
                     print("[UPDATER] No version tag found in release")
                     _state["checking"] = False
+                    _state["last_checked"] = _strftime("%Y-%m-%dT%H:%M:%S")
                     return
 
                 try:
@@ -326,6 +332,7 @@ def check_for_updates(force=False):
             print("[UPDATER] Error: " + str(e))
         finally:
             _state["checking"] = False
+            _state["last_checked"] = _strftime("%Y-%m-%dT%H:%M:%S")
 
     t = threading.Thread(target=_check, daemon=True, name="UpdateCheck")
     t.start()
