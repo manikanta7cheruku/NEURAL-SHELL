@@ -559,7 +559,7 @@ export default function Settings() {
                     </div>
                     <div className="flex gap-2">
                       <button
-                        onClick={() => navigate('/blog')}
+                        onClick={() => navigate('/guide')}
                         className="text-[10px] px-2 py-1 border border-s-accent/30 bg-s-accent/8 text-s-accent rounded hover:bg-s-accent/20">
                         How to use →
                       </button>

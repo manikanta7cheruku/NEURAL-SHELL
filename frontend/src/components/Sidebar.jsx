@@ -46,7 +46,7 @@ const SECTIONS = [
       { to: '/plans',    label: 'Plans',    icon: CreditCard },
       { to: '/settings', label: 'Settings', icon: Settings },
       { to: '/updates',  label: 'Updates',  icon: RefreshCw, badge: 'update' },
-      { to: '/blog',     label: 'Guide',    icon: BookMarked },
+      { to: '/guide',     label: 'Guide',    icon: BookMarked },
       { to: '/feedback', label: 'Feedback', icon: MessageSquare },
     ],
   },

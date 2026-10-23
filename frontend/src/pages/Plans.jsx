@@ -101,7 +101,7 @@ function CurrentPlan({ tier, isTrial, daysUntilExpiry }) {
         </div>
         <div className={cx('mt-0.5 text-[12px]', tone)}>{status}</div>
       </div>
-      <Button variant="ghost" onClick={() => window.__navigate?.('/blog')}>How to use Seven</Button>
+      <Button variant="ghost" onClick={() => window.__navigate?.('/guide')}>How to use Seven</Button>
     </div>
   );
 }

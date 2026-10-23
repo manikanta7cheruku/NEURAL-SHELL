@@ -1,6 +1,6 @@
 {
   "app_map_version": 1,
-  "source_hash": "a39b22e4d1bc66f8",
+  "source_hash": "49246ded1c4a7c3c",
   "pages": [
     {
       "id": "home",
@@ -997,69 +997,75 @@
       "sections": []
     },
     {
-      "id": "blog",
-      "route": "/blog",
-      "component": "Blog",
+      "id": "guide",
+      "route": "/guide",
+      "component": "Guide",
       "title": "Guide",
-      "purpose": "How Seven works and what you can do with it",
+      "purpose": "Learn how to use Seven: try live commands, see everything Seven can do with example phrases, set it up, privacy facts, questions and shortcuts",
       "controls": [
         {
-          "label": "At a glance",
-          "description": "",
-          "file": "Blog.jsx"
+          "label": "Try it now",
+          "description": "Run real commands like max brightness or open Chrome with one click.",
+          "file": "Guide.jsx"
         },
         {
-          "label": "How it works",
-          "description": "",
-          "file": "Blog.jsx"
+          "label": "What Seven can do",
+          "description": "Every ability with phrases you can say or type.",
+          "file": "Guide.jsx"
         },
         {
-          "label": "What you can say",
-          "description": "",
-          "file": "Blog.jsx"
+          "label": "Set up Seven",
+          "description": "A short checklist: your name, your voice, a workspace, a trigger and your documents.",
+          "file": "Guide.jsx"
         },
         {
-          "label": "Features",
-          "description": "",
-          "file": "Blog.jsx"
+          "label": "Questions",
+          "description": "Answers about privacy, the internet, models and troubleshooting.",
+          "file": "Guide.jsx"
         },
         {
-          "label": "Status orb",
-          "description": "",
-          "file": "Blog.jsx"
+          "label": "Shift",
+          "description": "], [MessageSquare, 'Console',",
+          "file": "Guide.jsx"
         },
         {
-          "label": "Orb controls",
+          "label": "Press",
           "description": "",
-          "file": "Blog.jsx"
+          "file": "Guide.jsx"
         },
         {
-          "label": "Privacy",
+          "label": "Alt",
           "description": "",
-          "file": "Blog.jsx"
+          "file": "Guide.jsx"
         },
         {
-          "label": "Data type",
+          "label": "Send feedback",
           "description": "",
-          "file": "Blog.jsx"
+          "file": "Guide.jsx"
         },
         {
-          "label": "Stored",
+          "label": "What's new",
           "description": "",
-          "file": "Blog.jsx"
+          "file": "Guide.jsx"
         },
         {
-          "label": "Location",
+          "label": "Plans",
           "description": "",
-          "file": "Blog.jsx"
-        },
-        {
-          "label": "Keyboard shortcuts",
-          "description": "",
-          "file": "Blog.jsx"
+          "file": "Guide.jsx"
         }
       ],
-      "keywords": [],
+      "keywords": [
+        "guide",
+        "help",
+        "how",
+        "tutorial",
+        "learn",
+        "examples",
+        "commands",
+        "faq",
+        "shortcuts",
+        "what can you do"
+      ],
       "sections": []
     },
     {
@@ -1115,7 +1121,7 @@
       "controls": [
         {
           "label": "Check for updates automatically",
-          "description": "Seven asks GitHub once a day and tells you when a new version is ready.",
+          "description": "Seven checks shortly after it starts and every two hours, and tells you when a new version is ready.",
           "file": "Updates.jsx"
         },
         {
