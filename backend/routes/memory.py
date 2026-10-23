@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Request
 import os
 import datetime
 import logging
+from seven_utils.version import get_version
 
 from memory import facts_store
 
@@ -290,7 +291,7 @@ def export_memory():
 
     export = {
         "exported_at": datetime.datetime.now().isoformat(),
-        "version":     "1.3.1",
+        "version":     get_version(),
         "identity": {
             "name":  cfg.KEY.get("identity", {}).get("user_name", ""),
             "email": cfg.KEY.get("email", ""),

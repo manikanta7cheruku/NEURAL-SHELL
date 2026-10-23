@@ -232,16 +232,8 @@ def _check_schedules():
 
 
 def _get_version():
-    try:
-        here = os.path.dirname(os.path.dirname(os.path.dirname(
-            os.path.abspath(__file__)
-        )))
-        vf = os.path.join(here, "version.txt")
-        if os.path.exists(vf):
-            return open(vf).read().strip()
-    except Exception:
-        pass
-    return "unknown"
+    from seven_utils.version import get_version
+    return get_version()
 
 
 @router.get("/api/health/production",
