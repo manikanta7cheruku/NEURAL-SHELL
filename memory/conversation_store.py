@@ -286,6 +286,30 @@ def count_messages() -> int:
     return _rows("SELECT COUNT(*) AS n FROM messages")[0]["n"]
 
 
+def activity() -> Dict[str, Any]:
+    """Message counts by role and source, and the first and last message times (for the Memory page)."""
+    _init()
+    rows = _rows("SELECT role, COALESCE(source, 'chat') AS source, COUNT(*) AS n, MIN(ts) AS first, MAX(ts) AS last "
+                 "FROM messages GROUP BY role, COALESCE(source, 'chat')")
+    out = {"messages": 0, "from_user": 0, "by_source": {}, "first_at": None, "last_at": None}
+    for r in rows:
+        out["messages"] += r["n"]
+        if r["role"] == "user":
+            out["from_user"] += r["n"]
+            out["by_source"][r["source"]] = out["by_source"].get(r["source"], 0) + r["n"]
+        out["first_at"] = min(filter(None, [out["first_at"], r["first"]]), default=None)
+        out["last_at"] = max(filter(None, [out["last_at"], r["last"]]), default=None)
+    return out
+
+
+def delete_everything() -> int:
+    """Delete every conversation for every speaker. Returns how many were removed."""
+    n = 0
+    for conv in _rows("SELECT id FROM conversations"):
+        n += 1 if delete_conversation(conv["id"]) else 0
+    return n
+
+
 def export(conv_id: Optional[str] = None, speaker_key: Optional[str] = None) -> Dict[str, Any]:
     """Full transcript(s) as plain data, for the user's own backup."""
     convs = [get_conversation(conv_id)] if conv_id else _rows(

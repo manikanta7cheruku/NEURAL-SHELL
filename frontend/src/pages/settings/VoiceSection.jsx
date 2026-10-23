@@ -1,1153 +1,493 @@
 /**
- * frontend/src/pages/settings/VoiceSection.jsx
- *
- * Shows: Piper voice grid, SAPI voice list, speed selector,
- *        hardware info, voice control words editor.
- *
- * Voice selection saves immediately on click (no Save Changes needed).
- * Speed saves immediately on click.
- * Voice control words save when user clicks Done in edit mode.
- *
- * PROPS: (all passed from index.jsx — see index for descriptions)
+ * Voice settings: speaking voice and speed, control words, speech recognition
+ * model, and the three voice security gates (push to talk, wake word, speaker
+ * verification with enrollment). Everything saves on change.
  */
-
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Play, Square, Plus, X, Mic, Check, AlertTriangle } from 'lucide-react';
 import api from '../../api';
+import useLicense from '../../stores/useLicense';
+import { Section, Row, Body, Toggle, Segmented, Button, Badge, Input, LoadingRows } from '../../components/ui';
+import { cx } from '../../lib/cx';
+import { toast } from '../../lib/toast';
+import { saveWith } from './save';
 
-export default function VoiceSection({
-  local, set, hw,
-  voices, selectedVoiceId, selectedEngine,
-  previewingVoice, voiceSpeed, setVoiceSpeed,
-  voiceConfigLoaded,
-  voiceWords, voiceWordsEdited, savingVoice,
-  editingVoice, setEditingVoice, canEditVoice,
-  saveVoice, saveSpeed, previewVoice,
-  saveVoiceWords, updateVoiceWord, addVoiceWord, removeVoiceWord,
-  navigate, setLocal
-}) {
-  return (
-    <>
-      {/* Voice Engine Picker */}
-      <div className="bg-white/[0.02] border border-white/8 rounded-2xl overflow-hidden">
-        <div className="px-5 py-4 border-b border-white/[0.05] flex items-center justify-between">
-          <div>
-            <h2 className="text-[12px] font-semibold text-white/85">Voice Engine</h2>
-            <p className="text-[9px] text-white/40 mt-0.5">
-              {selectedVoiceId
-                ? voices.find(v => v.voice_id === selectedVoiceId)?.name || 'Select a voice'
-                : 'Loading...'}
-            </p>
-          </div>
-          <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-white/[0.03] border border-white/6">
-            <div className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
-            <span className="text-[8.5px] text-white/60 font-medium">Offline</span>
-          </div>
-        </div>
-        <div className="p-5">
+const SPEEDS = [{ value: 130, label: 'Slow' }, { value: 165, label: 'Normal' }, { value: 190, label: 'Fast' }, { value: 220, label: 'Fastest' }];
+const nearestSpeed = s => SPEEDS.reduce((a, b) => (Math.abs(b.value - s) < Math.abs(a.value - s) ? b : a)).value;
 
-        {!voiceConfigLoaded || voices.length === 0 ? (
-          <div className="flex items-center gap-2 py-4 text-s-text-4">
-            <div className="w-3 h-3 border border-s-border border-t-s-accent rounded-full animate-spin" />
-            <span className="text-[11px]">Loading voices...</span>
-          </div>
-        ) : (
-          <div className="space-y-3">
+// ── Speaking voice ──────────────────────────────────────────────────────────
 
-            {/* Piper voices — neural quality, shown as cards in a grid */}
-            {voices.filter(v => v.engine === 'piper').length > 0 && (
-              <div>
-                <div className="text-[8px] text-s-text-4 uppercase tracking-widest mb-1.5 px-0.5">
-                  Neural · Human Quality
-                </div>
-                <div className="grid grid-cols-2 gap-1.5">
-                  {voices.filter(v => v.engine === 'piper').map((v) => {
-                    const isActive     = selectedVoiceId === v.voice_id;
-                    const isPreviewing = previewingVoice === v.voice_id;
-                    return (
-                      <div
-                        key={v.voice_id}
-                        onClick={() => v.installed && saveVoice(v)}
-                        className={`relative rounded-lg border p-2.5 transition-all cursor-pointer ${
-                          !v.installed
-                            ? 'border-s-border/30 opacity-40 cursor-not-allowed'
-                            : isActive
-                            ? 'border-s-accent bg-s-accent/6'
-                            : 'border-s-border bg-s-bg hover:border-s-accent/40 hover:bg-s-card-h'
-                        }`}
-                      >
-                        {isActive && (
-                          <div className="absolute top-2 right-2 w-1.5 h-1.5 rounded-full bg-s-accent" />
-                        )}
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="text-base leading-none">{v.flag}</span>
-                          <span className={`text-[11px] font-semibold tracking-wide ${
-                            isActive ? 'text-s-accent' : 'text-s-text'
-                          }`}>
-                            {v.name}
-                          </span>
-                        </div>
-                        <div className="text-[9px] text-s-text-4 mb-2">{v.language}</div>
-                        <div className="flex items-center justify-between">
-                          <span className={`text-[8px] px-1.5 py-0.5 rounded font-medium ${
-                            v.gender === 'Female'
-                              ? 'text-pink-400/70 bg-pink-400/8'
-                              : 'text-blue-400/70 bg-blue-400/8'
-                          }`}>
-                            {v.gender}
-                          </span>
-                          <button
-                            onClick={e => { e.stopPropagation(); if (v.installed) previewVoice(v); }}
-                            disabled={!v.installed}
-                            className={`text-[8px] px-1.5 py-0.5 rounded border transition-all ${
-                              isPreviewing
-                                ? 'border-s-accent/60 bg-s-accent/15 text-s-accent'
-                                : 'border-s-border/60 text-s-text-4 hover:border-s-accent/40 hover:text-s-accent'
-                            }`}
-                          >
-                            {isPreviewing ? 'Playing' : 'Play'}
-                          </button>
-                        </div>
-                        {!v.installed && (
-                          <div className="mt-1 text-[8px] text-s-text-4 text-center">Not installed</div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
+function SpeakingVoice() {
+  const [voices, setVoices] = useState(null);
+  const [selected, setSelected] = useState(null);
+  const [speed, setSpeed] = useState(165);
+  const [previewing, setPreviewing] = useState(null);
 
-            {/* SAPI voices — Windows built-in, shown as compact list */}
-            {voices.filter(v => v.engine === 'sapi').length > 0 && (
-              <div>
-                <div className="text-[8px] text-s-text-4 uppercase tracking-widest mb-1.5 px-0.5">
-                  Windows Built-in
-                </div>
-                <div className="rounded-lg border border-s-border/50 overflow-hidden divide-y divide-s-border/30">
-                  {voices.filter(v => v.engine === 'sapi').map((v) => {
-                    const isActive     = selectedVoiceId === v.voice_id;
-                    const isPreviewing = previewingVoice === v.voice_id;
-                    return (
-                      <div
-                        key={v.voice_id}
-                        onClick={() => saveVoice(v)}
-                        className={`flex items-center gap-2.5 px-3 py-2 cursor-pointer transition-all ${
-                          isActive ? 'bg-s-accent/6' : 'bg-s-bg/60 hover:bg-s-card-h'
-                        }`}
-                      >
-                        <div className={`w-1 h-4 rounded-full shrink-0 ${
-                          isActive ? 'bg-s-accent' : 'bg-s-border'
-                        }`} />
-                        <span className="text-sm leading-none shrink-0">{v.flag}</span>
-                        <div className="flex-1 min-w-0">
-                          <div className={`text-[10px] font-medium ${
-                            isActive ? 'text-s-accent' : 'text-s-text-3'
-                          }`}>
-                            {v.name}
-                          </div>
-                          <div className="text-[8px] text-s-text-4">{v.language}</div>
-                        </div>
-                        <button
-                          onClick={e => { e.stopPropagation(); previewVoice(v); }}
-                          className={`shrink-0 text-[8px] px-2 py-0.5 rounded border transition-all ${
-                            isPreviewing
-                              ? 'border-s-accent/60 bg-s-accent/15 text-s-accent'
-                              : 'border-s-border/50 text-s-text-4 hover:border-s-accent/40 hover:text-s-accent'
-                          }`}
-                        >
-                          {isPreviewing ? 'Playing' : 'Play'}
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
+  useEffect(() => {
+    api.get('/config').then(r => {
+      const v = r.data?.voice || {};
+      setSelected(v.voice_id || null);
+      setSpeed(v.speed || 165);
+    }).catch(() => {});
+    api.get('/setup/voices').then(r => setVoices(r.data.voices || [])).catch(() => setVoices([]));
+  }, []);
 
-            {/* Speed selector — saves immediately, no Save Changes needed */}
-            <div className="flex items-center justify-between pt-1 border-t border-s-border/40">
-              <span className="text-[9px] text-s-text-4 uppercase tracking-wider">Speed</span>
-              <div className="flex rounded-md border border-s-border overflow-hidden">
-                {[
-                  { label: 'Slow',   value: 130 },
-                  { label: 'Normal', value: 165 },
-                  { label: 'Fast',   value: 190 },
-                  { label: 'Max',    value: 220 },
-                ].map(({ label, value }) => {
-                  const isActive = Math.abs(voiceSpeed - value) < 20;
-                  return (
-                    <button
-                      key={label}
-                      onClick={() => {
-                        setVoiceSpeed(value);
-                        saveSpeed(value);
-                        setLocal(prev => prev ? {
-                          ...prev,
-                          voice: { ...(prev.voice || {}), speed: value }
-                        } : prev);
-                      }}
-                      className={`px-2.5 py-1.5 text-[9px] font-medium transition-all border-r border-s-border/50 last:border-r-0 ${
-                        isActive
-                          ? 'bg-s-accent text-white'
-                          : 'bg-s-bg text-s-text-4 hover:bg-s-card-h hover:text-s-text-3'
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
+  const choose = async v => {
+    if (v.engine === 'piper' && !v.installed) return;
+    const previous = selected;
+    setSelected(v.voice_id);
+    const voice = { engine: v.engine, voice_id: v.voice_id ?? String(v.index),
+                    voice_index: v.engine === 'sapi' ? parseInt(v.voice_id) : 0, speed };
+    const ok = await saveWith(() => api.put('/config', { updates: { voice } }));
+    if (!ok) setSelected(previous);
+  };
 
-          </div>
-        )}
-        </div>
-      </div>
+  const changeSpeed = async value => {
+    setSpeed(value);
+    await saveWith(async () => {
+      const fresh = (await api.get('/config')).data?.voice || {};
+      return api.put('/config', { updates: { voice: { ...fresh, speed: value } } });
+    });
+  };
 
+  const preview = async v => {
+    setPreviewing(v.voice_id);
+    try { await api.post('/setup/preview-voice', { engine: v.engine, voice_id: v.voice_id ?? String(v.index) }); }
+    catch { toast.error('Preview failed', 'Seven could not play this voice.'); }
+    setTimeout(() => setPreviewing(p => (p === v.voice_id ? null : p)), 6000);
+  };
 
+  const neural = (voices || []).filter(v => v.engine === 'piper');
+  const builtIn = (voices || []).filter(v => v.engine === 'sapi');
 
-      {/* Voice Control Words — wake/pause/resume/shutdown word editor */}
-      <div className="bg-white/[0.02] border border-white/8 rounded-2xl overflow-hidden">
-        <div className="p-5">
-        <div className="flex items-center justify-between mb-3">
-          <div>
-            <div className="text-[9px] text-white/30 uppercase tracking-widest font-semibold">
-              Voice Control Commands
-            </div>
-            <div className="text-[9px] text-s-text-4 mt-0.5">
-              Words that control Seven's listening behavior
-            </div>
-          </div>
+  const VoiceRow = ({ v }) => {
+    const active = selected === v.voice_id;
+    const disabled = v.engine === 'piper' && !v.installed;
+    return (
+      <div role="radio" aria-checked={active} tabIndex={disabled ? -1 : 0}
+           onClick={() => choose(v)} onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), choose(v))}
+           className={cx('flex items-center gap-3 px-5 py-3 transition-colors',
+                         disabled ? 'opacity-45 cursor-not-allowed' : 'cursor-pointer hover:bg-s-card',
+                         'focus-visible:outline-none focus-visible:bg-s-card')}>
+        <span className={cx('flex h-4 w-4 shrink-0 items-center justify-center rounded-full border',
+                            active ? 'border-s-accent bg-s-accent' : 'border-s-border-l')}>
+          {active && <span className="h-1.5 w-1.5 rounded-full bg-s-on-accent" />}
+        </span>
+        <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            {!canEditVoice && (
-              <span className="text-[9px] px-2 py-0.5 bg-s-accent/10 text-s-accent rounded font-medium">
-                PRO
-              </span>
-            )}
-            {canEditVoice && (
-              <button
-                onClick={() => {
-                  if (editingVoice && voiceWordsEdited) saveVoiceWords();
-                  setEditingVoice(p => !p);
-                }}
-                className={`text-[10px] px-2.5 py-1 rounded border font-medium transition-colors ${
-                  editingVoice
-                    ? 'border-s-accent bg-s-accent/8 text-s-accent'
-                    : 'border-s-border text-s-text-3 hover:border-s-accent/40 hover:text-s-accent'
-                }`}
-              >
-                {editingVoice ? (savingVoice ? 'Saving...' : 'Done') : 'Edit'}
-              </button>
-            )}
+            <span className="text-[13px] font-medium text-s-text">{v.name}</span>
+            {v.gender && <span className="text-[12px] text-s-text-4">{v.gender}</span>}
           </div>
+          <div className="text-[12px] text-s-text-3">{v.language}{disabled ? ' · not installed' : ''}</div>
         </div>
-
-        {/* Upgrade prompt for free users */}
-        {!canEditVoice && (
-          <div className="mb-3 p-2.5 bg-s-accent/5 border border-s-accent/20 rounded flex items-center justify-between">
-            <p className="text-[10px] text-s-text-3">
-              Customize wake words, pause words, and more with Pro.
-            </p>
-            <button
-              onClick={() => navigate('/plans')}
-              className="text-[10px] text-s-accent font-medium hover:underline ml-3 shrink-0"
-            >
-              Upgrade
-            </button>
-          </div>
-        )}
-
-        {/* Word groups grid */}
-        {voiceWords && (
-          <div className="grid grid-cols-2 gap-3">
-            {[
-              { key: 'wake_words',     label: 'Wake Words',     desc: 'Activate Seven',     color: 'text-s-green'    },
-              { key: 'pause_words',    label: 'Pause Words',    desc: 'Pause listening',    color: 'text-yellow-400' },
-              { key: 'resume_words',   label: 'Resume Words',   desc: 'Resume after pause', color: 'text-blue-400'   },
-              { key: 'shutdown_words', label: 'Shutdown Words', desc: 'Close Seven',        color: 'text-s-red'      },
-            ].map(({ key, label, desc, color }) => (
-              <div key={key}>
-                <div className="flex items-center justify-between mb-1.5">
-                  <div>
-                    <div className="text-[10px] text-s-text-2 font-medium">{label}</div>
-                    <div className="text-[8px] text-s-text-4">{desc}</div>
-                  </div>
-                  {canEditVoice && editingVoice && (
-                    <button
-                      onClick={() => addVoiceWord(key)}
-                      className="text-[9px] text-s-accent hover:text-s-accent/80 font-medium"
-                    >
-                      + Add
-                    </button>
-                  )}
-                </div>
-                <div className="flex flex-wrap gap-1">
-                  {voiceWords[key]?.map((word, i) => (
-                    <div
-                      key={i}
-                      className="flex items-center gap-1 bg-s-bg border border-s-border rounded px-1.5 py-0.5"
-                    >
-                      {canEditVoice && editingVoice ? (
-                        <>
-                          <input
-                            value={word}
-                            onChange={e => updateVoiceWord(key, i, e.target.value)}
-                            className={`bg-transparent text-[10px] ${color} font-mono w-16 focus:outline-none`}
-                            placeholder="word"
-                          />
-                          {voiceWords[key].length > 1 && (
-                            <button
-                              onClick={() => removeVoiceWord(key, i)}
-                              className="text-s-red/60 hover:text-s-red text-[9px] ml-0.5"
-                            >
-                              x
-                            </button>
-                          )}
-                        </>
-                      ) : (
-                        <span className={`text-[10px] ${color} font-mono`}>{word}</span>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-        </div>
+        <Button size="sm" variant="ghost" icon={previewing === v.voice_id ? Square : Play} disabled={disabled}
+                onClick={e => { e.stopPropagation(); preview(v); }}>
+          {previewing === v.voice_id ? 'Playing' : 'Preview'}
+        </Button>
       </div>
-      {/* Speech Recognition -- Whisper model size */}
-      <WhisperModelPanel hw={hw} setLocal={setLocal} />
+    );
+  };
 
-      {/* Voice Security Gates */}
-      <VoiceGatesPanel />
-    </>
+  return (
+    <Section title="Speaking voice" description="Runs offline. Neural voices sound more natural; Windows voices use less memory."
+             actions={<Segmented size="sm" value={nearestSpeed(speed)} options={SPEEDS} onChange={changeSpeed} />}>
+      {voices === null ? <Body><LoadingRows rows={3} /></Body> : voices.length === 0 ? (
+        <Body className="text-[13px] text-s-text-3">No voices found. Reinstall voices from System, Repair installation.</Body>
+      ) : (
+        <>
+          {neural.length > 0 && <div className="px-5 pt-3 pb-1 text-[12px] font-medium text-s-text-3">Neural voices</div>}
+          {neural.map(v => <VoiceRow key={v.voice_id} v={v} />)}
+          {builtIn.length > 0 && <div className="px-5 pt-3 pb-1 text-[12px] font-medium text-s-text-3">Windows voices</div>}
+          {builtIn.map(v => <VoiceRow key={v.voice_id} v={v} />)}
+        </>
+      )}
+    </Section>
   );
 }
 
-// ─── Voice Gates Panel ───────────────────────────────────────────────────────
+// ── Control words ───────────────────────────────────────────────────────────
 
-function WhisperModelPanel({ hw, setLocal }) {
-  const [models,         setModels]         = useState(null);
-  const [current,        setCurrent]        = useState(null);
-  const [downloading,    setDownloading]    = useState(false);
-  const [downloadModel,  setDownloadModel]  = useState(null);
-  const [progress,       setProgress]       = useState(0);
-  const [error,          setError]          = useState(null);
-  const [pendingRestart, setPendingRestart] = useState(false);
-  const pollRef = useRef(null);
+const WORD_GROUPS = [
+  { key: 'wake_words', label: 'Wake', desc: 'Start listening' },
+  { key: 'pause_words', label: 'Pause', desc: 'Stop listening for now' },
+  { key: 'resume_words', label: 'Resume', desc: 'Listen again after a pause' },
+  { key: 'shutdown_words', label: 'Shut down', desc: 'Close Seven' },
+];
 
-  const syncParentWhisperModel = useCallback((modelId) => {
-    if (!modelId || typeof setLocal !== 'function') return;
+function ControlWords() {
+  const navigate = useNavigate();
+  const { tier } = useLicense();
+  const [words, setWords] = useState(null);
+  const [editing, setEditing] = useState(false);
+  const [dirty, setDirty] = useState(false);
 
-    setLocal(prev => prev ? {
-      ...prev,
-      brain: {
-        ...(prev.brain || {}),
-        whisper_model: modelId,
-      },
-    } : prev);
-  }, [setLocal]);
+  useEffect(() => {
+    api.get('/voice-control/words').then(r => setWords(r.data)).catch(() => setWords({
+      wake_words: ['seven', 'hey seven'], pause_words: ['not you', 'hold on', 'wait'],
+      resume_words: ['wake up', 'seven', 'continue'], shutdown_words: ['go to sleep', 'goodbye', 'shutdown'],
+      can_edit: false,
+    }));
+  }, []);
+
+  const canEdit = words?.can_edit || tier === 'pro' || tier === 'ultimate';
+  const update = (group, fn) => { setWords(w => ({ ...w, [group]: fn(w[group]) })); setDirty(true); };
+
+  const done = async () => {
+    if (dirty) {
+      const ok = await saveWith(() => api.put('/voice-control/words', words));
+      if (!ok) return;
+      setDirty(false);
+    }
+    setEditing(false);
+  };
+
+  return (
+    <Section title="Control words" description="Phrases that change how Seven listens. Say them at any time."
+             actions={canEdit
+               ? <Button size="sm" variant={editing ? 'primary' : 'secondary'} onClick={editing ? done : () => setEditing(true)}>{editing ? 'Done' : 'Edit'}</Button>
+               : <Button size="sm" onClick={() => navigate('/plans')}>Customize with Pro</Button>}>
+      {!words ? <Body><LoadingRows rows={2} /></Body> : WORD_GROUPS.map(g => (
+        <Row key={g.key} label={g.label} description={g.desc}>
+          <div className="flex max-w-[420px] flex-wrap justify-end gap-1.5">
+            {(words[g.key] || []).map((word, i) => editing ? (
+              <span key={i} className="inline-flex items-center rounded-md border border-s-border bg-s-bg pl-2">
+                <input value={word} aria-label={`${g.label} word ${i + 1}`}
+                       onChange={e => update(g.key, list => list.map((w, j) => (j === i ? e.target.value : w)))}
+                       className="h-7 w-24 bg-transparent text-[12px] text-s-text outline-none" />
+                {words[g.key].length > 1 && (
+                  <button aria-label="Remove" onClick={() => update(g.key, list => list.filter((_, j) => j !== i))}
+                          className="flex h-7 w-6 items-center justify-center text-s-text-4 hover:text-s-red"><X size={12} /></button>
+                )}
+              </span>
+            ) : (
+              <span key={i} className="inline-flex h-7 items-center rounded-md border border-s-border bg-s-bg px-2 text-[12px] text-s-text-2">{word}</span>
+            ))}
+            {editing && (
+              <Button size="sm" variant="ghost" icon={Plus} onClick={() => update(g.key, list => [...list, ''])}>Add</Button>
+            )}
+          </div>
+        </Row>
+      ))}
+    </Section>
+  );
+}
+
+// ── Speech recognition ──────────────────────────────────────────────────────
+
+function SpeechRecognition() {
+  const [models, setModels] = useState(null);
+  const [current, setCurrent] = useState(null);
+  const [hasGpu, setHasGpu] = useState(false);
+  const [download, setDownload] = useState(null);        // { id, progress }
+  const [restart, setRestart] = useState(false);
+  const poll = useRef(null);
 
   const load = useCallback(() => {
-    // Add timestamp + no-cache headers to prevent Electron/Chrome stale responses
-    api.get(`/setup/whisper-models?t=${Date.now()}`, {
-      headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' }
-    })
-       .then(r => {
-         const freshCurrent = r.data.current;
-
-         console.log('[WHISPER] Load response:', freshCurrent);
-
-         setModels(r.data.models || []);
-         setCurrent(freshCurrent);
-
-         // Important:
-         // Keep the parent Settings draft in sync, otherwise Save Changes
-         // can overwrite whisper_model back to the old value.
-         syncParentWhisperModel(freshCurrent);
-       })
-       .catch((e) => {
-         console.error('[WHISPER] Load error:', e);
-       });
-  }, [syncParentWhisperModel]);
-
-  useEffect(() => { load(); }, [load]);
-  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
-
-  const hasGPU = hw?.gpu?.available;
-
-  const selectModel = async (model) => {
-    if (downloading) return;
-    setError(null);
-
-    const previousCurrent = current;
-
-    // Optimistic update:
-    // This prevents the main Settings "Save Changes" button from saving
-    // the old whisper_model back over the new one.
-    setCurrent(model.id);
-    syncParentWhisperModel(model.id);
-    setPendingRestart(true);
-
-    try {
-      const r = await api.post('/setup/whisper-model', { model: model.id });
-      const newCurrent = r.data.current || model.id;
-
-      console.log('[WHISPER] POST response:', JSON.stringify(r.data));
-      console.log('[WHISPER] Setting current to:', newCurrent);
-      console.log('[WHISPER] current before set:', current);
-
-      setCurrent(newCurrent);
-      syncParentWhisperModel(newCurrent);
-      setPendingRestart(true);
-
-      setTimeout(() => {
-        console.log('[WHISPER] Calling load() now');
-        load();
-      }, 800);
-
-      if (!r.data.installed) {
-        setDownloading(true);
-        setDownloadModel(model.id);
-        setProgress(5);
-
-        pollRef.current = setInterval(async () => {
-          try {
-            const s = await api.get(`/setup/whisper-download-status?t=${Date.now()}`);
-            setProgress(Math.max(5, s.data.progress || 0));
-
-            if (!s.data.downloading) {
-              clearInterval(pollRef.current);
-              setDownloading(false);
-              setDownloadModel(null);
-
-              if (s.data.error) {
-                setError(s.data.error);
-              } else {
-                setPendingRestart(true);
-                syncParentWhisperModel(newCurrent);
-                load();
-              }
-            }
-          } catch {}
-        }, 600);
-      }
-    } catch (e) {
-      setCurrent(previousCurrent);
-      syncParentWhisperModel(previousCurrent);
-      setError(e.response?.data?.detail || 'Could not change model');
-    }
-  };
-  if (!models) {
-    return (
-      <div className="bg-white/[0.02] border border-white/8 rounded-2xl p-5">
-        <div className="text-[9px] text-white/30 uppercase tracking-widest font-semibold mb-2">
-          Speech Recognition
-        </div>
-        <div className="text-[10px] text-s-text-4">Loading...</div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="bg-white/[0.02] border border-white/8 rounded-2xl overflow-hidden">
-      <div className="px-5 py-4 border-b border-white/[0.05]">
-        <h2 className="text-[12px] font-semibold text-white/85">Speech Recognition</h2>
-        <p className="text-[9px] text-white/40 mt-0.5 leading-relaxed">
-          This controls how Seven converts your voice into text. Separate from
-          the AI model that writes responses. Larger models make fewer mistakes
-          but take longer to process on machines without a graphics card.
-        </p>
-      </div>
-
-      <div className="p-5 space-y-2">
-        {models.map(m => {
-          const isActive = current === m.id;
-          const isDownloadingThis = downloading && downloadModel === m.id;
-          const needsGpuWarning = !hasGPU && (m.id === 'medium.en' || m.id === 'large-v3');
-
-          return (
-            <div
-              key={m.id}
-              onClick={() => selectModel(m)}
-              className={`rounded-lg border p-3 transition-all duration-200 cursor-pointer ${
-                downloading && !isDownloadingThis ? 'opacity-40 cursor-not-allowed' : ''
-              } ${
-                isActive
-                  ? 'border-s-accent bg-s-accent/6'
-                  : 'border-s-border bg-s-bg hover:border-s-accent/40 hover:bg-s-card-h'
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2.5">
-                  <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                    isActive ? 'bg-s-accent' : 'bg-s-border'
-                  }`} />
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className={`text-[11px] font-semibold ${
-                        isActive ? 'text-s-accent' : 'text-s-text-2'
-                      }`}>
-                        {m.label}
-                      </span>
-                      <span className="text-[8px] px-1.5 py-0.5 rounded font-medium text-s-text-4 bg-white/5">
-                        {m.tag}
-                      </span>
-                      {isActive && (
-                        <span className="text-[8px] text-s-green">Active</span>
-                      )}
-                      {m.installed && !isActive && (
-                        <span className="text-[8px] text-s-green">Downloaded</span>
-                      )}
-                    </div>
-                    <div className="text-[9px] text-s-text-4 mt-0.5">{m.headline}</div>
-                  </div>
-                </div>
-                <div className="text-right shrink-0 ml-3">
-                  <div className="text-[9px] text-s-text-3 font-mono">
-                    {m.size_mb >= 1000 ? `${(m.size_mb / 1000).toFixed(1)} GB` : `${m.size_mb} MB`}
-                  </div>
-                  {!m.installed && !isDownloadingThis && !isActive && (
-                    <div className="text-[8px] text-s-accent mt-0.5">Click to download</div>
-                  )}
-                </div>
-              </div>
-
-              {isActive && (
-                <div className="mt-2.5 pt-2.5 border-t border-s-border/40 grid grid-cols-2 gap-2">
-                  <div className="text-[9px] text-s-text-4">
-                    CPU speed: <span className="text-s-text-3">{m.cpu_speed}</span>
-                  </div>
-                  <div className="text-[9px] text-s-text-4">
-                    GPU speed: <span className="text-s-text-3">{m.gpu_speed}</span>
-                  </div>
-                  <div className="col-span-2 text-[9px] text-s-text-4">
-                    Accuracy: <span className="text-s-text-3">{m.accuracy}</span>
-                  </div>
-                </div>
-              )}
-
-              {needsGpuWarning && (
-                <div className="mt-2 flex items-start gap-1.5 text-[9px] text-yellow-400">
-                  <span className="shrink-0 mt-0.5">!</span>
-                  <span>No GPU detected. This model will run slower and may add a noticeable delay before Seven responds.</span>
-                </div>
-              )}
-
-              {isDownloadingThis && (
-                <div className="mt-2.5 space-y-1">
-                  <div className="flex items-center justify-between text-[9px] text-s-text-4">
-                    <span>Downloading...</span>
-                    <span>{progress}%</span>
-                  </div>
-                  <div className="h-1 bg-s-bg rounded-full overflow-hidden">
-                    <div className="h-full bg-s-accent rounded-full transition-all duration-500"
-                         style={{ width: `${Math.max(5, progress)}%` }} />
-                  </div>
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-
-      {error && (
-        <div className="mx-5 mb-4 px-3 py-2 bg-s-red/10 border border-s-red/20 rounded text-[9px] text-s-red">
-          {error}
-        </div>
-      )}
-
-      {pendingRestart && !downloading && (
-        <div className="mx-5 mb-5 px-3 py-2 bg-s-accent/5 border border-s-accent/20 rounded flex items-center gap-2">
-          <div className="w-1.5 h-1.5 rounded-full bg-s-accent shrink-0" />
-          <span className="text-[9px] text-s-accent">Restart Seven to apply this change.</span>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function Toggle({ enabled, onToggle }) {
-  return (
-    <button
-      onClick={onToggle}
-      className={`relative w-9 h-5 rounded-full transition-colors shrink-0 ${
-        enabled ? 'bg-s-accent' : 'bg-s-border'
-      }`}
-    >
-      <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${
-        enabled ? 'translate-x-4' : 'translate-x-0.5'
-      }`} />
-    </button>
-  );
-}
-
-function VoiceGatesPanel() {
-  const [gates,           setGates]           = useState(null);
-  const [enrolled,        setEnrolled]        = useState([]);
-  const [saving,          setSaving]          = useState(false);
-  const [saved,           setSaved]           = useState(false);
-  const [showEnrollModal, setShowEnrollModal] = useState(false);
-
-  // Ref always holds the latest gates value — eliminates stale closure bugs
-  const gatesRef = useRef(null);
-
-  const loadData = useCallback(() => {
-    api.get('/voice/gates')
-       .then(r => {
-         setGates(r.data);
-         gatesRef.current = r.data;
-       })
-       .catch(() => {
-         const fallback = {
-           push_to_talk:   { enabled: false, key: 'shift' },
-           wake_word:      { enabled: false, words: ['hey seven'] },
-           speaker_verify: { enabled: false },
-         };
-         setGates(fallback);
-         gatesRef.current = fallback;
-       });
-    api.get('/voice/enrolled')
-       .then(r => setEnrolled(r.data.enrolled || []))
-       .catch(() => setEnrolled([]));
+    api.get(`/setup/whisper-models?t=${Date.now()}`, { headers: { 'Cache-Control': 'no-cache' } })
+       .then(r => { setModels(r.data.models || []); setCurrent(r.data.current); })
+       .catch(() => setModels([]));
   }, []);
 
-  useEffect(() => { loadData(); }, [loadData]);
+  useEffect(() => {
+    load();
+    api.get('/hardware').then(r => setHasGpu(!!r.data?.gpu?.available)).catch(() => {});
+    return () => poll.current && clearInterval(poll.current);
+  }, [load]);
 
-  // Save always uses the value passed in — never reads from state
-  const save = useCallback(async (updated) => {
-    setSaving(true);
-    try {
-      await api.post('/voice/gates', updated);
-      gatesRef.current = updated;
-      setGates(updated);
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
-    } catch (e) {
-      console.error('[GATES] save error:', e);
-    } finally {
-      setSaving(false);
-    }
-  }, []);
-
-  // Always reads from ref — never from stale closure state
-  const togglePath = useCallback((path, currentValue) => {
-    const base = gatesRef.current;
-    if (!base) return;
-    const next = JSON.parse(JSON.stringify(base));
-    const parts = path.split('.');
-    let node = next;
-    for (let i = 0; i < parts.length - 1; i++) {
-      if (!node[parts[i]]) node[parts[i]] = {};
-      node = node[parts[i]];
-    }
-    // Use the passed currentValue to compute next value
-    // Never derives from state — eliminates stale closure race
-    node[parts[parts.length - 1]] = !currentValue;
-    save(next);
-  }, [save]);
-
-  const addWord = useCallback(() => {
-    const base = gatesRef.current;
-    if (!base) return;
-    const next = JSON.parse(JSON.stringify(base));
-    if (!next.wake_word) next.wake_word = { enabled: false, words: [] };
-    if (!next.wake_word.words) next.wake_word.words = [];
-    next.wake_word.words.push('new word');
-    // Update local state only — saved on blur
-    gatesRef.current = next;
-    setGates(next);
-  }, []);
-
-  const updateWord = useCallback((i, val) => {
-    const base = gatesRef.current;
-    if (!base) return;
-    const next = JSON.parse(JSON.stringify(base));
-    next.wake_word.words[i] = val;
-    gatesRef.current = next;
-    setGates(next);
-  }, []);
-
-  const saveWords = useCallback(() => {
-    // Reads from ref — guaranteed fresh value
-    if (gatesRef.current) save(gatesRef.current);
-  }, [save]);
-
-  const removeWord = useCallback((i) => {
-    const base = gatesRef.current;
-    if (!base) return;
-    const next = JSON.parse(JSON.stringify(base));
-    next.wake_word.words.splice(i, 1);
-    save(next);
-  }, [save]);
-
-  const deleteEnrolled = async (name) => {
-    try {
-      await api.delete(`/voice/enrolled/${name}`);
-      setEnrolled(e => e.filter(n => n !== name));
-    } catch (e) {
-      console.error(e);
+  const select = async m => {
+    if (download || m.id === current) return;
+    const previous = current;
+    setCurrent(m.id);
+    const r = await saveWith(() => api.post('/setup/whisper-model', { model: m.id }));
+    if (!r) { setCurrent(previous); return; }
+    setRestart(true);
+    if (!r.data.installed) {
+      setDownload({ id: m.id, progress: 5 });
+      poll.current = setInterval(async () => {
+        try {
+          const s = await api.get(`/setup/whisper-download-status?t=${Date.now()}`);
+          setDownload(d => d && { ...d, progress: Math.max(5, s.data.progress || 0) });
+          if (!s.data.downloading) {
+            clearInterval(poll.current);
+            setDownload(null);
+            if (s.data.error) toast.error('Download failed', s.data.error);
+            load();
+          }
+        } catch {}
+      }, 600);
+    } else {
+      setTimeout(load, 800);
     }
   };
 
-  if (!gates) {
-    return (
-      <div className="bg-s-card border border-s-border rounded p-4">
-        <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium mb-1">
-          Voice Security
-        </div>
-        <div className="text-[10px] text-s-text-4">Loading...</div>
-      </div>
-    );
-  }
-
-  const ptt = gates.push_to_talk   || { enabled: false };
-  const ww  = gates.wake_word      || { enabled: false, words: ['hey seven'] };
-  const sv  = gates.speaker_verify || { enabled: false };
+  const size = mb => (mb >= 1000 ? `${(mb / 1000).toFixed(1)} GB` : `${mb} MB`);
 
   return (
-    <div className="bg-white/[0.02] border border-white/8 rounded-2xl p-5 space-y-4">
-
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <div className="text-[9px] text-white/30 uppercase tracking-widest font-semibold">
-            Voice Security
-          </div>
-          <div className="text-[9px] text-s-text-4 mt-0.5">
-            Three noise gates, enable any combination
-          </div>
-        </div>
-        {saving && <span className="text-[9px] text-s-text-4">Saving...</span>}
-        {!saving && saved && <span className="text-[9px] text-s-green">Saved</span>}
-      </div>
-
-      {/* Gate 1 — Push to Talk */}
-      <div className="border border-s-border/50 rounded p-3 space-y-2">
-        <div className="flex items-center justify-between">
-          <div className="flex-1 min-w-0 pr-3">
-            <div className="text-[11px] text-s-text-2 font-medium">Push to Talk</div>
-            <div className="text-[9px] text-s-text-4 mt-0.5 leading-relaxed">
-              Seven only listens while you hold&nbsp;
-              <kbd className="px-1 py-0.5 bg-s-bg border border-s-border rounded text-[8px] font-mono text-s-text-3">
-                Shift
-              </kbd>.
-              &nbsp;Releases automatically when key is released.
-            </div>
-          </div>
-          <Toggle
-            enabled={ptt.enabled}
-            onToggle={() => togglePath('push_to_talk.enabled', ptt.enabled)}
-          />
-        </div>
-        {ptt.enabled && (
-          <div className="flex items-center gap-2 px-2 py-1.5 bg-s-accent/5 border border-s-accent/20 rounded">
-            <div className="w-1.5 h-1.5 rounded-full bg-s-accent shrink-0 animate-pulse" />
-            <span className="text-[9px] text-s-accent">
-              Hold Shift to speak. All other audio is ignored.
-            </span>
-          </div>
-        )}
-      </div>
-
-      {/* Gate 2 — Wake Word */}
-      <div className="border border-s-border/50 rounded p-3 space-y-2.5">
-        <div className="flex items-center justify-between">
-          <div className="flex-1 min-w-0 pr-3">
-            <div className="text-[11px] text-s-text-2 font-medium">Wake Word</div>
-            <div className="text-[9px] text-s-text-4 mt-0.5">
-              Say a wake word before every command. Seven ignores everything else.
-            </div>
-          </div>
-          <Toggle
-            enabled={ww.enabled}
-            onToggle={() => togglePath('wake_word.enabled', ww.enabled)}
-          />
-        </div>
-
-        <div>
-          <div className="flex items-center justify-between mb-1.5">
-            <span className="text-[9px] text-s-text-4 uppercase tracking-wider">
-              Wake Words
-            </span>
-            <button
-              onClick={addWord}
-              className="text-[9px] text-s-accent hover:text-s-accent/70 font-medium transition-colors"
-            >
-              + Add
-            </button>
-          </div>
-          <div className="flex flex-wrap gap-1.5 relative z-10">
-            {(ww.words || []).map((word, i) => (
-              <div
-                key={i}
-                className="flex items-center gap-1 bg-s-bg border border-s-border rounded px-2 py-1"
-              >
-                <input
-                  value={word}
-                  onChange={e => updateWord(i, e.target.value)}
-                  onBlur={saveWords}
-                  className="bg-transparent text-[10px] text-s-accent font-mono w-20 focus:outline-none"
-                  placeholder="wake word"
-                />
-                {(ww.words || []).length > 1 && (
-                  <button
-                    onClick={() => removeWord(i)}
-                    className="text-s-red/50 hover:text-s-red text-[10px] leading-none transition-colors"
-                  >
-                    x
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-          {ww.enabled && (
-            <div className="mt-2 text-[9px] text-s-text-4 leading-relaxed">
-              Example:&nbsp;
-              <span className="text-s-accent font-mono">"hey seven open chrome"</span>
-              &nbsp;-- Seven hears&nbsp;
-              <span className="text-s-accent font-mono">"open chrome"</span>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Gate 3 — Speaker Verification */}
-      <div className="border border-s-border/50 rounded p-3 space-y-2.5">
-        <div className="flex items-center justify-between">
-          <div className="flex-1 min-w-0 pr-3">
-            <div className="text-[11px] text-s-text-2 font-medium">Speaker Verification</div>
-            <div className="text-[9px] text-s-text-4 mt-0.5">
-              Only responds to your enrolled voice. Other voices are ignored.
-            </div>
-          </div>
-          <Toggle
-            enabled={sv.enabled}
-            onToggle={() => togglePath('speaker_verify.enabled', sv.enabled)}
-          />
-        </div>
-
-        <div>
-          <div className="text-[9px] text-s-text-4 uppercase tracking-wider mb-1.5">
-            Enrolled Voices
-          </div>
-          <button
-            onClick={() => setShowEnrollModal(true)}
-            className="w-full flex items-center justify-center gap-2 px-3 py-2 border border-s-accent/30 bg-s-accent/5 hover:bg-s-accent/10 text-s-accent rounded transition-colors text-[10px] font-medium"
-          >
-            <span>+ Enroll New Voice</span>
-          </button>
-
-          {enrolled.length === 0 ? (
-            <div className="p-2.5 bg-s-bg border border-s-border/40 rounded text-center mt-1.5">
-              <div className="text-[10px] text-s-text-4">No voices enrolled.</div>
-              <div className="text-[9px] text-s-text-4 mt-0.5">
-                Click Enroll or say&nbsp;
-                <span className="text-s-accent font-mono">"enroll my voice"</span>
-              </div>
-            </div>
-          ) : (
-            <div className="space-y-1 mt-1.5">
-              {enrolled.map(name => (
-                <div
-                  key={name}
-                  className="flex items-center justify-between px-2.5 py-2 bg-s-bg border border-s-border/40 rounded"
-                >
-                  <div className="flex items-center gap-2">
-                    <div className="w-1.5 h-1.5 rounded-full bg-s-green shrink-0" />
-                    <span className="text-[10px] text-s-text-2 font-medium capitalize">{name}</span>
-                  </div>
-                  <button
-                    onClick={() => deleteEnrolled(name)}
-                    className="text-[9px] text-s-red/50 hover:text-s-red transition-colors"
-                  >
-                    Remove
-                  </button>
+    <Section title="Speech recognition" description="How Seven turns your voice into text. Separate from the model that writes replies. Larger models make fewer mistakes but are slower without a graphics card.">
+      {models === null ? <Body><LoadingRows rows={3} /></Body> : models.map(m => {
+        const active = current === m.id;
+        const downloading = download?.id === m.id;
+        const slow = !hasGpu && (m.id === 'medium.en' || m.id === 'large-v3');
+        return (
+          <div key={m.id} role="radio" aria-checked={active} tabIndex={0}
+               onClick={() => select(m)} onKeyDown={e => e.key === 'Enter' && select(m)}
+               className={cx('px-5 py-3.5 transition-colors focus-visible:outline-none focus-visible:bg-s-card',
+                             download && !downloading ? 'opacity-45 cursor-not-allowed' : 'cursor-pointer hover:bg-s-card')}>
+            <div className="flex items-center gap-3">
+              <span className={cx('flex h-4 w-4 shrink-0 items-center justify-center rounded-full border',
+                                  active ? 'border-s-accent bg-s-accent' : 'border-s-border-l')}>
+                {active && <span className="h-1.5 w-1.5 rounded-full bg-s-on-accent" />}
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-[13px] font-medium text-s-text">{m.label}</span>
+                  {m.tag && <Badge>{m.tag}</Badge>}
+                  {m.installed && !active && <span className="text-[12px] text-s-text-4">Downloaded</span>}
                 </div>
-              ))}
+                <div className="text-[12px] text-s-text-3">{m.headline}</div>
+              </div>
+              <span className="text-[12px] tabular-nums text-s-text-3">{size(m.size_mb)}</span>
             </div>
-          )}
-
-          {sv.enabled && enrolled.length === 0 && (
-            <div className="mt-1.5 flex items-start gap-1.5 text-[9px] text-yellow-400">
-              <span className="shrink-0 mt-0.5">!</span>
-              <span>Gate enabled but no voice enrolled. Seven will reject all audio.</span>
-            </div>
-          )}
-
-          {showEnrollModal && (
-            <EnrollModal
-              onClose={() => { setShowEnrollModal(false); loadData(); }}
-            />
-          )}
-        </div>
-      </div>
-
-    </div>
+            {active && (m.cpu_speed || m.accuracy) && (
+              <div className="mt-2 ml-7 flex flex-wrap gap-x-5 gap-y-1 text-[12px] text-s-text-3">
+                {m.cpu_speed && <span>CPU speed: <span className="text-s-text-2">{m.cpu_speed}</span></span>}
+                {m.gpu_speed && <span>GPU speed: <span className="text-s-text-2">{m.gpu_speed}</span></span>}
+                {m.accuracy && <span>Accuracy: <span className="text-s-text-2">{m.accuracy}</span></span>}
+              </div>
+            )}
+            {slow && (
+              <p className="mt-2 ml-7 flex items-center gap-1.5 text-[12px] text-s-yellow">
+                <AlertTriangle size={13} /> No graphics card detected, so this model adds a noticeable delay.
+              </p>
+            )}
+            {downloading && (
+              <div className="mt-2.5 ml-7">
+                <div className="flex justify-between text-[12px] text-s-text-3"><span>Downloading</span><span className="tabular-nums">{download.progress}%</span></div>
+                <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-s-card-h">
+                  <div className="h-full rounded-full bg-s-accent transition-[width] duration-500" style={{ width: `${download.progress}%` }} />
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+      {restart && !download && (
+        <Body className="text-[12px] text-s-accent-h">Restart Seven to use the new speech model.</Body>
+      )}
+    </Section>
   );
 }
 
-function EnrollModal({ onClose }) {
-  const [step,     setStep]     = useState('form');
-  const [name,     setName]     = useState('');
-  const [progress, setProgress] = useState(0);
-  const [result,   setResult]   = useState(null);
-  const [playing,  setPlaying]  = useState(null);
+// ── Voice security ──────────────────────────────────────────────────────────
+
+function VoiceSecurity() {
+  const [gates, setGates] = useState(null);
   const [enrolled, setEnrolled] = useState([]);
-  const pollRef        = useRef(null);
-  const timeoutRef     = useRef(null);
-  const welcomeFiredRef = useRef(false);
+  const [enrolling, setEnrolling] = useState(false);
+  const ref = useRef(null);                 // always the latest gates, so quick toggles never save stale state
 
-  // Lock background page scroll while modal is open — onWheel
-  // stopPropagation alone does not block native browser scroll
+  const load = useCallback(() => {
+    api.get('/voice/gates').then(r => { setGates(r.data); ref.current = r.data; }).catch(() => {
+      const fallback = { push_to_talk: { enabled: false, key: 'shift' }, wake_word: { enabled: false, words: ['hey seven'] },
+                         speaker_verify: { enabled: false } };
+      setGates(fallback); ref.current = fallback;
+    });
+    api.get('/voice/enrolled').then(r => setEnrolled(r.data.enrolled || [])).catch(() => setEnrolled([]));
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const save = async next => {
+    ref.current = next;
+    setGates(next);
+    await saveWith(() => api.post('/voice/gates', next));
+  };
+  const edit = fn => {
+    const next = JSON.parse(JSON.stringify(ref.current));
+    fn(next);
+    return next;
+  };
+  const toggle = (gate, value) => save(edit(g => { g[gate] = { ...(g[gate] || {}), enabled: value }; }));
+  const setWord = (i, value) => { const next = edit(g => { g.wake_word.words[i] = value; }); ref.current = next; setGates(next); };
+  const addWord = () => save(edit(g => { g.wake_word = g.wake_word || { enabled: false, words: [] }; g.wake_word.words = [...(g.wake_word.words || []), 'hey seven']; }));
+  const removeWord = i => save(edit(g => { g.wake_word.words.splice(i, 1); }));
+  const removeVoice = async name => {
+    const ok = await saveWith(() => api.delete(`/voice/enrolled/${name}`));
+    if (ok) setEnrolled(e => e.filter(n => n !== name));
+  };
+
+  if (!gates) return <Section title="Voice security"><Body><LoadingRows rows={3} /></Body></Section>;
+  const ptt = gates.push_to_talk || {};
+  const ww = gates.wake_word || { words: [] };
+  const sv = gates.speaker_verify || {};
+
+  return (
+    <Section title="Voice security" description="Filters that stop Seven reacting to background talk. Use any combination.">
+      <Row label="Push to talk" description="Seven listens only while you hold Shift.">
+        <Toggle checked={!!ptt.enabled} onChange={v => toggle('push_to_talk', v)} label="Push to talk" />
+      </Row>
+      <Row label="Require a wake word" description={'Seven ignores speech that doesn\'t start with a wake word. "Hey Seven, open Chrome" runs "open Chrome".'}>
+        <Toggle checked={!!ww.enabled} onChange={v => toggle('wake_word', v)} label="Require a wake word" />
+      </Row>
+      <Body className="flex flex-wrap items-center gap-1.5 pt-0">
+        {(ww.words || []).map((word, i) => (
+          <span key={i} className="inline-flex items-center rounded-md border border-s-border bg-s-bg pl-2">
+            <input value={word} aria-label={`Wake word ${i + 1}`} onChange={e => setWord(i, e.target.value)}
+                   onBlur={() => save(ref.current)} className="h-7 w-28 bg-transparent text-[12px] text-s-text outline-none" />
+            {(ww.words || []).length > 1 && (
+              <button aria-label="Remove wake word" onClick={() => removeWord(i)}
+                      className="flex h-7 w-6 items-center justify-center text-s-text-4 hover:text-s-red"><X size={12} /></button>
+            )}
+          </span>
+        ))}
+        <Button size="sm" variant="ghost" icon={Plus} onClick={addWord}>Add wake word</Button>
+      </Body>
+      <Row label="Speaker verification" description="Respond only to enrolled voices.">
+        <Toggle checked={!!sv.enabled} onChange={v => toggle('speaker_verify', v)} label="Speaker verification" />
+      </Row>
+      {sv.enabled && enrolled.length === 0 && (
+        <Body className="flex items-center gap-2 pt-0 text-[12px] text-s-yellow">
+          <AlertTriangle size={13} /> No voice is enrolled yet, so Seven will ignore everyone. Enroll your voice below.
+        </Body>
+      )}
+      <Body className="space-y-2">
+        <div className="flex items-center justify-between">
+          <span className="text-[13px] font-medium text-s-text">Enrolled voices</span>
+          <Button size="sm" icon={Mic} onClick={() => setEnrolling(true)}>Enroll a voice</Button>
+        </div>
+        {enrolled.length === 0 ? (
+          <p className="text-[12px] text-s-text-3">None yet. You can also say "enroll my voice".</p>
+        ) : enrolled.map(name => (
+          <div key={name} className="flex items-center justify-between rounded-lg border border-s-border bg-s-bg px-3 h-10">
+            <span className="flex items-center gap-2 text-[13px] capitalize text-s-text">
+              <span className="h-1.5 w-1.5 rounded-full bg-s-green" />{name}
+            </span>
+            <Button size="sm" variant="ghost" onClick={() => removeVoice(name)}>Remove</Button>
+          </div>
+        ))}
+      </Body>
+      {enrolling && <EnrollDialog onClose={() => { setEnrolling(false); load(); }} />}
+    </Section>
+  );
+}
+
+function EnrollDialog({ onClose }) {
+  const [step, setStep] = useState('form');          // form | recording | done | error
+  const [name, setName] = useState('');
+  const [clips, setClips] = useState(0);
+  const [message, setMessage] = useState('');
+  const poll = useRef(null);
+  const timeout = useRef(null);
+  const latest = useRef({ step, onClose });
+  useEffect(() => { latest.current = { step, onClose }; });
+
   useEffect(() => {
-    const _prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => { document.body.style.overflow = _prevOverflow; };
+    api.post('/voice/enrollment-welcome').catch(() => {});
+    const onKey = e => e.key === 'Escape' && latest.current.step !== 'recording' && latest.current.onClose();
+    window.addEventListener('keydown', onKey);
+    return () => { window.removeEventListener('keydown', onKey); clearInterval(poll.current); clearTimeout(timeout.current); };
   }, []);
 
-  useEffect(() => {
-    api.get('/voice/enrolled')
-       .then(r => setEnrolled(r.data.enrolled || []))
-       .catch(() => {});
-    if (!welcomeFiredRef.current) {
-      welcomeFiredRef.current = true;
-      api.post('/voice/enrollment-welcome').catch(() => {});
-    }
-  }, []);
-
-  const startEnroll = async () => {
+  const start = async () => {
     if (!name.trim()) return;
-    setStep('recording');
-    setProgress(0);
+    setStep('recording'); setClips(0);
     try { await api.post('/interrupt'); } catch {}
-    try {
-      await api.post('/voice/enroll', { name: name.trim() });
-    } catch {
-      setStep('error');
-      setResult({ message: 'Could not reach Seven. Make sure Seven is running.' });
-      return;
-    }
-    pollRef.current = setInterval(async () => {
+    try { await api.post('/voice/enroll', { name: name.trim() }); }
+    catch { setStep('error'); setMessage('Could not reach Seven. Make sure Seven is running.'); return; }
+    poll.current = setInterval(async () => {
       try {
         const r = await api.get('/voice/enrollment-status');
-        if (r.data.clips_done !== undefined) {
-          const clipProgress = [0, 20, 40, 60, 80, 95];
-          setProgress(clipProgress[Math.min(r.data.clips_done, 5)]);
-        }
+        if (r.data.clips_done !== undefined) setClips(Math.min(5, r.data.clips_done));
         if (r.data.status === 'done' && r.data.done) {
-          clearInterval(pollRef.current);
-          clearTimeout(timeoutRef.current);
-          setProgress(100);
-          setResult(r.data.done);
+          clearInterval(poll.current); clearTimeout(timeout.current);
+          setMessage(r.data.done.message || '');
           setStep(r.data.done.success ? 'done' : 'error');
-          api.get('/voice/enrolled')
-             .then(resp => setEnrolled(resp.data.enrolled || []))
-             .catch(() => {});
         }
       } catch {}
     }, 2000);
-    timeoutRef.current = setTimeout(() => {
-      clearInterval(pollRef.current);
+    timeout.current = setTimeout(() => {
+      clearInterval(poll.current);
       setStep('error');
-      setResult({ message: 'Timed out. Make sure Seven is running and microphone is working.' });
+      setMessage('Timed out. Check that your microphone works and Seven is running.');
     }, 120000);
   };
 
-  const deleteVoice = async (voiceName) => {
-    try {
-      await api.delete(`/voice/enrolled/${voiceName}`);
-      setEnrolled(e => e.filter(n => n !== voiceName));
-    } catch (e) { console.error(e); }
-  };
-
-  const playVoice = async (voiceName) => {
-    try {
-      setPlaying(voiceName);
-      await api.post('/voice/play-sample', { name: voiceName });
-      setTimeout(() => setPlaying(null), 3000);
-    } catch { setPlaying(null); }
-  };
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={e => e.stopPropagation()} onWheel={e => e.stopPropagation()}>
-      <div className="bg-s-card border border-s-border rounded-xl w-full max-w-sm shadow-2xl overflow-hidden">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-s-border">
-          <div>
-            <div className="text-[13px] text-s-text font-semibold">Voice Enrollment</div>
-            <div className="text-[9px] text-s-text-4 mt-0.5">Speaker verification profiles</div>
-          </div>
-          <button onClick={onClose}
-            className="w-6 h-6 flex items-center justify-center text-s-text-4 hover:text-s-text rounded transition-colors">
-            x
-          </button>
+    <div className="fixed inset-0 z-[1000] flex items-center justify-center p-6">
+      <div className="absolute inset-0 bg-[var(--s-scrim)]" onClick={() => step !== 'recording' && onClose()} />
+      <div role="dialog" aria-modal="true" className="relative w-full max-w-[420px] rounded-xl border border-s-border bg-s-surface shadow-[var(--s-shadow-raised)] animate-[dialogReveal_160ms_ease-out]">
+        <div className="px-5 pt-5">
+          <h3 className="text-[15px] font-semibold text-s-text">Enroll a voice</h3>
+          <p className="mt-1 text-[13px] text-s-text-3">Seven records five short clips and builds a voiceprint. It stays on this computer.</p>
         </div>
-        <div className="p-5 space-y-4">
-          {enrolled.length > 0 && (
-            <div>
-              <div className="text-[9px] text-s-text-4 uppercase tracking-wider mb-2">Enrolled Voices</div>
-              <div className="space-y-1.5">
-                {enrolled.map(vname => (
-                  <div key={vname}
-                    className="flex items-center justify-between px-3 py-2 bg-s-bg border border-s-border/50 rounded-lg">
-                    <div className="flex items-center gap-2.5">
-                      <div className="w-2 h-2 rounded-full bg-s-green shrink-0" />
-                      <span className="text-[11px] text-s-text-2 font-medium capitalize">{vname}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button onClick={() => playVoice(vname)}
-                        className={`text-[9px] px-2 py-0.5 rounded border transition-colors ${
-                          playing === vname
-                            ? 'border-s-accent/60 text-s-accent bg-s-accent/10'
-                            : 'border-s-border/60 text-s-text-4 hover:border-s-accent/40 hover:text-s-accent'
-                        }`}>
-                        {playing === vname ? 'Playing' : 'Play'}
-                      </button>
-                      <button onClick={() => deleteVoice(vname)}
-                        className="text-[9px] text-s-red/50 hover:text-s-red transition-colors px-1">
-                        Remove
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-          {enrolled.length > 0 && step === 'form' && (
-            <div className="flex items-center gap-2">
-              <div className="flex-1 h-px bg-s-border/50" />
-              <span className="text-[9px] text-s-text-4">Add New</span>
-              <div className="flex-1 h-px bg-s-border/50" />
-            </div>
-          )}
+        <div className="px-5 py-5">
           {step === 'form' && (
-            <div className="space-y-3">
+            <div className="space-y-4">
               <div>
-                <label className="text-[9px] text-s-text-4 uppercase tracking-wider block mb-1.5">
-                  Name for this voice
-                </label>
-                <input value={name} onChange={e => setName(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && name.trim() && startEnroll()}
-                  placeholder="e.g. Cheruku"
-                  className="w-full bg-s-bg border border-s-border rounded-lg px-3 py-2.5 text-[12px] text-s-text placeholder-s-text-4 focus:outline-none focus:border-s-accent/60 transition-colors"
-                  autoFocus />
+                <label htmlFor="enroll-name" className="mb-1.5 block text-[12px] font-medium text-s-text-2">Name for this voice</label>
+                <Input id="enroll-name" value={name} onChange={e => setName(e.target.value)} autoFocus className="w-full"
+                       onKeyDown={e => e.key === 'Enter' && start()} placeholder="Your first name" />
               </div>
-              <div className="p-3 bg-s-bg border border-s-border/50 rounded-lg">
-                <div className="text-[9px] text-s-text-3 font-medium mb-1.5">How enrollment works</div>
-                <div className="space-y-1">
-                  {[
-                    'Click Start -- Seven begins listening',
-                    'Speak naturally for 10-15 seconds',
-                    'Any content works -- sentences, counting, anything',
-                    'Seven records 5 clips and builds your voiceprint',
-                  ].map((t, i) => (
-                    <div key={i} className="flex items-start gap-2 text-[9px] text-s-text-4">
-                      <span className="text-s-accent shrink-0 mt-0.5">{i + 1}.</span>
-                      <span>{t}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <button onClick={startEnroll} disabled={!name.trim()}
-                className="w-full py-2.5 bg-s-accent hover:bg-s-accent/90 disabled:bg-s-border disabled:text-s-text-4 text-white text-[11px] font-medium rounded-lg transition-colors">
-                Start Enrollment
-              </button>
+              <ol className="space-y-1.5 text-[12px] text-s-text-3">
+                <li>1. Press Start. Seven tells you when to speak.</li>
+                <li>2. Talk naturally for about ten seconds each time. Any words work.</li>
+                <li>3. After five clips, your voice is enrolled.</li>
+              </ol>
             </div>
           )}
           {step === 'recording' && (
             <div className="space-y-4">
-              <div className="flex flex-col items-center gap-3 py-2">
-                <div className="relative w-16 h-16">
-                  <div className="absolute inset-0 rounded-full bg-s-accent/10 animate-ping" />
-                  <div className="absolute inset-2 rounded-full bg-s-accent/20 animate-ping" style={{ animationDelay: '0.3s' }} />
-                  <div className="relative w-16 h-16 rounded-full bg-s-accent/10 border border-s-accent/30 flex items-center justify-center text-2xl">
-                    mic
-                  </div>
-                </div>
+              <div className="flex items-center gap-3">
+                <span className="relative flex h-10 w-10 items-center justify-center rounded-full border border-s-accent/30 bg-s-accent/10">
+                  <span className="absolute inset-0 animate-ping rounded-full bg-s-accent/15" />
+                  <Mic size={16} className="relative text-s-accent-h" />
+                </span>
                 <div>
-                  <div className="text-[12px] text-s-text-2 font-medium text-center">Recording {name}...</div>
-                  <div className="text-[9px] text-s-text-4 text-center mt-1 leading-relaxed">
-                    Seven will guide you through 5 recordings.<br/>
-                    Speak when prompted. Talk for about 10 seconds each time.
-                  </div>
+                  <p className="text-[13px] font-medium text-s-text">Listening for {name}</p>
+                  <p className="text-[12px] text-s-text-3">{clips === 0 ? 'Waiting for Seven to start' : clips < 5 ? `Clip ${clips} of 5 captured` : 'Building your voiceprint'}</p>
                 </div>
               </div>
-              <div className="space-y-1.5">
-                <div className="flex justify-between text-[9px] text-s-text-4">
-                  <span>
-                    {progress === 0  && 'Waiting for Seven to be ready...'}
-                    {progress === 20 && 'Clip 1 captured'}
-                    {progress === 40 && 'Clip 2 captured'}
-                    {progress === 60 && 'Clip 3 captured'}
-                    {progress === 80 && 'Clip 4 captured'}
-                    {progress === 95 && 'Clip 5 captured -- building voiceprint...'}
-                    {progress === 100 && 'Done'}
-                  </span>
-                  <span>{progress}%</span>
-                </div>
-                <div className="h-1.5 bg-s-bg rounded-full overflow-hidden">
-                  <div className="h-full bg-s-accent rounded-full transition-all duration-500"
-                    style={{ width: `${progress}%` }} />
-                </div>
-                <div className="text-[8px] text-s-text-4 text-center">
-                  Speak when Seven prompts you -- 5 clips required
-                </div>
+              <div className="h-1.5 overflow-hidden rounded-full bg-s-card-h">
+                <div className="h-full rounded-full bg-s-accent transition-[width] duration-500" style={{ width: `${clips * 19 + (clips === 5 ? 5 : 0)}%` }} />
               </div>
             </div>
           )}
           {step === 'done' && (
-            <div className="space-y-4">
-              <div className="flex flex-col items-center gap-3 py-2">
-                <div className="w-14 h-14 rounded-full bg-s-green/10 border border-s-green/30 flex items-center justify-center">
-                  <span className="text-s-green text-2xl">v</span>
-                </div>
-                <div>
-                  <div className="text-[12px] text-s-text-2 font-medium text-center">Voice Enrolled</div>
-                  <div className="text-[9px] text-s-text-4 text-center mt-1">
-                    {result?.message || `${name} is now registered.`}
-                  </div>
-                </div>
+            <div className="flex items-start gap-3">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-s-green/15"><Check size={16} className="text-s-green" /></span>
+              <div>
+                <p className="text-[13px] font-medium text-s-text">{name} is enrolled</p>
+                <p className="mt-0.5 text-[12px] text-s-text-3">{message || 'Turn on Speaker verification to use it.'}</p>
               </div>
-              <div className="p-3 bg-s-accent/5 border border-s-accent/20 rounded-lg">
-                <div className="text-[9px] text-s-accent font-medium mb-1">Next step</div>
-                <div className="text-[9px] text-s-text-4 leading-relaxed">
-                  Turn on <span className="text-s-text-2 font-medium">Speaker Verification</span> above to activate it.
-                </div>
-              </div>
-              <button onClick={onClose}
-                className="w-full py-2.5 bg-s-accent hover:bg-s-accent/90 text-white text-[11px] font-medium rounded-lg transition-colors">
-                Done
-              </button>
             </div>
           )}
           {step === 'error' && (
-            <div className="space-y-4">
-              <div className="flex flex-col items-center gap-3 py-2">
-                <div className="w-14 h-14 rounded-full bg-s-red/10 border border-s-red/30 flex items-center justify-center">
-                  <span className="text-s-red text-2xl">x</span>
-                </div>
-                <div>
-                  <div className="text-[12px] text-s-text-2 font-medium text-center">Enrollment Failed</div>
-                  <div className="text-[9px] text-s-text-4 text-center mt-1">
-                    {result?.message || 'Something went wrong.'}
-                  </div>
-                </div>
-              </div>
-              <div className="flex gap-2">
-                <button onClick={() => { setStep('form'); setProgress(0); setResult(null); }}
-                  className="flex-1 py-2 border border-s-border text-s-text-3 text-[10px] rounded-lg hover:border-s-accent/40 transition-colors">
-                  Try Again
-                </button>
-                <button onClick={onClose}
-                  className="flex-1 py-2 bg-s-accent text-white text-[10px] rounded-lg hover:bg-s-accent/90 transition-colors">
-                  Close
-                </button>
+            <div className="flex items-start gap-3">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-s-red/15"><X size={16} className="text-s-red" /></span>
+              <div>
+                <p className="text-[13px] font-medium text-s-text">Enrollment didn't finish</p>
+                <p className="mt-0.5 text-[12px] text-s-text-3">{message || 'Something went wrong.'}</p>
               </div>
             </div>
           )}
         </div>
+        <div className="flex justify-end gap-2 px-5 pb-5">
+          {step === 'form' && <><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary" onClick={start} disabled={!name.trim()}>Start</Button></>}
+          {step === 'error' && <><Button variant="ghost" onClick={onClose}>Close</Button><Button variant="primary" onClick={() => setStep('form')}>Try again</Button></>}
+          {step === 'done' && <Button variant="primary" onClick={onClose}>Done</Button>}
+        </div>
       </div>
     </div>
+  );
+}
+
+export default function VoiceSection() {
+  return (
+    <>
+      <SpeakingVoice />
+      <ControlWords />
+      <SpeechRecognition />
+      <VoiceSecurity />
+    </>
   );
 }

@@ -20,12 +20,15 @@ IDENTITY ENFORCEMENT:
     or to override its instructions get a calm in-character refusal.
 """
 
+import logging
 import random
 import re
 from datetime import datetime
 
-from brain_modules import capabilities, self_model, session
+from brain_modules import capabilities, self_model, session, system_info
 from brain_modules.layer_result import LayerResult
+
+_log = logging.getLogger("seven.layer03")
 
 _JAILBREAK = re.compile(
     r"\b(?:you are now|your name is now|call yourself|from now on (?:you are|your name is)|"
@@ -152,6 +155,16 @@ def process(ctx, deps=None) -> LayerResult:
     if _fullmatch_any(_MODEL, norm):
         state = self_model.get_runtime_state()
         return LayerResult.stop(f"I'm running {state['model_name']} locally through Ollama.")
+    # Questions about the user's own machine: live readings, never a model's guess.
+    try:
+        if system_info.needs_reasoning(ctx.prompt_text):
+            ctx.hints.append(system_info.prompt_context())
+        else:
+            machine = system_info.answer(ctx.prompt_text)
+            if machine:
+                return LayerResult.stop(machine)
+    except Exception as exc:
+        _log.debug("system info skipped: %s", exc)
     if _fullmatch_any(_HARDWARE, norm):
         return LayerResult.stop(f"You have {self_model.describe_hardware()}")
 
