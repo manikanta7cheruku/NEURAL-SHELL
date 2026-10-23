@@ -1,0 +1,181 @@
+"""
+backend/routes/feedback.py
+
+Sends feedback from the Feedback page to a Google Form, whose responses land in
+a Google Sheet. Sending from the backend (not the browser) means Seven can see
+Google's answer: it only reports "sent" when Google accepted the entry, and
+feedback written while offline is queued on disk and sent automatically later.
+
+    POST /api/feedback          send one report (queued if it can't be sent now)
+    GET  /api/feedback/status   is the form configured, how many are queued
+    POST /api/feedback/retry    send anything still queued
+
+==========================================================================
+ SETUP: paste your Google Form here (see docs in the Feedback PR or below)
+==========================================================================
+ 1. FORM_URL: open your form, click Send > link, copy the link. It looks like
+    https://docs.google.com/forms/d/e/<LONG_ID>/viewform
+    Paste it below; "viewform" is changed to "formResponse" automatically.
+ 2. FIELDS: each question has an id like "entry.123456789". In the form,
+    open the three-dot menu > Get pre-filled link, fill every question, click
+    Get link, copy it. The link contains entry.NNN=value for each question.
+ You can also set SEVEN_FEEDBACK_FORM_URL and SEVEN_FEEDBACK_FIELDS (a JSON
+ object of the same shape) as environment variables instead of editing code.
+"""
+
+import json
+import logging
+import os
+import platform
+import threading
+import time
+import uuid
+from typing import Dict, List
+
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
+
+_log = logging.getLogger("seven.feedback")
+router = APIRouter()
+
+FORM_URL = "https://docs.google.com/forms/d/e/1FAIpQLScbQrtJLGQR0fVB2PkG_7uM8xcrRMSF7D9184Fq0X-L1tKnoA/viewform"
+FIELDS = {
+    "category": "entry.1403735424",    # Short answer or multiple choice: Bug Report, Feature Request, UI/UX, Performance, Other
+    "severity": "entry.813819414",     # Low, Medium, High, Critical, or N/A
+    "details": "entry.2134832696",     # Paragraph: the description (plus app info if the user allowed it)
+    "email": "entry.1297852434",       # Short answer: email or "anonymous"
+}
+
+_lock = threading.Lock()
+
+
+def _form_url() -> str:
+    url = (os.environ.get("SEVEN_FEEDBACK_FORM_URL") or FORM_URL).strip()
+    for tail in ("/viewform", "/edit"):
+        if tail in url:
+            url = url.split(tail)[0] + "/formResponse"
+    if not url.endswith("/formResponse"):
+        url = url.rstrip("/") + "/formResponse"
+    return url
+
+
+def _fields() -> Dict[str, str]:
+    raw = os.environ.get("SEVEN_FEEDBACK_FIELDS")
+    if raw:
+        try:
+            return {**FIELDS, **json.loads(raw)}
+        except ValueError:
+            _log.warning("SEVEN_FEEDBACK_FIELDS is not valid JSON; using the built-in fields")
+    return FIELDS
+
+
+def _configured() -> bool:
+    return "/forms/d/e/" in _form_url() and all(v.startswith("entry.") for v in _fields().values())
+
+
+def _queue_path() -> str:
+    try:
+        from seven_paths import paths
+        base = paths._seven_data
+    except Exception:
+        base = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "seven_data")
+    os.makedirs(base, exist_ok=True)
+    return os.path.join(base, "feedback_queue.json")
+
+
+def _load_queue() -> List[dict]:
+    try:
+        with open(_queue_path(), encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, list) else []
+    except (OSError, ValueError):
+        return []
+
+
+def _save_queue(items: List[dict]) -> None:
+    with open(_queue_path(), "w", encoding="utf-8") as f:
+        json.dump(items, f, indent=2)
+
+
+def _post(entry: dict) -> bool:
+    """True only when Google accepted the response."""
+    import requests
+    f = _fields()
+    data = {f["category"]: entry["category"], f["severity"]: entry.get("severity") or "N/A",
+            f["details"]: entry["details"], f["email"]: entry.get("email") or "anonymous"}
+    try:
+        r = requests.post(_form_url(), data=data, timeout=8,
+                          headers={"User-Agent": "Seven feedback", "Referer": _form_url().replace("formResponse", "viewform")})
+    except requests.RequestException as exc:
+        _log.info("feedback not sent yet (%s); queued", exc)
+        return False
+    if r.status_code == 200:
+        return True
+    _log.warning("Google Forms rejected feedback: HTTP %s. Check FORM_URL and FIELDS in backend/routes/feedback.py",
+                 r.status_code)
+    return False
+
+
+def _flush() -> int:
+    """Send queued feedback. Returns how many are still queued."""
+    with _lock:
+        queue = _load_queue()
+        remaining = [e for e in queue if not _post(e)]
+        if len(remaining) != len(queue):
+            _save_queue(remaining)
+        return len(remaining)
+
+
+def _app_info() -> str:
+    try:
+        from seven_utils.version import get_version
+        version = get_version()
+    except Exception:
+        version = "unknown"
+    try:
+        from brain_modules.system_info import os_name
+        os_text = os_name()
+    except Exception:
+        os_text = f"{platform.system()} {platform.release()}"
+    return f"Seven {version} on {os_text}"
+
+
+class FeedbackIn(BaseModel):
+    category: str
+    severity: str = ""
+    details: str
+    email: str = ""
+    include_app_info: bool = True
+
+
+@router.post("/api/feedback")
+def send_feedback(req: FeedbackIn):
+    details = req.details.strip()
+    if not details or not req.category.strip():
+        raise HTTPException(400, "Choose a category and describe the issue.")
+    if not _configured():
+        raise HTTPException(503, "Feedback isn't set up yet. Add your Google Form in backend/routes/feedback.py.")
+    if req.include_app_info:
+        details = f"{details}\n\n[{_app_info()}]"
+    entry = {"id": uuid.uuid4().hex, "at": time.strftime("%Y-%m-%d %H:%M:%S"), "category": req.category.strip(),
+             "severity": req.severity.strip(), "details": details[:8000], "email": req.email.strip()[:200]}
+    sent = _post(entry)
+    with _lock:
+        queue = _load_queue()
+        if not sent:
+            queue.append(entry)
+            _save_queue(queue)
+    queued = _flush() if sent and queue else len(queue) if not sent else 0
+    return {"sent": sent, "queued": queued}
+
+
+@router.get("/api/feedback/status")
+def feedback_status():
+    return {"configured": _configured(), "queued": len(_load_queue())}
+
+
+@router.post("/api/feedback/retry")
+def retry_feedback():
+    if not _configured():
+        return {"configured": False, "queued": len(_load_queue())}
+    return {"configured": True, "queued": _flush()}
