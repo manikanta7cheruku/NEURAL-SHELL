@@ -23,6 +23,7 @@
   --color-s-on-accent: #ffffff;
   --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
   --font-mono: 'JetBrains Mono', 'Consolas', monospace;
+  --font-display: 'Michroma', 'Inter', system-ui, sans-serif;
 }
 
 /* Theme. Dark is the default; lib/theme.js sets data-theme on <html>.

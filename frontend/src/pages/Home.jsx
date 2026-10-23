@@ -14,6 +14,7 @@ import useConfig from '../stores/useConfig';
 import { PageShell, Button, Badge } from '../components/ui';
 import { cx } from '../lib/cx';
 import { relativeTime } from '../lib/format';
+import WeekChart from '../components/WeekChart';
 
 const SCHED_ICON = { reminder: Bell, alarm: AlarmClock, timer: Timer, event: Calendar };
 const EASE = 'ease-[cubic-bezier(0.32,0.72,0,1)]';
@@ -128,7 +129,8 @@ export default function Home({ isFirstLaunch }) {
   }, [tasks]);
   const upcoming = useMemo(() => scheds.filter(s => s.status === 'active')
     .sort((a, b) => new Date(a.time) - new Date(b.time)).slice(0, 5), [scheds]);
-  const maxHours = Math.max(0.1, ...history.map(d => d.hours));
+  const weekTotal = history.reduce((a, d) => a + (d.hours || 0), 0);
+  const bestDay = history.reduce((b, d) => (d.hours > (b?.hours || 0) ? d : b), null);
   const name = (config?.identity?.user_name || '').trim();
   const state = st.label();
   const nextUp = upcoming[0];
@@ -227,24 +229,19 @@ export default function Home({ isFirstLaunch }) {
 
         <div className="grid grid-cols-3 gap-3">
           <Card title="This week" className="col-span-1">
-            <div className="px-4 pt-3 pb-3">
-              <div className="flex h-24 items-end gap-2">
-                {(history.length ? history : Array.from({ length: 7 }, (_, i) => ({ day: '', hours: 0, i }))).map((d, i, all) => (
-                  <div key={i} className="group/b relative flex h-full flex-1 flex-col items-center justify-end gap-1.5">
-                    <div className={cx('w-full rounded-[3px] transition-all duration-500', EASE,
-                                       i === all.length - 1 ? 'bg-s-accent' : 'bg-s-card-h group-hover/b:bg-s-border-l')}
-                         style={{ height: `${d.hours ? Math.max(6, (d.hours / maxHours) * 100) : 3}%` }} />
-                    <span className="text-[10.5px] text-s-text-4">{d.day?.slice(0, 2)}</span>
-                    {d.hours > 0 && (
-                      <span className="pointer-events-none absolute -top-5 rounded bg-s-text px-1.5 text-[10.5px] text-s-bg opacity-0 transition-opacity duration-150 group-hover/b:opacity-100">
-                        {hoursText(d.hours)}
-                      </span>)}
+            <div className="px-4 pt-5 pb-3">
+              <WeekChart history={history} />
+              <div className="mt-3 grid grid-cols-3 gap-2 border-t border-s-border/70 pt-2.5">
+                {[
+                  ['Total', usage?.display || hoursText(weekTotal)],
+                  ['Daily average', hoursText(weekTotal / 7)],
+                  ['Best day', bestDay ? bestDay.day : 'None yet'],
+                ].map(([k, v]) => (
+                  <div key={k} className="min-w-0">
+                    <div className="text-[10.5px] text-s-text-4">{k}</div>
+                    <div className="truncate text-[12.5px] font-medium tabular-nums text-s-text">{v}</div>
                   </div>
                 ))}
-              </div>
-              <div className="mt-2 flex justify-between text-[11.5px]">
-                <span className="text-s-text-3">Time with Seven</span>
-                <span className="tabular-nums text-s-text">{usage?.display || hoursText(history.reduce((a, d) => a + d.hours, 0))}</span>
               </div>
             </div>
           </Card>

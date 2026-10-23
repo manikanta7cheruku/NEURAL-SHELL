@@ -10,6 +10,8 @@
         "preview": "vite preview"
     },
     "dependencies": {
+        "@fontsource/jetbrains-mono": "5.2.5",
+        "@fontsource/michroma": "5.2.5",
         "@tailwindcss/vite": "^4.3.0",
         "axios": "^1.6.7",
         "lucide-react": "^1.23.0",
