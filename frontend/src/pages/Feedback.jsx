@@ -13,6 +13,7 @@ import useConfig from '../stores/useConfig';
 import { PageShell, Section, Row, Body, Button, Input, Segmented } from '../components/ui';
 import { cx } from '../lib/cx';
 import { toast } from '../lib/toast';
+import { sendDirect } from '../lib/feedbackForm';
 
 const CATEGORIES = [
   { id: 'Bug Report', label: 'Bug', hint: 'Something is broken', icon: Bug },
@@ -52,7 +53,20 @@ export default function Feedback() {
       setDetails('');
       setCategory('');
     } catch (e) {
-      toast.error("Couldn't send your feedback", e?.response?.data?.detail || 'Check that Seven is running, then try again.');
+      // Backend unreachable or too old for /api/feedback: send straight to the form instead of losing the report.
+      const reason = e?.response?.status;
+      if (!e?.response || reason === 404 || reason === 405) {
+        try {
+          await sendDirect({ category, severity: bug ? severity : '', details: details.trim(), email: email.trim() });
+          setResult('direct');
+          setDetails('');
+          setCategory('');
+        } catch {
+          toast.error("Couldn't send your feedback", 'You seem to be offline. Try again when you are connected.');
+        }
+      } else {
+        toast.error("Couldn't send your feedback", e?.response?.data?.detail || 'Check that Seven is running, then try again.');
+      }
     }
     setSending(false);
   };
@@ -63,11 +77,11 @@ export default function Feedback() {
         {result && (
           <div className="page-in flex items-start gap-3 rounded-lg border border-s-border bg-s-surface px-4 py-3 shadow-[var(--s-shadow)]">
             <span className={cx('mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full',
-                                result === 'sent' ? 'bg-s-green/15 text-s-green' : 'bg-s-card-h text-s-text-2')}>
-              {result === 'sent' ? <Check size={14} /> : <CloudOff size={13} />}
+                                result !== 'queued' ? 'bg-s-green/15 text-s-green' : 'bg-s-card-h text-s-text-2')}>
+              {result !== 'queued' ? <Check size={14} /> : <CloudOff size={13} />}
             </span>
             <div className="flex-1">
-              <p className="text-[13px] font-medium text-s-text">{result === 'sent' ? 'Thanks, your feedback was sent.' : 'Saved. It will send when you are online.'}</p>
+              <p className="text-[13px] font-medium text-s-text">{result === 'queued' ? 'Saved. It will send when you are online.' : 'Thanks, your feedback was sent.'}</p>
               <p className="mt-0.5 text-[12px] text-s-text-3">
                 {result === 'sent' ? 'If you left an email, the team may reply there.' : 'Seven keeps it on this computer and retries automatically.'}
               </p>

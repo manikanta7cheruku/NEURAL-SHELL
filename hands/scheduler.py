@@ -278,6 +278,12 @@ def _parse_recurrence(recur_str):
     # Decode underscores back to spaces for matching
     clean = recur_str.lower().strip().replace("_", " ")
 
+    if clean.startswith("interval "):
+        try:
+            return f"interval_{max(5, int(clean.split()[1]))}"
+        except (IndexError, ValueError):
+            return None
+
     if clean in ["daily", "every day", "everyday", "every morning", "every night"]:
         return "daily"
 
@@ -322,6 +328,13 @@ def _next_recurrence(schedule):
             next_time += timedelta(days=1)
         return next_time
     
+    if recur.startswith("interval_"):
+        step = timedelta(minutes=int(recur.split("_")[1]))
+        next_time = last_time + step
+        while next_time <= now:
+            next_time += step
+        return next_time
+
     if recur.startswith("weekly_"):
         target_day = int(recur.split("_")[1])
         next_time = last_time + timedelta(days=7)
@@ -469,7 +482,13 @@ def _register_windows_task_recurring(schedule):
 
         time_str = fire_time.strftime("%H:%M")
 
-        if recur == "daily":
+        if recur.startswith("interval_"):
+            minutes = int(recur.split("_")[1])
+            if minutes % 60 == 0:
+                schedule_type, extra = "hourly", ["/mo", str(minutes // 60)]
+            else:
+                schedule_type, extra = "minute", ["/mo", str(minutes)]
+        elif recur == "daily":
             schedule_type = "daily"
             extra = ["/mo", "1"]
         elif recur == "weekdays":
@@ -613,7 +632,11 @@ def add_schedule(stype, message, time_str=None, duration=None, recur=None, speak
             elif stype == "reminder":
                 if schedule["recur"] != "none":
                     recur_label = schedule["recur"].replace("weekly_", "every ")
-                    if recur_label.startswith("every "):
+                    if schedule["recur"].startswith("interval_"):
+                        mins = int(schedule["recur"].split("_")[1])
+                        recur_label = ("every hour" if mins == 60 else f"every {mins // 60} hours" if mins % 60 == 0
+                                       else f"every {mins} minutes")
+                    elif recur_label.startswith("every "):
                         day_num = schedule["recur"].split("_")[-1]
                         day_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
                         try:
@@ -622,18 +645,18 @@ def add_schedule(stype, message, time_str=None, duration=None, recur=None, speak
                             pass
                     speech = _rand2.choice([
                         f"I'll remind you {recur_label}. {message}.",
-                        f"Recurring. {recur_label} — {message}.",
+                        f"Recurring, {recur_label}: {message}.",
                     ])
                 else:
                     speech = _rand2.choice([
                         f"I'll remind you {time_speech}. {message}.",
-                        f"Noted. {time_speech} — {message}.",
+                        f"Noted. {time_speech}: {message}.",
                         f"You got it. {message}, {time_speech}.",
                     ])
             elif stype == "event":
                 speech = _rand2.choice([
                     f"On the calendar. {message}, {time_speech}.",
-                    f"Locked in. {message} — {time_speech}.",
+                    f"Locked in. {message}, {time_speech}.",
                     f"You've got {message} {time_speech}.",
                 ])
             else:

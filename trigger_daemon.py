@@ -44,6 +44,16 @@ from trigger_modules.reload_poller import ReloadPoller
 _tab_listener_proc = None
 
 
+def _port_held_by_listener() -> bool:
+    """True when port 7777 is answered by the offline tab listener rather than Seven's backend."""
+    try:
+        import urllib.request
+        with urllib.request.urlopen("http://127.0.0.1:7777/api/health", timeout=0.5) as r:
+            return b"offline_tab_listener" in r.read(200)
+    except Exception:
+        return False
+
+
 def _offline_tab_listener_supervisor():
     """
     Background supervisor thread:
@@ -69,7 +79,7 @@ def _offline_tab_listener_supervisor():
     import socket
     import subprocess
 
-    CONSECUTIVE_CLOSED_REQUIRED = 4   # 4 x 2s = 8s of confirmed silence
+    CONSECUTIVE_CLOSED_REQUIRED = 15  # 15 x 2s = 30s of confirmed silence, longer than a backend restart
     POLL_INTERVAL = 2.0
 
     consecutive_closed = 0
@@ -88,9 +98,12 @@ def _offline_tab_listener_supervisor():
 
             if port_open:
                 consecutive_closed = 0
-                # Real backend (or anything) has the port now. If our own
-                # fallback listener is still running, it's redundant and
-                # will fight the next legitimate restart — tear it down.
+                # The port being busy is not proof the real backend is back: our own listener holds it too.
+                # Tearing the listener down whenever the port was busy made it start and stop every ~10s.
+                if _port_held_by_listener():
+                    time.sleep(POLL_INTERVAL)
+                    continue
+                # The real backend has the port. A leftover listener would fight its next restart.
                 if _tab_listener_proc is not None and _tab_listener_proc.poll() is None:
                     try:
                         _tab_listener_proc.terminate()
