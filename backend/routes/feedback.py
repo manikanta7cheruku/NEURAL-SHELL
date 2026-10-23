@@ -109,7 +109,10 @@ def _post(entry: dict) -> bool:
     except requests.RequestException as exc:
         _log.info("feedback not sent yet (%s); queued", exc)
         return False
-    if r.status_code == 200:
+    # Google answers 200 with a confirmation page when the entry was recorded. A rejected entry comes back as
+    # the form itself (with its FB_PUBLIC_LOAD_DATA_ payload) or as an error status.
+    text = r.text or ""
+    if r.status_code == 200 and ("response has been recorded" in text.lower() or "FB_PUBLIC_LOAD_DATA_" not in text):
         return True
     _log.warning("Google Forms rejected feedback: HTTP %s. Check FORM_URL and FIELDS in backend/routes/feedback.py",
                  r.status_code)
@@ -167,6 +170,30 @@ def send_feedback(req: FeedbackIn):
             _save_queue(queue)
     queued = _flush() if sent and queue else len(queue) if not sent else 0
     return {"sent": sent, "queued": queued}
+
+
+_retry_started = False
+
+
+def start_retry_loop(interval: int = 600) -> None:
+    """Send queued feedback in the background: shortly after start, then every `interval` seconds."""
+    global _retry_started
+    if _retry_started or os.environ.get("SEVEN_TEST") == "1":
+        return
+    _retry_started = True
+
+    def loop():
+        time.sleep(30)
+        while True:
+            try:
+                if _configured() and _load_queue():
+                    left = _flush()
+                    _log.info("feedback retry: %s still queued", left)
+            except Exception as exc:
+                _log.debug("feedback retry failed: %s", exc)
+            time.sleep(interval)
+
+    threading.Thread(target=loop, daemon=True, name="SevenFeedbackRetry").start()
 
 
 @router.get("/api/feedback/status")

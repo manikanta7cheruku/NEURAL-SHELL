@@ -24,6 +24,33 @@ import threading
 import time
 import os
 
+def _evict_offline_listener() -> None:
+    """
+    While Seven is closed, a small listener (hands/workspace_modules/offline_tab_listener.py) keeps port 7777
+    to catch Chrome tab updates. Ask it to step aside before the backend binds the port, so a backend started
+    any way (main.py, uvicorn, tests of the real app) never loses the port to it.
+    """
+    if os.environ.get("SEVEN_TEST") == "1":
+        return
+    try:
+        import urllib.request
+        with urllib.request.urlopen("http://127.0.0.1:7777/api/health", timeout=0.4) as r:
+            if b"offline_tab_listener" not in r.read(200):
+                return
+        urllib.request.urlopen(urllib.request.Request("http://127.0.0.1:7777/__seven_shutdown", method="POST"),
+                               timeout=0.8).close()
+        for _ in range(20):
+            time.sleep(0.1)
+            try:
+                urllib.request.urlopen("http://127.0.0.1:7777/api/health", timeout=0.2).close()
+            except Exception:
+                return
+    except Exception:
+        pass
+
+
+_evict_offline_listener()
+
 # Hands and layers print emoji. Electron starts us with UTF-8, but a plain
 # "uvicorn" in a Windows console defaults to cp1252 and those prints would
 # raise inside actions (a volume change failed with a 'charmap' error).
@@ -347,6 +374,7 @@ def start_api_server(host="127.0.0.1", port=7777):
     import uvicorn
 
     def _run():
+        _evict_offline_listener()      # again, right before binding: loading the app takes several seconds
         uvicorn.run(
             app,
             host=host,
@@ -367,6 +395,13 @@ def start_api_server(host="127.0.0.1", port=7777):
             sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
             from updater import start_auto_check
         start_auto_check()
+    except Exception:
+        pass
+
+    # Feedback written while offline is sent automatically once the internet is back.
+    try:
+        from backend.routes.feedback import start_retry_loop
+        start_retry_loop()
     except Exception:
         pass
 
