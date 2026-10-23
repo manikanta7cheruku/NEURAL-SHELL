@@ -532,7 +532,7 @@ function showOrbContextMenu() {
     { type: 'separator' },
     { label: 'Settings',  click: () => navigateTo('/settings') },
     { label: 'Plans',     click: () => navigateTo('/plans') },
-    { label: 'Guide',     click: () => navigateTo('/blog') },
+    { label: 'Guide',     click: () => navigateTo('/guide') },
     { type: 'separator' },
     { label: 'Reset Orb Position', click: () => resetOrbPosition() },
     { type: 'separator' },

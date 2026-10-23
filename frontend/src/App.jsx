@@ -1,4 +1,4 @@
-import { HashRouter, Routes, Route, useNavigate, useLocation } from 'react-router-dom';
+import { HashRouter, Routes, Route, useNavigate, useLocation, Navigate } from 'react-router-dom';
 import { useEffect, useState, useRef } from 'react';
 import Sidebar        from './components/Sidebar';
 import ScheduleAlert  from './components/ScheduleAlert';
@@ -17,7 +17,7 @@ import Knowledge      from './pages/Knowledge';
 import Settings       from './pages/settings/index'
 import Plans          from './pages/Plans';
 import Purchase       from './pages/Purchase';
-import Blog           from './pages/Blog';
+import Guide          from './pages/Guide';
 import Feedback       from './pages/Feedback';
 import Updates        from './pages/Updates';
 import Setup          from './pages/Setup';
@@ -81,7 +81,8 @@ function MainApp({ isFirstLaunch }) {
             <Route path="/settings"  element={<Settings />} />
             <Route path="/plans"     element={<Plans />}    />
             <Route path="/purchase"  element={<Purchase />} />
-            <Route path="/blog"      element={<Blog />}     />
+            <Route path="/guide"     element={<Guide />}    />
+            <Route path="/blog"      element={<Navigate to="/guide" replace />} />
             <Route path="/feedback"  element={<Feedback />} />
             <Route path="/updates"   element={<Updates />}  />
           </Routes>
