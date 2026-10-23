@@ -163,6 +163,15 @@ export default function App() {
     }
   }, [backendReady]);
 
+  // 2b. /api/health can answer before every route is registered, so a config fetch right after
+  //     startup may fail. Retry instead of waiting on "Loading configuration" forever.
+  const [configAttempt, setConfigAttempt] = useState(0);
+  useEffect(() => {
+    if (!backendReady || configLoading || config !== null || configAttempt > 30) return undefined;
+    const t = setTimeout(async () => { await fetchConfig(); fetchStatus(); setConfigAttempt(n => n + 1); }, 1000);
+    return () => clearTimeout(t);
+  }, [backendReady, configLoading, config, configAttempt]);
+
   // 3. Monitor setup_complete flag
   useEffect(() => {
     if (!configLoading && config !== null) {
