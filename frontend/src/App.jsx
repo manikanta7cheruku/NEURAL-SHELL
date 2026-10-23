@@ -229,13 +229,14 @@ export default function App() {
   if (backendChecking) {
     return (
       <div className="h-screen w-screen bg-s-bg flex flex-col items-center justify-center gap-6">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-14 h-14 rounded-2xl bg-s-accent/10 border border-s-accent/20 flex items-center justify-center">
-            <div className="w-3.5 h-3.5 rounded-full bg-s-accent animate-pulse" />
+        <div className="flex flex-col items-center gap-4">
+          <div className="relative flex h-14 w-14 items-center justify-center">
+            <div className="absolute inset-0 rounded-full bg-s-accent/20 blur-xl animate-pulse" />
+            <div className="h-3 w-3 rounded-full bg-s-accent-h shadow-[0_0_18px_var(--color-s-accent)]" />
           </div>
           <div className="text-center">
-            <div className="text-xl font-semibold text-white tracking-widest">SEVEN</div>
-            <div className="text-[10px] text-white/40 font-light tracking-wider mt-1">Private AI Voice Assistant</div>
+            <div className="font-display text-[17px] tracking-[0.42em] text-s-text">SEVEN</div>
+            <div className="mt-2 font-mono text-[10.5px] tracking-[0.14em] text-s-text-4">THE LAYER BETWEEN YOU AND YOUR COMPUTER</div>
           </div>
         </div>
 
