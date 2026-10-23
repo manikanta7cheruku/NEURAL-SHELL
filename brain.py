@@ -338,13 +338,15 @@ def think(prompt_text, speaker_id="default", stream_mode="sentence", conversatio
     ensure_name_loaded()
     _refresh_user_name()
     key = session.resolve_key(speaker_id, USER_NAME)
+    # The voice loop asks for sentences; the console and API ask for tokens or text.
+    source = "voice" if stream_mode == "sentence" else "chat"
 
     conv_id, storage_error, user_msg_id = "", "", None
     try:
         from memory import conversation_store
         conv_id = conversation_store.ensure(key, conversation_id)
         user_msg_id = conversation_store.add_message(
-            conv_id, "user", prompt_text, source="voice" if speaker_id != "default" else "chat")
+            conv_id, "user", prompt_text, source=source)
     except Exception as exc:
         storage_error = str(exc)
         _log.warning("transcript not saved: %s", exc)
@@ -358,7 +360,7 @@ def think(prompt_text, speaker_id="default", stream_mode="sentence", conversatio
         _log.debug("tone tracking skipped: %s", exc)
 
     def _done(reply):
-        save_completed_turn(prompt_text, reply, speaker_id, source="chat", persist=False,
+        save_completed_turn(prompt_text, reply, speaker_id, source=source, persist=False,
                             conversation_id=conv_id, thread_key=tkey)
         conversation_state.get(tkey).trace = {"answered_by": "dialogue", "storage_error": storage_error}
         return reply
@@ -401,7 +403,7 @@ def think(prompt_text, speaker_id="default", stream_mode="sentence", conversatio
     if ctx.answered_by != "layer_08_llm":
         st.trace = {"answered_by": ctx.answered_by, "intent": getattr(ctx.intent, "label", None),
                     "storage_error": storage_error, "confirmed": ctx.confirmed}
-        save_completed_turn(prompt_text, result, speaker_id, source="chat", persist=False,
+        save_completed_turn(prompt_text, result, speaker_id, source=source, persist=False,
                             conversation_id=conv_id, thread_key=tkey)
         conversation_state.observe_reply(st, result or "")
     return result

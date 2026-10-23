@@ -273,7 +273,7 @@ function Transcript({ id, onDeleted }) {
   const [confirm, setConfirm] = useState(false);
 
   useEffect(() => {
-    api.get(`/conversations/${id}?limit=1000`).then(r => setData(r.data)).catch(() => setData({ error: true }));
+    api.get(`/conversations/${id}?limit=1000&everyone=true`).then(r => setData(r.data)).catch(() => setData({ error: true }));
   }, [id]);
 
   const exportChat = async () => {
@@ -343,7 +343,8 @@ function Transcript({ id, onDeleted }) {
                   <div className="flex items-center gap-2 text-[12px]">
                     <span className="font-medium text-s-text">{user ? 'You' : 'Seven'}</span>
                     <span className="tabular-nums text-s-text-4" title={fullTime(m.ts)}>{clockTime(m.ts)}</span>
-                    {user && m.source === 'voice' && <span className="flex items-center gap-1 text-s-text-4"><Mic size={11} />Voice</span>}
+                    {m.source === 'voice' && <span className="flex items-center gap-1 text-s-text-4"><Mic size={11} />Voice</span>}
+                    {m.meta && String(m.meta).includes('interrupted') && <span className="text-s-text-4">Interrupted</span>}
                   </div>
                   <p className="mt-0.5 whitespace-pre-wrap text-[13px] leading-relaxed text-s-text-2">
                     {(m.content || '').replace(/###[A-Z_]+:[^\n#]*/g, '').trim()}
@@ -370,7 +371,7 @@ function ConversationsView({ onChanged }) {
   const results = q.length >= 2 ? (found.q === q ? found.items : []) : null;
 
   const load = useCallback(() => {
-    api.get('/conversations?limit=500').then(r => {
+    api.get('/conversations?limit=500&everyone=true').then(r => {
       const items = r.data.conversations || [];
       setList(items);
       setSelected(s => (s && items.some(c => c.id === s) ? s : items[0]?.id || null));
@@ -381,7 +382,7 @@ function ConversationsView({ onChanged }) {
   useEffect(() => {
     if (q.length < 2) return undefined;
     const t = setTimeout(() => {
-      api.get(`/conversations?q=${encodeURIComponent(q)}&limit=50`)
+      api.get(`/conversations?q=${encodeURIComponent(q)}&limit=50&everyone=true`)
          .then(r => setFound({ q, items: r.data.results || [] })).catch(() => setFound({ q, items: [] }));
     }, 250);
     return () => clearTimeout(t);
@@ -436,7 +437,10 @@ function ConversationsView({ onChanged }) {
                                       selected === c.id ? 'bg-s-card-h' : 'hover:bg-s-card')}>
                   <div className="truncate text-[13px] font-medium text-s-text">{c.title || 'Untitled conversation'}</div>
                   <div className="mt-0.5 flex items-center justify-between text-[12px] text-s-text-3">
-                    <span>{plural(c.message_count, 'message')}</span>
+                    <span className="flex items-center gap-1.5">
+                      {plural(c.message_count, 'message')}
+                      {c.voice_count > 0 && <span className="flex items-center gap-0.5 text-s-text-4"><Mic size={11} />{c.voice_count}</span>}
+                    </span>
                     <span className="tabular-nums" title={fullTime(c.updated_at)}>{clockTime(c.updated_at)}</span>
                   </div>
                 </button>
@@ -479,7 +483,7 @@ export default function Memory() {
                    options={[{ value: 'facts', label: `Facts${f ? `  ${f.active}` : ''}` },
                              { value: 'conversations', label: `Conversations${c ? `  ${c.count}` : ''}` }]} />
       }>
-      <div className="mx-auto max-w-[1080px] space-y-6 px-8 py-6">
+      <div className="mx-auto max-w-[980px] space-y-4 px-6 py-5">
         <div className="grid grid-cols-4 gap-3">
           <Stat label="Facts" value={f ? f.active : '...'}
                 hint={f?.last_learned_at ? `Last learned ${relativeTime(f.last_learned_at)}` : 'Nothing learned yet'} />
