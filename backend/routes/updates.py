@@ -6,6 +6,7 @@ Handles: /api/update/*
 from fastapi import APIRouter, HTTPException
 import os
 import sys
+from seven_utils.version import get_version
 
 router = APIRouter()
 
@@ -39,7 +40,7 @@ def get_update_status():
             "download_path":     None,
             "error":             str(e),
             "info":              None,
-            "current_version":   "1.1.4"
+            "current_version":   get_version()
         }
 
 

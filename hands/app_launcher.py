@@ -67,7 +67,6 @@ WEB_SERVICES = {
     "pexels": "https://pexels.com",
     "pixabay": "https://pixabay.com",
     "freepik": "https://freepik.com",
-    "pinterest": "https://pinterest.com",
     "lottiefiles": "https://lottiefiles.com",
     "removebg": "https://remove.bg",
     "photoroom": "https://photoroom.com",

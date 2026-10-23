@@ -323,7 +323,7 @@ def _start_raw_server(host, port):
                 body = json.dumps({
                     "listening": False, "speaking": False,
                     "thinking": False, "mode": "minimal",
-                    "version": "1.3.3"
+                    "version": _get_version()
                 }).encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
@@ -387,19 +387,12 @@ def _load_config():
                 return json.load(f)
         except Exception as e:
             print(f"[STARTUP] config.json read failed: {e}")
-    return {"setup_complete": False, "version": "1.3.3"}
+    return {"setup_complete": False, "version": _get_version()}
 
 def _save_config(cfg):
     with open(_get_config_path(), 'w') as f:
         json.dump(cfg, f, indent=4)
 
 def _get_version():
-    try:
-        here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        pkg  = os.path.join(here, 'package.json')
-        if os.path.exists(pkg):
-            with open(pkg) as f:
-                return json.load(f).get("version", "1.3.3")
-    except Exception:
-        pass
-    return "1.3.3"
+    from seven_utils.version import get_version
+    return get_version()

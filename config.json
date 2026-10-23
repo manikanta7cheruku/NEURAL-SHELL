@@ -95,7 +95,7 @@
         "channel": "stable"
     },
     "setup_complete": false,
-    "version": "1.3.3",
+    "version": "1.3.4",
     "email": "",
     "voice": {"engine": "sapi", "voice_id": "1", "voice_index": 1, "speed": 165}
 }

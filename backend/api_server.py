@@ -22,6 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import threading
 import time
 import os
+from seven_utils.version import get_version
 
 # Telemetry
 try:
@@ -142,7 +143,7 @@ def plan_limit_error(feature_name: str, limit_check: dict) -> HTTPException:
 
 app = FastAPI(
     title="Seven AI Assistant API",
-    version="1.3.4",
+    version=get_version(),
     description="""
 ## Seven Local AI Voice Assistant
 
@@ -210,7 +211,7 @@ def root():
     """Root endpoint - API info."""
     return {
         "name":    "Seven API",
-        "version": "1.3.4",
+        "version": get_version(),
         "status":  "running",
         "docs":    "http://127.0.0.1:7777/api/docs",
         "endpoints": {
