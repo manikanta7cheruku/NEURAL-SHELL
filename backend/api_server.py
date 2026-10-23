@@ -325,6 +325,8 @@ app.include_router(brain_routes.router)
 app.include_router(conversation_routes.router)
 from backend.routes import feedback as feedback_routes
 app.include_router(feedback_routes.router)
+from backend.routes import models as model_routes
+app.include_router(model_routes.router)
 
 
 @app.get("/api/speed")

@@ -3,82 +3,24 @@ import useSetup from '../../stores/useSetup';
 
 const API = 'http://127.0.0.1:7777';
 
-// Modern model catalog — Meta Llama 3.2 series released late 2024
-// Ordered from smallest to largest so weakest hardware sees best fit first
-const MODELS = [
-  {
-    tier: 'minimum',
-    name: 'Llama 3.2 1B',
-    ollama: 'llama3.2:1b',
-    size: '1.3 GB',
-    params: '1 billion',
-    downloadEst: '2-4 min',
-    speed: '1-3 seconds per reply',
-    ramNeeded: '4 GB',
-    gpuNeeded: 'Not required',
-    tagline: 'Fastest and lightest',
-    strengths: 'Voice commands, quick Q&A, simple tasks, running apps, controlling your PC',
-    limitations: 'Struggles with complex reasoning or long multi-step problems',
-    bestFor: 'Any laptop, older PCs, users who prioritize speed over depth',
-  },
-  {
-    tier: 'low',
-    name: 'Llama 3.2 3B',
-    ollama: 'llama3.2:3b',
-    size: '2.0 GB',
-    params: '3 billion',
-    downloadEst: '3-6 min',
-    speed: '2-5 seconds per reply',
-    ramNeeded: '6 GB',
-    gpuNeeded: 'Not required',
-    tagline: 'Balanced and versatile',
-    strengths: 'Natural conversations, coding help, writing tasks, summarizing text, everyday knowledge',
-    limitations: 'Occasional gaps in specialized topics like advanced mathematics',
-    bestFor: 'Modern laptops with 8GB RAM, most daily users',
-  },
-  {
-    tier: 'medium',
-    name: 'Phi-3 Mini',
-    ollama: 'phi3:mini',
-    size: '2.3 GB',
-    params: '3.8 billion',
-    downloadEst: '4-7 min',
-    speed: '3-8 seconds per reply',
-    ramNeeded: '8 GB',
-    gpuNeeded: 'Recommended',
-    tagline: 'Strong reasoning specialist',
-    strengths: 'Complex math, logic puzzles, code review, analysis, professional writing',
-    limitations: 'Slower on machines without a graphics card',
-    bestFor: 'Users who ask analytical questions and can wait a few seconds',
-  },
-  {
-    tier: 'high',
-    name: 'Llama 3 8B',
-    ollama: 'llama3',
-    size: '4.7 GB',
-    params: '8 billion',
-    downloadEst: '10-20 min',
-    speed: '5-15 seconds per reply on CPU, 2-4s on GPU',
-    ramNeeded: '16 GB',
-    gpuNeeded: 'Strongly recommended',
-    tagline: 'Commercial-grade intelligence',
-    strengths: 'Deep reasoning, nuanced conversations, technical writing, near GPT-3.5 quality',
-    limitations: 'Slow without a GPU, high RAM usage',
-    bestFor: 'Gaming PCs, workstations with dedicated graphics cards',
-  },
-];
-
-// Choose the recommended model based on detected hardware
-const getRecommendedTier = (hw) => {
-  if (!hw) return 'minimum';
-  const ram = hw.ram_gb || 4;
-  const hasGPU = hw.gpu?.available;
-
-  if (hasGPU && ram >= 16) return 'high';
-  if (hasGPU && ram >= 8) return 'medium';
-  if (ram >= 8) return 'low';
-  return 'minimum';
-};
+// Models come from the one catalog the whole app uses (brain_modules/model_catalog.py via /api/models),
+// so setup, Settings and Seven's own answers always agree.
+const toCard = m => ({
+  tier: m.id,
+  name: m.name,
+  ollama: m.id,
+  size: `${m.size_gb} GB`,
+  params: m.params,
+  downloadEst: m.size_gb < 2.5 ? '2 to 6 min' : '8 to 20 min',
+  speed: m.speed,
+  ramNeeded: `${m.ram} GB`,
+  gpuNeeded: m.vram <= 2 ? 'Not required' : `${m.vram} GB for full speed`,
+  tagline: `Good at ${m.good_at}`,
+  strengths: m.good_at,
+  limitations: m.weak_at,
+  bestFor: m.best_for,
+  fits: m.fits,
+});
 
 export default function StepModel() {
   const { data, setField, next, back, fetchHardware, hardwareInfo } = useSetup();
@@ -88,6 +30,8 @@ export default function StepModel() {
   const [eta, setEta] = useState('');
   const [error, setError] = useState('');
   const [expandedTier, setExpandedTier] = useState(null);
+  const [MODELS, setModels] = useState([]);
+  const [recommendedTier, setRecommendedTier] = useState(null);
   const pollRef = useRef(null);
 
   useEffect(() => {
@@ -96,24 +40,30 @@ export default function StepModel() {
       .then(r => r.json())
       .then(d => setInstalledModels(d.installed || []))
       .catch(() => {});
+    // The full backend may still be restarting after the environment step: retry for up to 30 seconds.
+    let tries = 0, timer = null, alive = true;
+    const loadCatalog = () => fetch(`${API}/api/models`)
+      .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+      .then(d => { if (!alive) return; setModels((d.models || []).map(toCard)); setRecommendedTier(d.recommended?.id || 'llama3.2:1b'); })
+      .catch(() => { if (alive && ++tries < 15) timer = setTimeout(loadCatalog, 2000); });
+    loadCatalog();
+    return () => { alive = false; clearTimeout(timer); };
   }, []);
 
   // Auto-select the recommended model once hardware is detected
   useEffect(() => {
-    if (hardwareInfo && !data.modelTier) {
-      const recommendedTier = getRecommendedTier(hardwareInfo);
+    if (recommendedTier && MODELS.length && !data.modelTier) {
       const recommendedModel = MODELS.find(m => m.tier === recommendedTier);
       if (recommendedModel) {
         setField('modelName', recommendedModel.ollama);
         setField('modelTier', recommendedModel.tier);
       }
     }
-  }, [hardwareInfo]);
+  }, [recommendedTier, MODELS]);
 
   const isModelInstalled = (name) =>
     installedModels.some(m => m === name || m.startsWith(name + ':') || m === name + ':latest');
 
-  const recommendedTier = getRecommendedTier(hardwareInfo);
   const hasAnyModelInstalled = installedModels.length > 0;
 
   const handleSelect = (m) => {
@@ -176,9 +126,9 @@ export default function StepModel() {
       {/* Header */}
       <div className="space-y-3">
         <div className="text-[10px] text-white/50 tracking-[0.3em] font-medium uppercase">Step 5 of 6</div>
-        <h2 className="text-[32px] font-bold text-white tracking-tight">Intelligence Engine</h2>
+        <h2 className="text-[24px] font-semibold text-white tracking-tight">Choose Seven's brain</h2>
         <p className="text-[12px] text-white/40 font-light">
-          Choose the AI model that powers Seven's reasoning. Each model has different strengths, response speeds, and hardware requirements.
+          This is the AI model that writes Seven's replies. Bigger models are smarter and need more memory. The one marked Recommended fits this PC.
         </p>
       </div>
 
@@ -197,7 +147,7 @@ export default function StepModel() {
 
       {/* Info banner */}
       <div className="px-4 py-3 rounded-lg bg-white/[0.02] border border-white/[0.05] text-[11px] text-white/50 leading-relaxed">
-        Seven requires at least one AI model to generate responses. Smaller models respond within 1-3 seconds and work great for voice commands. Larger models are smarter but slower. Models download once and stay cached permanently — you can add more later from Settings.
+        Seven requires at least one AI model to generate responses. Smaller models respond within 1-3 seconds and work great for voice commands. Larger models are smarter but slower. Models download once and stay on this computer. You can add or switch models any time in Settings, Brain.
       </div>
 
       {/* Model cards */}
@@ -207,12 +157,7 @@ export default function StepModel() {
           const isRecommended = m.tier === recommendedTier;
           const isExpanded = expandedTier === m.tier;
           const installed = isModelInstalled(m.ollama);
-          const canRun = (() => {
-            if (!hardwareInfo) return true;
-            const ram = hardwareInfo.ram_gb || 0;
-            const requiredRam = parseInt(m.ramNeeded);
-            return ram >= requiredRam - 2; // Allow 2GB slack
-          })();
+          const canRun = m.fits !== false;
 
           return (
             <div
@@ -238,7 +183,7 @@ export default function StepModel() {
                 )}
                 {!canRun && !installed && (
                   <span className="px-2 py-0.5 bg-red-500/10 text-red-400/80 text-[9px] font-bold uppercase tracking-wider rounded-sm border border-red-500/20">
-                    Low RAM
+                    May be slow
                   </span>
                 )}
               </div>
@@ -316,7 +261,7 @@ export default function StepModel() {
             <div className="h-full bg-white transition-all duration-500" style={{ width: `${pct}%` }} />
           </div>
           <div className="text-[10px] text-white/40 font-light">
-            Model downloads happen once. Future launches use the cached copy instantly. You can safely leave this window open — the download continues in the background.
+            The download happens once; after that the model starts instantly. You can leave this window open while it downloads.
           </div>
         </div>
       )}
