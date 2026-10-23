@@ -11,7 +11,8 @@ from fastapi import WebSocket
 import asyncio
 import datetime
 import time
-from seven_utils.version import get_version
+# Aliased: this module defines its own get_version route below.
+from seven_utils.version import get_version as app_version
 
 router = APIRouter()
 
@@ -27,12 +28,12 @@ def get_status():
             "user_text": "", "seven_text": "", "mood": "neutral",
             "mood_value": 0.5, "model": "unknown", "streaming": False,
             "uptime": "0h 0m", "uptime_seconds": 0, "speaker": "default",
-            "version": get_version()
+            "version": app_version()
         }
 
     try:
         model = "unknown"
-        version = get_version()
+        version = app_version()
         try:
             import config
             if hasattr(config, 'KEY') and isinstance(config.KEY, dict):
@@ -86,7 +87,7 @@ def get_status():
             "user_text": "", "seven_text": "", "mood": "neutral",
             "mood_value": 0.5, "model": "unknown", "streaming": False,
             "uptime": "0h 0m", "uptime_seconds": 0, "speaker": "default",
-            "version": get_version()
+            "version": app_version()
         }
 
 @router.post("/api/interrupt")
@@ -105,7 +106,7 @@ def get_version():
     """Get version info."""
     import config
     return {
-        "version":    get_version(),
+        "version":    app_version(),
         "build_date": datetime.datetime.now().strftime("%Y-%m-%d"),
         "name":       config.KEY.get("identity", {}).get("name", "Seven")
     }
