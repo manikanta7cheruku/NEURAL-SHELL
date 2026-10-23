@@ -22,6 +22,7 @@ os.environ.update(SEVEN_TEST="1", SEVEN_DISABLE_CHROMA="1", SEVEN_DISABLE_MIGRAT
 _BASE = tempfile.mkdtemp(prefix="seven_t_")
 os.environ["APPDATA"] = _BASE
 os.environ["SEVEN_TASKS_DB"] = os.path.join(_BASE, "tasks.db")   # never the real seven_data/tasks.db
+os.environ["SEVEN_TRIGGERS_DB"] = os.path.join(_BASE, "triggers.db")   # nor the real triggers and workspaces
 
 import config                                                    # noqa: E402
 from brain_modules import (capabilities, chat_history, conversation_state, learning, ollama_client,  # noqa: E402
