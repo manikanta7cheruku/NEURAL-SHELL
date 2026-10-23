@@ -379,12 +379,13 @@ function TriggerForm({ initial, onSave, onCancel, workspaces }) {
         else if (paths.length > 1) actionData.paths = paths;
         else { setError('Add at least one path.'); return; }
         break;
-      case 'open_workspace':
+      case 'open_workspace': {
         if (!workspaceId) { setError('Select a workspace.'); return; }
         actionData.workspace_id = parseInt(workspaceId);
         const ws = workspaces.find(w => w.id === parseInt(workspaceId));
         if (ws) actionData.workspace_name = ws.name;
         break;
+      }
       case 'run_command':
         if (!command.trim()) { setError('Enter a command.'); return; }
         actionData.command = command.trim();
