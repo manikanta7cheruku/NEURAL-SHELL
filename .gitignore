@@ -108,8 +108,9 @@ test_record_and_save.py
 
 seven_overlay/_layout_runner.py
 
-# Documentation folder (local only)
-docs/
+# Private working notes, never published. Product and engineering docs live in docs/.
+localdocs/
+learning/
 
 # Server dashboard test file (local only)
 test_admin.html

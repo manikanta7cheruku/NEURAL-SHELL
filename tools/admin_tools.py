@@ -7,7 +7,7 @@ INTERNAL USE ONLY — DO NOT DISTRIBUTE
 
 import sys
 import os
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # project root, for license.py
 
 from datetime import datetime, timedelta
 
@@ -206,7 +206,7 @@ def check_referrals():
                 print(f"  Referrer: {pr['referrer']} → Send ULTIMATE 1-month")
                 print(f"  Referred: {pr['referred']} → Send PRO 1-month")
                 print(f"\n  Command:")
-                print(f"  python admin_tools.py reward {pr['referred']} {pr['referrer']}")
+                print(f"  python tools/admin_tools.py reward {pr['referred']} {pr['referrer']}")
                 print("-" * 70)
         else:
             print("\n✓ No pending rewards")
@@ -277,7 +277,7 @@ def check_referrals_local():
             print(f"  Completed: {completed_at[:16] if completed_at else 'N/A'}")
             print(f"  Referred:  {ref_email} → Send PRO 1-month")
             print(f"  Referrer:  {referrer_email} → Send ULTIMATE 1-month")
-            print(f"\n  Command: python admin_tools.py reward {ref_email} {referrer_email}")
+            print(f"\n  Command: python tools/admin_tools.py reward {ref_email} {referrer_email}")
             print("-" * 70)
     else:
         print("\n✓ No completed referrals yet")
@@ -629,7 +629,7 @@ def force_update(version, download_url, size_mb=0, changelog=""):
     Creates a local update state file that Seven reads.
     
     Usage:
-      python admin_tools.py update 1.2.0 https://github.com/.../SEVEN.Setup.1.2.0.exe
+      python tools/admin_tools.py update 1.2.0 https://github.com/.../SEVEN.Setup.1.2.0.exe
     """
     import json
     import os
@@ -695,20 +695,20 @@ def show_help():
 ║      types: monthly, yearly, lifetime                                     ║
 ║                                                                           ║
 ║      Examples:                                                            ║
-║        python admin_tools.py gen user@email.com pro monthly               ║
-║        python admin_tools.py gen user@email.com ultimate lifetime         ║
+║        python tools/admin_tools.py gen user@email.com pro monthly               ║
+║        python tools/admin_tools.py gen user@email.com ultimate lifetime         ║
 ║                                                                           ║
 ║  pro <email>                  Quick: Pro 1-month key                      ║
-║      Example: python admin_tools.py pro friend@gmail.com                  ║
+║      Example: python tools/admin_tools.py pro friend@gmail.com                  ║
 ║                                                                           ║
 ║  ultimate <email>             Quick: Ultimate 1-month key                 ║
-║      Example: python admin_tools.py ultimate vip@gmail.com                ║
+║      Example: python tools/admin_tools.py ultimate vip@gmail.com                ║
 ║                                                                           ║
 ║  list                         Show all active licenses                    ║
-║      Example: python admin_tools.py list                                  ║
+║      Example: python tools/admin_tools.py list                                  ║
 ║                                                                           ║
 ║  revoke <key>                 Deactivate a license                        ║
-║      Example: python admin_tools.py revoke VII-XXXX-XXXX-XXXX             ║
+║      Example: python tools/admin_tools.py revoke VII-XXXX-XXXX-XXXX             ║
 ║                                                                           ║
 ╠═══════════════════════════════════════════════════════════════════════════╣
 ║                                                                           ║
@@ -717,10 +717,10 @@ def show_help():
 ║                                                                           ║
 ║  referrals                    Check all referral status                   ║
 ║      Shows: Completed, Almost complete, All pending                       ║
-║      Example: python admin_tools.py referrals                             ║
+║      Example: python tools/admin_tools.py referrals                             ║
 ║                                                                           ║
 ║  reward <referred> <referrer> Generate reward keys for completed referral ║
-║      Example: python admin_tools.py reward friend@email.com you@email.com ║
+║      Example: python tools/admin_tools.py reward friend@email.com you@email.com ║
 ║                                                                           ║
 ╠═══════════════════════════════════════════════════════════════════════════╣
 ║                                                                           ║
@@ -728,13 +728,13 @@ def show_help():
 ║  ────────────────────────────────────────────────────────────────────     ║
 ║                                                                           ║
 ║  emails                       List all registered emails                  ║
-║      Example: python admin_tools.py emails                                ║
+║      Example: python tools/admin_tools.py emails                                ║
 ║                                                                           ║
 ║  usage                        Show usage time for ALL users               ║
-║      Example: python admin_tools.py usage                                 ║
+║      Example: python tools/admin_tools.py usage                                 ║
 ║                                                                           ║
 ║  usage <email>                Show usage time for SPECIFIC user           ║
-║      Example: python admin_tools.py usage jacksonnote@gmail.com           ║
+║      Example: python tools/admin_tools.py usage jacksonnote@gmail.com           ║
 ║                                                                           ║
 ║                                                                           ║
 ╠═══════════════════════════════════════════════════════════════════════════╣
@@ -742,9 +742,9 @@ def show_help():
 ║  DAILY WORKFLOW                                                           ║
 ║  ────────────────────────────────────────────────────────────────────     ║
 ║                                                                           ║
-║  1. Check referrals:   python admin_tools.py referrals                    ║
-║  2. Check usage:       python admin_tools.py usage                        ║
-║  3. Send rewards:      python admin_tools.py reward <email1> <email2>     ║
+║  1. Check referrals:   python tools/admin_tools.py referrals                    ║
+║  2. Check usage:       python tools/admin_tools.py usage                        ║
+║  3. Send rewards:      python tools/admin_tools.py reward <email1> <email2>     ║
 ║  4. Copy emails and send via Gmail                                        ║
 ║                                                                           ║
 ╚═══════════════════════════════════════════════════════════════════════════╝
@@ -763,14 +763,14 @@ if __name__ == "__main__":
     
     elif cmd == "gen":
         if len(sys.argv) < 3:
-            print("Usage: python admin_tools.py gen <email> [tier] [plan] [custom-key]")
+            print("Usage: python tools/admin_tools.py gen <email> [tier] [plan] [custom-key]")
             print()
             print("Examples:")
-            print("  python admin_tools.py gen user@email.com pro monthly")
-            print("  python admin_tools.py gen user@email.com ultimate lifetime")
-            print("  python admin_tools.py gen user@email.com ultimate monthly LAUNCH-2025")
-            print("  python admin_tools.py gen user@email.com ultimate lifetime VIP-MANIKANTA")
-            print("  python admin_tools.py gen user@email.com pro monthly BETA-FRIEND")
+            print("  python tools/admin_tools.py gen user@email.com pro monthly")
+            print("  python tools/admin_tools.py gen user@email.com ultimate lifetime")
+            print("  python tools/admin_tools.py gen user@email.com ultimate monthly LAUNCH-2025")
+            print("  python tools/admin_tools.py gen user@email.com ultimate lifetime VIP-MANIKANTA")
+            print("  python tools/admin_tools.py gen user@email.com pro monthly BETA-FRIEND")
             sys.exit(1)
         email      = sys.argv[2]
         tier       = sys.argv[3] if len(sys.argv) > 3 else "ultimate"
@@ -784,19 +784,19 @@ if __name__ == "__main__":
         Anyone who has the key can activate it.
         
         Usage:
-          python admin_tools.py custom LAUNCH-2025
-          python admin_tools.py custom BETA-FRIEND pro monthly
-          python admin_tools.py custom EARLYBIRD ultimate yearly
-          python admin_tools.py custom VIP-MK ultimate lifetime
+          python tools/admin_tools.py custom LAUNCH-2025
+          python tools/admin_tools.py custom BETA-FRIEND pro monthly
+          python tools/admin_tools.py custom EARLYBIRD ultimate yearly
+          python tools/admin_tools.py custom VIP-MK ultimate lifetime
         """
         if len(sys.argv) < 3:
-            print("Usage: python admin_tools.py custom <key-name> [tier] [plan]")
+            print("Usage: python tools/admin_tools.py custom <key-name> [tier] [plan]")
             print()
             print("Examples:")
-            print("  python admin_tools.py custom LAUNCH-2025")
-            print("  python admin_tools.py custom BETA-FRIEND pro monthly")
-            print("  python admin_tools.py custom EARLYBIRD ultimate yearly")
-            print("  python admin_tools.py custom VIP-MK ultimate lifetime")
+            print("  python tools/admin_tools.py custom LAUNCH-2025")
+            print("  python tools/admin_tools.py custom BETA-FRIEND pro monthly")
+            print("  python tools/admin_tools.py custom EARLYBIRD ultimate yearly")
+            print("  python tools/admin_tools.py custom VIP-MK ultimate lifetime")
             sys.exit(1)
         custom_key = sys.argv[2]
         tier       = sys.argv[3] if len(sys.argv) > 3 else "ultimate"
@@ -807,13 +807,13 @@ if __name__ == "__main__":
     
     elif cmd == "pro":
         if len(sys.argv) < 3:
-            print("Usage: python admin_tools.py pro <email>")
+            print("Usage: python tools/admin_tools.py pro <email>")
             sys.exit(1)
         generate_license(sys.argv[2], "pro", "monthly")
     
     elif cmd == "ultimate":
         if len(sys.argv) < 3:
-            print("Usage: python admin_tools.py ultimate <email>")
+            print("Usage: python tools/admin_tools.py ultimate <email>")
             sys.exit(1)
         generate_license(sys.argv[2], "ultimate", "monthly")
     
@@ -822,15 +822,15 @@ if __name__ == "__main__":
     
     elif cmd == "revoke":
         if len(sys.argv) < 3:
-            print("Usage: python admin_tools.py revoke <license_key>")
+            print("Usage: python tools/admin_tools.py revoke <license_key>")
             sys.exit(1)
         revoke_license(sys.argv[2])
 
     elif cmd == "demote":
         if len(sys.argv) < 3:
-            print("Usage: python admin_tools.py demote <email or license_key>")
-            print("Example: python admin_tools.py demote friend@gmail.com")
-            print("Example: python admin_tools.py demote VII-XXXX-XXXX-XXXX")
+            print("Usage: python tools/admin_tools.py demote <email or license_key>")
+            print("Example: python tools/admin_tools.py demote friend@gmail.com")
+            print("Example: python tools/admin_tools.py demote VII-XXXX-XXXX-XXXX")
             sys.exit(1)
         demote_user(sys.argv[2])
     
@@ -850,16 +850,16 @@ if __name__ == "__main__":
     
     elif cmd == "reward":
         if len(sys.argv) < 4:
-            print("Usage: python admin_tools.py reward <referred_email> <referrer_email>")
+            print("Usage: python tools/admin_tools.py reward <referred_email> <referrer_email>")
             sys.exit(1)
         send_referral_reward(sys.argv[2], sys.argv[3])
 
     elif cmd == "update":
         if len(sys.argv) < 4:
-            print("Usage: python admin_tools.py update <version> <download_url> [size_mb] [changelog]")
+            print("Usage: python tools/admin_tools.py update <version> <download_url> [size_mb] [changelog]")
             print()
             print("Example:")
-            print("  python admin_tools.py update 1.2.0 https://github.com/.../SEVEN.Setup.1.2.0.exe 145")
+            print("  python tools/admin_tools.py update 1.2.0 https://github.com/.../SEVEN.Setup.1.2.0.exe 145")
             sys.exit(1)
         version      = sys.argv[2]
         url          = sys.argv[3]
@@ -872,4 +872,4 @@ if __name__ == "__main__":
     
     else:
         print(f"❌ Unknown command: {cmd}")
-        print("Run 'python admin_tools.py help' for usage")
+        print("Run 'python tools/admin_tools.py help' for usage")
