@@ -60,8 +60,8 @@ export default function Settings() {
 
   return (
     <PageShell title="Settings" description={active.desc} actions={<SaveIndicator />}>
-      <div className="mx-auto flex max-w-[1080px] gap-8 px-8 py-6">
-        <nav aria-label="Settings sections" className="w-48 shrink-0">
+      <div className="mx-auto flex max-w-[980px] gap-6 px-6 py-5">
+        <nav aria-label="Settings sections" className="w-44 shrink-0">
           <ul className="sticky top-0 space-y-0.5">
             {SECTIONS.map(s => {
               const Icon = s.icon;
@@ -69,7 +69,7 @@ export default function Settings() {
               return (
                 <li key={s.key}>
                   <button onClick={() => setParams({ section: s.key })} aria-current={on ? 'page' : undefined}
-                          className={cx('flex h-8 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-[13px] transition-colors',
+                          className={cx('flex h-7 w-full items-center gap-2 rounded-md px-2 text-left text-[12.5px] transition-colors',
                                         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-s-accent/60',
                                         on ? 'bg-s-card-h text-s-text font-medium' : 'text-s-text-3 hover:bg-s-card hover:text-s-text')}>
                     <Icon size={15} className={on ? 'text-s-accent-h' : 'text-s-text-3'} />
@@ -81,7 +81,7 @@ export default function Settings() {
           </ul>
         </nav>
 
-        <div key={active.key} className="page-in min-w-0 flex-1 space-y-5 pb-10">
+        <div key={active.key} className="page-in min-w-0 flex-1 space-y-3.5 pb-10">
           {loading || !config ? <LoadingRows rows={5} /> : <Active config={config} />}
         </div>
       </div>

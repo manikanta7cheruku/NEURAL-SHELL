@@ -205,7 +205,7 @@ export default function Plans() {
 
   return (
     <PageShell title="Plans" description="Seven runs entirely on your computer on every plan. Paid plans raise limits and add extras.">
-      <div className="mx-auto max-w-[1080px] space-y-6 px-8 py-6">
+      <div className="mx-auto max-w-[980px] space-y-4 px-6 py-5">
         <CurrentPlan tier={tier} isTrial={isTrial} daysUntilExpiry={daysUntilExpiry} />
 
         {!catalog ? <LoadingRows rows={3} /> : catalog.error ? (

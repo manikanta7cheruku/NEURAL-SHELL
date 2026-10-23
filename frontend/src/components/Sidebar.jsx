@@ -77,7 +77,7 @@ function NavItem({ item, collapsed, badges }) {
 
   return (
     <NavLink to={item.to} title={collapsed ? item.label : undefined} aria-label={item.label}
-             className={`group relative flex h-8 items-center gap-2.5 rounded-lg text-[13px] transition-colors duration-150
+             className={`group relative flex h-[30px] items-center gap-2.5 rounded-md text-[12.5px] transition-colors duration-150
                          focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-s-accent/60
                          ${collapsed ? 'justify-center px-0' : 'px-2.5'}
                          ${active ? 'bg-s-card-h text-s-text font-medium'
@@ -135,8 +135,8 @@ export default function Sidebar() {
 
   return (
     <aside className={`flex h-full shrink-0 select-none flex-col border-r border-s-border bg-s-surface
-                       transition-[width] duration-200 ease-out ${collapsed ? 'w-[60px]' : 'w-56'}`}>
-      <div className={`flex h-14 items-center border-b border-s-border ${collapsed ? 'justify-center' : 'px-4'}`}>
+                       transition-[width] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] ${collapsed ? 'w-[56px]' : 'w-52'}`}>
+      <div className={`flex h-12 items-center border-b border-s-border ${collapsed ? 'justify-center' : 'px-3.5'}`}>
         <NavLink to="/" title="Seven home" className="flex min-w-0 items-center gap-2.5 rounded-lg
                                                      focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-s-accent/60">
           <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-s-accent/25 bg-s-accent/10">
