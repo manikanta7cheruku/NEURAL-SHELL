@@ -1,155 +1,206 @@
-export default function AccountSection({
-  local, config,
-  editName, setEditName,
-  editEmail, setEditEmail,
-  editingId, setEditingId,
-  savingId, savedId,
-  saveIdentity, navigate
-}) {
-  const isPro = local.license?.tier === 'pro' || local.license?.tier === 'ultimate';
+/**
+ * Account: profile (name and email), current plan, and referrals.
+ * Saving the profile also re-registers the device with Seven's server, as before.
+ */
+import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Copy, Check, Share2 } from 'lucide-react';
+import api from '../../api';
+import useConfig from '../../stores/useConfig';
+import useLicense from '../../stores/useLicense';
+import { Section, Row, Body, Button, Input, Badge, Dialog } from '../../components/ui';
+import { toast } from '../../lib/toast';
+
+const DOWNLOAD_URL = 'https://github.com/manikanta7cheruku/seven-releases/releases/latest';
+const PLAN_NAMES = { free: 'Free', pro: 'Pro', ultimate: 'Ultimate' };
+
+function hours(h) {
+  if (!h) return '0 min';
+  const m = Math.round(h * 60);
+  if (m < 60) return `${m} min`;
+  return m % 60 ? `${Math.floor(m / 60)} hr ${m % 60} min` : `${Math.floor(m / 60)} hr`;
+}
+
+function Profile({ config }) {
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(config.identity?.user_name || '');
+  const [email, setEmail] = useState(config.email || '');
+  const [saving, setSaving] = useState(false);
+  const [confirmEmail, setConfirmEmail] = useState(false);
+
+  const reset = () => {
+    setName(config.identity?.user_name || '');
+    setEmail(config.email || '');
+    setEditing(false);
+  };
+
+  const persist = async () => {
+    setConfirmEmail(false);
+    setSaving(true);
+    try {
+      await api.put('/config', { updates: { email: email.trim(), identity: { ...config.identity, user_name: name.trim() } } });
+      try { await api.post('/email/save', { email: email.trim() }); } catch {}
+      try {
+        const device = await api.get('/usage/stats');
+        await fetch('https://seven-server-u2rp.onrender.com/api/register', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ device_id: device.data?.device_id || '', name: name.trim(), email: email.trim(), country: null }),
+        });
+      } catch {}
+      await useConfig.getState().fetch();
+      setEditing(false);
+      toast.success('Profile saved');
+    } catch {
+      toast.error('Could not save your profile', 'Check that Seven is running, then try again.');
+    }
+    setSaving(false);
+  };
+
+  const save = () => {
+    if (!name.trim()) return;
+    const licensed = config.license?.tier && config.license.tier !== 'free';
+    if (licensed && email.trim() !== (config.email || '').trim()) setConfirmEmail(true);
+    else persist();
+  };
 
   return (
-    <div className="bg-white/[0.02] border border-white/8 rounded-2xl overflow-hidden">
-      <div className="px-5 py-4 border-b border-white/[0.05] flex items-center justify-between">
-        <div>
-          <h2 className="text-[12px] font-semibold text-white/85">Profile</h2>
-          <p className="text-[9px] text-white/35 mt-0.5">Your account details and plan</p>
+    <Section title="Profile" description="How Seven addresses you, and the email linked to your license."
+             actions={editing
+               ? <><Button variant="ghost" size="sm" onClick={reset} disabled={saving}>Cancel</Button>
+                   <Button variant="primary" size="sm" onClick={save} loading={saving} disabled={!name.trim()}>Save</Button></>
+               : <Button size="sm" onClick={() => setEditing(true)}>Edit</Button>}>
+      <Row label="Name" htmlFor="profile-name">
+        {editing
+          ? <Input id="profile-name" value={name} onChange={e => setName(e.target.value)} className="w-64" autoFocus />
+          : <span className="text-[13px] text-s-text">{config.identity?.user_name || 'Not set'}</span>}
+      </Row>
+      <Row label="Email" htmlFor="profile-email">
+        {editing
+          ? <Input id="profile-email" type="email" value={email} onChange={e => setEmail(e.target.value)} className="w-64" placeholder="you@example.com" />
+          : <span className="text-[13px] text-s-text">{config.email || 'Not set'}</span>}
+      </Row>
+      <Dialog open={confirmEmail} title="Change the email on your license?"
+              description={`Your license stays active on this device. The email changes from ${config.email || 'none'} to ${email.trim()}.`}
+              confirmLabel="Change email" onConfirm={persist} onCancel={() => setConfirmEmail(false)} />
+    </Section>
+  );
+}
+
+function Plan() {
+  const navigate = useNavigate();
+  const { tier, licenseKey, isTrial, daysUntilExpiry, fetchStatus } = useLicense();
+  useEffect(() => { fetchStatus(); }, [fetchStatus]);
+  const paid = tier === 'pro' || tier === 'ultimate';
+
+  return (
+    <Section title="Plan" actions={<Button size="sm" onClick={() => navigate('/plans')}>{paid ? 'Manage plan' : 'See plans'}</Button>}>
+      <Row label="Current plan" description="Facts and conversation history are unlimited on every plan.">
+        <div className="flex items-center gap-2">
+          {isTrial && <Badge tone="warning">Trial</Badge>}
+          <Badge tone={paid ? 'accent' : 'neutral'}>{PLAN_NAMES[tier] || 'Free'}</Badge>
         </div>
-        {!editingId ? (
-          <button
-            onClick={() => setEditingId(true)}
-            className="text-[10px] text-s-accent/80 hover:text-s-accent
-                       px-3 py-1 rounded-lg hover:bg-s-accent/8 transition-all"
-          >
-            Edit
-          </button>
-        ) : (
-          <div className="flex gap-1">
-            <button
-              onClick={() => {
-                setEditingId(false);
-                setEditName(config?.identity?.user_name || '');
-                setEditEmail(config?.email || '');
-              }}
-              className="text-[10px] text-white/35 hover:text-white/60 px-3 py-1 transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={saveIdentity}
-              disabled={savingId}
-              className="text-[10px] text-s-accent font-medium px-3 py-1
-                         bg-s-accent/8 border border-s-accent/15 rounded-lg
-                         hover:bg-s-accent/15 transition-all"
-            >
-              {savingId ? 'Saving...' : savedId ? 'Saved' : 'Save'}
-            </button>
-          </div>
-        )}
-      </div>
+      </Row>
+      {daysUntilExpiry != null && paid && (
+        <Row label={isTrial ? 'Trial ends' : 'Renews or expires'}>
+          <span className="text-[13px] text-s-text tabular-nums">in {daysUntilExpiry} day{daysUntilExpiry === 1 ? '' : 's'}</span>
+        </Row>
+      )}
+      {paid && licenseKey && (
+        <Row label="License key">
+          <span className="font-mono text-[12px] text-s-text-2">{licenseKey.slice(0, 9)}{'•'.repeat(8)}</span>
+        </Row>
+      )}
+    </Section>
+  );
+}
 
-      <div className="p-5 space-y-4">
-        <div className="flex items-center justify-between">
-          <span className="text-[11px] text-white/55">Name</span>
-          {editingId ? (
-            <input
-              value={editName}
-              onChange={e => setEditName(e.target.value)}
-              className="bg-white/[0.03] border border-s-accent/25 rounded-lg px-3 py-1.5
-                         text-[11px] text-white/80 w-48 focus:border-s-accent/50 outline-none
-                         transition-colors"
-              placeholder="Your name"
-              autoFocus
-            />
-          ) : (
-            <span className="text-[11px] text-white/90 font-medium">
-              {local.identity?.user_name || '—'}
-            </span>
-          )}
-        </div>
+function Referrals() {
+  const [stats, setStats] = useState(null);
+  const [copied, setCopied] = useState(false);
 
-        <div className="flex items-center justify-between">
-          <span className="text-[11px] text-white/55">Email</span>
-          {editingId ? (
-            <input
-              value={editEmail}
-              onChange={e => setEditEmail(e.target.value)}
-              type="email"
-              className="bg-white/[0.03] border border-s-accent/25 rounded-lg px-3 py-1.5
-                         text-[11px] text-white/80 w-56 focus:border-s-accent/50 outline-none
-                         transition-colors font-mono"
-              placeholder="you@email.com"
-            />
-          ) : (
-            <span className="text-[11px] text-white/80 font-mono truncate max-w-[240px]">
-              {local.email || '—'}
-            </span>
-          )}
-        </div>
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await api.get('/referral/stats');
+        const s = r.data;
+        if (!s.referral_code) {
+          try { s.referral_code = (await api.post('/referral/create', {})).data.referral_code; } catch {}
+        }
+        setStats(s);
+      } catch { setStats({}); }
+    })();
+  }, []);
 
-        <div className="flex items-center justify-between">
-          <span className="text-[11px] text-white/55">Plan</span>
-          <div className="flex items-center gap-2">
-            <span className={`text-[10px] font-semibold px-2.5 py-0.5 rounded-md border
-              ${isPro
-                ? 'bg-s-accent/10 text-s-accent border-s-accent/20'
-                : 'bg-white/[0.03] text-white/50 border-white/8'}`}>
-              {local.license?.tier?.toUpperCase() || 'FREE'}
-            </span>
-            <button
-              onClick={() => navigate('/plans')}
-              className="text-[10px] text-s-accent hover:underline"
-            >
-              {isPro ? 'Manage' : 'Upgrade'}
-            </button>
-          </div>
-        </div>
+  const code = stats?.referral_code;
+  const message = `I use Seven, a private AI voice assistant that runs entirely on my PC. Nothing leaves the device.\n\n`
+    + `Download: ${DOWNLOAD_URL}\n\nEnter my referral code during setup: ${code}\n\n`
+    + 'Use Seven for 7 hours and you get Pro free for a month.';
 
-        {isPro && local.license?.key && (
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] text-white/55">License</span>
-            <span className="text-[10px] font-mono text-white/60">
-              {local.license.key.slice(0, 12)}...
-            </span>
-          </div>
-        )}
+  const copy = () => {
+    navigator.clipboard.writeText(message);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+  const share = async () => {
+    if (navigator.share) {
+      try { await navigator.share({ title: 'Seven', text: message, url: DOWNLOAD_URL }); return; } catch {}
+    }
+    copy();
+  };
+  const open = url => window.open(url, '_blank');
 
-        <div className="pt-4 border-t border-white/[0.05]">
-          {(() => {
-            const t = local.license?.tier || 'free';
-            const featureMap = {
-              free: ['7 facts · 7 conversations · 1 file · 7 schedules · 3 aliases'],
-              pro: ['77 facts · 77 conversations · 7 files · 17 schedules · 7 aliases'],
-              ultimate: ['Unlimited everything · Voice ID · Memory export · 3 devices'],
-            };
-            return (
-              <div className="space-y-3">
-                <p className="text-[10.5px] text-white/55 leading-relaxed">
-                  {featureMap[t]?.[0]}
-                </p>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => navigate('/blog')}
-                    className="text-[10px] px-3 py-1.5 border border-s-accent/20 bg-s-accent/8
-                               text-s-accent rounded-lg hover:bg-s-accent/15 transition-all"
-                  >
-                    How to use
-                  </button>
-                  {t !== 'ultimate' && (
-                    <button
-                      onClick={() => navigate('/plans')}
-                      className="text-[10px] px-3 py-1.5 border border-white/8 text-white/55
-                                 rounded-lg hover:bg-white/[0.03] hover:text-white/75 transition-all"
-                    >
-                      {t === 'free' ? 'Upgrade to Pro' : 'Upgrade to Ultimate'}
-                    </button>
-                  )}
-                </div>
+  return (
+    <Section title="Referrals" description="When a friend you invite uses Seven for 7 hours, they get Pro and you get Ultimate, each free for one month.">
+      {!stats ? (
+        <Body className="text-[13px] text-s-text-3">Loading referral details</Body>
+      ) : !code ? (
+        <Body className="text-[13px] text-s-text-3">Add your email in Profile to get a referral code.</Body>
+      ) : (
+        <>
+          <Row label="Your code" description="Copying includes a short message and the download link.">
+            <div className="flex items-center gap-2">
+              <span className="rounded-lg border border-s-border bg-s-bg px-3 h-8 inline-flex items-center font-mono text-[13px] tracking-[0.15em] text-s-text">
+                {code}
+              </span>
+              <Button size="sm" icon={copied ? Check : Copy} onClick={copy}>{copied ? 'Copied' : 'Copy'}</Button>
+            </div>
+          </Row>
+          <Row label="Share">
+            <div className="flex items-center gap-2">
+              <Button size="sm" onClick={() => open(`https://wa.me/?text=${encodeURIComponent(message)}`)}>WhatsApp</Button>
+              <Button size="sm" onClick={() => open(`https://x.com/intent/tweet?text=${encodeURIComponent(`Seven is a private AI voice assistant that runs 100% on your PC. Use code ${code} during setup. ${DOWNLOAD_URL}`)}`)}>X</Button>
+              <Button size="sm" icon={Share2} onClick={share}>More</Button>
+            </div>
+          </Row>
+          <Row label="Progress">
+            <div className="flex items-center gap-5 text-[13px] text-s-text-2">
+              <span><span className="font-semibold text-s-text tabular-nums">{stats.completed_referrals ?? 0}</span> completed</span>
+              <span><span className="font-semibold text-s-text tabular-nums">{stats.pending_referrals ?? 0}</span> in progress</span>
+            </div>
+          </Row>
+          {stats.pending_details?.map((ref, i) => (
+            <Body key={i}>
+              <div className="flex items-center justify-between text-[12px]">
+                <span className="truncate text-s-text-2">{ref.email}</span>
+                <span className="tabular-nums text-s-text-3">{hours(ref.usage_hours)} of 7 hr</span>
               </div>
-            );
-          })()}
-        </div>
-      </div>
-    </div>
+              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-s-card-h">
+                <div className="h-full rounded-full bg-s-accent transition-[width] duration-500" style={{ width: `${ref.progress_percent}%` }} />
+              </div>
+            </Body>
+          ))}
+        </>
+      )}
+    </Section>
+  );
+}
+
+export default function AccountSection({ config }) {
+  return (
+    <>
+      <Profile config={config} />
+      <Plan />
+      <Referrals />
+    </>
   );
 }
