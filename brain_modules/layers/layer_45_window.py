@@ -105,7 +105,7 @@ def process(ctx, deps):
             _parts[_k] = _v
 
     _action   = _parts.get("action", "")
-    _target   = _parts.get("target", "").replace(",", " and ")
+    _target   = (_parts.get("target") or _parts.get("targets", "")).replace("|||", " ").replace(",", " and ")
     _position = _parts.get("position", "")
     _mode     = _parts.get("mode", "")
 
