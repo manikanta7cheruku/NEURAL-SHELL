@@ -112,13 +112,22 @@ def app_help_answer(text: str) -> Optional[str]:
     return app_map.describe(hits[0])
 
 
-def capability_list_answer(norm: str) -> str:
+def capability_list_answer(norm: str, state=None) -> str:
     toks = set(norm.split())
     if toks & {"app", "apps", "programs", "applications", "open"}:
         cap = capabilities.get("apps")
         base = capabilities.describe(cap)
         return base + " I don't keep a list of every app. If it's installed, say \"open\" and its name and I'll find it."
-    return capabilities.overview()
+    # Asked again in the same chat: a short reply, not the same paragraph word for word.
+    turn = getattr(state, "turn", None)
+    last = getattr(state, "last_overview_turn", None)
+    brief = turn is not None and last is not None and turn - last <= 8
+    if state is not None and turn is not None:
+        try:
+            state.last_overview_turn = turn
+        except Exception:
+            pass
+    return capabilities.overview(brief=brief)
 
 
 def value_answer() -> str:
@@ -139,7 +148,7 @@ def answer(label: str, ctx, config) -> Optional[str]:
     """Dispatch a routed self-knowledge intent. None means 'not mine, let the pipeline continue'."""
     norm = ctx.norm_in
     if label == "capability_list":
-        return capability_list_answer(norm)
+        return capability_list_answer(norm, getattr(ctx, "state", None))
     if label == "capability_check":
         reply = capabilities.answer_can_you(norm)
         if reply:
