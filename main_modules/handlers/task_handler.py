@@ -6,6 +6,7 @@ Communicates with Seven API on 127.0.0.1:7777.
 Writes panel trigger file for LIST action to open task panel.
 """
 
+import re
 import os
 import requests
 from colorama import Fore
@@ -46,7 +47,9 @@ class TaskHandler(BaseHandler):
             try:
                 from datetime import date, timedelta
                 dl = due_raw.lower()
-                if "today" in dl or "tonight" in dl:
+                if re.fullmatch(r"\d{4}-\d{2}-\d{2}", dl):
+                    due_date = dl
+                elif "today" in dl or "tonight" in dl:
                     due_date = date.today().isoformat()
                 elif "tomorrow" in dl:
                     due_date = (date.today() + timedelta(days=1)).isoformat()
