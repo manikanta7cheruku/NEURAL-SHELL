@@ -243,6 +243,7 @@ export default function Landing() {
     return () => window.removeEventListener('keydown', onKey);
   }, [navigate]);
 
+  const chatted = log.some(e => e.who === 'seven' && e.done);   // shown once Seven has finished its first reply
   const state = st.thinking || busy ? 'thinking' : st.speaking ? 'speaking' : st.listening ? 'listening' : 'idle';
   const S = STATE[state];
   const name = (config?.identity?.user_name || '').trim();
@@ -303,19 +304,19 @@ export default function Landing() {
           </Panel>
         </aside>
 
-        <section className="flex min-h-0 flex-col items-center">
+        <section className="flex min-h-0 flex-col items-center justify-center pb-6">
           <div className="relative -my-10 shrink-0"><OrbGL state={state} size={210} /></div>
           <div className={cx(MONO, 'z-10 flex items-center gap-2 text-[11px] tracking-[0.28em]', S.tone)}>
             <span className="text-s-text-4">[</span>{S.label}<span className="text-s-text-4">]</span>
           </div>
           <p className="mt-1 text-[12px] text-s-text-3">{state === 'idle' && name ? `Hi ${name}. ` : ''}{S.hint}</p>
 
-          <div className="mt-4 flex min-h-0 w-full max-w-[680px] flex-1 flex-col rounded-lg border border-s-border/80 bg-s-surface/55 backdrop-blur-md">
+          <div className="mt-4 flex w-full max-w-[560px] flex-col rounded-lg border border-s-border/80 bg-s-surface/55 backdrop-blur-md">
             <header className="flex items-center justify-between border-b border-s-border/70 px-3 py-2">
               <span className={cx(MONO, 'text-[10.5px] font-medium tracking-[0.18em] text-s-text-3')}>SESSION LOG</span>
               <span className={cx(MONO, 'text-[10.5px] text-s-text-4')}>{log.length ? `${log.filter(l => l.who === 'you').length} turns` : 'voice and text'}</span>
             </header>
-            <div className="min-h-[72px] flex-1 overflow-y-auto px-3 py-2 [mask-image:linear-gradient(to_bottom,transparent,black_18px)]">
+            <div className="h-[148px] overflow-y-auto px-3 py-2 [mask-image:linear-gradient(to_bottom,transparent,black_18px)]">
               {log.length === 0 ? (
                 <div className={cx(MONO, 'py-1 text-[11.5px] leading-6 text-s-text-4')}>
                   <div>Seven is ready. Everything said here, by voice or text, appears in this log.</div>
@@ -331,6 +332,15 @@ export default function Landing() {
                     {[0, 1, 2].map(d => <span key={d} className="h-1 w-1 animate-pulse rounded-full bg-s-text-3" style={{ animationDelay: `${d * 160}ms` }} />)}
                   </span>
                 </div>
+              )}
+              {chatted && !busy && (
+                <button onClick={() => navigate('/console')}
+                        className={cx(MONO, 'page-in group/c mt-1.5 flex w-full items-center gap-2 rounded-md border border-dashed border-s-border',
+                                      'px-2.5 py-1.5 text-left text-[11px] text-s-text-3 transition-colors hover:border-s-accent/40 hover:text-s-text')}>
+                  <span className="text-s-accent-h">›</span>
+                  Continue this chat in the Console
+                  <span className="ml-auto text-s-text-4 transition-transform duration-200 group-hover/c:translate-x-0.5">→</span>
+                </button>
               )}
               <div ref={logEnd} />
             </div>

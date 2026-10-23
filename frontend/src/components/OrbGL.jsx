@@ -14,7 +14,7 @@
  * States ease into each other:
  *   idle       slow breathing, deep indigo
  *   listening  emerald, fine ripples travel across the surface
- *   thinking   violet, a sheen sweeps around the sphere
+ *   thinking   violet, the inner light turns and a sheen sweeps slowly around
  *   speaking   indigo to cyan, the surface pulses
  *
  * Falls back to the 2D canvas orb when WebGL is unavailable and slows down
@@ -35,7 +35,7 @@ const VERT = `attribute vec2 p; void main(){ gl_Position = vec4(p, 0.0, 1.0); }`
 const FRAG = `
 precision highp float;
 uniform vec2 uRes;
-uniform float uTime, uEnergy, uListen, uThink, uSpeak, uHover;
+uniform float uTime, uEnergy, uListen, uThink, uSpeak, uHover, uSpin;
 uniform vec2 uMouse;
 uniform vec3 uColA, uColB;
 
@@ -95,8 +95,8 @@ float fbm(vec3 q){
 float map(vec3 p){
   vec3 q = rotX(uMouse.y * 0.3) * rotY(uTime * 0.08 - uMouse.x * 0.4) * p;
   float d = snoise(q * 1.05 + vec3(0.0, uTime * 0.16, uTime * 0.11)) * (0.025 + 0.05 * uEnergy);
-  d += uSpeak * 0.035 * sin(uTime * 7.5 + q.y * 4.0) * (0.55 + 0.45 * sin(uTime * 2.1));
-  d += uListen * 0.014 * sin(length(q.xy) * 13.0 - uTime * 5.0);
+  d += uSpeak * 0.032 * sin(uTime * 4.6 + q.y * 4.0) * (0.55 + 0.45 * sin(uTime * 1.6));
+  d += uListen * 0.014 * sin(length(q.xy) * 13.0 - uTime * 3.4);
   vec3 toward = normalize(vec3(uMouse * 0.9, 1.0));
   d += uHover * 0.085 * pow(max(dot(normalize(p), toward), 0.0), 6.0);
   return length(p) - (0.9 + 0.014 * sin(uTime * 1.05) + d);
@@ -123,7 +123,8 @@ void main(){
   }
 
   vec3 glow = mix(uColA, uColB, 0.55);
-  float halo = exp(-max(minD, 0.0) * 3.6) * (0.3 + 0.34 * uEnergy);
+  // The halo fades to nothing well inside the canvas, so its square edge is never visible.
+  float halo = exp(-max(minD, 0.0) * 3.6) * (0.3 + 0.34 * uEnergy) * (1.0 - smoothstep(0.5, 0.96, length(uv)));
   if (!hit){
     float a = clamp(halo, 0.0, 1.0) * 0.8;
     gl_FragColor = vec4(glow * a, a);
@@ -139,7 +140,7 @@ void main(){
   // Light flowing inside the glass: a short volumetric walk along the refracted ray.
   vec3 rr = refract(rd, n, 0.78);
   vec3 flow = vec3(uTime * 0.09, -uTime * 0.13, uTime * 0.07);
-  mat3 spin = rotY(uTime * 0.15 + uThink * uTime * 0.6);
+  mat3 spin = rotY(uSpin);      // phase accumulated on the CPU, so a state change never makes it race
   vec3 inner = vec3(0.0);
   float acc = 0.0;
   for (int i = 1; i <= 7; i++){
@@ -147,7 +148,7 @@ void main(){
     float r = length(q);
     float f = fbm(spin * q * 1.35 + flow);
     float dens = smoothstep(-0.05, 0.75, f) * (1.0 - smoothstep(0.35, 0.95, r));
-    dens *= 0.55 + 0.6 * uEnergy + 0.5 * uSpeak * (0.5 + 0.5 * sin(uTime * 6.0 + r * 9.0));
+    dens *= 0.55 + 0.6 * uEnergy + 0.5 * uSpeak * (0.5 + 0.5 * sin(uTime * 3.6 + r * 9.0));
     vec3 c = mix(uColA, uColB, smoothstep(-0.3, 0.6, f + q.y * 0.4));
     inner += c * dens * (1.0 - acc) * 0.78;
     acc += dens * 0.16;
@@ -168,7 +169,7 @@ void main(){
   col += vec3(1.0) * (spec * 1.1 + sheen);
 
   float ang = atan(n.y, n.x);
-  float sweep = smoothstep(0.9, 1.0, sin(ang * 2.0 + uTime * 2.4)) * (0.3 + fres);
+  float sweep = smoothstep(0.9, 1.0, sin(ang * 2.0 + uSpin * 1.6)) * (0.3 + fres);
   col += vec3(0.92, 0.88, 1.0) * sweep * 0.5 * uThink;
 
   col += glow * halo * 0.25;
@@ -219,7 +220,7 @@ export default function OrbGL({ state = 'idle', size = 260 }) {
     const u = name => gl.getUniformLocation(program, name);
     const U = {
       res: u('uRes'), time: u('uTime'), energy: u('uEnergy'), listen: u('uListen'), think: u('uThink'),
-      speak: u('uSpeak'), hover: u('uHover'), mouse: u('uMouse'), a: u('uColA'), b: u('uColB'),
+      speak: u('uSpeak'), hover: u('uHover'), spin: u('uSpin'), mouse: u('uMouse'), a: u('uColA'), b: u('uColB'),
     };
 
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -233,7 +234,7 @@ export default function OrbGL({ state = 'idle', size = 260 }) {
 
     const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
     const s0 = STATES.idle;
-    const cur = { a: [...s0.a], b: [...s0.b], energy: s0.energy, listen: 0, think: 0, speak: 0, mx: 0, my: 0, hover: 0 };
+    const cur = { a: [...s0.a], b: [...s0.b], energy: s0.energy, listen: 0, think: 0, speak: 0, mx: 0, my: 0, hover: 0, spin: 0 };
     const pointer = { x: 0, y: 0, near: 0 };
 
     const onMove = e => {
@@ -265,6 +266,7 @@ export default function OrbGL({ state = 'idle', size = 260 }) {
       cur.mx = lerp(cur.mx, pointer.x * pointer.near, ep);
       cur.my = lerp(cur.my, pointer.y * pointer.near, ep);
       cur.hover = lerp(cur.hover, pointer.near, ep);
+      cur.spin += dt * (reduce ? 0.05 : 0.14 + 0.22 * cur.think + 0.08 * cur.speak);   // calm even while thinking
 
       gl.uniform1f(U.time, t);
       gl.uniform1f(U.energy, cur.energy);
@@ -272,6 +274,7 @@ export default function OrbGL({ state = 'idle', size = 260 }) {
       gl.uniform1f(U.think, cur.think);
       gl.uniform1f(U.speak, cur.speak);
       gl.uniform1f(U.hover, reduce ? 0 : cur.hover);
+      gl.uniform1f(U.spin, cur.spin);
       gl.uniform2f(U.mouse, cur.mx, cur.my);
       gl.uniform3fv(U.a, cur.a);
       gl.uniform3fv(U.b, cur.b);
