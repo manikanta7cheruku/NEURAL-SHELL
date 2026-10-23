@@ -116,6 +116,13 @@ class TabHTTPHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_POST(self):
+        if self.path == "/__seven_shutdown":
+            # Seven's backend is starting and needs port 7777 back.
+            self.send_response(200)
+            self.end_headers()
+            import threading
+            threading.Thread(target=self.server.shutdown, daemon=True).start()
+            return
         if self.path.startswith("/api/chrome/tabs"):
             try:
                 length = int(self.headers.get("Content-Length", 0))
