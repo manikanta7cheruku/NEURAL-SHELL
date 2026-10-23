@@ -8,7 +8,7 @@ import StepModel       from './setup/StepModel';
 import StepDone        from './setup/StepDone';
 
 const STEPS  = [StepWelcome, StepAboutYou, StepPersonalize, StepEnvironment, StepModel, StepDone];
-const LABELS = ['Welcome', 'Identity', 'Voice', 'Environment', 'Model', 'Launch'];
+const LABELS = ['Welcome', 'You', 'Voice', 'Install', 'Brain', 'Done'];
 
 function WindowControls() {
   const minimize = () => window.electronAPI?.minimize?.();
@@ -56,8 +56,8 @@ export default function Setup({ onComplete }) {
                    border-b border-white/[0.04]"
         style={{ WebkitAppRegion: 'drag' }}
       >
-        <span className="text-[10px] font-mono text-white/15 tracking-[0.3em] font-semibold">
-          SEVEN SETUP
+        <span className="font-display text-[11px] tracking-[0.38em] text-white/40">
+          SEVEN
         </span>
         <WindowControls />
       </div>

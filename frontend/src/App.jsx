@@ -345,6 +345,16 @@ export default function App() {
     );
   }
 
+  // Development only: open the setup wizard without resetting anything, at #/setup-preview.
+  // It runs the real steps, so finishing it saves those answers like a real first run.
+  if (import.meta.env.DEV && window.location.hash.startsWith('#/setup-preview')) {
+    return (
+      <HashRouter>
+        <Setup onComplete={() => { window.location.hash = '#/'; window.location.reload(); }} />
+      </HashRouter>
+    );
+  }
+
   // ── Render Case 5: Onboarding Wizard (First Launch) ──
   if (!setupDone) {
     return (

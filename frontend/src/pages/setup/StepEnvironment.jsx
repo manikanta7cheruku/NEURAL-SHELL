@@ -211,7 +211,7 @@ export default function StepEnvironment() {
       <div className="col-span-2 space-y-5">
         <div className="space-y-3">
           <div className="text-[10px] text-white/40 tracking-[0.3em] font-medium uppercase">Step 4 of 6</div>
-          <h2 className="text-[28px] font-bold text-white tracking-tight leading-tight">Environment<br/>Deployment</h2>
+          <h2 className="text-[24px] font-semibold text-white tracking-tight leading-tight">Getting this PC ready</h2>
           <p className="text-[12px] text-white/40 font-light">One-time setup of local AI binaries.</p>
           <div className="p-3 rounded-lg bg-white/[0.02] border border-white/[0.06] space-y-1.5">
             <div className="flex justify-between text-[10px]">
