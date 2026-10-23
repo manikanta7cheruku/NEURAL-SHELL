@@ -1,9 +1,20 @@
-import { defineConfig } from 'vite'
+import { defineConfig, createLogger } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
+// While Python is still starting, the UI polls /api/health every second and Vite would log a
+// "http proxy error ... ECONNREFUSED" for each try. That is expected, not a failure, so keep the log clean.
+const logger = createLogger()
+const logError = logger.error
+logger.error = (msg, options) => {
+  const text = `${msg} ${options?.error?.code || ''} ${options?.error?.message || ''}`
+  if (text.includes('proxy error') && /ECONNREFUSED|ECONNRESET/.test(text)) return
+  logError(msg, options)
+}
+
 export default defineConfig({
   base: './',
+  customLogger: logger,
   plugins: [react(), tailwindcss()],
   server: {
     host: '127.0.0.1',

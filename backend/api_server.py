@@ -24,6 +24,10 @@ import threading
 import time
 import os
 
+# transformers would otherwise import TensorFlow too: many seconds and gigabytes Seven never uses.
+os.environ.setdefault("USE_TF", "0")
+os.environ.setdefault("TRANSFORMERS_NO_TF", "1")
+
 def _evict_offline_listener() -> None:
     """
     While Seven is closed, a small listener (hands/workspace_modules/offline_tab_listener.py) keeps port 7777

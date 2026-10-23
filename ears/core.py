@@ -94,7 +94,20 @@ def _get_configured_model() -> str:
                 return model
     except Exception:
         pass
-    return "medium.en"
+    # Default by hardware: medium on a GPU, small on a CPU (medium on a CPU made the whole PC lag).
+    return "medium.en" if _gpu_available() else "small.en"
+
+
+def _gpu_available() -> bool:
+    """
+    Ask CTranslate2, the engine faster-whisper runs on. Do not ask torch: the bundled torch is a CPU-only
+    build, so torch.cuda.is_available() is False even on an RTX card and Whisper silently ran on the CPU.
+    """
+    try:
+        import ctranslate2
+        return ctranslate2.get_cuda_device_count() > 0
+    except Exception:
+        return False
 
 
 def _is_voice_id_enabled() -> bool:
@@ -123,24 +136,23 @@ def _is_voice_id_enabled() -> bool:
 # =============================================================================
 
 def _load_whisper(model_size: str) -> WhisperModel:
-    try:
-        import torch
-        if torch.cuda.is_available():
-            name = torch.cuda.get_device_name(0)
-            print(Fore.CYAN + f"[EARS] GPU: {name}")
+    if _gpu_available():
+        try:
             model = WhisperModel(
                 model_size, device="cuda", compute_type="float16"
             )
-            print(Fore.GREEN + f"[EARS] Whisper {model_size} — GPU ready")
+            print(Fore.GREEN + f"[EARS] Whisper {model_size}: GPU ready")
             return model
-    except Exception as e:
-        print(Fore.YELLOW + f"[EARS] GPU init failed: {e}")
+        except Exception as e:
+            print(Fore.YELLOW + f"[EARS] GPU init failed: {e}")
 
     try:
+        # Leave cores for the rest of the PC: transcription on every core froze other apps.
+        threads = max(2, min(4, (os.cpu_count() or 4) // 2))
         model = WhisperModel(
-            model_size, device="cpu", compute_type="int8"
+            model_size, device="cpu", compute_type="int8", cpu_threads=threads
         )
-        print(Fore.YELLOW + f"[EARS] Whisper {model_size} — CPU mode")
+        print(Fore.YELLOW + f"[EARS] Whisper {model_size}: CPU mode ({threads} threads)")
         return model
     except Exception as e:
         print(Fore.RED + f"[EARS] Whisper load failed: {e}")
