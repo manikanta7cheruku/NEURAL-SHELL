@@ -7,6 +7,10 @@ System init → API server → voice loop.
 """
 import sys
 import os
+
+# transformers would otherwise import TensorFlow too: many seconds and gigabytes Seven never uses.
+os.environ.setdefault("USE_TF", "0")
+os.environ.setdefault("TRANSFORMERS_NO_TF", "1")
 import time
 import threading
 import subprocess
