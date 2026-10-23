@@ -51,7 +51,6 @@ _WORKSPACE_RESTORE_TRIGGERS = [
     "launch workspace",
     "open my workspace",
     "restore my workspace",
-    "switch to",
     "go to workspace",
 ]
 

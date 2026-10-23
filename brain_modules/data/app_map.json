@@ -1,32 +1,62 @@
 {
   "app_map_version": 1,
-  "source_hash": "49246ded1c4a7c3c",
+  "source_hash": "ab839c0d3753d6b5",
   "pages": [
     {
       "id": "home",
       "route": "/",
       "component": "Landing",
-      "title": "SEVEN",
-      "purpose": "Seven's home screen: the orb shows whether Seven is listening, thinking or speaking, with quick links to the Console and Dashboard",
+      "title": "Prompt",
+      "purpose": "Seven's home screen: the orb shows what Seven is doing, the session log shows what was said, type to Seven or use /commands, live system and today panels, shortcuts to every page",
       "controls": [
+        {
+          "label": "Prompt",
+          "description": "Type anything to Seven, or a /command such as /tasks or /settings to open that page.",
+          "file": "Landing.jsx"
+        },
+        {
+          "label": "Shortcuts",
+          "description": "Press 1 to 7 to open Dashboard, Console, Tasks, Schedules, Memory, Settings or Guide.",
+          "file": "Landing.jsx"
+        },
         {
           "label": "SEVEN",
           "description": "",
           "file": "Landing.jsx"
         },
         {
-          "label": "Alt",
+          "label": "MODEL",
           "description": "",
           "file": "Landing.jsx"
         },
         {
-          "label": "Shift",
+          "label": "SESSION LOG",
+          "description": "Seven is ready. Everything said here, by voice or text, appears in this log.",
+          "file": "Landing.jsx"
+        },
+        {
+          "label": "Try",
           "description": "",
           "file": "Landing.jsx"
         },
         {
-          "label": "task panel",
-          "description": "Everything runs on this computer",
+          "label": "what can you do?",
+          "description": "",
+          "file": "Landing.jsx"
+        },
+        {
+          "label": "for commands.",
+          "description": "",
+          "file": "Landing.jsx"
+        },
+        {
+          "label": "running",
+          "description": "",
+          "file": "Landing.jsx"
+        },
+        {
+          "label": "nothing open",
+          "description": "ALT+S hide \u00b7 ALT+SHIFT+T tasks",
           "file": "Landing.jsx"
         }
       ],
@@ -34,7 +64,10 @@
         "home",
         "start",
         "orb",
-        "landing"
+        "landing",
+        "terminal",
+        "command",
+        "session"
       ],
       "sections": []
     },
@@ -73,11 +106,6 @@
         {
           "label": "Nothing scheduled",
           "description": "Say \"remind me to stretch at 4pm\".",
-          "file": "Home.jsx"
-        },
-        {
-          "label": "Time with Seven",
-          "description": "",
           "file": "Home.jsx"
         },
         {

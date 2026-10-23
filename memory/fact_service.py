@@ -87,6 +87,24 @@ def _enforce_limit(speaker_key: str, keep_id: int) -> int:
     return evicted
 
 
+def _same_slot(speaker_key: str, key: str) -> str:
+    """
+    "favorite language" after "favorite programming language" is the same
+    preference said shorter, so it updates that slot instead of opening a new
+    one. Matches only favorite_* slots that end in the same noun.
+    """
+    if not key.startswith("favorite_") or facts_store.get_active_by_key(speaker_key, key):
+        return key
+    words = set(key.split("_")[1:])
+    noun = key.rsplit("_", 1)[-1]
+    for row in facts_store.list_by_prefix(speaker_key, "favorite_"):
+        other = row.get("key") or ""
+        o_words = set(other.split("_")[1:])
+        if other != key and other.rsplit("_", 1)[-1] == noun and (words <= o_words or o_words <= words):
+            return other
+    return key
+
+
 def remember(speaker_key: str, fact: ExtractedFact, source_text: str = "",
              index: bool = True, source_msg_id: Optional[int] = None,
              conversation_id: Optional[str] = None, origin: str = "explicit") -> Dict[str, Any]:
@@ -96,8 +114,9 @@ def remember(speaker_key: str, fact: ExtractedFact, source_text: str = "",
     "I prefer X over Y" also replaces an existing slot holding Y, keeping Y
     as the former value.
     """
+    key = _same_slot(speaker_key, fact.key)
     result = facts_store.upsert_fact(
-        speaker_key, fact.key, fact.value, fact.text, category=fact.category,
+        speaker_key, key, fact.value, fact.text, category=fact.category,
         source_text=source_text, confidence=fact.confidence, origin=origin,
         source_msg_id=source_msg_id, conversation_id=conversation_id)
     if getattr(fact, "supersedes", None):
@@ -285,7 +304,7 @@ def answer_provenance(speaker_key: str, state=None) -> str:
     """How and when Seven learned the last thing it talked about, from stored evidence."""
     last = getattr(state, "last_recalled", None) if state is not None else None
     if not last or not last.get("key"):
-        return "I'm not sure which thing you mean. Ask me about one of your preferences first."
+        return profile_source_answer(speaker_key)
     rows = facts_store.get_history(speaker_key, last["key"])
     if not rows:
         return "I don't have a record of that anymore."
@@ -333,6 +352,82 @@ def reason_slot(speaker_key: str, recall, state=None) -> Optional[str]:
         return slots[0]
     last = getattr(state, "last_recalled", None) if state is not None else None
     return last.get("key") if last else None
+
+
+_SECOND_PERSON = (
+    (r"^User's ", "Your "), (r"^User is ", "You're "), (r"^User was ", "You were "), (r"^User has ", "You have "),
+    (r"^User does ", "You do "), (r"^User ([a-z]+?)ies\b", r"You \1y"), (r"^User ([a-z]+?)(ch|sh|ss|x)es\b", r"You \1\2"),
+    (r"^User ([a-z]+)s\b", r"You \1"), (r"^User\b", "You"),
+)
+_PROFILE_ORDER = ("personal", "work", "preference", "general", "manual")
+
+
+def _to_you(sentence: str) -> str:
+    """'User lives in Hyderabad' -> 'You live in Hyderabad'."""
+    s = (sentence or "").strip().rstrip(".")
+    for pat, rep in _SECOND_PERSON:
+        new = re.sub(pat, rep, s, count=1)
+        if new != s:
+            s = new
+            break
+    return (s[:1].upper() + s[1:] + ".") if s else ""
+
+
+def _profile_lines(speaker_key: str) -> List[str]:
+    rows = _reconcile(facts_store.all_active(speaker_key))
+    rows = [r for r in rows if r.get("value") or r.get("raw_value")]
+    rows.sort(key=lambda r: (_PROFILE_ORDER.index(r.get("category")) if r.get("category") in _PROFILE_ORDER
+                             else len(_PROFILE_ORDER), r.get("created_at") or ""))
+    lines, seen = [], set()
+    for r in rows:
+        if (r.get("key") or "").startswith("reason:"):
+            continue
+        line = _to_you(r.get("value") or f"User told me {r.get('raw_value')}")
+        if line and line.lower() not in seen:
+            seen.add(line.lower())
+            lines.append(line)
+    return lines
+
+
+def profile_answer(speaker_key: str, name: str = "") -> str:
+    """Everything Seven knows about the user, only from what they said. Never invented."""
+    lines = []
+    if name:
+        lines.append(f"Your name is {name}.")
+    facts = _profile_lines(speaker_key)
+    lines += facts
+    try:
+        from memory import learning_store
+        from brain_modules.curiosity import _gerund
+        for g in learning_store.list_goals(speaker_key)[:3]:
+            doing = _gerund(g["title"])
+            lines.append(f"You're {doing}." if doing != g["title"] else f"One of your goals: {g['title']}.")
+    except Exception:
+        pass
+    if not facts and len(lines) <= 1:
+        who = f"Your name, {name}, " if name else "Nothing yet. "
+        return (f"{who}and that's all so far. You haven't told me anything else about yourself. "
+                "Tell me things like where you live, what you do or what you're working on, and I'll remember.")
+    shown = lines[:12]
+    more = len(lines) - len(shown)
+    tail = f"\n\nAnd {more} more on the Memory page." if more > 0 else ""
+    return ("Here's what I know about you, all from what you've told me:\n\n" +
+            "\n".join(f"- {line}" for line in shown) + tail +
+            "\n\nIt's stored only on this computer. You can see, edit or delete any of it on the Memory page.")
+
+
+def profile_source_answer(speaker_key: str) -> str:
+    """How Seven came to know these things: the user's own words, with dates."""
+    rows = facts_store.all_active(speaker_key)
+    stamps = sorted(r["created_at"] for r in rows if r.get("created_at"))
+    if not stamps:
+        return ("Only from what you tell me, and you haven't told me much yet. "
+                "I don't read your files, accounts or browsing to learn about you.")
+    first, last = _when(stamps[0]), _when(stamps[-1])
+    span = f"The first was {first}, the latest {last}." if first != last else f"You told me {first}."
+    return ("Only from what you've told me in our chats. I don't read your files, accounts or browsing to learn "
+            f"about you. Each fact is saved with the message it came from. {span} "
+            "The Memory page shows every one, with when you said it.")
 
 
 def answer_recall(speaker_key: str, recall, state=None) -> Optional[str]:
