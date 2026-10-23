@@ -375,6 +375,22 @@ def answer_recall(speaker_key: str, recall, state=None) -> Optional[str]:
     return f"{value}."
 
 
+def _still_active(meta: Dict[str, Any]) -> bool:
+    """
+    A semantic hit backed by a SQLite fact counts only while that fact is active.
+    Without this, a fact deleted or replaced on the Memory page could still be
+    recalled from the index until the background worker caught up.
+    """
+    sql_id = meta.get("sql_id")
+    if sql_id in (None, ""):
+        return True                      # legacy documents have no SQLite row
+    try:
+        row = facts_store.get_by_id(int(sql_id))
+    except (TypeError, ValueError):
+        return True
+    return bool(row and row.get("active"))
+
+
 def semantic_facts(speaker_key: str, query: str, min_relevance: float = 0.70,
                    k: int = 3) -> List[str]:
     """
@@ -403,6 +419,8 @@ def semantic_facts(speaker_key: str, query: str, min_relevance: float = 0.70,
         meta = metas[i] if i < len(metas) and metas[i] else {}
         if relevance < min_relevance or meta.get("category") == "identity":
             continue
+        if not _still_active(meta):
+            continue
         if not fact_extractor.is_clean_fact_text(doc) or doc in out:
             continue
         out.append(doc)
@@ -415,6 +433,54 @@ def semantic_facts_async(speaker_key: str, query: str, min_relevance: float = 0.
                          k: int = 3) -> Future:
     """Start semantic search without blocking the pipeline."""
     return _pool.submit(semantic_facts, speaker_key, query, min_relevance, k)
+
+
+# --------------------------------------------------------------------------
+# Edits from the Memory page (keep SQLite and the semantic index in step)
+# --------------------------------------------------------------------------
+
+def add_manual(speaker_key: str, value: str, category: str = "manual", key: Optional[str] = None) -> int:
+    """A fact typed on the Memory page, stored under the same key the brain recalls with."""
+    fact_id = facts_store.add_fact(value=value, speaker_id=speaker_key, category=category, key=key,
+                                   source_text="Added on the Memory page")
+    index_fact(fact_id)
+    return fact_id
+
+
+def edit(fact_id: int, new_value: str, mode: str = "update") -> Optional[int]:
+    """Change a fact in place, or supersede it (old value kept as history). Returns the live fact id."""
+    row = facts_store.get_by_id(fact_id)
+    if not row or not row.get("active"):
+        return None
+    if mode == "supersede":
+        new_id = facts_store.supersede_fact(fact_id, new_value, source_text="Edited on the Memory page")
+        if new_id is None:
+            return None
+        _unindex(row.get("chroma_id"))
+        index_fact(new_id)
+        return new_id
+    if not facts_store.update_fact(fact_id, new_value):
+        return None
+    index_fact(fact_id, old_chroma_id=row.get("chroma_id"))
+    return fact_id
+
+
+def delete(fact_id: int) -> bool:
+    """Forget one fact everywhere: the SQLite row and its semantic index document."""
+    row = facts_store.get_by_id(fact_id)
+    if not row:
+        return False
+    _unindex(row.get("chroma_id") or f"sqlf_{fact_id}")
+    return facts_store.delete_fact(fact_id)
+
+
+def forget_all(speaker_key: Optional[str] = None) -> int:
+    """Delete every fact (for one speaker, or all) from SQLite and the semantic index."""
+    rows = facts_store.get_facts(speaker_id=speaker_key, active_only=False, limit=1_000_000)
+    for r in rows:
+        _unindex(r.get("chroma_id") or f"sqlf_{r['id']}")
+        facts_store.delete_fact(r["id"])
+    return len(rows)
 
 
 # --------------------------------------------------------------------------
