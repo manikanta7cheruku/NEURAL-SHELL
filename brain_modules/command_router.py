@@ -650,6 +650,19 @@ def _build_sched_tag(clean_in, words):
                 recur = val
                 break
 
+        # "every hour", "every 2 hours", "every 30 minutes", "hourly", "every half hour"
+        interval_min = 0
+        iv = re.search(r"\b(?:every|each)\s+(?:(\d+)\s*|(half(?:\s+an?)?)\s+)?(hours?|hrs?|minutes?|mins?)\b|\bhourly\b",
+                       clean_in)
+        if iv:
+            if iv.group(0) == "hourly":
+                interval_min = 60
+            else:
+                n = 0.5 if iv.group(2) else int(iv.group(1) or 1)
+                interval_min = int(n * (60 if iv.group(3).startswith(("hour", "hr")) else 1))
+            interval_min = max(5, interval_min)
+            recur = f"interval_{interval_min}"
+
         # Strip reminder phrase from start to get remainder
         remainder = clean_in
         for prefix in REMINDER_PHRASES:
@@ -657,8 +670,11 @@ def _build_sched_tag(clean_in, words):
                 remainder = remainder.split(prefix, 1)[-1].strip()
                 break
 
+        if interval_min:
+            remainder = remainder.replace(iv.group(0), " ").strip()
+            remainder = re.sub(r"\s{2,}", " ", remainder)
         # Remove recurrence phrase from remainder
-        if recur:
+        if recur and not interval_min:
             for phrase in ["every day", "everyday", "daily", "every weekday",
                            "every monday", "every tuesday", "every wednesday",
                            "every thursday", "every friday", "every saturday",
@@ -732,6 +748,8 @@ def _build_sched_tag(clean_in, words):
                     message = remainder
                     message = re.sub(r'^(to|about|that)\s+', '', message).strip()
 
+        if interval_min and not time_text:
+            time_text = f"in {interval_min} minutes"
         if message or time_text:
             tag = "action=reminder"
             if time_text:

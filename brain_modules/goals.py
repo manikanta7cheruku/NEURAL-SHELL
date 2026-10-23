@@ -113,6 +113,6 @@ def relevant(speaker_key: str, text: str, k: int = 2) -> List[dict]:
         sim = len(inter) / max(1, min(len(wanted), len(have))) if inter and any(len(t) > 3 for t in inter) else 0.0
         scored.append((sim, g))
     hits = [g for sim, g in sorted(scored, key=lambda x: -x[0]) if sim >= 0.2][:k]
-    if not hits and len(goals) <= 2 and re.search(r"\b(my|the)\s+(project|app|goal|plan|work)\b|\bit\b", text.lower()):
+    if not hits and len(goals) <= 2 and re.search(r"\b(my|our)\s+(project|app|goal|plan|work|startup|product)\b", text.lower()):
         hits = goals[:1]
     return hits

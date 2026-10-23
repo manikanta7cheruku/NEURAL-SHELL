@@ -94,11 +94,18 @@ def _fullmatch_any(patterns, norm: str) -> bool:
     return any(re.fullmatch(p, norm) for p in patterns)
 
 
-def _identity_reply() -> str:
+def _identity_reply(norm: str = "") -> str:
+    words = set(norm.split())
+    if words & {"created", "made", "built", "creator", "developed", "maker", "owns", "build", "make", "create"}:
+        return ("Seven Labs made me. I'm Seven, the layer between you and your computer, and I run entirely on "
+                "this machine.")
+    if "name" in words or "called" in words:
+        return random.choice(["I'm Seven, made by Seven Labs.", "Seven. Seven Labs built me."])
     return random.choice([
-        "I am Seven, created by Seven Labs.",
-        "I'm Seven. Seven Labs built me.",
-        "Seven. Created by Seven Labs, living on this machine.",
+        "I'm Seven, the layer between you and your computer. Tell me what you want and I do it on this PC: apps, "
+        "windows, settings, files and your day. Seven Labs built me, and I run entirely on this machine.",
+        "Seven, the layer between you and your computer. I turn what you say into things done on this PC, "
+        "privately and offline. Seven Labs made me.",
     ])
 
 
@@ -144,7 +151,7 @@ def process(ctx, deps=None) -> LayerResult:
     activity = bool(words & _ACTIVITY_WORDS)
     if _CREATOR.search(norm) or (not activity and _fullmatch_any(_IDENTITY, norm)) or (
             "your name" in norm and len(norm.split()) <= 8 and not activity):
-        return LayerResult.stop(_identity_reply())
+        return LayerResult.stop(_identity_reply(norm))
     if _fullmatch_any(_ORIGIN, norm):
         return LayerResult.stop("I run locally on this machine. Seven Labs built me.")
 

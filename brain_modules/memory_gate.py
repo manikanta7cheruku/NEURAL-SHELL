@@ -144,6 +144,40 @@ def _parse_extended(norm: str) -> Optional[RecallQuery]:
     return None
 
 
+_LEAD = r"^(?:(?:so|and|ok|okay|just|please|then|well|now|hey seven|seven)\s+)*(?:can you |could you |would you )?"
+_RE_PROFILE = re.compile(
+    _LEAD + r"(?:"
+    r"what (?:else )?(?:do|did) you (?:know|remember|have) (?:about|on|of) (?:me|myself)"
+    r"|what (?:all |exactly )?(?:do|did) you know about me"
+    r"|how much do you know about me"
+    r"|what have you (?:learned|learnt|remembered|saved|stored) about me"
+    r"|what (?:have|did) i (?:told|tell) you(?: about (?:me|myself))?(?: so far)?"
+    r"|what information do you have (?:on|about) me"
+    r"|tell me (?:about me|about myself|what you know about me|everything you know(?: about me)?|everything about me|everything)"
+    r"|describe me|who am i to you|what do you think you know about me"
+    r")(?: please| so far| then| now)?$")
+_RE_PROFILE_SOURCE = re.compile(
+    _LEAD + r"(?:how (?:do|did|can) you know|where did you (?:get|learn|find)|how did you (?:learn|find out|get))\s+"
+    r"(?:all |so much |that much )?(?:of )?(?:these|those|this|that|so much|everything|all this|all that|all of (?:this|that)|it all)"
+    r"(?: things| stuff| info| information| facts| details)?(?: about me| on me)?$")
+
+
+def parse_profile(norm: str) -> Optional[str]:
+    """
+    "what do you know about me", "tell me about me", "just tell me everything" -> "profile";
+    "how do you know all these things about me" -> "profile_source". None otherwise.
+    Answered from stored evidence; the model never describes the user.
+    """
+    if not norm:
+        return None
+    if _RE_PROFILE.match(norm):
+        return "profile"
+    if _RE_PROFILE_SOURCE.match(norm) and (norm.endswith(("about me", "on me")) or
+                                            any(w in norm.split() for w in ("these", "those", "everything", "all"))):
+        return "profile_source"
+    return None
+
+
 def time_sensitive(norm: str) -> bool:
     """True when stale knowledge would be misleading (live topics, 'latest', 'today')."""
     toks = set(norm.split())
