@@ -34,7 +34,13 @@ class TriggerHandler(BaseHandler):
 
         try:
             from backend.routes.triggers import db_get_by_voice_phrase, db_increment_fire_count
-            trigger = db_get_by_voice_phrase(phrase)
+            trigger = None
+            if params.get("id", "").isdigit():          # resolved by name in brain_modules/productivity.py
+                from backend.routes.triggers import _get_conn, _row_to_dict
+                with _get_conn() as conn:
+                    row = conn.execute("SELECT * FROM triggers WHERE id = ?", (int(params["id"]),)).fetchone()
+                trigger = _row_to_dict(row) if row else None
+            trigger = trigger or db_get_by_voice_phrase(phrase)
 
             if not trigger:
                 ctx.speak(f"No trigger found for '{phrase}'.")
