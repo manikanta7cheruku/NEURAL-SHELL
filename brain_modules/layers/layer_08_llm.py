@@ -166,7 +166,20 @@ def process(ctx, deps):
                 "uncertainty": bool(decision.uncertainty), "model": model, "answered_by": "layer_08_llm"}
 
     def _finalize(parts, completed, failed):
-        if not completed or failed or is_visual:
+        if failed or is_visual:
+            return
+        if not completed:
+            # Interrupted mid-reply (the user spoke over Seven): keep what was said in the transcript,
+            # but don't learn from or follow up on a half answer.
+            partial = "".join(parts).strip()
+            if partial and ctx.conversation_id:
+                try:
+                    from memory import conversation_store
+                    conversation_store.add_message(ctx.conversation_id, "assistant", partial,
+                                                   source="voice" if is_voice else "chat",
+                                                   meta={"interrupted": True})
+                except Exception as exc:
+                    _log.warning("partial reply not saved: %s", exc)
             return
         text = "".join(parts).strip()
         if not text:

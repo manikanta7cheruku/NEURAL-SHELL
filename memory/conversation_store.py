@@ -243,33 +243,42 @@ def get_message(msg_id: int) -> Optional[Dict[str, Any]]:
     return rows[0] if rows else None
 
 
-def list_conversations(speaker_key: str, limit: int = 50, offset: int = 0) -> List[Dict[str, Any]]:
-    return _rows("SELECT id, title, created_at, updated_at, message_count, summary FROM conversations "
-                 "WHERE speaker_key=? AND archived=0 AND message_count>0 "
+def list_conversations(speaker_key: Optional[str], limit: int = 50, offset: int = 0) -> List[Dict[str, Any]]:
+    """Conversations for one speaker, or for everyone when speaker_key is None (the Memory page)."""
+    cols = ("SELECT id, title, created_at, updated_at, message_count, summary, speaker_key, "
+            "(SELECT COUNT(*) FROM messages m WHERE m.conversation_id=conversations.id AND m.source='voice') "
+            "AS voice_count FROM conversations ")
+    if speaker_key is None:
+        return _rows(cols + "WHERE archived=0 AND message_count>0 ORDER BY updated_at DESC, rowid DESC LIMIT ? OFFSET ?",
+                     (limit, offset))
+    return _rows(cols + "WHERE speaker_key=? AND archived=0 AND message_count>0 "
                  "ORDER BY updated_at DESC, rowid DESC LIMIT ? OFFSET ?", (speaker_key, limit, offset))
 
 
-def search(speaker_key: str, query: str, limit: int = 20, exclude_conv: Optional[str] = None) -> List[Dict[str, Any]]:
-    """Find messages across every conversation. FTS5 when available, LIKE otherwise."""
+def search(speaker_key: Optional[str], query: str, limit: int = 20,
+           exclude_conv: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Find messages across every conversation (of one speaker, or everyone when None). FTS5 or LIKE."""
     terms = [t for t in re.findall(r"[A-Za-z0-9]+", query or "") if len(t) > 1]
     if not terms:
         return []
     _init()
     excl = exclude_conv or ""
+    who = "c.speaker_key=?" if speaker_key is not None else "(?='' OR 1=1)"
+    speaker_key = speaker_key if speaker_key is not None else ""
     if _fts:
         match = " OR ".join(f'"{t}"' for t in terms[:8])
         try:
             return _rows(
-                "SELECT m.id, m.conversation_id, m.role, m.content, m.ts, c.title FROM messages_fts f "
+                "SELECT m.id, m.conversation_id, m.role, m.content, m.ts, m.source, c.title FROM messages_fts f "
                 "JOIN messages m ON m.id=f.rowid JOIN conversations c ON c.id=m.conversation_id "
-                "WHERE messages_fts MATCH ? AND c.speaker_key=? AND c.id!=? "
+                f"WHERE messages_fts MATCH ? AND {who} AND c.id!=? "
                 "ORDER BY rank LIMIT ?", (match, speaker_key, excl, limit))
         except sqlite3.OperationalError:
             pass
     like = " OR ".join("m.content LIKE ?" for _ in terms[:8])
     params = tuple(f"%{t}%" for t in terms[:8]) + (speaker_key, excl, limit)
-    return _rows("SELECT m.id, m.conversation_id, m.role, m.content, m.ts, c.title FROM messages m "
-                 f"JOIN conversations c ON c.id=m.conversation_id WHERE ({like}) AND c.speaker_key=? "
+    return _rows("SELECT m.id, m.conversation_id, m.role, m.content, m.ts, m.source, c.title FROM messages m "
+                 f"JOIN conversations c ON c.id=m.conversation_id WHERE ({like}) AND {who} "
                  "AND c.id!=? ORDER BY m.id DESC LIMIT ?", params)
 
 
