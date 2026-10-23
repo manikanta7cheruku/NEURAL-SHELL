@@ -1,214 +1,90 @@
+/**
+ * One trigger as a list row: what it does, how it's activated, usage, an on/off
+ * switch, and test / edit / delete on hover.
+ */
 import { useState } from 'react';
-import {
-  Keyboard, Mic, Radio, Play, Trash2, Pencil,
-  ToggleLeft, ToggleRight, Clock,
-  Zap, Globe, FileText, FolderOpen, Layout,
-  Terminal as TermIcon, Settings2,
-} from 'lucide-react';
+import { Keyboard, Mic, Radio, Play, Trash2, Pencil, Zap, Globe, FileText, FolderOpen, Layout, Terminal, Settings2 } from 'lucide-react';
 import { ACTION_CONFIG, formatHotkey, timeAgo } from './helpers';
-import ConfirmDialog from '../../components/ConfirmDialog';
+import { Toggle, Dialog } from '../../components/ui';
+import { cx } from '../../lib/cx';
 
-const ICON_MAP = { Zap, Globe, FileText, FolderOpen, Layout, Terminal: TermIcon, Settings2 };
+const ICONS = { Zap, Globe, FileText, FolderOpen, Layout, Terminal, Settings2 };
 
-export default function TriggerCard({ trigger, onFire, onToggle, onDelete, onEdit, onRefresh, isEditing, compact }) {
-  const [firing,   setFiring]   = useState(false);
-  const [hovered,  setHovered]  = useState(false);
-  const [confirm,  setConfirm]  = useState(false);
+function details(trigger) {
+  const d = trigger.action_data || {};
+  return [d.app, ...(d.apps || []), d.url, ...(d.urls || []), d.path?.split('\\').pop(),
+          ...(d.paths || []).map(p => p.split('\\').pop()), d.workspace_name, d.command?.slice(0, 60), d.action].filter(Boolean);
+}
 
+export function Keycaps({ hotkey }) {
+  return (
+    <span className="inline-flex items-center gap-0.5">
+      {formatHotkey(hotkey).split(' + ').map(k => (
+        <kbd key={k} className="flex h-5 min-w-[20px] items-center justify-center rounded border border-s-border bg-s-bg px-1 font-sans text-[11px] text-s-text-2 shadow-[0_1px_0_var(--color-s-border)]">{k}</kbd>
+      ))}
+    </span>
+  );
+}
+
+export default function TriggerCard({ trigger, onFire, onToggle, onDelete, onEdit, onRefresh, isEditing }) {
+  const [firing, setFiring] = useState(false);
+  const [confirm, setConfirm] = useState(false);
   const ac = ACTION_CONFIG[trigger.action_type] || ACTION_CONFIG.open_app;
-  const ActionIcon = ICON_MAP[ac.icon] || Zap;
+  const Icon = ICONS[ac.icon] || Zap;
+  const info = details(trigger);
+  const snaps = trigger.audio_pattern ? Number(trigger.audio_pattern.split('_')[0]) : 0;
 
-  const methods = [];
-  if (trigger.hotkey)        methods.push({ type: 'hotkey', label: formatHotkey(trigger.hotkey), icon: Keyboard });
-  if (trigger.voice_phrase)  methods.push({ type: 'voice',  label: `"Seven ${trigger.voice_phrase}"`, icon: Mic });
-  if (trigger.audio_pattern) {
-    const n = trigger.audio_pattern.split('_')[0];
-    methods.push({ type: 'audio', label: `${n} snap${n > 1 ? 's' : ''}`, icon: Radio });
-  }
-
-  const handleFire = async () => {
+  const fire = async () => {
     setFiring(true);
     await onFire(trigger.id);
     if (onRefresh) await onRefresh();
-    setTimeout(() => setFiring(false), 2000);
+    setTimeout(() => setFiring(false), 1200);
   };
 
-  const actionDetails = (() => {
-    const d = trigger.action_data || {};
-    const parts = [];
-    if (d.app)             parts.push(d.app);
-    if (d.apps?.length)    parts.push(...d.apps);
-    if (d.url)             parts.push(d.url);
-    if (d.urls?.length)    parts.push(...d.urls);
-    if (d.path)            parts.push(d.path.split('\\').pop());
-    if (d.paths?.length)   parts.push(...d.paths.map(p => p.split('\\').pop()));
-    if (d.workspace_name)  parts.push(d.workspace_name);
-    if (d.command)         parts.push(d.command.substring(0, 50));
-    if (d.action)          parts.push(d.action);
-    return parts;
-  })();
-
-  // Compact mode: show only name + hotkey + edit button
-  if (compact) {
-    return (
-      <div className="flex items-center justify-between px-4 py-2.5
-                      bg-white/[0.02] border border-white/6 rounded-xl
-                      hover:border-white/10 transition-all duration-200"
-           onMouseEnter={() => setHovered(true)}
-           onMouseLeave={() => setHovered(false)}>
-        <div className="flex items-center gap-2.5 min-w-0">
-          <div className="w-6 h-6 rounded-md bg-white/[0.04] border border-white/6
-                          flex items-center justify-center flex-shrink-0">
-            <ActionIcon size={11} className="text-white/40" />
-          </div>
-          <span className="text-[11px] text-white/75 font-medium truncate">
-            {trigger.name}
-          </span>
-        </div>
-        <div className="flex items-center gap-2 flex-shrink-0">
-          {methods.map(m => {
-            const Icon = m.icon;
-            return (
-              <div key={m.type}
-                   className="flex items-center gap-1 px-2 py-0.5 rounded-md
-                              bg-white/[0.04] border border-white/8
-                              text-[9px] text-white/55 font-mono">
-                <Icon size={9} className="text-white/35" />
-                <span>{m.label}</span>
-              </div>
-            );
-          })}
-          {!trigger.enabled && (
-            <span className="text-[7px] text-white/20 uppercase tracking-wider">off</span>
-          )}
-          <button onClick={() => onEdit(trigger)}
-                  className={`p-1 rounded-md transition-all duration-150
-                    ${isEditing
-                      ? 'text-s-accent bg-s-accent/10'
-                      : 'text-white/20 hover:text-white/50 hover:bg-white/[0.04]'}
-                    ${hovered || isEditing ? 'opacity-100' : 'opacity-0'}`}
-                  title="Edit">
-            <Pencil size={10} />
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  // Full card mode
   return (
-    <div
-      className={`rounded-2xl border overflow-hidden transition-all duration-300
-        ${trigger.enabled
-          ? 'bg-white/[0.02] border-white/8 hover:border-white/12'
-          : 'bg-white/[0.01] border-white/5 opacity-40'}
-        ${firing    ? 'scale-[0.98]' : ''}
-        ${isEditing ? 'border-s-accent/25 bg-s-accent/[0.02]' : ''}`}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-    >
-      <div className="p-4">
-        {/* Header */}
-        <div className="flex items-start justify-between gap-3 mb-3">
-          <div className="flex items-center gap-2.5 flex-1 min-w-0">
-            <div className="w-8 h-8 rounded-lg bg-white/[0.04] border border-white/8
-                            flex items-center justify-center flex-shrink-0">
-              <ActionIcon size={14} className="text-white/50" />
-            </div>
-            <div className="min-w-0">
-              <h3 className="text-[13px] font-semibold text-white/90 leading-tight truncate">
-                {trigger.name}
-              </h3>
-              <span className="text-[9px] text-white/35">{ac.label}</span>
-            </div>
-          </div>
-          <button
-            onClick={() => onToggle(trigger.id, !trigger.enabled)}
-            className="flex-shrink-0 transition-all duration-200 mt-0.5"
-            title={trigger.enabled ? 'Disable' : 'Enable'}
-          >
-            {trigger.enabled
-              ? <ToggleRight size={18} className="text-s-accent" />
-              : <ToggleLeft  size={18} className="text-white/20" />}
-          </button>
-        </div>
-
-        {/* Action details */}
-        {actionDetails.length > 0 && (
-          <div className="flex flex-wrap gap-1 mb-3">
-            {actionDetails.map((detail, i) => (
-              <span key={i} className="text-[8.5px] text-white/45 bg-white/[0.03]
-                                        border border-white/6 px-2 py-0.5 rounded-md
-                                        truncate max-w-[200px]">
-                {detail}
-              </span>
-            ))}
-          </div>
-        )}
-
-        {/* Activation methods */}
-        <div className="flex items-center gap-1.5 mb-3 flex-wrap">
-          {methods.map(m => {
-            const Icon = m.icon;
-            return (
-              <div key={m.type}
-                   className="flex items-center gap-1 px-2 py-0.5 rounded-md
-                              bg-white/[0.03] border border-white/6
-                              text-[8.5px] text-white/50">
-                <Icon size={9} className="text-white/35" />
-                <span>{m.label}</span>
-              </div>
-            );
-          })}
-          {methods.length === 0 && (
-            <span className="text-[8.5px] text-white/20 italic">No activation set</span>
-          )}
-        </div>
-
-        {/* Footer */}
-        <div className="flex items-center justify-between pt-2.5 border-t border-white/5">
-          <div className="flex items-center gap-3">
-            <span className="text-[8px] text-white/25 flex items-center gap-0.5">
-              <Play size={7} /> {trigger.fire_count || 0}
-            </span>
-            <span className="text-[8px] text-white/25 flex items-center gap-0.5">
-              <Clock size={7} /> {timeAgo(trigger.last_fired)}
-            </span>
-          </div>
-
-          <div className={`flex items-center gap-0.5 transition-opacity duration-200
-                           ${hovered ? 'opacity-100' : 'opacity-0'}`}>
-            <button onClick={handleFire} disabled={firing || !trigger.enabled}
-                    className="p-1.5 rounded-lg text-white/30 hover:text-s-accent
-                               hover:bg-white/[0.04] transition-all disabled:opacity-20"
-                    title="Test">
-              <Play size={11} />
-            </button>
-            <button onClick={() => onEdit(trigger)}
-                    className={`p-1.5 rounded-lg transition-all
-                      ${isEditing
-                        ? 'text-s-accent bg-s-accent/10'
-                        : 'text-white/30 hover:text-white/70 hover:bg-white/[0.04]'}`}
-                    title="Edit">
-              <Pencil size={11} />
-            </button>
-            <button onClick={() => setConfirm(true)}
-                    className="p-1.5 rounded-lg text-white/30 hover:text-white/70
-                               hover:bg-white/[0.04] transition-all"
-                    title="Delete">
-              <Trash2 size={11} />
-            </button>
-          </div>
-        </div>
+    <div className={cx('group/row flex items-center gap-3 rounded-lg border px-3 py-2.5 transition-all duration-200',
+                       isEditing ? 'border-s-accent/50 bg-s-surface shadow-[var(--s-shadow)]' : 'border-transparent hover:border-s-border hover:bg-s-surface',
+                       !trigger.enabled && 'opacity-55')}>
+      <div className={cx('flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-s-border bg-s-card transition-transform duration-300',
+                         firing && 'scale-90')}>
+        <Icon size={15} className={firing ? 'text-s-accent-h' : 'text-s-text-2'} />
       </div>
-      <ConfirmDialog
-        open={confirm}
-        title="Delete Trigger"
-        message={`"${trigger.name}" will be permanently removed and its hotkey or voice phrase will be freed.`}
-        confirmLabel="Delete"
-        onConfirm={() => { setConfirm(false); onDelete(trigger.id); }}
-        onCancel={() => setConfirm(false)}
-      />
+
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <span className="truncate text-[13px] font-medium text-s-text">{trigger.name}</span>
+          <span className="shrink-0 text-[11.5px] text-s-text-4">{ac.label}</span>
+        </div>
+        <div className="mt-0.5 truncate text-[11.5px] text-s-text-3">{info.length ? info.join(', ') : 'No action details'}</div>
+      </div>
+
+      <div className="hidden shrink-0 items-center gap-2 md:flex">
+        {trigger.hotkey && <Keycaps hotkey={trigger.hotkey} />}
+        {trigger.voice_phrase && (
+          <span className="flex h-5 items-center gap-1 rounded-md border border-s-border px-1.5 text-[11px] text-s-text-2"><Mic size={11} />Seven {trigger.voice_phrase}</span>)}
+        {snaps > 0 && (
+          <span className="flex h-5 items-center gap-1 rounded-md border border-s-border px-1.5 text-[11px] text-s-text-2"><Radio size={11} />{snaps} snap{snaps > 1 ? 's' : ''}</span>)}
+        {!trigger.hotkey && !trigger.voice_phrase && !snaps && <span className="flex items-center gap-1 text-[11px] text-s-text-4"><Keyboard size={11} />No activation</span>}
+      </div>
+
+      <div className="w-20 shrink-0 text-right text-[11px] leading-tight text-s-text-4" title={trigger.last_fired ? new Date(trigger.last_fired).toLocaleString() : ''}>
+        <div className="tabular-nums">{trigger.fire_count || 0} run{trigger.fire_count === 1 ? '' : 's'}</div>
+        <div>{timeAgo(trigger.last_fired)}</div>
+      </div>
+
+      <div className="flex shrink-0 items-center opacity-0 transition-opacity duration-200 group-hover/row:opacity-100 focus-within:opacity-100">
+        <button aria-label="Test" title="Test" onClick={fire} disabled={firing || !trigger.enabled}
+                className="flex h-7 w-7 items-center justify-center rounded-md text-s-text-4 hover:bg-s-card hover:text-s-accent-h disabled:opacity-40"><Play size={13} /></button>
+        <button aria-label="Edit" title="Edit" onClick={() => onEdit(trigger)}
+                className={cx('flex h-7 w-7 items-center justify-center rounded-md hover:bg-s-card', isEditing ? 'text-s-accent-h' : 'text-s-text-4 hover:text-s-text-2')}><Pencil size={13} /></button>
+        <button aria-label="Delete" title="Delete" onClick={() => setConfirm(true)}
+                className="flex h-7 w-7 items-center justify-center rounded-md text-s-text-4 hover:bg-s-card hover:text-s-red"><Trash2 size={13} /></button>
+      </div>
+      <Toggle checked={!!trigger.enabled} onChange={v => onToggle(trigger.id, v)} label={trigger.enabled ? 'Turn off' : 'Turn on'} />
+
+      <Dialog open={confirm} tone="danger" title="Delete this trigger?" confirmLabel="Delete"
+              description={`"${trigger.name}" will be removed and its hotkey or voice phrase freed.`}
+              onConfirm={() => { setConfirm(false); onDelete(trigger.id); }} onCancel={() => setConfirm(false)} />
     </div>
   );
 }

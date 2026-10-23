@@ -71,10 +71,10 @@ export default function FileResultCards({ data }) {
     <div className="mt-3 pt-3 border-t border-white/[0.05] space-y-1.5">
       {/* Header */}
       <div className="flex items-center justify-between mb-1">
-        <span className="text-[8px] text-white/30 uppercase tracking-widest font-medium">
+        <span className="text-[11px] text-white/30 font-medium">
           {query ? `Files matching "${query}"` : 'Files found'}
         </span>
-        <span className="text-[8px] text-white/25 font-mono">
+        <span className="text-[11px] text-white/25 font-mono">
           {displayCount < count ? `${displayCount} of ${count}` : `${count}`}
         </span>
       </div>
@@ -96,7 +96,7 @@ export default function FileResultCards({ data }) {
               {/* Number + Icon */}
               <div className="flex flex-col items-center gap-0.5 shrink-0 pt-0.5 w-4">
                 <span
-                  className={`text-[8px] font-mono font-semibold ${
+                  className={`text-[11px] font-mono font-semibold ${
                     isTop ? 'text-s-accent/90' : 'text-white/35'
                   }`}
                 >
@@ -109,22 +109,22 @@ export default function FileResultCards({ data }) {
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1.5">
                   <span
-                    className={`text-[10.5px] font-medium truncate ${
+                    className={`text-[12px] font-medium truncate ${
                       isTop ? 'text-white/90' : 'text-white/70'
                     }`}
                   >
                     {item.name}
                   </span>
                   {isTop && (
-                    <span className="text-[7.5px] uppercase tracking-wider text-s-accent/70 font-semibold shrink-0">
+                    <span className="text-[11px] text-s-accent/70 font-semibold shrink-0">
                       Opened
                     </span>
                   )}
                 </div>
-                <div className="text-[8px] text-white/30 truncate mt-0.5 font-mono" title={item.path}>
+                <div className="text-[11px] text-white/30 truncate mt-0.5 font-mono" title={item.path}>
                   {item.folder || item.path}
                 </div>
-                <div className="flex items-center gap-1.5 mt-0.5 text-[8px] text-white/25">
+                <div className="flex items-center gap-1.5 mt-0.5 text-[11px] text-white/25">
                   {item.size_mb > 0 && <span>{formatSize(item.size_mb)}</span>}
                   {item.modified && (
                     <>

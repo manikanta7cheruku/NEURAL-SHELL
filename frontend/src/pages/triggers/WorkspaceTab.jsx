@@ -69,14 +69,14 @@ export default function WorkspaceTab({ workspaces, onScan, onSave, onRestore, on
 
       <button onClick={handleScan} disabled={scanning}
               className="flex items-center gap-2.5 w-full px-4 py-3 mb-4
-                         bg-white/[0.02] border border-white/8 rounded-2xl
+                         bg-white/[0.02] border border-white/8 rounded-lg
                          text-[11px] text-white/60 font-medium
                          hover:bg-white/[0.04] hover:border-white/12
                          disabled:opacity-40 transition-all">
         <Scan size={15} className={scanning ? 'animate-spin text-s-accent' : 'text-white/40'} />
         <div className="flex-1 text-left">
           <span>{scanning ? 'Scanning your desktop...' : 'Scan Current Desktop'}</span>
-          <p className="text-[8.5px] text-white/30 mt-0.5">
+          <p className="text-[11px] text-white/30 mt-0.5">
             Captures all open apps, Chrome tabs, VS Code state, and folders
           </p>
         </div>
@@ -119,7 +119,7 @@ export default function WorkspaceTab({ workspaces, onScan, onSave, onRestore, on
               onClick={handleSaveWorkspace}
               disabled={wsSaving || !wsName.trim()}
               className="flex items-center gap-1.5 px-4 py-2 bg-s-accent/90
-                         text-white rounded-lg text-[10px] font-semibold
+                         text-white rounded-lg text-[12px] font-semibold
                          hover:bg-s-accent disabled:opacity-25 transition-all flex-shrink-0"
             >
               <Save size={11} />
@@ -132,14 +132,14 @@ export default function WorkspaceTab({ workspaces, onScan, onSave, onRestore, on
             <div className="flex flex-wrap gap-1 max-h-[100px] overflow-y-auto mt-3
                             scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
               {scanned.map((app, i) => (
-                <span key={i} className="text-[8px] text-white/45 bg-[#0a0a0c]
+                <span key={i} className="text-[11px] text-white/45 bg-[#0a0a0c]
                                           border border-white/6 px-2 py-0.5 rounded">
                   {app.name || app.type}
                 </span>
               ))}
             </div>
           ) : (
-            <div className="mt-3 text-[9px] text-white/25 animate-pulse">
+            <div className="mt-3 text-[11.5px] text-white/25 animate-pulse">
               Loading {scanned.length} apps…
             </div>
           )}
@@ -153,7 +153,7 @@ export default function WorkspaceTab({ workspaces, onScan, onSave, onRestore, on
             <Layout size={20} className="text-white/12" />
           </div>
           <p className="text-[12px] text-white/45 font-medium">No workspaces saved</p>
-          <p className="text-[9px] text-white/25">Scan your current desktop to save a workspace snapshot.</p>
+          <p className="text-[11.5px] text-white/25">Scan your current desktop to save a workspace snapshot.</p>
         </div>
       ) : (
         <div className="grid grid-cols-2 gap-3">
