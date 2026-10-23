@@ -39,8 +39,8 @@ feature branch  ->  pull request  ->  CI green  ->  merge to main  ->  bump vers
    This builds the frontend, packages the app with electron-builder into `dist-electron\win-unpacked`, then compiles
    `installer\SEVEN.iss` with Inno Setup into `dist-installer\SEVEN-Setup-<version>.exe`. It needs Inno Setup 6.3 or
    newer (`winget install --id JRSoftware.InnoSetup -e`).
-6. **Test the installer** on a clean machine or VM: install, first-run setup, update from the previous version,
-   uninstall. See the [testing checklist](testing.md#manual-checklist-before-a-release).
+6. **Test the installer** as a brand-new user: install, first-run setup, update from the previous version,
+   uninstall. Follow [installer and fresh-install testing](installer-and-fresh-install-testing.md).
 7. **Publish.** Create a release tagged `vX.Y.Z` in `manikanta7cheruku/seven-releases` and upload only
    `SEVEN-Setup-<version>.exe`. Paste the changelog into the release notes.
 
