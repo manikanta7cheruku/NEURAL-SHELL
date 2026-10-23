@@ -20,8 +20,54 @@
   --color-s-blue: #3b82f6;
   --color-s-purple: #a855f7;
   --color-s-cyan: #06b6d4;
+  --color-s-on-accent: #ffffff;
   --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
   --font-mono: 'JetBrains Mono', 'Consolas', monospace;
+}
+
+/* Theme. Dark is the default; lib/theme.js sets data-theme on <html>.
+   Every colour in the app comes from these tokens, so one block re-themes everything. */
+:root {
+  color-scheme: dark;
+  --s-shadow: none;
+  --s-shadow-raised: 0 12px 32px rgba(0, 0, 0, 0.45);
+  --s-scrim: rgba(0, 0, 0, 0.6);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --color-s-bg: #f7f7f8;
+  --color-s-surface: #ffffff;
+  --color-s-card: #f2f2f4;
+  --color-s-card-h: #ebebef;
+  --color-s-border: #e4e4e9;
+  --color-s-border-l: #d4d4db;
+  --color-s-accent: #4f46e5;
+  --color-s-accent-h: #4338ca;
+  --color-s-accent-dim: #6366f1;
+  --color-s-text: #111114;
+  --color-s-text-2: #3b3b43;
+  --color-s-text-3: #6b6b76;
+  --color-s-text-4: #9b9ba5;
+  --color-s-green: #15803d;
+  --color-s-red: #dc2626;
+  --color-s-yellow: #b45309;
+  --color-s-blue: #2563eb;
+  --color-s-purple: #7c3aed;
+  --color-s-cyan: #0e7490;
+  /* Older pages use white-with-opacity for text and tints, and white/black for inverted
+     buttons; swapping the two keeps them readable on a light background. */
+  --color-white: #111114;
+  --color-black: #ffffff;
+  --s-shadow: 0 1px 2px rgba(16, 16, 24, 0.04), 0 1px 1px rgba(16, 16, 24, 0.02);
+  --s-shadow-raised: 0 12px 32px rgba(16, 16, 24, 0.12), 0 2px 6px rgba(16, 16, 24, 0.06);
+  --s-scrim: rgba(17, 17, 20, 0.32);
+}
+
+/* Older pages hardcode a few near-black panels; map them to light surfaces. */
+:root[data-theme="light"] :is(.bg-\[\#0a0a0c\], .bg-\[\#0e0e11\], .bg-\[\#0f0f12\], .bg-\[\#111\],
+                              .bg-\[\#111114\], .bg-\[\#050505\]) {
+  background-color: var(--color-s-surface);
 }
 
 body {
@@ -37,9 +83,57 @@ body {
 
 #root { height: 100vh; overflow: hidden; }
 
-::-webkit-scrollbar { width: 3px; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #23232a; border-radius: 1px; }
+::-webkit-scrollbar-thumb { background: var(--color-s-border); border-radius: 8px; border: 2px solid var(--color-s-bg); }
+::-webkit-scrollbar-thumb:hover { background: var(--color-s-border-l); }
+
+body, aside, header, section, main { transition: background-color 160ms ease, border-color 160ms ease; }
+
+.tabular-nums { font-variant-numeric: tabular-nums; }
+
+/* Range slider used by components/ui.jsx <Slider>. --pct is the filled share. */
+.s-range {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(to right, var(--color-s-accent) 0, var(--color-s-accent) var(--pct, 0%),
+                              var(--color-s-border-l) var(--pct, 0%), var(--color-s-border-l) 100%);
+  cursor: pointer;
+}
+.s-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  background: #fff;
+  border: 0;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.35);
+  transition: transform 120ms ease;
+}
+.s-range:hover::-webkit-slider-thumb { transform: scale(1.12); }
+.s-range:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.35); }
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes toastIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pageIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.page-in { animation: pageIn 180ms ease-out; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 1ms !important; transition-duration: 1ms !important; }
+}
 
 @keyframes fin {
   from { opacity: 0; transform: translateY(3px); }

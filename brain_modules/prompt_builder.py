@@ -170,8 +170,8 @@ def _build_reference_block(user_text, memory_facts, web_context, knowledge_conte
         parts.append(f"<clock>{now.strftime('%A, %B')} {now.day}, {now.year}, "
                      f"{now.strftime('%I:%M %p').lstrip('0')}</clock>")
     if toks & _PLAN_TOKENS:
-        parts.append("<plan_info>Free = 7 facts and conversations. Pro = 77. Ultimate = unlimited. "
-                     f"Current plan: {tier.upper()}. The Plans page is in the sidebar.</plan_info>")
+        parts.append(f"<plan_info>{plan_summary()} Current plan: {tier.upper()}. "
+                     "The Plans page is in the sidebar.</plan_info>")
     if goals:
         parts.append("<user_goals>\nGoals the user told you about. Use them to understand what they are really "
                      "trying to achieve. If the literal request seems to work against a goal, say so in one "
@@ -189,6 +189,30 @@ def _build_reference_block(user_text, memory_facts, web_context, knowledge_conte
     if not parts:
         return ""
     return "<reference_only>\n" + "\n".join(parts) + "\n</reference_only>\n\n"
+
+
+def plan_summary() -> str:
+    """Plan facts for the model, built from license.py so they can't drift from what is enforced."""
+    try:
+        import license as lic
+        feats, price = lic.TIER_FEATURES, lic.PRICING
+
+        def lim(tier, key, noun):
+            v = feats[tier].get(key, 0)
+            if v == -1:
+                return f"unlimited {noun}"
+            return f"{v} {noun[:-1] if v == 1 else noun}"
+
+        def plan(tier):
+            return ", ".join([lim(tier, "schedules", "schedules"), lim(tier, "triggers", "triggers"),
+                              lim(tier, "knowledge_files", "knowledge files")])
+        return ("Facts and conversation history are unlimited on every plan. "
+                f"Free: {plan('free')}. "
+                f"Pro (Rs {price['pro']['monthly']}/month): {plan('pro')}. "
+                f"Ultimate (Rs {price['ultimate']['monthly']}/month): {plan('ultimate')}, voice recognition, "
+                f"memory export and {feats['ultimate'].get('max_devices', 3)} devices.")
+    except Exception:
+        return "Facts and conversation history are unlimited on every plan."
 
 
 def build_messages(*, user_text: str, speaker_name: str = "", history: Optional[list] = None,

@@ -147,77 +147,53 @@ class BrainConfigUpdate(BaseModel):
 
 @router.get("/api/config/brain")
 def get_brain_config():
-    """Return current brain configuration with defaults filled in."""
+    """Every brain setting with its effective value (defaults filled in, bad values clamped)."""
     import config
-    brain_cfg = config.KEY.get("brain", {})
-    return {
-        "model_name": brain_cfg.get("model_name", "auto"),
-        "temperature": brain_cfg.get("temperature", 0.3),
-        "streaming": brain_cfg.get("streaming", False),
-        "auto_model": brain_cfg.get("auto_model", True),
-        "tars_humor": brain_cfg.get("tars_humor", 75),
-        "tars_honesty": brain_cfg.get("tars_honesty", 85),
-        "search_max_results": brain_cfg.get("search_max_results", 8),
-        "auto_open_best_match": brain_cfg.get("auto_open_best_match", True),
-        "follow_up_timeout": brain_cfg.get("follow_up_timeout", 90),
-        "prefer_browser_for_unknown": brain_cfg.get("prefer_browser_for_unknown", True),
-        "content_search_enabled": brain_cfg.get("content_search_enabled", True),
-    }
+    from brain_modules import brain_settings
+    out = {path.split(".", 1)[1]: info["effective"]
+           for path, info in brain_settings.effective(config).items() if path.startswith("brain.")}
+    out["auto_model"] = config.KEY.get("brain", {}).get("auto_model", True)
+    return out
 
 
 @router.patch("/api/config/brain")
 def update_brain_config(req: BrainConfigUpdate):
-    """Update only brain-specific fields without touching other config."""
+    """
+    Update brain settings. Allowed keys and bounds come from brain_settings, the
+    same registry the brain and chat commands ("set honesty to 75%") use.
+    """
     import config
+    from brain_modules import brain_settings
 
-    allowed = {
-        "model_name", "temperature", "streaming", "auto_model",
-        "tars_humor", "tars_honesty",
-        "search_max_results", "auto_open_best_match",
-        "follow_up_timeout", "prefer_browser_for_unknown",
-        "content_search_enabled",
-    }
+    clean, errors = {}, {}
+    for key, value in req.updates.items():
+        if key == "auto_model":
+            clean[key] = bool(value)
+            continue
+        path = f"brain.{key}"
+        if path not in brain_settings.SETTINGS:
+            continue
+        ok, stored, note = brain_settings.validate_update(path, value)
+        if not ok:
+            errors[key] = note
+        else:
+            clean[key] = stored
 
-    clean = {k: v for k, v in req.updates.items() if k in allowed}
-
+    if errors:
+        raise HTTPException(status_code=400, detail="; ".join(f"{k}: {v}" for k, v in errors.items()))
     if not clean:
         raise HTTPException(status_code=400, detail="No valid brain fields provided")
 
-    # Validation
-    if "temperature" in clean:
-        t = float(clean["temperature"])
-        if not (0.0 <= t <= 2.0):
-            raise HTTPException(status_code=400, detail="temperature must be 0.0-2.0")
-    if "search_max_results" in clean:
-        n = int(clean["search_max_results"])
-        if not (3 <= n <= 20):
-            raise HTTPException(status_code=400, detail="search_max_results must be 3-20")
+    if not config.update_config({"brain": clean}):
+        raise HTTPException(status_code=500, detail="Failed to save brain config")
+
     if "follow_up_timeout" in clean:
-        s = int(clean["follow_up_timeout"])
-        if not (15 <= s <= 300):
-            raise HTTPException(status_code=400, detail="follow_up_timeout must be 15-300")
-    if "tars_humor" in clean:
-        h = int(clean["tars_humor"])
-        if not (0 <= h <= 100):
-            raise HTTPException(status_code=400, detail="tars_humor must be 0-100")
-    if "tars_honesty" in clean:
-        h = int(clean["tars_honesty"])
-        if not (0 <= h <= 100):
-            raise HTTPException(status_code=400, detail="tars_honesty must be 0-100")
-
-    success = config.update_config({"brain": clean})
-
-    if success:
-        # Propagate follow_up_timeout to live dialogue manager
-        if "follow_up_timeout" in clean:
-            try:
-                import brain_modules.dialogue_manager as _dm
-                _dm._MEMORY_TIMEOUT_SEC = int(clean["follow_up_timeout"])
-                print(f"[CONFIG] Dialogue timeout updated live: {clean['follow_up_timeout']}s")
-            except Exception as _e:
-                print(f"[CONFIG] Dialogue timeout live update skipped: {_e}")
-        return {"success": True, "brain": get_brain_config()}
-    raise HTTPException(status_code=500, detail="Failed to save brain config")
+        try:
+            import brain_modules.dialogue_manager as _dm
+            _dm._MEMORY_TIMEOUT_SEC = int(clean["follow_up_timeout"])
+        except Exception as _e:
+            print(f"[CONFIG] Dialogue timeout live update skipped: {_e}")
+    return {"success": True, "brain": get_brain_config()}
 
 
 @router.get("/api/config/brain/available-models")

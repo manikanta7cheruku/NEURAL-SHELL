@@ -1,858 +1,499 @@
-import { useEffect, useState, useCallback } from 'react';
-import useMemory from '../stores/useMemory';
-import Spinner from '../components/Spinner';
-import api from '../api';
-import useConfig from '../stores/useConfig';
+/**
+ * Memory
+ *
+ * Shows exactly what the brain uses: facts from the structured facts store and
+ * conversations from the conversation store (the same data Seven recalls from).
+ * Adding, editing and deleting here also updates Seven's semantic index, so a
+ * deleted fact is never brought up again.
+ */
+/* SEVEN_DOC {"purpose": "What Seven knows about you and every saved conversation, with when each was learned or said",
+              "keywords": ["memory", "memories", "facts", "remember", "conversations", "history", "transcript"],
+              "controls": [
+                {"label": "Facts", "description": "Everything Seven knows about you. Search, filter by category, edit, see history or delete a fact."},
+                {"label": "Add fact", "description": "Tell Seven something to remember without chatting."},
+                {"label": "Conversations", "description": "Every chat and voice conversation with timestamps. Search all messages, export or delete one, or continue it in the Console."},
+                {"label": "Delete a fact", "description": "Hover a fact and press the trash icon. Seven won't bring it up again."}
+              ]} */
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  Brain, MessageSquare, HardDrive, ChevronDown,
-  ChevronRight, Trash2, Plus, Search, X,
-  Calendar, Clock, User, Cpu, AlertCircle
+  Brain, MessageSquare, Search, Plus, Pencil, Trash2, History, X, Mic, Keyboard, Download, ArrowUpRight, Quote,
 } from 'lucide-react';
+import api from '../api';
+import useChatSessions from '../stores/useChatSessions';
+import {
+  PageShell, Stat, Button, Input, Select, Badge, Dialog, EmptyState, LoadingRows, Segmented,
+} from '../components/ui';
+import { cx } from '../lib/cx';
+import { toast } from '../lib/toast';
+import { relativeTime, fullTime, clockTime, dayLabel, parseTime } from '../lib/format';
 
-// ── Helpers ────────────────────────────────────────────────────────────────
+const CATEGORY_LABELS = {
+  identity: 'About you', personal: 'Personal', preference: 'Preferences', work: 'Work', relationship: 'People',
+  explicit: 'Told directly', correction: 'Corrections', manual: 'Added by you', general: 'General', style: 'Style',
+};
+const categoryLabel = c => CATEGORY_LABELS[c] || (c ? c.charAt(0).toUpperCase() + c.slice(1).replace(/_/g, ' ') : 'General');
+const ADD_CATEGORIES = ['manual', 'personal', 'preference', 'work', 'identity', 'general'];
 
-function parseTimestamp(ts) {
-  if (!ts) return null;
-  const d = new Date(ts.replace(' ', 'T'));
-  return isNaN(d.getTime()) ? null : d;
+function plural(n, word) {
+  return `${n} ${word}${n === 1 ? '' : 's'}`;
 }
 
-function formatTime(ts) {
-  const d = parseTimestamp(ts);
-  if (!d) return '';
-  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-}
+// ── Facts ───────────────────────────────────────────────────────────────────
 
-function formatDayLabel(dateStr) {
-  const today     = new Date();
-  const yesterday = new Date(today);
-  yesterday.setDate(today.getDate() - 1);
-
-  const d = new Date(dateStr + 'T00:00:00');
-  const todayStr     = today.toISOString().split('T')[0];
-  const yesterdayStr = yesterday.toISOString().split('T')[0];
-
-  if (dateStr === todayStr)     return 'Today';
-  if (dateStr === yesterdayStr) return 'Yesterday';
-
-  return d.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });
-}
-
-function cleanResponse(text) {
-  if (!text) return '';
-  // Strip internal tags like ###OPEN: chrome ###SYS: brightness_set
-  return text
-    .replace(/###[A-Z_]+:[^\n#]*/g, '')
-    .replace(/\s{2,}/g, ' ')
-    .trim();
-}
-
-function groupByDay(conversations) {
-  const groups = {};
-  conversations.forEach(c => {
-    const d = parseTimestamp(c.timestamp);
-    if (!d) return;
-
-    // Use LOCAL date, not UTC ISO date
-    const key = [
-      d.getFullYear(),
-      String(d.getMonth() + 1).padStart(2, '0'),
-      String(d.getDate()).padStart(2, '0'),
-    ].join('-');
-
-    if (!groups[key]) groups[key] = [];
-    groups[key].push(c);
-  });
-
-  // Sort each day's messages oldest to newest
-  Object.values(groups).forEach(arr =>
-    arr.sort((a, b) => (a.timestamp || '').localeCompare(b.timestamp || ''))
-  );
-
-  // Newest day first
-  return Object.entries(groups).sort((a, b) => b[0].localeCompare(a[0]));
-}
-
-function groupIntoSessions(messages, gapMinutes = 5) {
-  const sessions = [];
-  let current = [];
-  messages.forEach((msg, i) => {
-    if (i === 0) { current.push(msg); return; }
-    const prev = parseTimestamp(messages[i - 1].timestamp);
-    const curr = parseTimestamp(msg.timestamp);
-    if (prev && curr && (curr - prev) / 60000 > gapMinutes) {
-      if (current.length) sessions.push(current);
-      current = [msg];
-    } else {
-      current.push(msg);
-    }
-  });
-  if (current.length) sessions.push(current);
-  return sessions;
-}
-
-function filterByRange(groups, range) {
-  if (range === 'all') return groups;
-  const now = new Date();
-  const todayStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
-  const today = new Date(todayStr + 'T00:00:00');
-  const cutoffs = {
-    today: 0,
-    week:  6,
-    month: 29,
-  };
-  const cutoffDays = cutoffs[range];
-  return groups.filter(([dateStr]) => {
-    if (range === 'today') return dateStr === todayStr;
-    const d = new Date(dateStr + 'T00:00:00');
-    const diffDays = Math.floor((today - d) / 86400000);
-    return diffDays <= cutoffDays;
-  });
-}
-
-// ── Stat Card ─────────────────────────────────────────────────────────────
-
-function StatCard({ label, value, icon: Icon }) {
-  return (
-    <div className="bg-white/[0.02] border border-white/8 rounded-xl px-4 py-3
-                    flex items-center gap-3">
-      <div className="w-7 h-7 rounded-lg bg-white/[0.04] border border-white/6
-                      flex items-center justify-center flex-shrink-0">
-        <Icon size={13} className="text-white/40" />
-      </div>
-      <div>
-        <div className="text-[8px] text-white/30 uppercase tracking-widest font-medium">
-          {label}
-        </div>
-        <div className="text-[13px] font-semibold text-white/85 mt-0.5 font-mono">
-          {value}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ── Session Block ──────────────────────────────────────────────────────────
-
-function SessionBlock({ messages, onDelete }) {
-  const sessionTime = formatTime(messages[0]?.timestamp);
-
-  return (
-    <div className="ml-4 border-l border-white/[0.05] pl-4 py-1 space-y-3">
-      <div className="text-[8px] text-white/20 font-mono flex items-center gap-1.5 mb-2">
-        <Clock size={8} />
-        {sessionTime}
-      </div>
-      {messages.map(msg => (
-        <MessageRow key={msg.id} msg={msg} onDelete={onDelete} />
-      ))}
-    </div>
-  );
-}
-
-// ── Message Row ────────────────────────────────────────────────────────────
-
-function MessageRow({ msg, onDelete }) {
-  const [hovered, setHovered] = useState(false);
-  const cleaned = cleanResponse(msg.seven_response);
-  if (!msg.user_input && !cleaned) return null;
-
-  return (
-    <div className="group relative"
-         onMouseEnter={() => setHovered(true)}
-         onMouseLeave={() => setHovered(false)}>
-      <div className="space-y-1.5">
-        {msg.user_input && (
-          <div className="flex items-start gap-2.5">
-            <div className="flex items-center gap-1 flex-shrink-0 mt-0.5">
-              <User size={9} className="text-s-accent/60" />
-              <span className="text-[8px] text-s-accent/70 font-mono font-semibold uppercase tracking-wider">
-                You
-              </span>
-            </div>
-            <p className="text-[12px] text-white/75 leading-relaxed flex-1">
-              {msg.user_input}
-            </p>
-          </div>
-        )}
-        {cleaned && (
-          <div className="flex items-start gap-2.5">
-            <div className="flex items-center gap-1 flex-shrink-0 mt-0.5">
-              <Cpu size={9} className="text-s-cyan/60" />
-              <span className="text-[8px] text-s-cyan/70 font-mono font-semibold uppercase tracking-wider">
-                VII
-              </span>
-            </div>
-            <p className="text-[12px] text-white/50 leading-relaxed flex-1">
-              {cleaned}
-            </p>
-          </div>
-        )}
-      </div>
-
-      <button
-        onClick={() => onDelete(msg.id)}
-        className={`absolute right-0 top-0 p-1 rounded-md
-                    text-white/20 hover:text-white/60 hover:bg-white/[0.04]
-                    transition-all duration-150
-                    ${hovered ? 'opacity-100' : 'opacity-0'}`}
-        title="Delete">
-        <Trash2 size={10} />
-      </button>
-    </div>
-  );
-}
-
-// ── Day Group ──────────────────────────────────────────────────────────────
-
-function DayGroup({ dateStr, messages, defaultOpen, onDelete, searchQuery }) {
-  const [open, setOpen] = useState(defaultOpen);
-  const sessions = groupIntoSessions(messages);
-  const label    = formatDayLabel(dateStr);
-
-  // Auto-open when search matches
+function FactHistory({ id }) {
+  const [chain, setChain] = useState(null);
   useEffect(() => {
-    if (searchQuery) setOpen(true);
-    else setOpen(defaultOpen);
-  }, [searchQuery, defaultOpen]);
-
+    api.get(`/memory/facts/structured/${id}/history`).then(r => setChain(r.data.chain || [])).catch(() => setChain([]));
+  }, [id]);
+  if (!chain) return <p className="text-[12px] text-s-text-3">Loading history</p>;
+  if (chain.length <= 1) return <p className="text-[12px] text-s-text-3">No earlier versions. This is the first value Seven learned.</p>;
   return (
-    <div className="border border-white/[0.05] rounded-xl overflow-hidden
-                    transition-all duration-200">
-
-      {/* Day header */}
-      <button
-        onClick={() => setOpen(o => !o)}
-        className="w-full flex items-center justify-between px-4 py-3
-                   bg-white/[0.015] hover:bg-white/[0.025]
-                   transition-colors duration-150">
-        <div className="flex items-center gap-2.5">
-          <div className={`transition-transform duration-200 ${open ? 'rotate-0' : '-rotate-90'}`}>
-            <ChevronDown size={12} className="text-white/30" />
-          </div>
-          <Calendar size={11} className="text-white/25" />
-          <span className="text-[12px] font-medium text-white/70">{label}</span>
-        </div>
-        <span className="text-[9px] text-white/25 font-mono">
-          {messages.length} message{messages.length !== 1 ? 's' : ''}
-        </span>
-      </button>
-
-      {/* Expandable content */}
-      <div className={`transition-all duration-300 ease-in-out overflow-hidden
-                       ${open ? 'max-h-[9999px] opacity-100' : 'max-h-0 opacity-0'}`}>
-        <div className="px-4 py-3 space-y-4 border-t border-white/[0.04]">
-          {sessions.map((session, i) => (
-            <SessionBlock key={i} messages={session} onDelete={onDelete} />
-          ))}
-        </div>
-      </div>
-    </div>
+    <ol className="space-y-2">
+      {chain.map((h, i) => (
+        <li key={h.id} className="flex items-start gap-3 text-[12px]">
+          <span className={cx('mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full', h.active ? 'bg-s-accent' : 'bg-s-border-l')} />
+          <span className={cx('flex-1', h.active ? 'text-s-text' : 'text-s-text-3 line-through decoration-s-text-4')}>{h.value}</span>
+          <span className="shrink-0 tabular-nums text-s-text-4" title={fullTime(h.created_at)}>
+            {i === chain.length - 1 && h.active ? 'Current' : relativeTime(h.created_at)}
+          </span>
+        </li>
+      ))}
+    </ol>
   );
 }
 
-// ── Conversations Tab ──────────────────────────────────────────────────────
+function FactCard({ fact, onEdit, onDelete }) {
+  const [open, setOpen] = useState(null);         // null | 'history' | 'edit'
+  const [value, setValue] = useState(fact.value);
+  const [keepHistory, setKeepHistory] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const updated = fact.updated_at && fact.updated_at !== fact.created_at;
+  const source = fact.source_text && fact.source_text !== fact.value ? fact.source_text : null;
 
-function ConversationsTab({ conversations, onDelete, searchQuery }) {
-  const [range,  setRange]  = useState('all');
-  const [source, setSource] = useState('all');
-
-  const RANGES = [
-    { key: 'today', label: 'Today'      },
-    { key: 'week',  label: 'This Week'  },
-    { key: 'month', label: 'This Month' },
-    { key: 'all',   label: 'All'        },
-  ];
-
-  const SOURCES = [
-    { key: 'all',   label: 'All'   },
-    { key: 'chat',  label: 'Chat'  },
-    { key: 'voice', label: 'Voice' },
-  ];
-
-  const filtered = conversations.filter(c => {
-    const matchesSearch = searchQuery
-      ? (c.user_input + c.seven_response).toLowerCase().includes(searchQuery.toLowerCase())
-      : true;
-    const matchesSource = source === 'all' || (c.source || 'chat') === source;
-    return matchesSearch && matchesSource;
-  });
-
-  const allGroups     = groupByDay(filtered);
-  const visibleGroups = filterByRange(allGroups, range);
-  const totalVisible  = visibleGroups.reduce((sum, [, msgs]) => sum + msgs.length, 0);
-
-  if (conversations.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center py-20 gap-3">
-        <div className="w-11 h-11 rounded-xl bg-white/[0.02] border border-white/6
-                        flex items-center justify-center">
-          <MessageSquare size={20} className="text-white/12" />
-        </div>
-        <p className="text-[12px] text-white/40 font-medium">No conversations yet</p>
-        <p className="text-[9px] text-white/20 text-center">
-          Start chatting with Seven to build your conversation history.
-        </p>
-      </div>
-    );
-  }
+  const save = async () => {
+    if (!value.trim() || value.trim() === fact.value) { setOpen(null); return; }
+    setSaving(true);
+    const ok = await onEdit(fact, value.trim(), keepHistory ? 'supersede' : 'update');
+    setSaving(false);
+    if (ok) setOpen(null);
+  };
 
   return (
-    <div className="space-y-3">
-
-      {/* Filters row */}
-      <div className="flex items-center gap-3 flex-wrap">
-        {/* Time range */}
-        <div className="flex items-center gap-1">
-          {RANGES.map(r => (
-            <button key={r.key} onClick={() => setRange(r.key)}
-                    className={`px-3 py-1.5 rounded-lg text-[9px] font-medium
-                                transition-all duration-150
-                      ${range === r.key
-                        ? 'bg-white/[0.06] text-white/70 border border-white/10'
-                        : 'text-white/30 hover:text-white/55 border border-transparent'}`}>
-              {r.label}
-            </button>
-          ))}
+    <li className="group rounded-xl border border-s-border bg-s-surface transition-colors hover:border-s-border-l">
+      <div className="flex items-start gap-4 px-4 py-3.5">
+        <div className="min-w-0 flex-1">
+          {open === 'edit' ? (
+            <div className="space-y-2.5">
+              <Input value={value} onChange={e => setValue(e.target.value)} autoFocus className="w-full"
+                     onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') setOpen(null); }} aria-label="Fact" />
+              <div className="flex items-center justify-between gap-3">
+                <label className="flex items-center gap-2 text-[12px] text-s-text-3">
+                  <input type="checkbox" checked={keepHistory} onChange={e => setKeepHistory(e.target.checked)} className="accent-[var(--color-s-accent)]" />
+                  Keep the old value in history
+                </label>
+                <div className="flex gap-2">
+                  <Button size="sm" variant="ghost" onClick={() => { setValue(fact.value); setOpen(null); }}>Cancel</Button>
+                  <Button size="sm" variant="primary" onClick={save} loading={saving}>Save</Button>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <p className="text-[13px] leading-relaxed text-s-text">{fact.value}</p>
+          )}
+          {source && open !== 'edit' && (
+            <p className="mt-1.5 flex items-start gap-1.5 text-[12px] text-s-text-3">
+              <Quote size={12} className="mt-0.5 shrink-0 text-s-text-4" />
+              <span className="line-clamp-2">{source}</span>
+            </p>
+          )}
+          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-s-text-4">
+            <Badge>{categoryLabel(fact.category)}</Badge>
+            <span title={fullTime(fact.created_at)}>Learned {relativeTime(fact.created_at)}</span>
+            {updated && <span title={fullTime(fact.updated_at)}>Updated {relativeTime(fact.updated_at)}</span>}
+            {fact.mentions > 1 && <span>Mentioned {fact.mentions} times</span>}
+            {fact.origin && fact.origin !== 'explicit' && <span>{fact.origin === 'inferred' ? 'Inferred' : categoryLabel(fact.origin)}</span>}
+          </div>
         </div>
-
-        {/* Divider */}
-        <div className="w-px h-4 bg-white/[0.06]" />
-
-        {/* Source filter */}
-        <div className="flex items-center gap-1">
-          {SOURCES.map(s => (
-            <button key={s.key} onClick={() => setSource(s.key)}
-                    className={`px-2.5 py-1 rounded-lg text-[8.5px] font-medium
-                                transition-all duration-150
-                      ${source === s.key
-                        ? 'bg-s-accent/8 text-s-accent border border-s-accent/12'
-                        : 'text-white/25 hover:text-white/50 border border-transparent'}`}>
-              {s.label}
-            </button>
-          ))}
-        </div>
-
-        {totalVisible > 0 && (
-          <span className="ml-auto text-[8px] text-white/20 font-mono">
-            {totalVisible} message{totalVisible !== 1 ? 's' : ''}
-          </span>
+        {open !== 'edit' && (
+          <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+            <Button size="sm" variant="ghost" icon={History} aria-label="History" onClick={() => setOpen(o => (o === 'history' ? null : 'history'))} />
+            <Button size="sm" variant="ghost" icon={Pencil} aria-label="Edit" onClick={() => { setValue(fact.value); setOpen('edit'); }} />
+            <Button size="sm" variant="ghost" icon={Trash2} aria-label="Delete" onClick={() => onDelete(fact)} />
+          </div>
         )}
       </div>
-
-      {/* Day groups */}
-      {visibleGroups.length === 0 ? (
-        <div className="py-12 text-center">
-          <p className="text-[11px] text-white/30">
-            {searchQuery ? 'No results found' : `No conversations in this period`}
-          </p>
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {visibleGroups.map(([dateStr, messages], i) => (
-            <DayGroup
-              key={dateStr}
-              dateStr={dateStr}
-              messages={messages}
-              defaultOpen={i === 0}
-              onDelete={onDelete}
-              searchQuery={searchQuery}
-            />
-          ))}
-        </div>
+      {open === 'history' && (
+        <div className="border-t border-s-border px-4 py-3"><FactHistory id={fact.id} /></div>
       )}
-    </div>
+    </li>
   );
 }
 
-// ── Facts Tab ──────────────────────────────────────────────────────────────
+function AddFact({ onAdded }) {
+  const [open, setOpen] = useState(false);
+  const [value, setValue] = useState('');
+  const [category, setCategory] = useState('manual');
+  const [saving, setSaving] = useState(false);
 
-function FactsTab({ facts, onDelete, searchQuery }) {
-  const [adding,  setAdding]  = useState(false);
-  const [newFact, setNewFact] = useState('');
-  const [saving,  setSaving]  = useState(false);
-
-  const addFact = async () => {
-    if (!newFact.trim()) return;
+  const add = async () => {
+    if (!value.trim()) return;
     setSaving(true);
-    await api.post('/chat', { text: `/add fact ${newFact.trim()}` });
-    setNewFact('');
-    setAdding(false);
+    try {
+      await api.post('/memory/facts/structured', { value: value.trim(), category });
+      toast.success('Fact added', 'Seven will use it from now on.');
+      setValue(''); setOpen(false); onAdded();
+    } catch (e) {
+      toast.error('Could not add that fact', e?.response?.data?.detail);
+    }
     setSaving(false);
   };
 
-  const filtered = searchQuery
-    ? facts.filter(f => f.text.toLowerCase().includes(searchQuery.toLowerCase()))
-    : facts;
+  if (!open) return <Button variant="primary" icon={Plus} onClick={() => setOpen(true)}>Add fact</Button>;
+  return (
+    <Dialog open title="Add a fact" description="Write it the way you'd tell Seven, for example: My sister's name is Priya."
+            confirmLabel="Add fact" busy={saving} confirmDisabled={!value.trim()} onConfirm={add} onCancel={() => setOpen(false)}>
+      <div className="space-y-3">
+        <Input value={value} onChange={e => setValue(e.target.value)} autoFocus className="w-full" aria-label="Fact"
+               onKeyDown={e => e.key === 'Enter' && add()} placeholder="Something Seven should remember" />
+        <div className="flex items-center justify-between">
+          <span className="text-[12px] text-s-text-3">Category</span>
+          <Select value={category} onChange={setCategory} className="w-44"
+                  options={ADD_CATEGORIES.map(c => ({ value: c, label: categoryLabel(c) }))} />
+        </div>
+      </div>
+    </Dialog>
+  );
+}
+
+function FactsView({ onChanged }) {
+  const [facts, setFacts] = useState(null);
+  const [query, setQuery] = useState('');
+  const [category, setCategory] = useState('all');
+  const [sort, setSort] = useState('recent');
+  const [deleting, setDeleting] = useState(null);
+
+  const load = useCallback(() => {
+    api.get('/memory/facts/structured?limit=2000').then(r => setFacts(r.data.facts || [])).catch(() => setFacts([]));
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const refresh = () => { load(); onChanged(); };
+
+  const edit = async (fact, value, mode) => {
+    try {
+      await api.patch(`/memory/facts/structured/${fact.id}`, { value, mode });
+      toast.success('Fact updated', mode === 'supersede' ? 'The old value is kept in its history.' : undefined);
+      refresh();
+      return true;
+    } catch (e) {
+      toast.error('Could not update that fact', e?.response?.data?.detail);
+      return false;
+    }
+  };
+
+  const remove = async () => {
+    const fact = deleting;
+    try {
+      const r = await api.delete(`/memory/facts/structured/${fact.id}`);
+      if (!r.data?.success) throw new Error(r.data?.error);
+      toast.success('Fact deleted', 'Seven won\'t bring it up again.');
+      setDeleting(null);
+      refresh();
+    } catch (e) {
+      toast.error('Could not delete that fact', e.message);
+    }
+  };
+
+  const counts = useMemo(() => {
+    const c = {};
+    for (const f of facts || []) c[f.category] = (c[f.category] || 0) + 1;
+    return Object.entries(c).sort((a, b) => b[1] - a[1]);
+  }, [facts]);
+
+  const visible = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const list = (facts || []).filter(f => (category === 'all' || f.category === category)
+      && (!q || f.value.toLowerCase().includes(q) || (f.source_text || '').toLowerCase().includes(q)));
+    const time = f => parseTime(f.updated_at || f.created_at)?.getTime() || 0;
+    if (sort === 'recent') list.sort((a, b) => time(b) - time(a));
+    if (sort === 'oldest') list.sort((a, b) => time(a) - time(b));
+    if (sort === 'az') list.sort((a, b) => a.value.localeCompare(b.value));
+    return list;
+  }, [facts, query, category, sort]);
 
   return (
-    <div className="space-y-3">
-
-      {/* Add fact */}
-      {adding ? (
-        <div className="bg-white/[0.02] border border-white/8 rounded-xl p-3
-                        flex items-center gap-2 animate-[cardReveal_200ms_ease-out]">
-          <input value={newFact} onChange={e => setNewFact(e.target.value)}
-                 autoFocus
-                 onKeyDown={e => e.key === 'Enter' && addFact()}
-                 placeholder="Enter a fact about yourself..."
-                 className="flex-1 bg-transparent text-[12px] text-white/80
-                            placeholder-white/20 outline-none" />
-          <button onClick={addFact} disabled={saving || !newFact.trim()}
-                  className="text-[9px] text-s-accent font-medium px-2 py-1
-                             hover:bg-s-accent/8 rounded transition-colors
-                             disabled:opacity-30">
-            {saving ? 'Saving...' : 'Save'}
-          </button>
-          <button onClick={() => { setAdding(false); setNewFact(''); }}
-                  className="text-white/25 hover:text-white/55 transition-colors">
-            <X size={12} />
-          </button>
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative">
+          <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-s-text-4" />
+          <Input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search facts" className="w-64 pl-8" aria-label="Search facts" />
         </div>
-      ) : (
-        <button onClick={() => setAdding(true)}
-                className="flex items-center gap-1.5 text-[9px] text-white/30
-                           hover:text-white/55 transition-colors">
-          <Plus size={11} />
-          Add fact
-        </button>
-      )}
+        <Select value={sort} onChange={setSort} className="w-40" aria-label="Sort"
+                options={[{ value: 'recent', label: 'Recently updated' }, { value: 'oldest', label: 'Oldest first' }, { value: 'az', label: 'A to Z' }]} />
+        <div className="ml-auto"><AddFact onAdded={refresh} /></div>
+      </div>
 
-      {/* Facts list */}
-      {filtered.length === 0 ? (
-        <div className="py-12 text-center">
-          <p className="text-[11px] text-white/30">
-            {searchQuery ? 'No facts match your search' : 'No facts stored yet'}
-          </p>
-        </div>
-      ) : (
-        <div className="space-y-1.5">
-          {filtered.map(f => (
-            <div key={f.id}
-                 className="flex items-start gap-3 px-4 py-3
-                            bg-white/[0.02] border border-white/[0.05] rounded-xl
-                            hover:border-white/10 group transition-all duration-150">
-              <div className="flex-1 min-w-0">
-                <p className="text-[12px] text-white/70 leading-relaxed">{f.text}</p>
-                <div className="flex items-center gap-2 mt-1.5">
-                  <span className="text-[8px] text-s-accent/60 bg-s-accent/6
-                                   border border-s-accent/10 px-1.5 py-0.5 rounded-md
-                                   font-medium">
-                    {f.category}
-                  </span>
-                  <span className="text-[8px] text-white/20 font-mono">
-                    {f.timestamp?.split(' ')[0]}
-                  </span>
-                </div>
-              </div>
-              <button onClick={() => onDelete(f.id)}
-                      className="text-white/15 hover:text-white/50 opacity-0 group-hover:opacity-100
-                                 transition-all duration-150 p-1 rounded-md hover:bg-white/[0.04]
-                                 flex-shrink-0 mt-0.5">
-                <Trash2 size={11} />
-              </button>
-            </div>
+      {counts.length > 1 && (
+        <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="Categories">
+          {[['all', facts?.length || 0], ...counts].map(([c, n]) => (
+            <button key={c} role="tab" aria-selected={category === c} onClick={() => setCategory(c)}
+                    className={cx('h-7 rounded-full border px-3 text-[12px] transition-colors',
+                                  category === c ? 'border-s-accent/40 bg-s-accent/10 text-s-accent-h'
+                                                 : 'border-s-border text-s-text-3 hover:border-s-border-l hover:text-s-text-2')}>
+              {c === 'all' ? 'All' : categoryLabel(c)} <span className="tabular-nums text-s-text-4">{n}</span>
+            </button>
           ))}
         </div>
       )}
+
+      {facts === null ? <LoadingRows rows={5} /> : facts.length === 0 ? (
+        <EmptyState icon={Brain} title="Seven hasn't learned anything about you yet"
+                    description='Tell Seven about yourself in chat, for example "I work as a designer" or "I prefer tea over coffee", or add a fact here.' />
+      ) : visible.length === 0 ? (
+        <EmptyState icon={Search} title="No matching facts" description="Try a different word or category." />
+      ) : (
+        <ul className="space-y-2">
+          {visible.map(f => <FactCard key={f.id} fact={f} onEdit={edit} onDelete={setDeleting} />)}
+        </ul>
+      )}
+
+      <Dialog open={!!deleting} tone="danger" title="Delete this fact?" confirmLabel="Delete"
+              description={deleting ? `"${deleting.value}" will be removed and Seven won't use it again.` : ''}
+              onConfirm={remove} onCancel={() => setDeleting(null)} />
     </div>
   );
 }
 
-// ── Structured Facts Tab (Phase 2) ─────────────────────────────────────────
+// ── Conversations ───────────────────────────────────────────────────────────
 
-function StructuredFactsTab({ facts, loading, onAdd, onUpdate, onDelete, onFetchHistory, searchQuery }) {
-  const [adding, setAdding]         = useState(false);
-  const [newValue, setNewValue]     = useState('');
-  const [newCategory, setNewCategory] = useState('manual');
-  const [saving, setSaving]         = useState(false);
+function Transcript({ id, onDeleted }) {
+  const navigate = useNavigate();
+  const [data, setData] = useState(null);
+  const [confirm, setConfirm] = useState(false);
 
-  const [editingId, setEditingId]   = useState(null);
-  const [editValue, setEditValue]   = useState('');
-  const [editMode, setEditMode]     = useState('update');
+  useEffect(() => {
+    api.get(`/conversations/${id}?limit=1000`).then(r => setData(r.data)).catch(() => setData({ error: true }));
+  }, [id]);
 
-  const [expandedId, setExpandedId] = useState(null);
-  const [history, setHistory]       = useState([]);
-  const [historyLoading, setHistoryLoading] = useState(false);
-
-  const CATEGORIES = ['manual', 'identity', 'preference', 'personal', 'explicit', 'correction', 'general'];
-
-  const handleAdd = async () => {
-    if (!newValue.trim()) return;
-    setSaving(true);
-    const result = await onAdd({ value: newValue.trim(), category: newCategory });
-    setSaving(false);
-    if (result.success) {
-      setNewValue('');
-      setNewCategory('manual');
-      setAdding(false);
-    }
+  const exportChat = async () => {
+    try {
+      const r = await api.get(`/conversations/${id}/export`);
+      const blob = new Blob([JSON.stringify(r.data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `seven-conversation-${id.slice(0, 8)}.json`; a.click();
+      URL.revokeObjectURL(url);
+    } catch { toast.error('Export failed'); }
   };
 
-  const startEdit = (fact, mode = 'update') => {
-    setEditingId(fact.id);
-    setEditValue(fact.value);
-    setEditMode(mode);
+  const remove = async () => {
+    try {
+      await api.delete(`/conversations/${id}`);
+      toast.success('Conversation deleted');
+      setConfirm(false);
+      onDeleted();
+    } catch { toast.error('Could not delete that conversation'); }
   };
 
-  const saveEdit = async () => {
-    if (!editValue.trim() || !editingId) return;
-    setSaving(true);
-    const result = await onUpdate(editingId, editValue.trim(), editMode);
-    setSaving(false);
-    if (result.success) {
-      setEditingId(null);
-      setEditValue('');
-    }
+  const openInConsole = () => {
+    useChatSessions.setState({ requestedId: id });
+    navigate('/console');
   };
 
-  const cancelEdit = () => {
-    setEditingId(null);
-    setEditValue('');
-  };
+  if (!data) return <div className="p-6"><LoadingRows rows={6} /></div>;
+  if (data.error) return <EmptyState icon={MessageSquare} title="Couldn't open this conversation" />;
+  const conv = data.conversation;
+  const messages = (data.messages || []).map((m, i, all) => ({
+    ...m, day: dayLabel(m.ts), newDay: i === 0 || dayLabel(all[i - 1].ts) !== dayLabel(m.ts),
+  }));
 
-  const toggleHistory = async (id) => {
-    if (expandedId === id) {
-      setExpandedId(null);
-      setHistory([]);
-      return;
-    }
-    setExpandedId(id);
-    setHistoryLoading(true);
-    const chain = await onFetchHistory(id);
-    setHistory(chain);
-    setHistoryLoading(false);
-  };
-
-  const filtered = searchQuery
-    ? facts.filter(f => f.value.toLowerCase().includes(searchQuery.toLowerCase()))
-    : facts;
-
-  if (loading) {
-    return (
-      <div className="py-12 text-center">
-        <p className="text-[11px] text-white/30">Loading structured facts...</p>
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex items-start justify-between gap-4 border-b border-s-border px-6 py-4">
+        <div className="min-w-0">
+          <h2 className="truncate text-[15px] font-semibold text-s-text">{conv.title || 'Untitled conversation'}</h2>
+          <p className="mt-0.5 text-[12px] text-s-text-3">
+            Started {fullTime(conv.created_at)} · {plural(conv.message_count || messages.length, 'message')}
+          </p>
+        </div>
+        <div className="flex shrink-0 gap-1">
+          <Button size="sm" icon={ArrowUpRight} onClick={openInConsole}>Continue in Console</Button>
+          <Button size="sm" variant="ghost" icon={Download} aria-label="Export" onClick={exportChat} />
+          <Button size="sm" variant="ghost" icon={Trash2} aria-label="Delete" onClick={() => setConfirm(true)} />
+        </div>
       </div>
-    );
+      {conv.summary && (
+        <div className="border-b border-s-border bg-s-surface px-6 py-3 text-[12px] leading-relaxed text-s-text-2">
+          <span className="font-medium text-s-text">Summary. </span>{conv.summary}
+        </div>
+      )}
+      <div className="flex-1 space-y-4 overflow-y-auto px-6 py-5">
+        {messages.map(m => {
+          const user = m.role === 'user';
+          return (
+            <div key={m.id}>
+              {m.newDay && <div className="mb-3 mt-1 text-center text-[11px] font-medium text-s-text-4">{m.day}</div>}
+              <div className="flex gap-3">
+                <div className={cx('mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold',
+                                   user ? 'bg-s-card-h text-s-text-2' : 'bg-s-accent/15 text-s-accent-h')}>
+                  {user ? 'Y' : '7'}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 text-[12px]">
+                    <span className="font-medium text-s-text">{user ? 'You' : 'Seven'}</span>
+                    <span className="tabular-nums text-s-text-4" title={fullTime(m.ts)}>{clockTime(m.ts)}</span>
+                    {user && m.source === 'voice' && <span className="flex items-center gap-1 text-s-text-4"><Mic size={11} />Voice</span>}
+                  </div>
+                  <p className="mt-0.5 whitespace-pre-wrap text-[13px] leading-relaxed text-s-text-2">
+                    {(m.content || '').replace(/###[A-Z_]+:[^\n#]*/g, '').trim()}
+                  </p>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <Dialog open={confirm} tone="danger" title="Delete this conversation?" confirmLabel="Delete"
+              description="The transcript is removed from this computer. Facts Seven learned from it are kept."
+              onConfirm={remove} onCancel={() => setConfirm(false)} />
+    </div>
+  );
+}
+
+function ConversationsView({ onChanged }) {
+  const [list, setList] = useState(null);
+  const [selected, setSelected] = useState(null);
+  const [query, setQuery] = useState('');
+  const [found, setFound] = useState({ q: '', items: [] });
+  const q = query.trim();
+  const results = q.length >= 2 ? (found.q === q ? found.items : []) : null;
+
+  const load = useCallback(() => {
+    api.get('/conversations?limit=500').then(r => {
+      const items = r.data.conversations || [];
+      setList(items);
+      setSelected(s => (s && items.some(c => c.id === s) ? s : items[0]?.id || null));
+    }).catch(() => setList([]));
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    if (q.length < 2) return undefined;
+    const t = setTimeout(() => {
+      api.get(`/conversations?q=${encodeURIComponent(q)}&limit=50`)
+         .then(r => setFound({ q, items: r.data.results || [] })).catch(() => setFound({ q, items: [] }));
+    }, 250);
+    return () => clearTimeout(t);
+  }, [q]);
+
+  const groups = useMemo(() => {
+    const out = [];
+    for (const c of list || []) {
+      const label = dayLabel(c.updated_at);
+      if (!out.length || out[out.length - 1].label !== label) out.push({ label, items: [] });
+      out[out.length - 1].items.push(c);
+    }
+    return out;
+  }, [list]);
+
+  if (list === null) return <LoadingRows rows={6} />;
+  if (list.length === 0) {
+    return <EmptyState icon={MessageSquare} title="No conversations yet"
+                       description="Everything you say to Seven, typed or spoken, is saved here with the time it happened." />;
   }
 
   return (
-    <div className="space-y-3">
-      {/* Add row */}
-      {adding ? (
-        <div className="bg-white/[0.02] border border-white/8 rounded-xl p-3
-                        flex items-center gap-2 animate-[cardReveal_200ms_ease-out]">
-          <select value={newCategory} onChange={e => setNewCategory(e.target.value)}
-                  className="bg-black/40 border border-white/10 text-[10px] text-white/70
-                             rounded-md px-2 py-1 outline-none">
-            {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-          </select>
-          <input value={newValue} onChange={e => setNewValue(e.target.value)}
-                 autoFocus
-                 onKeyDown={e => e.key === 'Enter' && handleAdd()}
-                 placeholder="Enter a structured fact..."
-                 className="flex-1 bg-transparent text-[12px] text-white/80
-                            placeholder-white/20 outline-none" />
-          <button onClick={handleAdd} disabled={saving || !newValue.trim()}
-                  className="text-[9px] text-s-accent font-medium px-2 py-1
-                             hover:bg-s-accent/8 rounded transition-colors
-                             disabled:opacity-30">
-            {saving ? 'Saving...' : 'Save'}
-          </button>
-          <button onClick={() => { setAdding(false); setNewValue(''); }}
-                  className="text-white/25 hover:text-white/55 transition-colors">
-            <X size={12} />
-          </button>
+    <div className="flex h-[calc(100vh-260px)] min-h-[420px] overflow-hidden rounded-xl border border-s-border bg-s-bg">
+      <div className="flex w-80 shrink-0 flex-col border-r border-s-border bg-s-surface">
+        <div className="border-b border-s-border p-3">
+          <div className="relative">
+            <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-s-text-4" />
+            <Input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search every message" className="w-full pl-8 pr-8" aria-label="Search conversations" />
+            {query && <button aria-label="Clear search" onClick={() => setQuery('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-s-text-4 hover:text-s-text-2"><X size={14} /></button>}
+          </div>
         </div>
-      ) : (
-        <button onClick={() => setAdding(true)}
-                className="flex items-center gap-1.5 text-[9px] text-white/30
-                           hover:text-white/55 transition-colors">
-          <Plus size={11} />
-          Add structured fact
-        </button>
-      )}
-
-      {/* Facts list */}
-      {filtered.length === 0 ? (
-        <div className="py-12 text-center">
-          <p className="text-[11px] text-white/30">
-            {searchQuery ? 'No structured facts match your search' : 'No structured facts stored yet'}
-          </p>
-          <p className="text-[9px] text-white/20 mt-1.5">
-            Chat with Seven and mention preferences, work, or identity details to see them here.
-          </p>
-        </div>
-      ) : (
-        <div className="space-y-1.5">
-          {filtered.map(f => (
-            <div key={f.id}
-                 className="bg-white/[0.02] border border-white/[0.05] rounded-xl
-                            hover:border-white/10 group transition-all duration-150">
-              <div className="flex items-start gap-3 px-4 py-3">
-                <div className="flex-1 min-w-0">
-                  {editingId === f.id ? (
-                    <div className="space-y-2">
-                      <input value={editValue} onChange={e => setEditValue(e.target.value)}
-                             autoFocus
-                             onKeyDown={e => e.key === 'Enter' && saveEdit()}
-                             className="w-full bg-black/40 border border-white/15 rounded-md
-                                        text-[12px] text-white/80 px-2 py-1.5 outline-none" />
-                      <div className="flex items-center gap-2">
-                        <label className="text-[9px] text-white/40 flex items-center gap-1">
-                          <input type="radio" name={`mode-${f.id}`} value="update"
-                                 checked={editMode === 'update'}
-                                 onChange={e => setEditMode(e.target.value)} />
-                          Update in place
-                        </label>
-                        <label className="text-[9px] text-white/40 flex items-center gap-1">
-                          <input type="radio" name={`mode-${f.id}`} value="supersede"
-                                 checked={editMode === 'supersede'}
-                                 onChange={e => setEditMode(e.target.value)} />
-                          Supersede (keep history)
-                        </label>
-                        <button onClick={saveEdit} disabled={saving}
-                                className="ml-auto text-[9px] text-s-accent font-medium px-2 py-1
-                                           hover:bg-s-accent/8 rounded transition-colors
-                                           disabled:opacity-30">
-                          {saving ? 'Saving...' : 'Save'}
-                        </button>
-                        <button onClick={cancelEdit}
-                                className="text-white/25 hover:text-white/55 transition-colors">
-                          <X size={12} />
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <>
-                      <p className="text-[12px] text-white/70 leading-relaxed">{f.value}</p>
-                      <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-                        <span className="text-[8px] text-s-accent/60 bg-s-accent/6
-                                         border border-s-accent/10 px-1.5 py-0.5 rounded-md
-                                         font-medium uppercase tracking-wide">
-                          {f.category}
-                        </span>
-                        {f.key && (
-                          <span className="text-[8px] text-s-cyan/60 bg-s-cyan/6
-                                           border border-s-cyan/10 px-1.5 py-0.5 rounded-md
-                                           font-medium">
-                            {f.key}
-                          </span>
-                        )}
-                        {f.speaker_id && f.speaker_id !== 'default' && (
-                          <span className="text-[8px] text-white/40 bg-white/[0.04]
-                                           border border-white/6 px-1.5 py-0.5 rounded-md
-                                           font-medium">
-                            {f.speaker_id}
-                          </span>
-                        )}
-                        <span className="text-[8px] text-white/20 font-mono">
-                          {(f.updated_at || f.created_at || '').split(' ')[0]}
-                        </span>
-                        <button onClick={() => toggleHistory(f.id)}
-                                className="text-[8px] text-white/30 hover:text-white/60
-                                           font-mono transition-colors ml-1">
-                          {expandedId === f.id ? 'Hide history' : 'History'}
-                        </button>
-                      </div>
-                    </>
-                  )}
+        <div className="flex-1 overflow-y-auto p-2">
+          {results ? (
+            results.length === 0 ? <p className="px-2 py-6 text-center text-[12px] text-s-text-3">No messages match "{query}".</p>
+            : results.map(r => (
+              <button key={r.id} onClick={() => setSelected(r.conversation_id)}
+                      className={cx('block w-full rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-s-card',
+                                    selected === r.conversation_id && 'bg-s-card-h')}>
+                <div className="flex items-center justify-between gap-2 text-[12px]">
+                  <span className="truncate font-medium text-s-text">{r.title || 'Untitled conversation'}</span>
+                  <span className="shrink-0 text-s-text-4">{relativeTime(r.ts)}</span>
                 </div>
-                {editingId !== f.id && (
-                  <div className="flex items-center gap-1 flex-shrink-0 mt-0.5
-                                  opacity-0 group-hover:opacity-100 transition-all duration-150">
-                    <button onClick={() => startEdit(f, 'update')}
-                            className="text-white/15 hover:text-white/50
-                                       p-1 rounded-md hover:bg-white/[0.04]"
-                            title="Edit in place">
-                      <ChevronRight size={11} className="rotate-90" />
-                    </button>
-                    <button onClick={() => onDelete(f.id)}
-                            className="text-white/15 hover:text-white/50
-                                       p-1 rounded-md hover:bg-white/[0.04]"
-                            title="Delete">
-                      <Trash2 size={11} />
-                    </button>
+                <p className="mt-0.5 line-clamp-2 text-[12px] text-s-text-3">{r.role === 'user' ? 'You: ' : 'Seven: '}{r.content}</p>
+              </button>
+            ))
+          ) : groups.map(g => (
+            <div key={g.label} className="mb-2">
+              <div className="px-3 pb-1 pt-2 text-[11px] font-medium text-s-text-4">{g.label}</div>
+              {g.items.map(c => (
+                <button key={c.id} onClick={() => setSelected(c.id)} aria-current={selected === c.id ? 'true' : undefined}
+                        className={cx('block w-full rounded-lg px-3 py-2.5 text-left transition-colors',
+                                      selected === c.id ? 'bg-s-card-h' : 'hover:bg-s-card')}>
+                  <div className="truncate text-[13px] font-medium text-s-text">{c.title || 'Untitled conversation'}</div>
+                  <div className="mt-0.5 flex items-center justify-between text-[12px] text-s-text-3">
+                    <span>{plural(c.message_count, 'message')}</span>
+                    <span className="tabular-nums" title={fullTime(c.updated_at)}>{clockTime(c.updated_at)}</span>
                   </div>
-                )}
-              </div>
-
-              {/* Correction history */}
-              {expandedId === f.id && (
-                <div className="px-4 py-2 border-t border-white/[0.04] bg-black/20">
-                  {historyLoading ? (
-                    <p className="text-[9px] text-white/30">Loading history...</p>
-                  ) : history.length === 0 ? (
-                    <p className="text-[9px] text-white/30">No revision history</p>
-                  ) : (
-                    <div className="space-y-1.5">
-                      <div className="text-[8px] text-white/30 uppercase tracking-widest font-medium mb-1">
-                        Revision Chain ({history.length})
-                      </div>
-                      {history.map((h, i) => (
-                        <div key={h.id} className="flex items-start gap-2 text-[10px]">
-                          <span className="text-white/25 font-mono w-4">#{i + 1}</span>
-                          <span className={h.active ? 'text-white/70' : 'text-white/35 line-through'}>
-                            {h.value}
-                          </span>
-                          <span className="text-white/20 font-mono ml-auto">
-                            {(h.updated_at || h.created_at || '').split(' ')[0]}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
+                </button>
+              ))}
             </div>
           ))}
         </div>
-      )}
+      </div>
+      <div className="min-w-0 flex-1">
+        {selected ? <Transcript key={selected} id={selected} onDeleted={() => { setSelected(null); load(); onChanged(); }} />
+                  : <EmptyState icon={MessageSquare} title="Select a conversation" />}
+      </div>
     </div>
   );
 }
 
-
-// ── Main Page ──────────────────────────────────────────────────────────────
+// ── Page ────────────────────────────────────────────────────────────────────
 
 export default function Memory() {
-  const { config }   = useConfig();
-  const [tab,        setTab]    = useState('conversations');
-  const [search,     setSearch] = useState('');
-  const [searching,  setSearching] = useState(false);
+  const [params, setParams] = useSearchParams();
+  const tab = params.get('tab') === 'conversations' ? 'conversations' : 'facts';
+  const [overview, setOverview] = useState(null);
 
-  const {
-    facts, conversations, totalConvos, stats, loading,
-    fetchFacts, fetchConvos, fetchStats, deleteFact, deleteConvo,
-    structuredFacts, structuredTotal, structuredLoading,
-    fetchStructuredFacts, addStructuredFact, updateStructuredFact,
-    deleteStructuredFact, fetchFactHistory,
-  } = useMemory();
-
-  useEffect(() => {
-    fetchFacts();
-    fetchConvos();
-    fetchStats();
-    fetchStructuredFacts();
+  const loadOverview = useCallback(() => {
+    api.get('/memory/overview').then(r => setOverview(r.data)).catch(() => setOverview(null));
   }, []);
+  useEffect(() => { loadOverview(); }, [loadOverview]);
 
-  if (loading) return <Spinner t="Loading memory..." />;
-
-  const _tier = config?.license?.tier || 'free';
-  const _maxConvos = _tier === 'free' ? 7 : _tier === 'pro' ? 77 : -1;
-  const _maxFacts = _tier === 'free' ? 7 : _tier === 'pro' ? 77 : -1;
-
-  const hitConvoLimit = _maxConvos !== -1 && (stats?.total_conversations >= _maxConvos);
-  const hitFactLimit = _maxFacts !== -1 && (stats?.total_facts >= _maxFacts);
-  const showLimitBanner = hitConvoLimit || hitFactLimit;
+  const f = overview?.facts;
+  const c = overview?.conversations;
+  const typed = c?.by_source?.chat || 0;
+  const spoken = c?.by_source?.voice || 0;
 
   return (
-    <div className="h-full flex flex-col bg-s-bg">
-      {showLimitBanner && (
-        <div className="bg-s-accent/10 border-b border-s-accent/20 px-6 py-3 flex items-center justify-between shadow-sm">
-          <div className="flex items-center gap-2 text-s-accent">
-            <AlertCircle size={13} />
-            <span className="text-[12px] font-semibold tracking-wide">Storage Capacity Reached</span>
-          </div>
-          <span className="text-[10.5px] text-s-accent/80 font-medium">
-            You hit the {_tier.toUpperCase()} plan limit. New chats and facts cannot be stored. Upgrade to save more.
-          </span>
+    <PageShell
+      title="Memory"
+      description="What Seven knows about you and everything you've talked about. Stored only on this computer."
+      toolbar={
+        <Segmented value={tab} onChange={v => setParams({ tab: v })}
+                   options={[{ value: 'facts', label: `Facts${f ? `  ${f.active}` : ''}` },
+                             { value: 'conversations', label: `Conversations${c ? `  ${c.count}` : ''}` }]} />
+      }>
+      <div className="mx-auto max-w-[1080px] space-y-6 px-8 py-6">
+        <div className="grid grid-cols-4 gap-3">
+          <Stat label="Facts" value={f ? f.active : '...'}
+                hint={f?.last_learned_at ? `Last learned ${relativeTime(f.last_learned_at)}` : 'Nothing learned yet'} />
+          <Stat label="Conversations" value={c ? c.count : '...'}
+                hint={c ? `${plural(c.messages || 0, 'message')} in total` : ''} />
+          <Stat label="Your messages" value={c ? (c.from_user || 0) : '...'}
+                hint={c ? <span className="flex items-center gap-3"><span className="flex items-center gap-1"><Keyboard size={11} />{typed} typed</span><span className="flex items-center gap-1"><Mic size={11} />{spoken} spoken</span></span> : ''} />
+          <Stat label="Stored on this computer" value={overview ? `${overview.storage.total_mb} MB` : '...'}
+                hint={c?.last_at ? `Last activity ${relativeTime(c.last_at)}` : ''} />
         </div>
-      )}
-
-      {/* Header */}
-      <div className="flex items-center justify-between px-6 py-3.5 border-b border-white/8">
-        <div>
-          <h1 className="text-[15px] font-semibold text-white/95 tracking-tight">Memory</h1>
-          <p className="text-[9px] text-white/35 mt-0.5">
-            Everything Seven has learned, stored locally on your disk
-          </p>
+        <div key={tab} className="page-in">
+          {tab === 'facts' ? <FactsView onChanged={loadOverview} /> : <ConversationsView onChanged={loadOverview} />}
         </div>
       </div>
-
-      <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
-
-        {/* Stats */}
-        {stats && (
-          <div className="grid grid-cols-4 gap-2">
-            <StatCard label="Facts"         value={stats.total_facts}         icon={Brain} />
-            <StatCard label="Conversations" value={stats.total_conversations}  icon={MessageSquare} />
-            <StatCard label="DB Size"       value={`${stats.storage_mb} MB`}  icon={HardDrive} />
-            <StatCard label="Storage"       value="Local disk"                icon={HardDrive} />
-          </div>
-        )}
-
-        {/* Tab bar + search */}
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1 bg-white/[0.02] border border-white/6
-                          rounded-lg p-1">
-            {['conversations', 'facts', 'structured'].map(t => (
-              <button key={t} onClick={() => setTab(t)}
-                      className={`px-3.5 py-1.5 rounded-md text-[10px] font-medium
-                                  transition-all duration-150 capitalize
-                        ${tab === t
-                          ? 'bg-white/[0.06] text-white/80'
-                          : 'text-white/30 hover:text-white/55'}`}>
-                {t}
-                <span className="ml-1.5 text-[7px] font-mono opacity-60">
-                  {t === 'conversations' ? totalConvos : t === 'facts' ? facts.length : structuredTotal}
-                </span>
-              </button>
-            ))}
-          </div>
-
-          {/* Search */}
-          <div className={`flex items-center gap-2 bg-white/[0.02] border rounded-lg
-                           px-3 py-1.5 transition-all duration-200 ml-auto
-                           ${searching
-                             ? 'border-white/15 w-56'
-                             : 'border-white/6 w-36'}`}>
-            <Search size={11} className="text-white/25 flex-shrink-0" />
-            <input
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              onFocus={() => setSearching(true)}
-              onBlur={() => setSearching(false)}
-              placeholder="Search..."
-              className="flex-1 bg-transparent text-[11px] text-white/70
-                         placeholder-white/20 outline-none min-w-0"
-            />
-            {search && (
-              <button onClick={() => setSearch('')}
-                      className="text-white/25 hover:text-white/55 transition-colors flex-shrink-0">
-                <X size={10} />
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Content */}
-        {tab === 'conversations' && (
-          <ConversationsTab
-            conversations={conversations}
-            onDelete={deleteConvo}
-            searchQuery={search}
-          />
-        )}
-        {tab === 'facts' && (
-          <FactsTab
-            facts={facts}
-            onDelete={deleteFact}
-            searchQuery={search}
-          />
-        )}
-        {tab === 'structured' && (
-          <StructuredFactsTab
-            facts={structuredFacts}
-            loading={structuredLoading}
-            onAdd={addStructuredFact}
-            onUpdate={updateStructuredFact}
-            onDelete={deleteStructuredFact}
-            onFetchHistory={fetchFactHistory}
-            searchQuery={search}
-          />
-        )}
-      </div>
-    </div>
+    </PageShell>
   );
 }

@@ -1,707 +1,294 @@
-import { useState, useEffect } from 'react';
+/**
+ * Plans
+ *
+ * Limits and prices come from /api/license/pricing, which reads license.py:
+ * the same table the app enforces, so this page can't drift from reality.
+ * Seven runs fully on the user's computer on every plan; paid plans raise
+ * limits and add extras.
+ */
+/* SEVEN_DOC {"purpose": "Compare Free, Pro and Ultimate, buy a plan, activate a license key or start a free trial",
+              "keywords": ["plans", "pricing", "price", "upgrade", "pro", "ultimate", "license", "trial", "subscription"],
+              "controls": [
+                {"label": "Compare plans", "description": "Limits for schedules, triggers, knowledge files and more on each plan."},
+                {"label": "Activate a license key", "description": "Paste the key from your purchase email."},
+                {"label": "Start trial", "description": "Try Pro free for 14 days."}
+              ]} */
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import useLicense from '../stores/useLicense';
+import { Check, Minus, KeyRound, Sparkles, Gift } from 'lucide-react';
 import api from '../api';
-import PageHeader from '../components/PageHeader';
-import Spinner from '../components/Spinner';
+import useConfig from '../stores/useConfig';
+import useLicense from '../stores/useLicense';
+import { PageShell, Section, Row, Button, Input, Badge, Segmented, LoadingRows } from '../components/ui';
+import { cx } from '../lib/cx';
+import { toast } from '../lib/toast';
 
-// =============================================================================
-// FEATURE LISTS
-// =============================================================================
-
-const FEATURES = {
-  free: [
-    'Unlimited facts remembered',
-    'Unlimited conversation history',
-    'Unlimited tasks',
-    '7 triggers & hotkeys',
-    '7 schedules',
-    '1 knowledge file',
-    'Basic window control'
-  ],
-  pro: [
-    'Unlimited facts remembered',
-    'Unlimited conversation history',
-    'Unlimited tasks',
-    '77 triggers & hotkeys',
-    '77 schedules',
-    '7 knowledge files',
-    'Advanced window control',
-    'Memory search'
-  ],
-  ultimate: [
-    'Unlimited everything',
-    'Unlimited tasks & triggers',
-    'Voice recognition',
-    'Full system control',
-    'Recurring schedules',
-    'Memory export & backup',
-    'Multi-device (3 devices)',
-    'Priority support',
-    'All future features'
-  ]
+const TIERS = ['free', 'pro', 'ultimate'];
+const NAMES = { free: 'Free', pro: 'Pro', ultimate: 'Ultimate' };
+const TAGLINES = {
+  free: 'Everything you need to run Seven every day.',
+  pro: 'Higher limits for people who use Seven all day.',
+  ultimate: 'No limits, voice recognition and every future feature.',
 };
+const PERIODS = [{ value: 'monthly', label: 'Monthly' }, { value: 'yearly', label: 'Yearly' }, { value: 'lifetime', label: 'Lifetime' }];
+const PERIOD_SUFFIX = { monthly: '/month', yearly: '/year', lifetime: 'one time' };
+const WINDOW = { basic: 'Basic', advanced: 'Advanced', full: 'Full' };
 
-// =============================================================================
-// DETAILED FEATURE EXPLANATIONS
-// =============================================================================
-
-const DETAILED_FEATURES = {
-  free: {
-    title: "Free Tier — Get Started",
-    description: "Perfect for trying out Seven's core features",
-    details: [
-      {
-        feature: "Unlimited Facts Remembered",
-        example: "Seven remembers: 'My favorite color is blue', 'I work at Google', 'My birthday is Jan 15'"
-      },
-      {
-        feature: "Unlimited Conversation History",
-        example: "Every chat is saved on your device and searchable, nothing is deleted to make room"
-      },
-      {
-        feature: "1 Knowledge File",
-        example: "Upload your resume.pdf — Seven can answer questions about it"
-      },
-      {
-        feature: "7 Schedules",
-        example: "Set reminders like: 'Remind me to take medicine at 9 PM daily'"
-      },
-      {
-        feature: "Basic Window Control",
-        example: "Commands: 'Open Chrome', 'Close window', 'Set volume to 50%'"
-      },
-      {
-        feature: "3 URL Shortcuts",
-        example: "Say 'Open YouTube' → Goes to youtube.com"
-      }
-    ]
-  },
-  pro: {
-    title: "Pro Tier — Power User",
-    description: "For daily Seven users who need more memory and control",
-    details: [
-      {
-        feature: "Unlimited Facts & Conversations",
-        example: "Seven remembers your preferences, work details and the people in your life, for as long as you want"
-      },
-      {
-        feature: "7 Knowledge Files",
-        example: "Upload course notes, work docs, research papers — ask Seven anything about them"
-      },
-      {
-        feature: "77 Schedules",
-        example: "Morning alarms, work reminders, meeting alerts, medication schedules"
-      },
-      {
-        feature: "Advanced Window Control",
-        example: "'Move window to left half', 'Switch to Chrome', 'Show me Notepad'"
-      },
-      {
-        feature: "7 App Aliases",
-        example: "Say 'browser' → Opens Chrome (you define shortcuts)"
-      },
-      {
-        feature: "7 Custom Commands",
-        example: "'Start work mode' → Opens VS Code, Slack, Chrome in specific layout"
-      }
-    ]
-  },
-  ultimate: {
-    title: "Ultimate Tier — Maximum Power",
-    description: "Unlock every feature Seven has to offer",
-    details: [
-      {
-        feature: "Unlimited Everything",
-        example: "No limits on facts, conversations, files, schedules, searches"
-      },
-      {
-        feature: "Voice Recognition",
-        example: "Seven identifies who's speaking — 'Hey Seven' from you vs your brother → different responses"
-      },
-      {
-        feature: "Full System Control",
-        example: "'Always open Spotify minimized', 'Chrome on monitor 2', custom window rules"
-      },
-      {
-        feature: "Recurring Schedules",
-        example: "'Every Monday at 9 AM, remind me to submit report' — auto-repeats"
-      },
-      {
-        feature: "Memory Export",
-        example: "Download all your conversations, facts, knowledge base as backup"
-      },
-      {
-        feature: "Multi-Device (3)",
-        example: "Use same license on laptop, desktop, work PC"
-      },
-      {
-        feature: "Priority Support",
-        example: "Get help within 24 hours via email/Discord"
-      }
-    ]
-  }
-};
-
-// =============================================================================
-// FUTURE FEATURES (Phase 2)
-// =============================================================================
-
-const FUTURE_FEATURES = [
-  {
-    version: "V2.0",
-    title: "Screen Vision",
-    description: "Seven sees and understands your screen in real-time"
-  },
-  {
-    version: "V2.1",
-    title: "Click Anything",
-    description: "Voice command to click buttons, links, or text anywhere"
-  },
-  {
-    version: "V2.2",
-    title: "Face Detection",
-    description: "Webcam detects your presence — auto wake/sleep"
-  },
-  {
-    version: "V2.3",
-    title: "Gesture Control",
-    description: "Hand gestures to control apps (swipe, pinch, thumbs up)"
-  },
-  {
-    version: "V2.4",
-    title: "Full Cursor Control",
-    description: "Seven moves mouse, types, clicks — zero physical input needed"
-  },
-  {
-    version: "V2.5",
-    title: "Smart Scroll",
-    description: "Auto-scroll Instagram/YouTube reels, detect video ends"
-  },
-  {
-    version: "V2.6",
-    title: "Screen Reader",
-    description: "Reads text, errors, emails — understands context"
-  },
-  {
-    version: "V2.7",
-    title: "Auto Form Filler",
-    description: "Fills login forms, checkout pages with your saved info"
-  },
-  {
-    version: "V2.8",
-    title: "Multi-Monitor",
-    description: "Manage windows across 2-3 monitors with voice"
-  }
+// Rows of the comparison table: [label, value(features) => display]
+const ROWS = [
+  ['Facts and conversation history', () => 'Unlimited'],
+  ['Tasks and workspaces', () => 'Unlimited'],
+  ['Schedules and reminders', f => f.schedules],
+  ['Triggers and hotkeys', f => f.triggers],
+  ['Knowledge files', f => f.knowledge_files],
+  ['Web searches per day', f => f.web_searches_per_day],
+  ['App aliases', f => f.app_aliases],
+  ['URL shortcuts', f => f.url_shortcuts],
+  ['Custom commands', f => f.custom_commands],
+  ['Window control', f => WINDOW[f.window_control] || f.window_control],
+  ['Recurring schedules', f => f.recurring_schedules],
+  ['Voice recognition', f => f.voice_recognition],
+  ['Memory export', f => f.memory_export],
+  ['Devices', f => f.max_devices],
 ];
 
-// =============================================================================
-// PLANS ARRAY FOR PRICING CARDS
-// =============================================================================
-
-const PLANS_DATA = [
-  { 
-    name: 'Free', 
-    tier: 'free', 
-    price: '₹0', 
-    sub: 'forever', 
-    features: FEATURES.free
-  },
-  { 
-    name: 'Pro', 
-    tier: 'pro', 
-    price: '₹99', 
-    sub: '/month or ₹1299 lifetime', 
-    features: FEATURES.pro,
-    highlight: true 
-  },
-  { 
-    name: 'Ultimate', 
-    tier: 'ultimate', 
-    price: '₹199', 
-    sub: '/month or ₹1999 lifetime', 
-    features: FEATURES.ultimate,
-    premium: true,
-    hasFutureFeatures: true 
-  }
+const ROADMAP = [
+  ['Screen understanding', 'Seven sees what is on your screen and can help with it.'],
+  ['Click and type by voice', 'Press buttons, fill fields and move the cursor by asking.'],
+  ['Presence detection', 'Wake and sleep automatically when you sit down or leave.'],
+  ['Multi-monitor control', 'Arrange windows across two or three screens by voice.'],
 ];
 
-// =============================================================================
-// COMPONENT
-// =============================================================================
+function show(v) {
+  if (v === true) return <Check size={15} className="mx-auto text-s-green" aria-label="Included" />;
+  if (v === false || v === 0) return <Minus size={15} className="mx-auto text-s-text-4" aria-label="Not included" />;
+  if (v === -1) return 'Unlimited';
+  return v;
+}
 
-export default function Plans() {
-  // Hooks
-  const navigate = useNavigate();
-  const { tier, licenseKey, fetchStatus, activate, startTrial, isTrial, daysUntilExpiry } = useLicense();
-  
-  // State
+function highlights(f) {
+  const lim = (v, noun) => (v === -1 ? `Unlimited ${noun}` : `${v} ${v === 1 ? noun.replace(/s$/, '') : noun}`);
+  const out = ['Unlimited memory and conversations', lim(f.schedules, 'schedules'), lim(f.triggers, 'triggers and hotkeys'),
+               lim(f.knowledge_files, 'knowledge files')];
+  if (f.voice_recognition) out.push('Voice recognition');
+  if (f.max_devices > 1) out.push(`Use on ${f.max_devices} devices`);
+  return out;
+}
+
+function money(n) {
+  return `₹${Number(n).toLocaleString('en-IN')}`;
+}
+
+function CurrentPlan({ tier, isTrial, daysUntilExpiry }) {
+  const paid = tier !== 'free';
+  let status = 'Free forever. Upgrade any time.';
+  let tone = 'text-s-text-3';
+  if (paid) {
+    if (daysUntilExpiry == null) { status = 'Lifetime access'; tone = 'text-s-green'; }
+    else if (daysUntilExpiry <= 0) { status = 'Expired. Activate a new key to keep your plan.'; tone = 'text-s-red'; }
+    else {
+      status = `${isTrial ? 'Trial ends' : 'Renews or expires'} in ${daysUntilExpiry} day${daysUntilExpiry === 1 ? '' : 's'}`;
+      tone = daysUntilExpiry <= 3 ? 'text-s-red' : daysUntilExpiry <= 7 ? 'text-s-yellow' : 'text-s-text-3';
+    }
+  }
+  return (
+    <div className="flex items-center justify-between rounded-xl border border-s-border bg-s-surface px-5 py-4 shadow-[var(--s-shadow)]">
+      <div>
+        <div className="text-[12px] text-s-text-3">Your plan</div>
+        <div className="mt-0.5 flex items-center gap-2">
+          <span className="text-[17px] font-semibold text-s-text">{NAMES[tier] || 'Free'}</span>
+          {isTrial && <Badge tone="warning">Trial</Badge>}
+        </div>
+        <div className={cx('mt-0.5 text-[12px]', tone)}>{status}</div>
+      </div>
+      <Button variant="ghost" onClick={() => window.__navigate?.('/blog')}>How to use Seven</Button>
+    </div>
+  );
+}
+
+function PlanCard({ tier, features, price, period, current, onChoose }) {
+  const featured = tier === 'pro';
+  return (
+    <div className={cx('flex flex-col rounded-xl border bg-s-surface p-5 shadow-[var(--s-shadow)]',
+                       featured ? 'border-s-accent/60' : 'border-s-border')}>
+      <div className="flex h-5 items-center justify-between">
+        <span className="text-[14px] font-semibold text-s-text">{NAMES[tier]}</span>
+        {featured && <span className="text-[12px] font-medium text-s-accent-h">Most popular</span>}
+      </div>
+      <p className="mt-1 min-h-[36px] text-[12px] leading-relaxed text-s-text-3">{TAGLINES[tier]}</p>
+      <div className="mt-3 flex items-baseline gap-1.5">
+        <span className="text-[28px] font-semibold tracking-[-0.02em] text-s-text tabular-nums">{tier === 'free' ? money(0) : money(price)}</span>
+        <span className="text-[12px] text-s-text-3">{tier === 'free' ? 'forever' : PERIOD_SUFFIX[period]}</span>
+      </div>
+      <ul className="mt-4 flex-1 space-y-2">
+        {highlights(features).map(h => (
+          <li key={h} className="flex items-start gap-2 text-[13px] text-s-text-2">
+            <Check size={14} className="mt-0.5 shrink-0 text-s-accent-h" />{h}
+          </li>
+        ))}
+      </ul>
+      <div className="mt-5">
+        {current ? (
+          <Button className="w-full" disabled>Current plan</Button>
+        ) : tier === 'free' ? (
+          <Button className="w-full" variant="ghost" disabled>Included</Button>
+        ) : (
+          <Button className="w-full" variant={featured ? 'primary' : 'secondary'} onClick={onChoose}>
+            Get {NAMES[tier]}
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Activate({ tier }) {
+  const { activate, startTrial } = useLicense();
+  const { config } = useConfig();
   const [key, setKey] = useState('');
-  const [email, setEmail] = useState('');
-  const [msg, setMsg] = useState('');
-  const [msgType, setMsgType] = useState('');
-  const [referralStats, setReferralStats] = useState(null);
-  const [copied, setCopied] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [expandedPlan, setExpandedPlan] = useState(null);
-  const [showFuture, setShowFuture] = useState(false);
+  const [email, setEmail] = useState(config?.email || '');
+  const [busy, setBusy] = useState(null);
 
-  // Effects
-  useEffect(() => {
-    fetchStatus().then(() => setLoading(false));
-    loadReferralStats();
-  }, []);
-
-  // Functions
-  const loadReferralStats = async () => {
-    try {
-      // Get stats first
-      const r = await api.get('/referral/stats');
-      const stats = r.data;
-
-      // If no referral code yet, create one
-      if (!stats.referral_code) {
-        try {
-          const created = await api.post('/referral/create', {});
-          stats.referral_code = created.data.referral_code;
-        } catch {}
-      }
-
-      setReferralStats(stats);
-    } catch {}
-  };
-
-  const handleActivate = async () => {
-    if (!key.trim()) return;
-    const result = await activate(key.trim(), email.trim() || null);
-    setMsg(result.message);
-    setMsgType(result.success ? 'success' : 'error');
-    setTimeout(() => setMsg(''), 4000);
+  const run = async (which) => {
+    setBusy(which);
+    const result = which === 'key' ? await activate(key.trim(), config?.email || null) : await startTrial(email.trim());
+    setBusy(null);
     if (result.success) {
+      toast.success(which === 'key' ? 'License activated' : 'Pro trial started', result.message);
       setKey('');
-      setEmail('');
+    } else {
+      toast.error(which === 'key' ? 'Activation failed' : 'Could not start the trial', result.message);
     }
   };
-
-  const handleTrial = async () => {
-    if (!email.trim() || !email.includes('@')) {
-      setMsg('Valid email required for trial');
-      setMsgType('error');
-      setTimeout(() => setMsg(''), 3000);
-      return;
-    }
-    const result = await startTrial(email.trim());
-    setMsg(result.message);
-    setMsgType(result.success ? 'success' : 'error');
-    setTimeout(() => setMsg(''), 4000);
-    if (result.success) {
-      setEmail('');
-      loadReferralStats();
-    }
-  };
-
-  const copyReferral = () => {
-    if (referralStats?.referral_code) {
-      navigator.clipboard.writeText(referralStats.referral_code);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    }
-  };
-
-  const goToPurchase = () => {
-    navigate('/purchase');
-  };
-
-  // Loading state
-  if (loading) return <Spinner />;
-
-  const isPro = tier === 'pro' || tier === 'ultimate';
-
-  // =============================================================================
-  // RENDER
-  // =============================================================================
 
   return (
-    <div className="h-full flex flex-col">
-      <PageHeader title="Plans & Pricing" sub="Choose the plan that fits you" />
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
-
-        {/* ================================================================= */}
-        {/* CURRENT STATUS (If Pro/Ultimate) */}
-        {/* ================================================================= */}
-
-        {/* Current Plan — single clean block */}
-        <div className="rounded border border-s-border bg-s-card p-4 space-y-3">
-
-          {/* Top row — tier + expiry + actions */}
-          <div className="flex items-start justify-between">
-            <div className="space-y-0.5">
-              <div className="text-[9px] text-s-text-4 uppercase tracking-widest font-medium">
-                Your Current Plan
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-[15px] font-semibold text-s-text tracking-wide">
-                  {tier.toUpperCase()}
-                </span>
-                {isTrial && (
-                  <span className="text-[9px] text-s-text-4 border border-s-border rounded px-1.5 py-0.5 font-medium tracking-wide">
-                    TRIAL
-                  </span>
-                )}
-              </div>
-
-              {/* Expiry */}
-              {isPro && (
-                <div className="text-[11px]">
-                  {daysUntilExpiry === null ? (
-                    <span className="text-s-green">Lifetime access</span>
-                  ) : daysUntilExpiry <= 0 ? (
-                    <span className="text-red-400">Expired — activate a new key to continue</span>
-                  ) : daysUntilExpiry <= 3 ? (
-                    <span className="text-red-400">Expires in {daysUntilExpiry} day{daysUntilExpiry !== 1 ? 's' : ''}</span>
-                  ) : daysUntilExpiry <= 7 ? (
-                    <span className="text-yellow-400">Expires in {daysUntilExpiry} days</span>
-                  ) : (
-                    <span className="text-s-text-4">{daysUntilExpiry} days remaining</span>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* Action buttons */}
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setExpandedPlan(expandedPlan === tier ? null : tier)}
-                className="text-[11px] px-3 py-1.5 border border-s-border rounded text-s-text-3 hover:text-s-text-2 hover:border-s-border-l transition-colors"
-              >
-                {expandedPlan === tier ? 'Hide details' : 'What you have'}
-              </button>
-              <button
-                onClick={() => window.__navigate?.('/blog')}
-                className="text-[11px] px-3 py-1.5 border border-s-accent/30 rounded text-s-accent hover:bg-s-accent/8 transition-colors"
-              >
-                Guide
-              </button>
-            </div>
-          </div>
-
-          {/* Slide-down — current plan features */}
-          <div className={`grid transition-all duration-300 ease-in-out ${expandedPlan === tier ? 'grid-rows-[1fr] opacity-100 mt-3 pt-3 border-t border-s-border' : 'grid-rows-[0fr] opacity-0 mt-0 pt-0 border-t-0'}`}>
-            <div className="overflow-hidden space-y-2">
-              <div className="text-[9px] text-s-text-4 uppercase tracking-widest font-medium">
-                Included in your plan
-              </div>
-              <div className="space-y-px">
-                {FEATURES[tier].map((f, i) => (
-                  <div key={i} className="flex items-center gap-2 py-1">
-                    <div className="w-1 h-1 rounded-full bg-s-accent/50 flex-shrink-0" />
-                    <span className="text-[11px] text-s-text-3">{f}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
+    <Section title="License">
+      <Row label={tier === 'free' ? 'Activate a license key' : 'Use a different license key'}
+           description="Paste the key from your purchase email.">
+        <div className="flex gap-2">
+          <Input value={key} onChange={e => setKey(e.target.value)} placeholder="VII-XXXX-XXXX-XXXX" className="w-60 font-mono"
+                 aria-label="License key" onKeyDown={e => e.key === 'Enter' && key.trim() && run('key')} />
+          <Button variant="primary" icon={KeyRound} onClick={() => run('key')} disabled={!key.trim()} loading={busy === 'key'}>Activate</Button>
         </div>
+      </Row>
+      {tier === 'free' && (
+        <Row label="Try Pro free for 14 days" description="No payment needed. Your plan returns to Free when the trial ends.">
+          <div className="flex gap-2">
+            <Input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@example.com" className="w-60"
+                   aria-label="Email for trial" />
+            <Button onClick={() => run('trial')} disabled={!email.includes('@')} loading={busy === 'trial'}>Start trial</Button>
+          </div>
+        </Row>
+      )}
+    </Section>
+  );
+}
 
-        {/* ================================================================= */}
-        {/* PRICING CARDS */}
-        {/* ================================================================= */}
-        <div className="grid grid-cols-3 gap-3">
-          {PLANS_DATA.map(plan => (
-            <div 
-              key={plan.name} 
-              className={`rounded border p-4 flex flex-col ${
-                plan.premium 
-                  ? 'border-s-accent/40 bg-gradient-to-br from-s-accent/10 to-s-accent/5' 
-                  : plan.highlight 
-                    ? 'border-s-accent/30 bg-s-accent/3' 
-                    : 'border-s-border bg-s-card'
-              }`}
-            >
-              {/* Plan Name */}
-              <div className="text-[13px] font-semibold text-s-text">{plan.name}</div>
-              
-              {/* Price */}
-              <div className="mt-1">
-                <span className="text-2xl font-bold text-s-text font-mono">{plan.price}</span>
-                <span className="text-[10px] text-s-text-4 ml-1">{plan.sub}</span>
+export default function Plans() {
+  const navigate = useNavigate();
+  const { tier, isTrial, daysUntilExpiry, fetchStatus } = useLicense();
+  const [catalog, setCatalog] = useState(null);
+  const [period, setPeriod] = useState('lifetime');
+
+  useEffect(() => {
+    fetchStatus();
+    api.get('/license/pricing').then(r => setCatalog(r.data)).catch(() => setCatalog({ error: true }));
+  }, [fetchStatus]);
+
+  const savings = useMemo(() => {
+    if (!catalog?.pricing?.pro) return null;
+    const p = catalog.pricing.pro;
+    return Math.round((1 - p.yearly / (p.monthly * 12)) * 100);
+  }, [catalog]);
+
+  const choose = t => navigate('/purchase', { state: { plan: `${t}_${period}` } });
+
+  return (
+    <PageShell title="Plans" description="Seven runs entirely on your computer on every plan. Paid plans raise limits and add extras.">
+      <div className="mx-auto max-w-[1080px] space-y-6 px-8 py-6">
+        <CurrentPlan tier={tier} isTrial={isTrial} daysUntilExpiry={daysUntilExpiry} />
+
+        {!catalog ? <LoadingRows rows={3} /> : catalog.error ? (
+          <p className="text-[13px] text-s-text-3">Plan details couldn't be loaded. Check that Seven is running.</p>
+        ) : (
+          <>
+            <div className="flex items-center justify-between">
+              <h2 className="text-[14px] font-semibold text-s-text">Choose a plan</h2>
+              <div className="flex items-center gap-3">
+                {period === 'yearly' && savings > 0 && <span className="text-[12px] text-s-green">Save {savings}% on yearly</span>}
+                <Segmented value={period} options={PERIODS} onChange={setPeriod} />
               </div>
-              
-              {/* Features List */}
-              <div className="mt-3 space-y-1 flex-1 max-h-[200px] overflow-y-auto">
-                {plan.features.map(f => (
-                  <div key={f} className="text-[11px] text-s-text-3 py-0.5">✓ {f}</div>
-                ))}
-              </div>
-              
-              {/* Know More Button */}
-              <button 
-                onClick={() => setExpandedPlan(expandedPlan === plan.tier ? null : plan.tier)}
-                className="mt-3 w-full py-1.5 border border-s-border bg-s-bg text-s-text-3 rounded text-[10px] font-medium hover:bg-s-card-h hover:text-s-text-2"
-              >
-                {expandedPlan === plan.tier ? 'Show Less' : 'Know More'}
-              </button>
-
-              {/* Future Features Button (Ultimate Only) */}
-              {plan.hasFutureFeatures && (
-                <button 
-                  onClick={() => setShowFuture(!showFuture)}
-                  className="mt-2 w-full py-1.5 border border-s-accent/40 bg-gradient-to-r from-s-accent/20 to-s-accent/10 text-s-accent rounded text-[10px] font-medium hover:from-s-accent/30 hover:to-s-accent/20"
-                  style={{ animation: 'pulse 2s infinite' }}
-                >
-                  View Future Features
-                </button>
-              )}
-
-              {/* Current Plan / Upgrade / Activate */}
-              {tier === plan.tier ? (
-                <div className="mt-2 text-center py-1.5 border border-s-border rounded text-[11px] text-s-text-4">
-                  Current Plan
-                </div>
-              ) : tier === 'free' && plan.tier !== 'free' ? (
-                <div
-                  className="mt-2 text-center py-1.5 border border-s-accent/30 bg-s-accent/10 rounded text-[11px] text-s-accent cursor-pointer hover:bg-s-accent/20"
-                  onClick={() => navigate('/purchase', { state: { plan: plan.tier === 'pro' ? 'pro_lifetime' : 'ultimate_lifetime' } })}
-                >
-                  Get {plan.name} →
-                </div>
-              ) : tier === 'pro' && plan.tier === 'ultimate' ? (
-                <div
-                  className="mt-2 text-center py-1.5 border border-s-accent/40 bg-gradient-to-r from-s-accent/20 to-s-accent/10 rounded text-[11px] text-s-accent cursor-pointer hover:from-s-accent/30 hover:to-s-accent/20 font-medium"
-                  onClick={() => navigate('/purchase', { state: { plan: 'ultimate_lifetime' } })}
-                >
-                  Upgrade to Ultimate →
-                </div>
-              ) : null}
             </div>
-          ))}
-        </div>
 
-        {/* ================================================================= */}
-        {/* EXPANDED PLAN DETAILS */}
-        {/* ================================================================= */}
-        {expandedPlan && expandedPlan !== 'future' && DETAILED_FEATURES[expandedPlan] && (
-          <div className="bg-s-card border border-s-border rounded p-4">
-            <div className="flex items-center justify-between mb-3">
-              <div>
-                <div className="text-[13px] font-semibold text-s-text">{DETAILED_FEATURES[expandedPlan].title}</div>
-                <p className="text-[11px] text-s-text-3">{DETAILED_FEATURES[expandedPlan].description}</p>
-              </div>
-              <button onClick={() => setExpandedPlan(null)} className="text-s-text-4 hover:text-s-text-2 text-lg">✕</button>
-            </div>
-            <div className="space-y-3">
-              {DETAILED_FEATURES[expandedPlan].details.map((item, i) => (
-                <div key={i} className="bg-s-bg rounded p-3 border border-s-border">
-                  <div className="text-[11px] font-medium text-s-text-2 mb-1">✦ {item.feature}</div>
-                  <p className="text-[10px] text-s-text-4 italic">Example: {item.example}</p>
-                </div>
+            <div className="grid grid-cols-3 gap-4">
+              {TIERS.map(t => (
+                <PlanCard key={t} tier={t} features={catalog.tiers[t]} period={period}
+                          price={catalog.pricing[t]?.[period]} current={tier === t} onChoose={() => choose(t)} />
               ))}
             </div>
-            <button 
-              onClick={() => setExpandedPlan(null)}
-              className="mt-3 w-full py-1.5 border border-s-border bg-s-bg text-s-text-3 rounded text-[10px] font-medium hover:bg-s-card-h"
-            >
-              Close Details
-            </button>
-          </div>
+
+            <section className="overflow-hidden rounded-xl border border-s-border bg-s-surface shadow-[var(--s-shadow)]">
+              <div className="px-5 pt-4 pb-3"><h2 className="text-[14px] font-semibold text-s-text">Compare plans</h2></div>
+              <table className="w-full text-[13px]">
+                <thead>
+                  <tr className="border-y border-s-border text-[12px] text-s-text-3">
+                    <th className="px-5 py-2.5 text-left font-medium">Feature</th>
+                    {TIERS.map(t => (
+                      <th key={t} className={cx('w-40 px-5 py-2.5 text-center font-medium', tier === t && 'text-s-text')}>
+                        {NAMES[t]}{tier === t ? ' (yours)' : ''}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-s-border/70">
+                  {ROWS.map(([label, get]) => (
+                    <tr key={label}>
+                      <td className="px-5 py-2.5 text-s-text-2">{label}</td>
+                      {TIERS.map(t => (
+                        <td key={t} className={cx('px-5 py-2.5 text-center tabular-nums text-s-text', tier === t && 'bg-s-card/60')}>
+                          {show(get(catalog.tiers[t]))}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </section>
+          </>
         )}
 
-        {/* ================================================================= */}
-        {/* FUTURE FEATURES MODAL */}
-        {/* ================================================================= */}
-        <div className={`grid transition-all duration-400 ease-in-out ${showFuture ? 'grid-rows-[1fr] opacity-100 mt-4' : 'grid-rows-[0fr] opacity-0 mt-0'}`}>
-          <div className="overflow-hidden">
-            <div className="bg-gradient-to-br from-s-accent/5 to-s-accent/10 border border-s-accent/30 rounded p-4">
-            <div className="flex items-center justify-between mb-3">
-              <div>
-                <div className="text-[13px] font-semibold text-s-accent">Coming in Phase 2: The Senses</div>
-                <p className="text-[10px] text-s-text-3 mt-1">Screen control, vision, and gesture recognition — Ultimate users get free access</p>
-              </div>
-              <button onClick={() => setShowFuture(false)} className="text-s-text-4 hover:text-s-text-2 text-lg">✕</button>
+        <Activate tier={tier} />
+
+        <div className="grid grid-cols-2 gap-4">
+          <section className="rounded-xl border border-s-border bg-s-surface px-5 py-4">
+            <div className="flex items-center gap-2">
+              <Sparkles size={15} className="text-s-accent-h" />
+              <h2 className="text-[14px] font-semibold text-s-text">On the roadmap</h2>
             </div>
-            <div className="grid grid-cols-2 gap-2">
-              {FUTURE_FEATURES.map((feat, i) => (
-                <div key={i} className="bg-s-card border border-s-border rounded p-3 hover:border-s-accent/30 transition-colors">
-                  <div className="text-[10px] font-mono text-s-accent mb-1">{feat.version}</div>
-                  <div className="text-[11px] font-medium text-s-text-2 mb-1">{feat.title}</div>
-                  <p className="text-[9px] text-s-text-4 leading-tight">{feat.description}</p>
-                </div>
+            <p className="mt-1 text-[12px] text-s-text-3">Included with Ultimate when they ship.</p>
+            <ul className="mt-3 space-y-2.5">
+              {ROADMAP.map(([title, desc]) => (
+                <li key={title}>
+                  <div className="text-[13px] font-medium text-s-text">{title}</div>
+                  <div className="text-[12px] text-s-text-3">{desc}</div>
+                </li>
               ))}
+            </ul>
+          </section>
+          <section className="flex flex-col rounded-xl border border-s-border bg-s-surface px-5 py-4">
+            <div className="flex items-center gap-2">
+              <Gift size={15} className="text-s-accent-h" />
+              <h2 className="text-[14px] font-semibold text-s-text">Get a paid plan free</h2>
             </div>
-            <div className="mt-3 bg-s-bg border border-s-border rounded p-3">
-              <p className="text-[10px] text-s-text-3 mb-2">
-                💡 <strong>Ultimate users get early access</strong> to all Phase 2 features when released
-              </p>
-              <p className="text-[9px] text-s-text-4">
-                Phase 1 users who upgrade to Ultimate before Phase 2 launch get a{' '}
-                <strong className="text-s-accent">special "Founder" badge</strong> + priority beta access
-              </p>
-            </div>
-            <button 
-              onClick={() => setShowFuture(false)}
-              className="mt-3 w-full py-1.5 border border-s-border bg-s-bg text-s-text-3 rounded text-[10px] font-medium hover:bg-s-card-h"
-            >
-              Close
-            </button>
-          </div>
-         </div>
-        </div>
-
-        {/* ================================================================= */}
-        {/* ACTIVATION SECTION */}
-        {/* ================================================================= */}
-        <div className="bg-s-card border border-s-border rounded p-4">
-          <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium mb-2">
-            {tier === 'free' ? 'Activate License Key' : 'Have a Different License?'}
-          </div>
-          {tier === 'free' && (
-            <p className="text-[11px] text-s-text-3 mb-2">Already purchased? Enter your license key below</p>
-          )}
-          <div className="flex gap-2">
-            <input 
-              value={key} 
-              onChange={e => setKey(e.target.value)} 
-              placeholder="VII-XXXX-XXXX-XXXX"
-              className="flex-1 bg-s-bg border border-s-border rounded px-2.5 py-1.5 text-[12px] text-s-text font-mono placeholder-s-text-4" 
-            />
-            <button 
-              onClick={handleActivate} 
-              className="px-3 py-1.5 border border-s-accent/30 bg-s-accent/8 text-s-accent rounded text-[11px] font-medium hover:bg-s-accent/20"
-            >
-              Activate
-            </button>
-          </div>
-          {msg && <p className={`text-[10px] mt-1 ${msgType === 'success' ? 'text-s-green' : 'text-s-red'}`}>{msg}</p>}
-          
-          {tier === 'free' && (
-            <p className="text-[9px] text-s-text-4 mt-2">
-              Don't have a key?{' '}
-              <button 
-                onClick={goToPurchase} 
-                className="text-s-accent underline hover:text-s-accent/80"
-              >
-                Purchase here
-              </button>
-              {' '}or start a free trial above
+            <p className="mt-1 flex-1 text-[13px] leading-relaxed text-s-text-3">
+              Invite a friend. When they've used Seven for 7 hours, they get Pro and you get Ultimate, each free for a month.
             </p>
-          )}
+            <div className="mt-4">
+              <Button onClick={() => navigate('/settings?section=account')}>Get your referral code</Button>
+            </div>
+          </section>
         </div>
-
-        {/* ================================================================= */}
-        {/* REFERRAL SECTION */}
-        {/* ================================================================= */}
-        {/* Referral Section */}
-        <div className="bg-gradient-to-r from-s-accent/5 to-s-accent/10 border border-s-accent/20 rounded p-4 space-y-3">
-          <div className="text-[9px] text-s-accent uppercase tracking-wider font-medium">
-            Refer Friends - Get Premium Free
-          </div>
-
-          <p className="text-[11px] text-s-text-3 leading-relaxed">
-            Share Seven with a friend. When they use it for{' '}
-            <strong className="text-s-accent">7 hours</strong>, you get{' '}
-            <strong className="text-s-accent">Ultimate free for 1 month</strong> and
-            they get <strong className="text-s-green">Pro free for 1 month</strong>.
-          </p>
-
-          {/* Referral Code Display */}
-          {referralStats?.referral_code ? (
-            <div className="space-y-2">
-              <div className="text-[10px] text-s-text-4 uppercase tracking-wider">
-                Your Referral Code
-              </div>
-              <div className="flex gap-2">
-                <div className="flex-1 bg-s-bg border border-s-border rounded px-3 py-2 font-mono text-sm text-s-text tracking-widest">
-                  {referralStats.referral_code}
-                </div>
-                <button
-                  onClick={() => {
-                    const msg =
-                      `Hey! I use Seven AI, a private voice assistant that runs 100% on your PC. No cloud, no data leaving your device.\n\n` +
-                      `Download: https://github.com/manikanta7cheruku/seven-releases/releases/latest\n\n` +
-                      `During setup, enter my referral code: ${referralStats.referral_code}\n\n` +
-                      `Use it for 7 hours → you get Pro free for 1 month, I get Ultimate free!`;
-                    navigator.clipboard.writeText(msg);
-                    setCopied(true);
-                    setTimeout(() => setCopied(false), 2000);
-                  }}
-                  className="px-3 py-2 border border-s-accent/30 bg-s-accent/10 text-s-accent rounded text-[11px] font-medium hover:bg-s-accent/20 transition-colors"
-                >
-                  {copied ? '✓ Copied!' : 'Copy Message'}
-                </button>
-              </div>
-
-              {/* Share message preview */}
-              <div className="bg-s-bg border border-s-border rounded p-3 space-y-1">
-                <div className="text-[9px] text-s-text-4 uppercase tracking-wider mb-2">
-                  Message that gets copied
-                </div>
-                <p className="text-[10px] text-s-text-3 leading-relaxed">
-                  Hey! I use Seven AI, a private voice assistant that runs 100% on your PC.
-                  No cloud, no data leaving your device.
-                </p>
-                <p className="text-[10px] text-s-accent font-mono">
-                  Download: github.com/manikanta7cheruku/seven-releases/releases/latest
-                </p>
-                <p className="text-[10px] text-s-text-2 font-medium">
-                  Referral code: {referralStats.referral_code}
-                </p>
-                <p className="text-[10px] text-s-text-4">
-                  Use 7 hours → you get Pro free, I get Ultimate free!
-                </p>
-              </div>
-            </div>
-          ) : (
-            <div className="bg-s-bg border border-s-border rounded px-3 py-2 text-[11px] text-s-text-4">
-              Complete setup with your email to get a referral code
-            </div>
-          )}
-
-          {/* Stats */}
-          <div className="grid grid-cols-2 gap-2 pt-1">
-            <div className="bg-s-bg rounded px-3 py-2 text-center border border-s-border">
-              <div className="text-[18px] font-mono font-bold text-s-green">
-                {referralStats?.completed_referrals ?? 0}
-              </div>
-              <div className="text-[9px] text-s-text-4 mt-0.5">Friends Completed</div>
-              <div className="text-[9px] text-s-accent mt-0.5">→ You got Ultimate</div>
-            </div>
-            <div className="bg-s-bg rounded px-3 py-2 text-center border border-s-border">
-              <div className="text-[18px] font-mono font-bold text-yellow-400">
-                {referralStats?.pending_referrals ?? 0}
-              </div>
-              <div className="text-[9px] text-s-text-4 mt-0.5">In Progress</div>
-              <div className="text-[9px] text-s-text-4 mt-0.5">Using Seven now</div>
-            </div>
-          </div>
-
-          {/* How it works */}
-          <div className="bg-s-bg border border-s-border rounded p-3 space-y-1.5">
-            <div className="text-[9px] text-s-text-4 uppercase tracking-wider mb-2">
-              How It Works
-            </div>
-            {[
-              '1. Copy your referral code above',
-              '2. Friend installs Seven → enters your code in setup',
-              '3. Friend uses Seven for 7 hours',
-              '4. You get Ultimate (1 month) + Friend gets Pro (1 month)',
-              '5. You receive the license key by email',
-            ].map(step => (
-              <div key={step} className="text-[10px] text-s-text-3">{step}</div>
-            ))}
-          </div>
-        </div>
-
       </div>
-
-      {/* ================================================================= */}
-      {/* PULSE ANIMATION (add to global CSS or here) */}
-      {/* ================================================================= */}
-      <style>{`
-        @keyframes pulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.7; }
-        }
-      `}</style>
-    </div>
+    </PageShell>
   );
 }

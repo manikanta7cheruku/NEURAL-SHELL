@@ -1,377 +1,149 @@
 /**
- * frontend/src/pages/settings/BrainSection.jsx
- *
- * Brain configuration panel. Wired to /api/config/brain endpoints.
- *
- * Features:
- *   - Model picker (grouped by tier, shows installed Ollama models)
- *   - Temperature slider with visual labels
- *   - TARS Humor + Honesty sliders
- *   - Streaming toggle
- *   - Search behavior config (max results, auto-open, follow-up timeout)
- *   - Web fallback preferences
- *   - Live latency stats
- *
- * PROPS:
- *   local   full config clone
- *   set     function(path, value) — updates local config by dot-path
- *   hw      hardware info from /api/hardware
- *   speed   latency stats from /api/speed
+ * Brain settings. Every control maps to a key in brain_modules/brain_settings.py
+ * and saves through PATCH /api/config/brain (validated by that registry). Seven
+ * reads these on every message, so changes apply to the next reply. The same
+ * settings can be changed by chat: "set honesty to 75%", "turn off streaming".
  */
-
 import { useEffect, useState } from 'react';
+import { MessageSquareText } from 'lucide-react';
 import api from '../../api';
+import { Section, Row, Body, Toggle, Slider, Segmented, Select, Badge } from '../../components/ui';
+import { saveBrain } from './save';
 
-const TEMPS = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0];
-const TEMP_LABELS = {
-  0.1: 'Precise', 0.3: 'Focused', 0.5: 'Balanced',
-  0.7: 'Creative', 1.0: 'Wild'
-};
+const honestyLabel = v => (v <= 20 ? 'Diplomatic' : v <= 50 ? 'Tactful' : v <= 80 ? 'Direct' : v <= 95 ? 'Blunt' : 'No filter');
+const humorLabel = v => (v <= 10 ? 'Deadpan' : v <= 30 ? 'Mostly serious' : v <= 60 ? 'Dry wit' : v <= 85 ? 'Playful' : 'Maximum sarcasm');
+const tempLabel = v => (v <= 0.2 ? 'Precise' : v <= 0.4 ? 'Focused' : v <= 0.6 ? 'Balanced' : v <= 0.8 ? 'Creative' : 'Experimental');
 
-const TIER_LABELS = {
-  small:  { label: 'Small',  desc: '1B - 3B params, fastest, lightest' },
-  medium: { label: 'Medium', desc: '7B - 8B params, balanced' },
-  large:  { label: 'Large',  desc: '13B+ params, needs 12GB+ VRAM' },
-};
+const CONTEXT_WINDOWS = [
+  { value: 300, label: '5 minutes' }, { value: 900, label: '15 minutes' }, { value: 1800, label: '30 minutes' },
+  { value: 3600, label: '1 hour' }, { value: 14400, label: '4 hours' }, { value: 86400, label: '24 hours' },
+];
 
-export default function BrainSection({ local, set, hw, speed }) {
-  const [models, setModels] = useState({ tiers: {}, all: [], ollama_running: true });
-  const [loadingModels, setLoadingModels] = useState(true);
-  const [showModelPicker, setShowModelPicker] = useState(false);
+const TIERS = { small: 'Small, fastest', medium: 'Medium, balanced', large: 'Large, most capable' };
 
+export default function BrainSection({ config }) {
+  const [brain, setBrain] = useState(() => config.brain || {});
+  const [models, setModels] = useState(null);
+  const [hw, setHw] = useState(null);
+  const [seen, setSeen] = useState(config.brain);
+  if (config.brain !== seen) { setSeen(config.brain); setBrain(b => ({ ...b, ...(config.brain || {}) })); }
   useEffect(() => {
-    api.get('/config/brain/available-models')
-      .then(r => setModels(r.data))
-      .catch(() => setModels({ tiers: {}, all: [], ollama_running: false }))
-      .finally(() => setLoadingModels(false));
+    api.get('/config/brain').then(r => setBrain(b => ({ ...b, ...r.data }))).catch(() => {});
+    api.get('/config/brain/available-models').then(r => setModels(r.data))
+       .catch(() => setModels({ tiers: {}, all: [], ollama_running: false }));
+    api.get('/hardware').then(r => setHw(r.data)).catch(() => {});
   }, []);
 
-  const currentModel = local.brain?.model_name || 'auto';
+  const change = async (key, value, before = brain[key]) => {
+    setBrain(b => ({ ...b, [key]: value }));
+    const saved = await saveBrain({ [key]: value });
+    if (saved) setBrain(b => ({ ...b, ...saved }));
+    else setBrain(b => ({ ...b, [key]: before }));
+  };
+
+  const v = (key, fallback) => brain[key] ?? fallback;
+  const modelOptions = [{ value: 'auto', label: models?.recommended ? `Automatic (${models.recommended})` : 'Automatic' }];
+  if (models?.tiers) {
+    for (const tier of ['small', 'medium', 'large']) {
+      const items = models.tiers[tier] || [];
+      if (items.length) modelOptions.push({ group: TIERS[tier], items: items.map(m => ({ value: m.name, label: `${m.name}  ·  ${m.size_gb} GB` })) });
+    }
+  }
+  const current = v('model_name', 'auto');
+  if (current !== 'auto' && models && !models.all?.includes(current)) {
+    modelOptions.push({ value: current, label: `${current} (not installed)` });
+  }
+  const reasoningOptions = [{ value: '', label: 'Same as main model' },
+    ...(models?.all || []).map(n => ({ value: n, label: n }))];
 
   return (
-    <div className="bg-s-card border border-s-border rounded p-4">
-      <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium mb-3">
-        Brain Configuration
-      </div>
+    <>
+      <Section title="Model" description="The local language model that writes Seven's replies. Runs on this computer through Ollama.">
+        <Row label="Reply model"
+             description={models && !models.ollama_running
+               ? 'Ollama is not running, so installed models cannot be listed. Start Ollama and reopen Settings.'
+               : 'Changes apply from your next message. Automatic picks the best installed model for your hardware.'}>
+          <Select value={current} options={modelOptions} onChange={val => change('model_name', val)} className="w-72"
+                  disabled={!models} />
+        </Row>
+        {hw?.recommended_model && (
+          <Body className="flex items-center gap-2 text-[12px] text-s-text-3">
+            Recommended for this computer
+            <Badge tone="accent">{hw.recommended_model}</Badge>
+            {hw.recommendation_reason && <span className="text-s-text-4">{hw.recommendation_reason}</span>}
+          </Body>
+        )}
+      </Section>
 
-      {/* Model and Temperature row */}
-      <div className="grid grid-cols-2 gap-4">
+      <Section title="Personality" description="Tone only. These never change facts, actions or what Seven is allowed to do.">
+        <Row label="Honesty" description={`${honestyLabel(v('tars_honesty', 85))}. How directly Seven tells you when you're wrong.`}>
+          <Slider value={v('tars_honesty', 85)} min={0} max={100} step={5} format={x => `${x}%`} label="Honesty"
+                  onCommit={(x, before) => change('tars_honesty', x, before)} onChange={x => setBrain(b => ({ ...b, tars_honesty: x }))} />
+        </Row>
+        <Row label="Humor" description={`${humorLabel(v('tars_humor', 75))}. How dry and witty Seven sounds.`}>
+          <Slider value={v('tars_humor', 75)} min={0} max={100} step={5} format={x => `${x}%`} label="Humor"
+                  onCommit={(x, before) => change('tars_humor', x, before)} onChange={x => setBrain(b => ({ ...b, tars_humor: x }))} />
+        </Row>
+      </Section>
 
-        {/* Model picker */}
-        <div>
-          <label className="text-[10px] text-s-text-3 mb-1 block">Model</label>
+      <Section title="Answers">
+        <Row label="Temperature"
+             description={`${tempLabel(v('temperature', 0.3))}. Lower is more precise and repeatable; higher is more varied. Factual answers are always kept low.`}>
+          <Slider value={v('temperature', 0.3)} min={0.1} max={1} step={0.1} format={x => Number(x).toFixed(1)} label="Temperature"
+                  onCommit={(x, before) => change('temperature', Math.round(x * 10) / 10, before)}
+                  onChange={x => setBrain(b => ({ ...b, temperature: x }))} />
+        </Row>
+        <Row label="Stream replies" description="Show and speak the answer as it's written. Off waits for the full reply before speaking.">
+          <Toggle checked={!!v('streaming', true)} onChange={x => change('streaming', x)} label="Stream replies" />
+        </Row>
+        <Row label="Follow-up questions" description="How often Seven asks you something back to understand you better.">
+          <Segmented value={v('curiosity_level', 'normal')} onChange={x => change('curiosity_level', x)}
+                     options={[{ value: 'off', label: 'Off' }, { value: 'low', label: 'Low' }, { value: 'normal', label: 'Normal' }]} />
+        </Row>
+        <Row label="Model for hard questions" description="Optional. Used only for questions that need deeper reasoning.">
+          <Select value={v('reasoning_model', '')} options={reasoningOptions} onChange={x => change('reasoning_model', x)}
+                  className="w-56" disabled={!models} />
+        </Row>
+      </Section>
 
-          <button
-            onClick={() => setShowModelPicker(!showModelPicker)}
-            className="w-full bg-s-bg border border-s-border rounded px-2.5 py-2 text-[12px] text-s-text font-mono text-left flex items-center justify-between hover:border-s-accent/40 transition-colors"
-          >
-            <span>{currentModel}</span>
-            <span className="text-s-text-4 text-[9px]">{showModelPicker ? '▲' : '▼'}</span>
-          </button>
+      <Section title="Context">
+        <Row label="Conversation context" description="How far back Seven reads the current chat when it replies.">
+          <Select value={String(v('history_ttl_seconds', 1800))} onChange={x => change('history_ttl_seconds', Number(x))}
+                  options={CONTEXT_WINDOWS.map(o => ({ value: String(o.value), label: o.label }))} className="w-40" />
+        </Row>
+        <Row label="Reference memory" description={'How long "open the second one" or "do it again" still refers to your last action.'}>
+          <Slider value={v('follow_up_timeout', 90)} min={15} max={300} step={15} label="Reference memory"
+                  format={x => (x >= 60 ? `${Math.floor(x / 60)}m${x % 60 ? ` ${x % 60}s` : ''}` : `${x}s`)}
+                  onCommit={(x, before) => change('follow_up_timeout', x, before)} onChange={x => setBrain(b => ({ ...b, follow_up_timeout: x }))} />
+        </Row>
+      </Section>
 
-          {showModelPicker && (
-            <div className="mt-1 bg-s-bg border border-s-border rounded overflow-hidden">
-              {/* Auto option */}
-              <button
-                onClick={() => { set('brain.model_name', 'auto'); setShowModelPicker(false); }}
-                className={`w-full text-left px-2.5 py-1.5 text-[10px] font-mono flex items-center justify-between transition-colors ${
-                  currentModel === 'auto'
-                    ? 'bg-s-accent/10 text-s-accent'
-                    : 'text-s-text-2 hover:bg-s-card-h'
-                }`}
-              >
-                <span>auto</span>
-                <span className="text-[8px] opacity-70">
-                  {models.recommended ? `→ ${models.recommended}` : 'pick best'}
-                </span>
-              </button>
+      <Section title="File and app search">
+        <Row label="Results per search" description="Fewer results are faster to read out.">
+          <Slider value={v('search_max_results', 8)} min={3} max={20} step={1} label="Results per search"
+                  onCommit={(x, before) => change('search_max_results', x, before)} onChange={x => setBrain(b => ({ ...b, search_max_results: x }))} />
+        </Row>
+        <Row label="Open the best match" description="Open the top result right away. Off lists results and waits for you to choose.">
+          <Toggle checked={!!v('auto_open_best_match', true)} onChange={x => change('auto_open_best_match', x)} label="Open the best match" />
+        </Row>
+        <Row label="Search inside documents" description="Match words inside PDF and Word files, not only file names.">
+          <Toggle checked={!!v('content_search_enabled', true)} onChange={x => change('content_search_enabled', x)} label="Search inside documents" />
+        </Row>
+        <Row label="Open unknown apps as websites" description="If an app isn't installed, try its website instead.">
+          <Toggle checked={!!v('prefer_browser_for_unknown', true)} onChange={x => change('prefer_browser_for_unknown', x)} label="Open unknown apps as websites" />
+        </Row>
+      </Section>
 
-              {loadingModels ? (
-                <div className="px-2.5 py-2 text-[10px] text-s-text-4">Loading models...</div>
-              ) : !models.ollama_running ? (
-                <div className="px-2.5 py-2 text-[10px] text-red-400/80">
-                  Ollama not running. Start Ollama to see installed models.
-                </div>
-              ) : models.all.length === 0 ? (
-                <div className="px-2.5 py-2 text-[10px] text-s-text-4">
-                  No models installed. Run: <span className="font-mono text-s-accent">ollama pull llama3.2</span>
-                </div>
-              ) : (
-                ['small', 'medium', 'large'].map(tier => {
-                  const items = models.tiers[tier] || [];
-                  if (items.length === 0) return null;
-                  return (
-                    <div key={tier}>
-                      <div className="px-2.5 pt-1.5 pb-0.5 text-[7.5px] uppercase tracking-widest text-s-text-4 bg-s-card/40 border-t border-s-border/40">
-                        {TIER_LABELS[tier].label} · {TIER_LABELS[tier].desc}
-                      </div>
-                      {items.map(m => (
-                        <button
-                          key={m.name}
-                          onClick={() => { set('brain.model_name', m.name); setShowModelPicker(false); }}
-                          className={`w-full text-left px-2.5 py-1.5 text-[10px] font-mono flex items-center justify-between transition-colors ${
-                            currentModel === m.name
-                              ? 'bg-s-accent/10 text-s-accent'
-                              : 'text-s-text-2 hover:bg-s-card-h'
-                          }`}
-                        >
-                          <span className="truncate">{m.name}</span>
-                          <span className="text-[8px] text-s-text-4 shrink-0 ml-2">{m.size_gb}GB</span>
-                        </button>
-                      ))}
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          )}
-
-          <p className="text-[9px] text-s-text-4 mt-1">
-            Type <span className="font-mono text-s-accent">auto</span> or pick specific model.
-          </p>
-          {hw && (
-            <p className="text-[9px] text-s-text-4 mt-0.5">
-              Recommended: <span className="text-s-accent font-mono">{hw.recommended_model}</span>
-            </p>
-          )}
-        </div>
-
-        {/* Temperature */}
-        <div>
-          <label className="text-[10px] text-s-text-3 mb-1 block">
-            Temperature —{' '}
-            <span className="text-s-accent font-mono">{local.brain?.temperature}</span>
-          </label>
-          <div className="flex gap-px mt-1">
-            {TEMPS.map(t => (
-              <button
-                key={t}
-                onClick={() => set('brain.temperature', t)}
-                className={`flex-1 py-1.5 text-[9px] font-mono rounded-sm ${
-                  local.brain?.temperature === t
-                    ? 'bg-s-accent text-white'
-                    : 'bg-s-bg text-s-text-4 hover:text-s-text-3 hover:bg-s-card-h'
-                }`}
-              >
-                {t}
-              </button>
-            ))}
-          </div>
-          <div className="flex justify-between mt-1 px-1">
-            {Object.entries(TEMP_LABELS).map(([v, l]) => (
-              <span key={v} className="text-[8px] text-s-text-4">{l}</span>
-            ))}
-          </div>
-          <p className="text-[9px] text-s-text-4 mt-1.5 leading-relaxed">
-            Low = precise and factual. High = creative but may go off-script.
+      <div className="flex items-start gap-3 rounded-xl border border-s-border bg-s-surface px-5 py-4">
+        <MessageSquareText size={16} className="mt-0.5 shrink-0 text-s-accent-h" />
+        <div className="text-[12px] leading-relaxed text-s-text-3">
+          <p className="text-[13px] font-medium text-s-text">You can also ask Seven</p>
+          <p className="mt-1">
+            "Set honesty to 75%", "be a bit funnier", "turn off streaming", "switch your model to llama3.2"
+            or "what are your settings". Seven confirms what changed, and this page updates when you come back to it.
           </p>
         </div>
       </div>
-
-      {/* TARS Personality */}
-      <div className="mt-4 border-t border-s-border/50 pt-3">
-        <div className="flex items-center justify-between mb-2">
-          <div className="text-[8px] text-s-text-4 uppercase tracking-widest">Personality</div>
-          <span className="text-[8px] text-s-text-4 italic">Inspired by TARS</span>
-        </div>
-
-        <div className="grid grid-cols-2 gap-3">
-          {/* Humor */}
-          <div className="bg-s-bg border border-s-border rounded p-2.5">
-            <div className="flex items-center justify-between mb-1.5">
-              <div>
-                <div className="text-[10px] text-s-text-2 font-medium">Humor</div>
-                <div className="text-[8px] text-s-text-4 mt-0.5 leading-snug">
-                  How dry and witty Seven sounds.<br />
-                  <span className="opacity-70">0% = deadpan · 100% = sarcasm</span>
-                </div>
-              </div>
-              <span className="text-[11px] font-mono text-s-accent shrink-0 ml-2">
-                {local.brain?.tars_humor ?? 75}%
-              </span>
-            </div>
-            <input
-              type="range" min={0} max={100} step={5}
-              value={local.brain?.tars_humor ?? 75}
-              onChange={e => set('brain.tars_humor', parseInt(e.target.value))}
-              className="w-full h-[3px] accent-s-accent cursor-pointer rounded-full"
-            />
-            <div className="flex justify-between mt-1">
-              <span className="text-[7px] text-s-text-4">Deadpan</span>
-              <span className="text-[7px] text-s-text-4">Witty</span>
-            </div>
-          </div>
-
-          {/* Honesty */}
-          <div className="bg-s-bg border border-s-border rounded p-2.5">
-            <div className="flex items-center justify-between mb-1.5">
-              <div>
-                <div className="text-[10px] text-s-text-2 font-medium">Honesty</div>
-                <div className="text-[8px] text-s-text-4 mt-0.5 leading-snug">
-                  How direct when you're wrong.<br />
-                  <span className="opacity-70">100% = don't ask if you can't handle it</span>
-                </div>
-              </div>
-              <span className="text-[11px] font-mono text-s-accent shrink-0 ml-2">
-                {local.brain?.tars_honesty ?? 85}%
-              </span>
-            </div>
-            <input
-              type="range" min={0} max={100} step={5}
-              value={local.brain?.tars_honesty ?? 85}
-              onChange={e => set('brain.tars_honesty', parseInt(e.target.value))}
-              className="w-full h-[3px] accent-s-accent cursor-pointer rounded-full"
-            />
-            <div className="flex justify-between mt-1">
-              <span className="text-[7px] text-s-text-4">Diplomatic</span>
-              <span className="text-[7px] text-s-text-4">Brutal</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Search Behavior */}
-      <div className="mt-4 border-t border-s-border/50 pt-3">
-        <div className="text-[8px] text-s-text-4 uppercase tracking-widest mb-2">
-          Search Behavior
-        </div>
-
-        <div className="space-y-2.5">
-
-          {/* Max results */}
-          <div className="bg-s-bg border border-s-border rounded p-2.5">
-            <div className="flex items-center justify-between mb-1">
-              <div>
-                <div className="text-[10px] text-s-text-2 font-medium">Max Results</div>
-                <div className="text-[8px] text-s-text-4 mt-0.5">
-                  How many files to show per search. Fewer = faster, less clutter.
-                </div>
-              </div>
-              <span className="text-[11px] font-mono text-s-accent shrink-0 ml-2">
-                {local.brain?.search_max_results ?? 8}
-              </span>
-            </div>
-            <input
-              type="range" min={3} max={20} step={1}
-              value={local.brain?.search_max_results ?? 8}
-              onChange={e => set('brain.search_max_results', parseInt(e.target.value))}
-              className="w-full h-[3px] accent-s-accent cursor-pointer rounded-full mt-1"
-            />
-            <div className="flex justify-between mt-1">
-              <span className="text-[7px] text-s-text-4">3 (minimal)</span>
-              <span className="text-[7px] text-s-text-4">20 (broad)</span>
-            </div>
-          </div>
-
-          {/* Follow-up timeout */}
-          <div className="bg-s-bg border border-s-border rounded p-2.5">
-            <div className="flex items-center justify-between mb-1">
-              <div>
-                <div className="text-[10px] text-s-text-2 font-medium">Reference Memory</div>
-                <div className="text-[8px] text-s-text-4 mt-0.5">
-                  How long Seven remembers "the second one" or "open it again".
-                </div>
-              </div>
-              <span className="text-[11px] font-mono text-s-accent shrink-0 ml-2">
-                {local.brain?.follow_up_timeout ?? 90}s
-              </span>
-            </div>
-            <input
-              type="range" min={15} max={300} step={15}
-              value={local.brain?.follow_up_timeout ?? 90}
-              onChange={e => set('brain.follow_up_timeout', parseInt(e.target.value))}
-              className="w-full h-[3px] accent-s-accent cursor-pointer rounded-full mt-1"
-            />
-            <div className="flex justify-between mt-1">
-              <span className="text-[7px] text-s-text-4">15s (short)</span>
-              <span className="text-[7px] text-s-text-4">5min (long)</span>
-            </div>
-          </div>
-
-          {/* Auto-open best match */}
-          <div className="flex items-center justify-between bg-s-bg rounded px-2.5 py-2 border border-s-border">
-            <div>
-              <div className="text-[10px] text-s-text-2 font-medium">Auto-Open Best Match</div>
-              <p className="text-[8px] text-s-text-4 mt-0.5">
-                Open the top result automatically. Off = list results only, wait for choice.
-              </p>
-            </div>
-            <button
-              onClick={() => set('brain.auto_open_best_match', !(local.brain?.auto_open_best_match ?? true))}
-              className={`w-8 h-[18px] rounded-full relative transition-colors shrink-0 ml-4 ${
-                (local.brain?.auto_open_best_match ?? true) ? 'bg-s-accent' : 'bg-s-border'
-              }`}
-            >
-              <div className={`absolute top-[2px] w-[14px] h-[14px] rounded-full bg-white transition-all ${
-                (local.brain?.auto_open_best_match ?? true) ? 'left-[14px]' : 'left-[2px]'
-              }`} />
-            </button>
-          </div>
-
-          {/* Content search */}
-          <div className="flex items-center justify-between bg-s-bg rounded px-2.5 py-2 border border-s-border">
-            <div>
-              <div className="text-[10px] text-s-text-2 font-medium">Search Inside Documents</div>
-              <p className="text-[8px] text-s-text-4 mt-0.5">
-                Look inside PDF and DOCX contents, not just filenames. Uses more disk.
-              </p>
-            </div>
-            <button
-              onClick={() => set('brain.content_search_enabled', !(local.brain?.content_search_enabled ?? true))}
-              className={`w-8 h-[18px] rounded-full relative transition-colors shrink-0 ml-4 ${
-                (local.brain?.content_search_enabled ?? true) ? 'bg-s-accent' : 'bg-s-border'
-              }`}
-            >
-              <div className={`absolute top-[2px] w-[14px] h-[14px] rounded-full bg-white transition-all ${
-                (local.brain?.content_search_enabled ?? true) ? 'left-[14px]' : 'left-[2px]'
-              }`} />
-            </button>
-          </div>
-
-          {/* Prefer browser fallback */}
-          <div className="flex items-center justify-between bg-s-bg rounded px-2.5 py-2 border border-s-border">
-            <div>
-              <div className="text-[10px] text-s-text-2 font-medium">Try Browser for Unknown Apps</div>
-              <p className="text-[8px] text-s-text-4 mt-0.5">
-                If Seven can't find an app locally, try opening it as a website.
-              </p>
-            </div>
-            <button
-              onClick={() => set('brain.prefer_browser_for_unknown', !(local.brain?.prefer_browser_for_unknown ?? true))}
-              className={`w-8 h-[18px] rounded-full relative transition-colors shrink-0 ml-4 ${
-                (local.brain?.prefer_browser_for_unknown ?? true) ? 'bg-s-accent' : 'bg-s-border'
-              }`}
-            >
-              <div className={`absolute top-[2px] w-[14px] h-[14px] rounded-full bg-white transition-all ${
-                (local.brain?.prefer_browser_for_unknown ?? true) ? 'left-[14px]' : 'left-[2px]'
-              }`} />
-            </button>
-          </div>
-
-        </div>
-      </div>
-
-      {/* Streaming toggle */}
-      <div className="flex items-center justify-between bg-s-bg rounded px-3 py-2 border border-s-border mt-4">
-        <div>
-          <div className="text-[12px] text-s-text-2">Streaming</div>
-          <p className="text-[9px] text-s-text-4 mt-0.5">
-            Seven speaks as it thinks. Faster first word, slight choppiness.
-            Off = waits for full answer, then speaks smoothly.
-          </p>
-        </div>
-        <button
-          onClick={() => set('brain.streaming', !local.brain?.streaming)}
-          className={`w-8 h-[18px] rounded-full relative transition-colors shrink-0 ml-4 ${
-            local.brain?.streaming ? 'bg-s-accent' : 'bg-s-border'
-          }`}
-        >
-          <div className={`absolute top-[2px] w-[14px] h-[14px] rounded-full bg-white transition-all ${
-            local.brain?.streaming ? 'left-[14px]' : 'left-[2px]'
-          }`} />
-        </button>
-      </div>
-
-    </div>
+    </>
   );
 }

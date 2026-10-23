@@ -31,5 +31,7 @@
   "what is fifteen percent of eighty", "give me a recipe for pasta", "tell me a joke", "what is the difference between tcp and udp",
   "how do neural networks learn", "why is the sky blue", "summarize the plot of inception", "what about interstellar",
   "i love that movie", "tell me about black holes", "how do i learn python quickly", "what should i cook tonight",
-  "who is the president of france", "how tall is mount everest", "explain how a hash map works", "what is a good name for a dog"]
+  "who is the president of france", "how tall is mount everest", "explain how a hash map works", "what is a good name for a dog",
+  "whats the temperature outside", "what is the weather today", "how hot is it outside", "will it rain tomorrow",
+  "what is the temperature in london", "how cold is it today", "what is the news today"]
 }

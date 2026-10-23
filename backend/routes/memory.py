@@ -16,6 +16,65 @@ _log = logging.getLogger('seven.memory')
 router = APIRouter()
 
 
+def _speaker_key(speaker_id=None) -> str:
+    """The storage key the brain uses for this speaker (generic ids map to the owner)."""
+    from brain_modules import session
+    return session.resolve_key(speaker_id or "default")
+
+
+def _size_mb(path: str) -> float:
+    total = 0
+    if os.path.isfile(path):
+        total = os.path.getsize(path)
+    elif os.path.isdir(path):
+        for root, _dirs, files in os.walk(path):
+            for f in files:
+                try:
+                    total += os.path.getsize(os.path.join(root, f))
+                except OSError:
+                    pass
+    return round(total / (1024 * 1024), 2)
+
+
+@router.get("/api/memory/overview", summary="What Seven remembers, from the stores the brain uses",
+            description="Fact and conversation counts, categories, activity times, storage size and index status.")
+def memory_overview():
+    from memory import conversation_store
+    facts = facts_store.get_facts(active_only=False, limit=1_000_000)
+    active = [f for f in facts if f.get("active")]
+    by_category = {}
+    for f in active:
+        by_category[f["category"]] = by_category.get(f["category"], 0) + 1
+    try:
+        activity = conversation_store.activity()
+        conversations = conversation_store.count_conversations()
+    except Exception as exc:
+        _log.warning(f"[API] conversation stats unavailable: {exc}")
+        activity, conversations = {"messages": 0, "from_user": 0, "by_source": {}}, 0
+    folder = os.path.dirname(facts_store.get_db_path())
+    facts_mb = _size_mb(facts_store.get_db_path())
+    conv_mb = _size_mb(conversation_store.get_db_path())
+    index_mb = _size_mb(os.path.join(folder, "chroma.sqlite3"))
+    for entry in (os.listdir(folder) if os.path.isdir(folder) else []):
+        full = os.path.join(folder, entry)
+        if os.path.isdir(full):
+            index_mb += _size_mb(full)
+    return {
+        "speaker_key": _speaker_key(),
+        "facts": {
+            "active": len(active),
+            "history": len(facts) - len(active),
+            "by_category": dict(sorted(by_category.items(), key=lambda kv: -kv[1])),
+            "last_learned_at": max((f.get("created_at") or "" for f in active), default="") or None,
+            "last_updated_at": max((f.get("updated_at") or "" for f in active), default="") or None,
+            "indexed": sum(1 for f in active if f.get("indexed")),
+        },
+        "conversations": {"count": conversations, **activity},
+        "storage": {"folder": folder, "facts_mb": facts_mb, "conversations_mb": conv_mb,
+                    "index_mb": round(index_mb, 2), "total_mb": round(facts_mb + conv_mb + index_mb, 2)},
+    }
+
+
 @router.post("/api/memory/facts")
 def add_manual_fact(data: dict):
     """Manually add a fact. Enforces plan limit."""
@@ -457,14 +516,26 @@ def export_memory():
 @router.delete("/api/memory/clear", summary="Clear all facts and conversations",
                description="Permanently deletes all stored facts and conversation history from ChromaDB and resets brain session state.")
 def clear_all_memory():
-    """Clear all facts, conversations, and reset brain session state. Never returns 500."""
+    """
+    Clear everything Seven remembers: facts and their semantic index, every
+    conversation, learned goals and preferences, and the legacy ChromaDB data.
+    Never returns 500.
+    """
+    cleared = {}
+    try:
+        from memory import conversation_store, fact_service, learning_store
+        cleared["facts"] = fact_service.forget_all()
+        cleared["conversations"] = conversation_store.delete_everything()
+        learning_store.clear_speaker(_speaker_key())
+    except Exception as e:
+        _log.error(f"[API] Clear memory error: {e}")
+        return {"success": False, "error": str(e)}
     try:
         from memory import seven_memory
         if seven_memory:
             seven_memory.clear_all()
     except Exception as e:
-        _log.error(f"[API] Clear memory error: {e}")
-        return {"success": False, "error": str(e)}
+        _log.warning(f"[API] Legacy memory clear skipped: {e}")
 
     try:
         import brain
@@ -472,7 +543,8 @@ def clear_all_memory():
     except Exception:
         pass
 
-    return {"success": True, "message": "All facts and conversations cleared successfully"}
+    return {"success": True, "cleared": cleared,
+            "message": f"Cleared {cleared.get('facts', 0)} facts and {cleared.get('conversations', 0)} conversations."}
 
 
 @router.post("/api/memory/import")
@@ -797,25 +869,17 @@ async def update_structured_fact(fact_id: int, request: Request):
         body = await request.json()
         new_value = (body.get("value") or "").strip()
         mode = body.get("mode", "update")
-        source_text = body.get("source_text")
 
         if not new_value:
             raise HTTPException(status_code=400, detail="Value cannot be empty")
 
+        from memory import fact_service
+        live_id = fact_service.edit(fact_id, new_value, "supersede" if mode == "supersede" else "update")
+        if live_id is None:
+            raise HTTPException(status_code=404, detail="Fact not found or inactive")
         if mode == "supersede":
-            new_id = facts_store.supersede_fact(
-                old_id=fact_id,
-                new_value=new_value,
-                source_text=source_text
-            )
-            if new_id is None:
-                raise HTTPException(status_code=404, detail="Original fact not found or inactive")
-            return {"success": True, "new_id": new_id, "old_id": fact_id}
-        else:
-            ok = facts_store.update_fact(fact_id, new_value)
-            if not ok:
-                raise HTTPException(status_code=404, detail="Fact not found or inactive")
-            return {"success": True, "id": fact_id}
+            return {"success": True, "new_id": live_id, "old_id": fact_id}
+        return {"success": True, "id": live_id}
     except HTTPException:
         raise
     except Exception as e:
@@ -829,8 +893,8 @@ async def update_structured_fact(fact_id: int, request: Request):
 def delete_structured_fact(fact_id: int):
     """Delete a structured fact."""
     try:
-        ok = facts_store.delete_fact(fact_id)
-        if not ok:
+        from memory import fact_service
+        if not fact_service.delete(fact_id):
             return {"success": False, "error": "Fact not found"}
         return {"success": True, "deleted": fact_id}
     except Exception as e:
@@ -846,21 +910,16 @@ async def add_structured_fact(request: Request):
     try:
         body = await request.json()
         value = (body.get("value") or "").strip()
-        speaker_id = body.get("speaker_id", "default")
         category = body.get("category", "manual")
         key = body.get("key")
-        source_text = body.get("source_text")
 
         if not value:
             raise HTTPException(status_code=400, detail="Value cannot be empty")
 
-        new_id = facts_store.add_fact(
-            value=value,
-            speaker_id=speaker_id,
-            category=category,
-            key=key,
-            source_text=source_text
-        )
+        # Store under the key the brain recalls with (the owner's name), not "default",
+        # or Seven would never bring this fact up.
+        from memory import fact_service
+        new_id = fact_service.add_manual(_speaker_key(body.get("speaker_id")), value, category, key)
         return {"success": True, "id": new_id, "value": value}
     except HTTPException:
         raise
