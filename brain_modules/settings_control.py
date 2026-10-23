@@ -64,6 +64,9 @@ _ON = {"on", "enable", "enabled", "activate", "start", "resume"}
 _OFF = {"off", "disable", "disabled", "deactivate", "stop", "pause"}
 _QUESTION_STARTS = ("what", "whats", "how much", "how high", "how low", "is ", "are ", "show", "tell me",
                     "which", "current")
+# "what is your model good at" asks about the model itself, not the model setting.
+_ABOUT_MODEL = re.compile(r"\bmodel\b.*\b(?:good at|capable|smart|limits?|parameters|strengths?|weak|better|best at|"
+                          r"can (?:it|you) do)\b|\b(?:capable|smart|good) is (?:your|the) model\b")
 _HOW_TO = re.compile(r"^(?:how (?:do|can|would|should) i|where (?:do|can|is|are)|how to)\b")
 _NEGATION = re.compile(r"\b(?:dont|do not|don't|never|not now)\b")
 _WEATHER = re.compile(r"\b(?:outside|weather|degrees?|celsius|fahrenheit|forecast|today|tomorrow|tonight|hot|cold|"
@@ -206,7 +209,7 @@ def parse(text: str) -> Optional[Dict]:
     None means "not a settings request": the pipeline continues untouched.
     """
     t = _clean(text)
-    if not t or _HOW_TO.search(t) or _NEGATION.search(t):
+    if not t or _HOW_TO.search(t) or _NEGATION.search(t) or _ABOUT_MODEL.search(t):
         return None
     words = set(t.split())
     if _ALL_SETTINGS.search(t) and (t.startswith(_QUESTION_STARTS) or words & {"list", "show"}):
