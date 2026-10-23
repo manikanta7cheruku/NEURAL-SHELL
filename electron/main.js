@@ -610,7 +610,7 @@ function createTray() {
   ]);
 
   tray.setContextMenu(contextMenu);
-  tray.setToolTip('SEVEN — Private AI Voice Assistant');
+  tray.setToolTip('SEVEN: the layer between you and your computer');
   tray.on('click', () => mainWindow?.show());
 }
 

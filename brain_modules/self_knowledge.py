@@ -121,6 +121,20 @@ def capability_list_answer(norm: str) -> str:
     return capabilities.overview()
 
 
+def value_answer() -> str:
+    return ("Because it puts your whole computer one sentence away, without giving your data to anyone. "
+            "Say what you want and Seven does it on this PC: opens and arranges apps, changes settings, finds files, "
+            "brings back your workspace and keeps your reminders, in milliseconds. It runs entirely on this computer, "
+            "works offline, remembers what you tell it and shows you everything it knows. "
+            "And it never says something worked unless it did.")
+
+
+def symbol_answer() -> str:
+    return ("The orb on the home screen. It's how I show what I'm doing: calm while I wait, and it changes when I'm "
+            "listening, thinking or speaking. Around it is the SEVEN wordmark. Underneath, I'm a layer between you "
+            "and this computer, running entirely on this machine.")
+
+
 def answer(label: str, ctx, config) -> Optional[str]:
     """Dispatch a routed self-knowledge intent. None means 'not mine, let the pipeline continue'."""
     norm = ctx.norm_in
@@ -138,4 +152,8 @@ def answer(label: str, ctx, config) -> Optional[str]:
         return data_flow_answer(norm, config)
     if label == "status_check":
         return status_answer(norm, ctx, config)
+    if label == "self_value":
+        return value_answer()
+    if label == "self_symbol":
+        return symbol_answer()
     return None

@@ -29,6 +29,14 @@ _NOT_ENTITY = {
     "And", "But", "Or", "So", "It", "That", "This", "My", "Seven", "Remember", "Actually", "Also", "Sure",
     "Thanks", "Thank", "Today", "Tomorrow", "Yesterday", "Maybe", "Well", "Now", "Then", "Here", "There",
     "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday", "AI", "OK", "If", "You",
+    "All", "Just", "Everything", "Anything", "Something", "Nothing", "Some", "Any", "Every", "Each", "None",
+    "Let", "Lets", "Let's", "Give", "Show", "Find", "Open", "Close", "Set", "Turn", "Make", "Put", "Add", "Remind",
+    "Start", "Stop", "Go", "Get", "Not", "Very", "Really", "Great", "Good", "Nice", "Cool", "Wow", "Oh", "Hmm",
+    "Sorry", "We", "They", "He", "She", "Our", "Your", "Their", "His", "Her", "Its", "These", "Those", "In", "On",
+    "At", "For", "With", "From", "By", "Of", "To", "As", "Because", "Since", "While", "After", "Before", "Again",
+    "More", "Most", "Less", "Still", "Even", "Only", "Also", "Too", "Why", "Was", "Were", "Will", "Did", "Have",
+    "Has", "Had", "Am", "Be", "Being", "Lol", "Haha", "Ya", "Yeah", "Yep", "Nope", "Me", "Him", "Them", "Us",
+    "Explain", "Describe", "Write", "Create", "Help", "Check", "Tell", "Think", "Know", "Want", "Need", "Like",
 }
 _LEAD_VERBS = {"compare", "tell", "show", "explain", "give", "find", "open", "play", "describe", "list", "write",
                "make", "create", "summarize", "recommend", "suggest", "watch", "read", "see", "check", "help"}
@@ -125,7 +133,7 @@ def extract_entities(text: str) -> List[Tuple[str, Optional[str]]]:
         add(m.group("name"), _KIND_WORDS[m.group("kind").lower()])
     for m in re.finditer(r"\b[A-Z][A-Za-z0-9'\-]*(?:\s+[A-Z][A-Za-z0-9'\-]*){0,3}", text):
         words = m.group(0).split()
-        if len(words) > 1 and words[0].lower() in _LEAD_VERBS:
+        while len(words) > 1 and (words[0].lower() in _LEAD_VERBS or words[0] in _NOT_ENTITY):
             words = words[1:]
         add(" ".join(words))
     for m in re.finditer(r"\b(?:about|called|named)\s+(?:the\s+)?([A-Za-z0-9][\w\-]*(?:\s[A-Za-z0-9][\w\-]*){0,2})", text):
