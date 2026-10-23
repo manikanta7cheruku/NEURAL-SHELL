@@ -99,7 +99,7 @@ def status_answer(norm: str, ctx, config) -> Optional[str]:
     return None
 
 
-def app_help_answer(text: str) -> str:
+def app_help_answer(text: str) -> Optional[str]:
     if time.time() - _last_refresh["t"] > 60:
         _last_refresh["t"] = time.time()
         try:
@@ -108,7 +108,7 @@ def app_help_answer(text: str) -> str:
             pass
     hits = app_map.search(text)
     if not hits:
-        return "I don't have notes on that part of the app yet."
+        return None              # not about the app after all ("what's the temperature outside"): let it continue
     return app_map.describe(hits[0])
 
 
