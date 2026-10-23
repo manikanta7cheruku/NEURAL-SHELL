@@ -11,6 +11,7 @@ from fastapi import WebSocket
 import asyncio
 import datetime
 import time
+from seven_utils.version import get_version
 
 router = APIRouter()
 
@@ -26,17 +27,16 @@ def get_status():
             "user_text": "", "seven_text": "", "mood": "neutral",
             "mood_value": 0.5, "model": "unknown", "streaming": False,
             "uptime": "0h 0m", "uptime_seconds": 0, "speaker": "default",
-            "version": "1.3.2"
+            "version": get_version()
         }
 
     try:
         model = "unknown"
-        version = "1.3.2"
+        version = get_version()
         try:
             import config
             if hasattr(config, 'KEY') and isinstance(config.KEY, dict):
                 model = config.KEY.get("brain", {}).get("model_name", "unknown")
-                version = config.KEY.get("version", "1.3.2")
         except Exception:
             pass
 
@@ -86,7 +86,7 @@ def get_status():
             "user_text": "", "seven_text": "", "mood": "neutral",
             "mood_value": 0.5, "model": "unknown", "streaming": False,
             "uptime": "0h 0m", "uptime_seconds": 0, "speaker": "default",
-            "version": "1.3.2"
+            "version": get_version()
         }
 
 @router.post("/api/interrupt")
@@ -105,7 +105,7 @@ def get_version():
     """Get version info."""
     import config
     return {
-        "version":    config.KEY.get("version", "1.1.4"),
+        "version":    get_version(),
         "build_date": datetime.datetime.now().strftime("%Y-%m-%d"),
         "name":       config.KEY.get("identity", {}).get("name", "Seven")
     }
