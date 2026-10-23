@@ -124,6 +124,24 @@ def copy_path_to_clipboard(path):
             return False
 
 
+def _get_chrome_profiles():
+    """
+    Profile directory names ("Default", "Profile 1", ...) from Chrome's Local State.
+    Falls back to ["Default"] when Chrome's user data can't be read.
+    """
+    import json
+    user_data = os.path.join(os.environ.get("LOCALAPPDATA", ""), "Google", "Chrome", "User Data")
+    try:
+        with open(os.path.join(user_data, "Local State"), "r", encoding="utf-8") as f:
+            info_cache = json.load(f).get("profile", {}).get("info_cache", {})
+        profiles = [d for d in info_cache if os.path.isdir(os.path.join(user_data, d))]
+        if profiles:
+            return sorted(profiles, key=lambda d: (d != "Default", d))
+    except Exception as e:
+        print(Fore.YELLOW + f"[CHROME SETUP] Could not read Chrome profiles: {e}")
+    return ["Default"]
+
+
 def open_chrome_extensions_page():
     """
     Open Chrome extensions page for each profile.
