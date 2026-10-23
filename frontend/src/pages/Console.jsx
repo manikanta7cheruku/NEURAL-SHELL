@@ -1,31 +1,46 @@
-import { useRef, useEffect, useState, useCallback } from 'react';
+/**
+ * Console: chat with Seven (the same brain as voice). Saved chats on the left
+ * (resizable, collapsible), the conversation in the middle, and an optional
+ * "What I know about you" panel on the right. Type "/" for commands.
+ */
+import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import useChatSessions from '../stores/useChatSessions';
 import api from '../api';
 import {
-  Send, Paperclip, X, FileText, ChevronRight, Cpu, AlertCircle, Upload, Square, RotateCcw,
-  ThumbsUp, ThumbsDown, Copy, Check, PanelLeft, Brain, ArrowDown, Globe, Database, FileSearch,
+  ArrowUp, Paperclip, X, FileText, AlertCircle, Upload, Square, RotateCcw, ThumbsUp, ThumbsDown, Copy, Check,
+  PanelLeftClose, PanelLeftOpen, Brain, ArrowDown, Globe, Database, FileSearch, Plus, Sparkles,
 } from 'lucide-react';
 import FileResultCards from '../components/FileResultCards';
 import TaskResultCard from '../components/TaskResultCard';
 import MessageContent from '../components/MessageContent';
 import ConversationSidebar from '../components/ConversationSidebar';
 import KnowledgePanel from '../components/KnowledgePanel';
+import { Button } from '../components/ui';
+import { cx } from '../lib/cx';
 
-const CMDS = [
-  { c: 'Memory',    d: ['/memory', '/facts', '/convos', '/stats'] },
-  { c: 'Logs',      d: ['/logs', '/mood'] },
-  { c: 'Manage',    d: ['/add fact [text]', '/delete fact [n]'] },
-  { c: 'Chat',      d: ['/new', '/export', '/clear'] },
-  { c: 'Control',   d: ['/windows', '/system', '/schedules'] },
-  { c: 'Knowledge', d: ['/knowledge', '/knowledge search X'] },
-  { c: 'Speakers',  d: ['/speakers'] },
-  { c: 'Help',      d: ['/help'] },
+const COMMANDS = [
+  ['/memory', 'What Seven remembers'], ['/facts', 'Stored facts'], ['/convos', 'Recent conversations'],
+  ['/stats', 'Memory statistics'], ['/logs', 'Recent actions'], ['/mood', 'Mood history'],
+  ['/add fact ', 'Remember something'], ['/delete fact ', 'Forget a fact by number'], ['/new', 'Start a new chat'],
+  ['/export', 'Export this chat'], ['/clear', 'Clear this chat'], ['/windows', 'Open windows'],
+  ['/system', 'System status'], ['/schedules', 'Your reminders'], ['/knowledge', 'Indexed documents'],
+  ['/knowledge search ', 'Search your documents'], ['/speakers', 'Enrolled voices'], ['/help', 'All commands'],
 ];
-const SUGGESTIONS = ['What can you do?', 'What do you know about me?', 'Open camera', 'What am I working on?'];
+const SUGGESTIONS = [
+  ['What can you do?', 'See what Seven can help with'],
+  ['Show my tasks', 'Your pending tasks'],
+  ['What do you know about me?', 'Facts Seven has learned'],
+  ['What are my system specs?', 'Your computer at a glance'],
+];
 const SUPPORTED_EXTENSIONS = ['.pdf', '.docx', '.pptx', '.xlsx', '.txt', '.md'];
 const SOURCE_ICON = { memory: Brain, web: Globe, documents: FileSearch, earlier_chats: Database, goals: Brain };
+const OPEN_KEY = 'seven.chats.open';
+const EASE = 'ease-[cubic-bezier(0.32,0.72,0,1)]';
 
-/* ---- thinking indicator: blinking dots, live elapsed time, honest phase label ---- */
+function readOpen() {
+  try { return localStorage.getItem(OPEN_KEY) !== '0'; } catch { return true; }
+}
+
 function Thinking({ since }) {
   const [secs, setSecs] = useState(0);
   useEffect(() => {
@@ -33,111 +48,141 @@ function Thinking({ since }) {
     return () => clearInterval(t);
   }, [since]);
   return (
-    <div className="flex items-center gap-2 text-[11px] text-white/40" aria-live="polite">
+    <div className="flex items-center gap-2.5 text-[12.5px] text-s-text-3" aria-live="polite">
       <span className="flex items-center gap-1">
-        {[0, 1, 2].map((i) => (
-          <span key={i} className="w-1.5 h-1.5 rounded-full bg-s-accent/70"
-                style={{ animation: `sevenBlink 1.2s ease-in-out ${i * 0.2}s infinite` }} />
+        {[0, 1, 2].map(i => (
+          <span key={i} className="h-1.5 w-1.5 rounded-full bg-s-text-3"
+                style={{ animation: `sevenDot 1.3s ease-in-out ${i * 0.16}s infinite` }} />
         ))}
       </span>
-      <span>{secs < 2 ? 'Thinking' : secs < 8 ? `Thinking · ${secs}s` : `Still working · ${secs}s (the model may be loading)`}</span>
+      <span>{secs < 2 ? 'Thinking' : secs < 8 ? `Thinking for ${secs}s` : `Still working, ${secs}s. The model may be loading.`}</span>
     </div>
   );
 }
 
 function SourceChips({ meta }) {
   const sources = meta?.sources || [];
-  if (!sources.length && !meta?.first_token_ms) return null;
+  if (!sources.length && !meta?.uncertainty) return null;
   return (
-    <div className="flex flex-wrap items-center gap-1.5 mt-2">
-      {sources.map((s) => {
+    <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+      {sources.map(s => {
         const Icon = SOURCE_ICON[s] || Brain;
         return (
-          <span key={s} className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-white/[0.04] border border-white/[0.06] text-[8.5px] text-white/40">
-            <Icon size={9} />{s.replace('_', ' ')}
+          <span key={s} className="flex h-5 items-center gap-1 rounded-full border border-s-border px-2 text-[11px] capitalize text-s-text-3">
+            <Icon size={11} />{s.replace('_', ' ')}
           </span>);
       })}
-      {meta?.uncertainty && (
-        <span className="px-1.5 py-0.5 rounded-full bg-yellow-500/[0.07] border border-yellow-500/15 text-[8.5px] text-yellow-200/60">unsure, said so</span>)}
-      {meta?.first_token_ms != null && <span className="text-[8.5px] text-white/20 font-mono">{meta.first_token_ms} ms</span>}
+      {meta?.uncertainty && <span className="flex h-5 items-center rounded-full border border-s-border px-2 text-[11px] text-s-text-3">Not certain</span>}
     </div>
   );
 }
 
 function Receipts({ receipts }) {
   if (!receipts?.length) return null;
-  const color = { success: 'text-emerald-300/70', failed: 'text-red-300/80', unconfirmed: 'text-yellow-200/60' };
+  const tone = { success: 'text-s-green', failed: 'text-s-red', unconfirmed: 'text-s-yellow' };
+  const label = { success: 'Done', failed: 'Failed', unconfirmed: 'Not confirmed' };
   return (
-    <div className="mt-2 pt-2 border-t border-white/[0.05] space-y-0.5">
+    <div className="mt-2.5 space-y-1">
       {receipts.map((r, i) => (
-        <div key={i} className={`text-[9px] font-mono ${color[r.status] || 'text-white/40'}`}>
-          {r.kind.toLowerCase()} {r.target} · {r.status}{r.detail ? ` (${r.detail})` : ''}
+        <div key={i} className="flex items-center gap-2 text-[11.5px] text-s-text-3">
+          <span className={cx('h-1.5 w-1.5 rounded-full bg-current', tone[r.status] || 'text-s-text-4')} />
+          <span className="capitalize">{r.kind.toLowerCase()}</span>
+          <span className="text-s-text-2">{r.target}</span>
+          <span className={tone[r.status]}>{label[r.status] || r.status}</span>
+          {r.detail && <span className="truncate text-s-text-4">{r.detail}</span>}
         </div>))}
     </div>
   );
 }
 
-function MessageBubble({ msg, isLast, onRetry, onRate }) {
-  const [copied, setCopied] = useState(false);
-  const isUser = msg.role === 'user';
-  const time = msg.time?.toLocaleTimeString?.([], { hour: '2-digit', minute: '2-digit' });
+function IconAction({ label, onClick, active, children }) {
+  return (
+    <button aria-label={label} title={label} onClick={onClick}
+            className={cx('flex h-6 w-6 items-center justify-center rounded-md transition-colors duration-150',
+                          active ? 'text-s-text' : 'text-s-text-4 hover:bg-s-card hover:text-s-text-2')}>
+      {children}
+    </button>
+  );
+}
 
-  if (isUser) {
+function Message({ msg, canRetry, onRetry, onRate, since }) {
+  const [copied, setCopied] = useState(false);
+  const time = msg.time?.toLocaleTimeString?.([], { hour: 'numeric', minute: '2-digit' });
+
+  if (msg.role === 'user') {
     return (
-      <div className="flex justify-end">
-        <div className="max-w-[75%]">
-          {msg.attachedFile && (
-            <div className="flex justify-end mb-1.5">
-              <div className="flex items-center gap-1.5 px-2.5 py-1 bg-s-accent/8 border border-s-accent/12 rounded-lg">
-                <FileText size={10} className="text-s-accent/70" />
-                <span className="text-[9px] text-s-accent/80 font-medium">{msg.attachedFile}</span>
-              </div>
-            </div>)}
-          <div className="bg-s-accent/90 rounded-2xl rounded-tr-sm px-4 py-2.5">
-            <p className="text-[12.5px] text-white leading-relaxed whitespace-pre-wrap">{msg.text}</p>
-          </div>
-          <div className="text-[8px] text-white/25 text-right mt-1 pr-1">{time}</div>
+      <div className="flex flex-col items-end">
+        {msg.attachedFile && (
+          <div className="mb-1.5 flex items-center gap-1.5 rounded-md border border-s-border bg-s-surface px-2 h-6 text-[11.5px] text-s-text-2">
+            <FileText size={12} className="text-s-text-3" />{msg.attachedFile}
+          </div>)}
+        <div className="max-w-[78%] rounded-2xl rounded-br-md bg-s-card-h px-3.5 py-2 text-[13px] leading-[1.6] text-s-text whitespace-pre-wrap">
+          {msg.text}
         </div>
+        <span className="mt-1 pr-1 text-[11px] text-s-text-4">{time}</span>
       </div>
     );
   }
 
   const streaming = msg.status === 'streaming';
+  const waiting = streaming && !msg.text;
   return (
-    <div className="flex gap-2.5 group">
-      <div className="w-6 h-6 rounded-lg bg-white/[0.04] border border-white/8 flex items-center justify-center shrink-0 mt-1">
-        <Cpu size={11} className="text-white/40" />
+    <div className="group/msg flex gap-3">
+      <div className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-s-accent text-[11px] font-semibold text-s-on-accent">7</div>
+      <div className="min-w-0 flex-1">
+        <div className="mb-1 flex items-center gap-2 text-[12px]">
+          <span className="font-medium text-s-text">Seven</span>
+          {!waiting && <span className="text-s-text-4">{time}</span>}
+        </div>
+        {waiting ? <Thinking since={since || Date.now()} /> : msg.isCommand ? (
+          <pre className="overflow-x-auto whitespace-pre-wrap rounded-lg border border-s-border bg-s-surface p-3 font-mono text-[12px] leading-relaxed text-s-text-2">{msg.text}</pre>
+        ) : msg.status === 'error' ? (
+          <div className="flex items-start gap-2 rounded-lg border border-s-red/25 bg-s-red/5 px-3 py-2 text-[12.5px] text-s-red">
+            <AlertCircle size={14} className="mt-0.5 shrink-0" />{msg.text}
+          </div>
+        ) : (
+          <div className="relative">
+            <MessageContent text={msg.text} />
+            {streaming && <span className="ml-0.5 inline-block h-[14px] w-[2px] translate-y-[2px] rounded-full bg-s-accent" style={{ animation: 'sevenCaret 1s ease-in-out infinite' }} />}
+          </div>
+        )}
+        {msg.fileResults?.count > 0 && <FileResultCards data={msg.fileResults} />}
+        {msg.taskResults && <TaskResultCard data={msg.taskResults} />}
+        <Receipts receipts={msg.receipts} />
+        {!streaming && <SourceChips meta={msg.meta} />}
+        {!streaming && !msg.isCommand && msg.text && (
+          <div className="mt-1.5 flex h-6 items-center gap-0.5 opacity-0 transition-opacity duration-200 group-hover/msg:opacity-100 focus-within:opacity-100">
+            <IconAction label={copied ? 'Copied' : 'Copy'} onClick={() => { navigator.clipboard.writeText(msg.text); setCopied(true); setTimeout(() => setCopied(false), 1200); }}>
+              {copied ? <Check size={13} /> : <Copy size={13} />}
+            </IconAction>
+            {msg.serverId && (
+              <>
+                <IconAction label="Good answer" active={msg.rating === 'up'} onClick={() => onRate(msg, 'up')}><ThumbsUp size={13} /></IconAction>
+                <IconAction label="Bad answer" active={msg.rating === 'down'} onClick={() => onRate(msg, 'down')}><ThumbsDown size={13} /></IconAction>
+              </>)}
+            {canRetry && <IconAction label="Try again" onClick={onRetry}><RotateCcw size={13} /></IconAction>}
+            {msg.meta?.first_token_ms != null && <span className="ml-1.5 text-[11px] tabular-nums text-s-text-4">{(msg.meta.first_token_ms / 1000).toFixed(1)}s</span>}
+          </div>
+        )}
       </div>
-      <div className="max-w-[78%] min-w-0">
-        <div className={`rounded-2xl rounded-tl-sm px-4 py-2.5 ${msg.status === 'error' ? 'bg-red-500/[0.06] border border-red-500/15' : 'bg-white/[0.03] border border-white/[0.06]'}`}>
-          {msg.isCommand ? (
-            <pre className="text-[11px] leading-relaxed whitespace-pre-wrap font-mono overflow-x-auto text-white/60">{msg.text}</pre>
-          ) : msg.status === 'error' ? (
-            <p className="text-[12.5px] text-red-300">{msg.text}</p>
-          ) : (
-            <>
-              <MessageContent text={msg.text} />
-              {streaming && msg.text && <span className="inline-block w-[7px] h-[13px] ml-0.5 align-middle bg-s-accent/70" style={{ animation: 'sevenCaret 1s steps(1) infinite' }} />}
-            </>)}
-          {msg.fileResults?.count > 0 && <FileResultCards data={msg.fileResults} />}
-          {msg.taskResults && <TaskResultCard data={msg.taskResults} />}
-          <Receipts receipts={msg.receipts} />
-          {!streaming && <SourceChips meta={msg.meta} />}
-        </div>
-        <div className="flex items-center gap-2 mt-1 pl-1 h-4">
-          <span className="text-[8px] text-white/20">{time}</span>
-          {!streaming && !msg.isCommand && (
-            <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-              <button title="Copy" onClick={() => { navigator.clipboard.writeText(msg.text); setCopied(true); setTimeout(() => setCopied(false), 1200); }}
-                className="text-white/30 hover:text-white/70">{copied ? <Check size={10} /> : <Copy size={10} />}</button>
-              {msg.serverId && (
-                <>
-                  <button title="Good answer" onClick={() => onRate(msg, 'up')} className={msg.rating === 'up' ? 'text-emerald-300' : 'text-white/30 hover:text-white/70'}><ThumbsUp size={10} /></button>
-                  <button title="Bad answer" onClick={() => onRate(msg, 'down')} className={msg.rating === 'down' ? 'text-red-300' : 'text-white/30 hover:text-white/70'}><ThumbsDown size={10} /></button>
-                </>)}
-              {isLast && <button title="Try again" onClick={onRetry} className="text-white/30 hover:text-white/70"><RotateCcw size={10} /></button>}
-            </div>)}
-        </div>
+    </div>
+  );
+}
+
+function Empty({ onPick }) {
+  return (
+    <div className="mx-auto flex max-w-[640px] flex-col items-center pt-[12vh]" style={{ animation: 'sevenRise .4s cubic-bezier(0.32,0.72,0,1)' }}>
+      <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-s-accent text-[15px] font-semibold text-s-on-accent">7</div>
+      <h2 className="mt-4 text-[18px] font-semibold tracking-[-0.01em] text-s-text">What can I help with?</h2>
+      <p className="mt-1 text-[12.5px] text-s-text-3">Ask anything, type / for commands, or drop a document to learn from it.</p>
+      <div className="mt-6 grid w-full grid-cols-2 gap-2">
+        {SUGGESTIONS.map(([text, hint]) => (
+          <button key={text} onClick={() => onPick(text)}
+                  className="group/s rounded-lg border border-s-border bg-s-surface px-3.5 py-2.5 text-left shadow-[var(--s-shadow)]
+                             transition-[border-color,transform,background-color] duration-200 hover:-translate-y-px hover:border-s-border-l hover:bg-s-card">
+            <div className="text-[12.5px] font-medium text-s-text">{text}</div>
+            <div className="mt-0.5 text-[11.5px] text-s-text-3">{hint}</div>
+          </button>))}
       </div>
     </div>
   );
@@ -145,31 +190,51 @@ function MessageBubble({ msg, isLast, onRetry, onRate }) {
 
 export default function Console() {
   const s = useChatSessions();
-  const { messages, sending, phase, sentAt, warning, init, send, stop, retry, rate, newChat } = s;
+  const { messages, sending, phase, sentAt, warning, init, send, stop, retry, rate, newChat, conversations, conversationId } = s;
   const [draft, setDraft] = useState('');
-  const [showSidebar, setShowSidebar] = useState(true);
+  const [panel, setPanel] = useState(readOpen);
   const [showKnowledge, setShowKnowledge] = useState(false);
   const [pendingFile, setPendingFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [uploadErr, setUploadErr] = useState('');
   const [dragOver, setDragOver] = useState(false);
   const [atBottom, setAtBottom] = useState(true);
+  const [cmdIndex, setCmdIndex] = useState(0);
   const scroller = useRef(null);
   const endRef = useRef(null);
   const inputRef = useRef(null);
   const fileRef = useRef(null);
 
-  useEffect(() => { init(); }, []);
+  const setPanelOpen = useCallback(open => {
+    setPanel(open);
+    try { localStorage.setItem(OPEN_KEY, open ? '1' : '0'); } catch { /* per-device convenience only */ }
+  }, []);
 
-  useEffect(() => { if (atBottom) endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }); }, [messages, phase]);
+  useEffect(() => { init(); }, [init]);
+  useEffect(() => {
+    const onChats = e => setPanelOpen(e.detail);
+    const onKey = e => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 's') { e.preventDefault(); setPanelOpen(!panel); }
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'n') { e.preventDefault(); newChat(); }
+    };
+    window.addEventListener('seven:chats', onChats);
+    window.addEventListener('keydown', onKey);
+    return () => { window.removeEventListener('seven:chats', onChats); window.removeEventListener('keydown', onKey); };
+  }, [panel, newChat, setPanelOpen]);
+
+  useEffect(() => { if (atBottom) endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }); }, [messages, phase, atBottom]);
   useEffect(() => { if (!sending) inputRef.current?.focus(); }, [sending]);
-
-  // auto-growing composer
   useEffect(() => {
     const el = inputRef.current;
     if (!el) return;
     el.style.height = 'auto';
-    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+    el.style.height = `${Math.min(el.scrollHeight, 180)}px`;
+  }, [draft]);
+
+  const commands = useMemo(() => {
+    if (!/^\/\S*$/.test(draft)) return [];                // only while typing the command word
+    const q = draft.toLowerCase();
+    return COMMANDS.filter(([c]) => c.startsWith(q)).slice(0, 8);
   }, [draft]);
 
   const onScroll = () => {
@@ -201,137 +266,148 @@ export default function Console() {
     await send(text);
   };
 
-  const handleFileSelect = (file) => {
+  const pickCommand = c => { setDraft(c.endsWith(' ') ? c : `${c} `); setCmdIndex(0); inputRef.current?.focus(); };
+
+  const handleFileSelect = file => {
     if (!file) return;
     const ext = `.${file.name.split('.').pop().toLowerCase()}`;
-    if (!SUPPORTED_EXTENSIONS.includes(ext)) { setUploadErr(`Unsupported: ${ext}. Use PDF, DOCX, PPTX, XLSX, TXT, or MD`); return; }
+    if (!SUPPORTED_EXTENSIONS.includes(ext)) { setUploadErr(`${ext} isn't supported. Use PDF, DOCX, PPTX, XLSX, TXT or MD.`); return; }
     setUploadErr(''); setPendingFile(file);
   };
 
-  const onDrop = useCallback((e) => {
+  const onDrop = useCallback(e => {
     e.preventDefault(); setDragOver(false);
     if (e.dataTransfer.files[0]) handleFileSelect(e.dataTransfer.files[0]);
   }, []);
 
-  const lastBotIndex = [...messages].map((m) => m.role).lastIndexOf('assistant');
-  const waiting = sending && phase === 'thinking';
+  const onKeyDown = e => {
+    if (commands.length) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); setCmdIndex(i => (i + 1) % commands.length); return; }
+      if (e.key === 'ArrowUp') { e.preventDefault(); setCmdIndex(i => (i - 1 + commands.length) % commands.length); return; }
+      if (e.key === 'Tab' || (e.key === 'Enter' && draft.trim() !== commands[cmdIndex]?.[0].trim())) {
+        e.preventDefault(); pickCommand(commands[cmdIndex][0]); return;
+      }
+    }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(); }
+    if (e.key === 'Escape' && sending) stop();
+  };
+
+  const lastBotIndex = messages.map(m => m.role).lastIndexOf('assistant');
+  const title = conversations.find(c => c.id === conversationId)?.title || 'New chat';
 
   return (
-    <div className="h-full flex bg-s-bg relative"
-         onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-         onDragLeave={() => setDragOver(false)} onDrop={onDrop}>
+    <div className="relative flex h-full bg-s-bg"
+         onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+         onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget)) setDragOver(false); }} onDrop={onDrop}>
       <style>{`
-        @keyframes sevenBlink { 0%,80%,100% { opacity: .2; transform: scale(.8);} 40% { opacity: 1; transform: scale(1);} }
-        @keyframes sevenCaret { 0%,50% { opacity: 1;} 51%,100% { opacity: 0;} }
-        @keyframes sevenRise { from { opacity: 0; transform: translateY(4px);} to { opacity: 1; transform: none;} }
+        @keyframes sevenDot { 0%,80%,100% { opacity: .25; transform: translateY(0);} 40% { opacity: 1; transform: translateY(-2px);} }
+        @keyframes sevenCaret { 0%,100% { opacity: 1;} 50% { opacity: .15;} }
+        @keyframes sevenRise { from { opacity: 0; transform: translateY(6px);} to { opacity: 1; transform: none;} }
       `}</style>
 
-      {dragOver && (
-        <div className="absolute inset-0 z-50 bg-s-accent/[0.06] border-2 border-s-accent/30 border-dashed flex items-center justify-center pointer-events-none">
-          <div className="flex flex-col items-center gap-2"><Upload size={28} className="text-s-accent/60" />
-            <p className="text-[13px] text-s-accent/70 font-medium">Drop to add to your knowledge</p></div>
-        </div>)}
-
-      {showSidebar && <ConversationSidebar />}
-
-      <div className="flex-1 min-w-0 flex flex-col">
-        <div className="flex items-center justify-between px-5 py-3 border-b border-white/8">
-          <div className="flex items-center gap-3 min-w-0">
-            <button onClick={() => setShowSidebar(!showSidebar)} className="text-white/30 hover:text-white/70" title="Chats"><PanelLeft size={14} /></button>
-            <div className="min-w-0">
-              <h1 className="text-[14px] font-semibold text-white/95 tracking-tight">Console</h1>
-              <p className="text-[9px] text-white/35 truncate">Same brain as voice. Saved on this computer.</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <button onClick={() => setShowKnowledge(!showKnowledge)}
-              className={`flex items-center gap-1.5 text-[10px] px-2.5 py-1.5 rounded-lg border transition-colors ${showKnowledge ? 'border-s-accent/40 text-s-accent bg-s-accent/10' : 'border-white/8 text-white/40 hover:text-white/70'}`}>
-              <Brain size={11} /> What I know about you
-            </button>
-            <button onClick={newChat} className="text-[10px] px-2.5 py-1.5 rounded-lg border border-white/8 text-white/40 hover:text-white/70 transition-colors">New chat</button>
-          </div>
+      <div className={cx('pointer-events-none absolute inset-3 z-50 flex items-center justify-center rounded-xl border-2 border-dashed border-s-accent/40 bg-s-accent/5',
+                         'transition-opacity duration-200', dragOver ? 'opacity-100' : 'opacity-0')}>
+        <div className="flex flex-col items-center gap-2 text-s-accent-h">
+          <Upload size={22} /><p className="text-[13px] font-medium">Drop to add to your knowledge</p>
         </div>
+      </div>
+
+      <ConversationSidebar open={panel} />
+
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-s-border px-4">
+          <div className="flex min-w-0 items-center gap-2">
+            <button onClick={() => setPanelOpen(!panel)} aria-label={panel ? 'Hide chats' : 'Show chats'} title={`${panel ? 'Hide' : 'Show'} chats (Ctrl+Shift+S)`}
+                    className="flex h-7 w-7 items-center justify-center rounded-md text-s-text-3 transition-colors hover:bg-s-card hover:text-s-text">
+              {panel ? <PanelLeftClose size={16} /> : <PanelLeftOpen size={16} />}
+            </button>
+            <h1 className="truncate text-[13px] font-medium text-s-text">{title}</h1>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <Button size="sm" variant={showKnowledge ? 'secondary' : 'ghost'} icon={Brain} onClick={() => setShowKnowledge(!showKnowledge)}>What I know about you</Button>
+            <Button size="sm" variant="ghost" icon={Plus} onClick={newChat} title="New chat (Ctrl+N)">New chat</Button>
+          </div>
+        </header>
 
         {warning && (
-          <div className="mx-5 mt-3 flex items-center gap-2 px-3 py-2 bg-yellow-500/[0.06] border border-yellow-500/15 rounded-lg" role="alert">
-            <AlertCircle size={12} className="text-yellow-300/80 shrink-0" />
-            <span className="text-[10.5px] text-yellow-100/80">{warning}</span>
+          <div className="mx-auto mt-3 flex w-full max-w-[760px] items-center gap-2 rounded-lg border border-s-yellow/30 bg-s-yellow/5 px-3 py-2" role="alert">
+            <AlertCircle size={14} className="shrink-0 text-s-yellow" />
+            <span className="text-[12px] text-s-text-2">{warning}</span>
           </div>)}
 
-        <div ref={scroller} onScroll={onScroll} className="flex-1 overflow-y-auto px-5 py-4 relative scrollbar-thin scrollbar-thumb-white/8 scrollbar-track-transparent">
-          {messages.length === 0 && (
-            <div className="space-y-5" style={{ animation: 'sevenRise .3s ease-out' }}>
-              <div className="flex flex-col items-center py-8 gap-2">
-                <div className="w-10 h-10 rounded-xl bg-white/[0.03] border border-white/6 flex items-center justify-center"><Cpu size={18} className="text-white/25" /></div>
-                <p className="text-[13px] text-white/50 font-medium">What are we working on?</p>
-                <p className="text-[9.5px] text-white/25 text-center">Type a message, use a / command, or drop a file to learn from it.</p>
-                <div className="flex flex-wrap justify-center gap-2 pt-2">
-                  {SUGGESTIONS.map((t) => (
-                    <button key={t} onClick={() => send(t)}
-                      className="px-3 py-1.5 rounded-full border border-white/8 bg-white/[0.02] text-[10.5px] text-white/50 hover:text-white/80 hover:border-white/20 transition-colors">{t}</button>))}
-                </div>
-              </div>
-              <div className="grid grid-cols-4 gap-2">
-                {CMDS.map((g) => (
-                  <div key={g.c} className="bg-white/[0.02] border border-white/[0.05] rounded-xl p-3">
-                    <div className="text-[9px] text-s-accent/70 font-semibold mb-2 uppercase tracking-wider">{g.c}</div>
-                    {g.d.map((cmd) => (
-                      <button key={cmd} onClick={() => { setDraft(`${cmd.replace(/\[.*?\]/g, '').trim()} `); inputRef.current?.focus(); }}
-                        className="flex items-center gap-1 w-full text-left py-0.5 text-[9.5px] text-white/35 hover:text-white/60 transition-colors font-mono truncate group">
-                        <ChevronRight size={8} className="text-white/15 group-hover:text-s-accent/50 shrink-0" />{cmd}
-                      </button>))}
+        <div ref={scroller} onScroll={onScroll} className="relative flex-1 overflow-y-auto">
+          <div className="mx-auto w-full max-w-[760px] px-6 py-6">
+            {messages.length === 0 ? <Empty onPick={send} /> : (
+              <div className="space-y-6">
+                {messages.map((m, i) => (
+                  <div key={m.id} style={{ animation: `sevenRise .28s cubic-bezier(0.32,0.72,0,1)` }}>
+                    <Message msg={m} since={sentAt} canRetry={i === lastBotIndex && !sending} onRetry={retry} onRate={rate} />
                   </div>))}
               </div>
-            </div>)}
-
-          <div className="space-y-4 max-w-[860px] mx-auto">
-            {messages.map((m, i) => (
-              m.role === 'assistant' && m.status === 'streaming' && !m.text
-                ? (<div key={m.id} className="flex gap-2.5" style={{ animation: 'sevenRise .2s ease-out' }}>
-                    <div className="w-6 h-6 rounded-lg bg-white/[0.04] border border-white/8 flex items-center justify-center shrink-0"><Cpu size={11} className="text-white/40" /></div>
-                    <div className="bg-white/[0.03] border border-white/[0.06] rounded-2xl rounded-tl-sm px-4 py-3"><Thinking since={sentAt || Date.now()} /></div>
-                  </div>)
-                : <div key={m.id} style={{ animation: 'sevenRise .2s ease-out' }}>
-                    <MessageBubble msg={m} isLast={i === lastBotIndex && !sending} onRetry={retry} onRate={rate} />
-                  </div>))}
-            <div ref={endRef} />
+            )}
+            <div ref={endRef} className="h-1" />
           </div>
-
-          {!atBottom && (
-            <button onClick={() => endRef.current?.scrollIntoView({ behavior: 'smooth' })}
-              className="sticky bottom-2 left-full -translate-x-2 ml-auto flex items-center justify-center w-8 h-8 rounded-full bg-s-card border border-white/10 text-white/60 hover:text-white shadow-lg" title="Jump to latest">
-              <ArrowDown size={13} /></button>)}
+          <button onClick={() => endRef.current?.scrollIntoView({ behavior: 'smooth' })} aria-label="Jump to latest"
+                  className={cx('sticky bottom-3 left-1/2 flex h-8 w-8 -translate-x-1/2 items-center justify-center rounded-full border border-s-border bg-s-surface',
+                                'text-s-text-2 shadow-[var(--s-shadow-raised)] transition-all duration-200 hover:text-s-text',
+                                atBottom ? 'pointer-events-none translate-y-2 opacity-0' : 'opacity-100')}>
+            <ArrowDown size={14} />
+          </button>
         </div>
 
-        <div className="px-5 py-3 border-t border-white/[0.06] bg-s-bg space-y-2">
-          {pendingFile && (
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-white/[0.04] border border-white/8 rounded-lg max-w-[260px]">
-              <FileText size={11} className="text-white/50" /><span className="text-[10px] text-white/60 truncate flex-1">{pendingFile.name}</span>
-              <button onClick={() => { setPendingFile(null); setUploadErr(''); }} className="text-white/25 hover:text-white/55"><X size={10} /></button>
-            </div>)}
-          {uploadErr && (
-            <div className="flex items-center gap-2 px-3 py-2 bg-red-500/[0.06] border border-red-500/12 rounded-lg">
-              <AlertCircle size={11} className="text-red-400 shrink-0" /><span className="text-[9.5px] text-red-300 flex-1">{uploadErr}</span>
-              <button onClick={() => setUploadErr('')} className="text-white/20 hover:text-white/50"><X size={10} /></button>
-            </div>)}
-          <div className="flex items-end gap-2 max-w-[860px] mx-auto w-full">
-            <button onClick={() => fileRef.current?.click()} disabled={sending || uploading} title="Attach document"
-              className="p-2.5 rounded-xl border border-white/6 bg-white/[0.02] text-white/30 hover:text-white/60 hover:bg-white/[0.04] disabled:opacity-30 transition-all"><Paperclip size={15} /></button>
-            <input ref={fileRef} type="file" accept={SUPPORTED_EXTENSIONS.join(',')} className="hidden" onChange={(e) => handleFileSelect(e.target.files[0])} />
-            <div className="flex-1 bg-white/[0.02] border border-white/8 rounded-2xl px-4 py-2.5 focus-within:border-white/20 transition-colors">
-              <textarea ref={inputRef} rows={1} value={draft} onChange={(e) => setDraft(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(); } if (e.key === 'Escape' && sending) stop(); }}
-                placeholder={pendingFile ? `Ask about ${pendingFile.name} or press Enter to index it...` : 'Message Seven   (Enter to send, Shift+Enter for a new line)'}
-                disabled={uploading}
-                className="w-full bg-transparent text-[12.5px] text-white/80 placeholder-white/20 outline-none resize-none disabled:opacity-40 leading-relaxed" />
+        <div className="shrink-0 px-6 pb-4 pt-2">
+          <div className="relative mx-auto w-full max-w-[760px]">
+            <div className={cx('absolute bottom-full left-0 right-0 mb-2 overflow-hidden rounded-lg border border-s-border bg-s-surface shadow-[var(--s-shadow-raised)]',
+                               `origin-bottom transition-all duration-200 ${EASE}`,
+                               commands.length ? 'scale-100 opacity-100' : 'pointer-events-none scale-[0.98] opacity-0')}>
+              <div className="px-3 pt-2 pb-1 text-[11px] font-medium text-s-text-4">Commands</div>
+              {commands.map(([c, d], i) => (
+                <button key={c} onMouseEnter={() => setCmdIndex(i)} onClick={() => pickCommand(c)}
+                        className={cx('flex w-full items-center gap-3 px-3 h-8 text-left transition-colors duration-100',
+                                      i === cmdIndex ? 'bg-s-card' : '')}>
+                  <span className="w-36 font-mono text-[12px] text-s-text">{c.trim()}</span>
+                  <span className="truncate text-[12px] text-s-text-3">{d}</span>
+                </button>))}
             </div>
-            {sending ? (
-              <button onClick={stop} title="Stop (Esc)" className="p-2.5 rounded-xl bg-white/10 text-white/80 hover:bg-white/15 transition-colors"><Square size={14} /></button>
-            ) : (
-              <button onClick={submit} disabled={(!draft.trim() && !pendingFile) || uploading} title="Send"
-                className="p-2.5 rounded-xl bg-s-accent/90 text-white hover:bg-s-accent disabled:opacity-25 disabled:bg-white/[0.04] disabled:text-white/20 transition-all">
-                {uploading ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Send size={15} />}
-              </button>)}
+
+            {(pendingFile || uploadErr) && (
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                {pendingFile && (
+                  <span className="flex h-7 items-center gap-1.5 rounded-md border border-s-border bg-s-surface pl-2 pr-1 text-[12px] text-s-text-2">
+                    <FileText size={13} className="text-s-text-3" /><span className="max-w-[240px] truncate">{pendingFile.name}</span>
+                    <button aria-label="Remove file" onClick={() => { setPendingFile(null); setUploadErr(''); }}
+                            className="flex h-5 w-5 items-center justify-center rounded text-s-text-4 hover:bg-s-card hover:text-s-text-2"><X size={12} /></button>
+                  </span>)}
+                {uploadErr && <span className="flex items-center gap-1.5 text-[12px] text-s-red"><AlertCircle size={13} />{uploadErr}</span>}
+              </div>)}
+
+            <div className="flex items-end gap-1.5 rounded-xl border border-s-border bg-s-surface p-1.5 shadow-[var(--s-shadow)]
+                            transition-[border-color,box-shadow] duration-200 focus-within:border-s-border-l focus-within:shadow-[var(--s-shadow-raised)]">
+              <button onClick={() => fileRef.current?.click()} disabled={sending || uploading} aria-label="Attach a document" title="Attach a document"
+                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-s-text-3 transition-colors hover:bg-s-card hover:text-s-text disabled:opacity-40">
+                <Paperclip size={16} />
+              </button>
+              <input ref={fileRef} type="file" accept={SUPPORTED_EXTENSIONS.join(',')} className="hidden" onChange={e => handleFileSelect(e.target.files[0])} />
+              <textarea ref={inputRef} rows={1} value={draft} onChange={e => { setDraft(e.target.value); setCmdIndex(0); }} onKeyDown={onKeyDown}
+                        placeholder={pendingFile ? `Ask about ${pendingFile.name}, or press Enter to add it` : 'Message Seven'}
+                        disabled={uploading} aria-label="Message"
+                        className="max-h-[180px] min-h-[32px] flex-1 resize-none bg-transparent py-1.5 text-[13px] leading-[1.55] text-s-text outline-none placeholder:text-s-text-4 disabled:opacity-50" />
+              {sending ? (
+                <button onClick={stop} aria-label="Stop" title="Stop (Esc)"
+                        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-s-text text-s-bg transition-transform duration-150 hover:scale-105">
+                  <Square size={12} fill="currentColor" />
+                </button>
+              ) : (
+                <button onClick={submit} disabled={(!draft.trim() && !pendingFile) || uploading} aria-label="Send"
+                        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-s-accent text-s-on-accent transition-all duration-200
+                                   hover:bg-s-accent-h disabled:bg-s-card-h disabled:text-s-text-4">
+                  {uploading ? <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" /> : <ArrowUp size={16} />}
+                </button>
+              )}
+            </div>
+            <div className="mt-1.5 flex items-center justify-center gap-1 text-[11px] text-s-text-4">
+              <Sparkles size={11} /> Runs on this computer. Enter to send, Shift+Enter for a new line, / for commands.
+            </div>
           </div>
         </div>
       </div>
