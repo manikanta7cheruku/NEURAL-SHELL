@@ -35,9 +35,17 @@ const useChatSessions = create((set, get) => ({
   searchResults: null,
   profile: null,
   abortController: null,
+  requestedId: null,         // set by other pages (Memory) to open a specific chat when the Console mounts
 
   // ---------------------------------------------------------------- sessions
   init: async () => {
+    const wanted = get().requestedId;
+    if (wanted) {
+      set({ requestedId: null });
+      await get().openChat(wanted);
+      await get().refreshList();
+      return;
+    }
     try {
       const cur = await api.get('/conversations/current');
       await get().openChat(cur.data.conversation_id, { silent: true });

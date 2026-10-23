@@ -4,7 +4,7 @@ import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import PageHeader from '../components/PageHeader';
 
 const PLANS = [
-  { id: 'pro_monthly', tier: 'Pro', type: 'Monthly', price: '₹99', period: '/month', desc: '77 facts, 20 schedules, 77 triggers' },
+  { id: 'pro_monthly', tier: 'Pro', type: 'Monthly', price: '₹99', period: '/month', desc: '77 schedules, 77 triggers, 7 knowledge files' },
   { id: 'pro_yearly', tier: 'Pro', type: 'Yearly', price: '₹699', period: '/year', badge: 'Save ₹489', desc: 'Best value for regular users' },
   { id: 'pro_lifetime', tier: 'Pro', type: 'Lifetime', price: '₹1,299', period: 'one-time', badge: 'Most Popular', desc: 'Pay once, use forever' },
   { id: 'ultimate_monthly', tier: 'Ultimate', type: 'Monthly', price: '₹199', period: '/month', desc: 'Unlimited everything + future features' },
