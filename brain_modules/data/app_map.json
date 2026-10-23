@@ -1,41 +1,41 @@
 {
   "app_map_version": 1,
-  "source_hash": "6158a7ad0406d45d",
+  "source_hash": "a39b22e4d1bc66f8",
   "pages": [
     {
       "id": "home",
       "route": "/",
       "component": "Landing",
-      "title": "system console",
-      "purpose": "",
+      "title": "SEVEN",
+      "purpose": "Seven's home screen: the orb shows whether Seven is listening, thinking or speaking, with quick links to the Console and Dashboard",
       "controls": [
-        {
-          "label": "system console",
-          "description": "",
-          "file": "Landing.jsx"
-        },
         {
           "label": "SEVEN",
           "description": "",
           "file": "Landing.jsx"
         },
         {
-          "label": "Private AI Voice Assistant",
+          "label": "Alt",
           "description": "",
           "file": "Landing.jsx"
         },
         {
-          "label": "Alt + Shift + T",
+          "label": "Shift",
           "description": "",
           "file": "Landing.jsx"
         },
         {
-          "label": "Toggle task panel",
-          "description": "All processing local \u00b7 Zero cloud",
+          "label": "task panel",
+          "description": "Everything runs on this computer",
           "file": "Landing.jsx"
         }
       ],
-      "keywords": [],
+      "keywords": [
+        "home",
+        "start",
+        "orb",
+        "landing"
+      ],
       "sections": []
     },
     {
@@ -43,31 +43,11 @@
       "route": "/dashboard",
       "component": "Home",
       "title": "Dashboard",
-      "purpose": "",
+      "purpose": "An overview of today: Seven's status, your tasks and upcoming schedules, memory, activity and your computer",
       "controls": [
         {
-          "label": "Undo",
-          "description": "Share Seven, Unlock Ultimate",
-          "file": "Home.jsx"
-        },
-        {
-          "label": "Done",
-          "description": "",
-          "file": "Home.jsx"
-        },
-        {
-          "label": "Pending",
-          "description": "",
-          "file": "Home.jsx"
-        },
-        {
-          "label": "Copied",
-          "description": "",
-          "file": "Home.jsx"
-        },
-        {
-          "label": "Share",
-          "description": "",
+          "label": "Ask Seven",
+          "description": "Seven is ready. Say \"Hey Seven\" to start.",
           "file": "Home.jsx"
         },
         {
@@ -76,32 +56,44 @@
           "file": "Home.jsx"
         },
         {
-          "label": "Dashboard",
-          "description": "Seven is ready. Say \"Hey Seven\" to begin.",
+          "label": "You said",
+          "description": "",
           "file": "Home.jsx"
         },
         {
-          "label": "Total",
+          "label": "Seven",
+          "description": "",
+          "file": "Home.jsx"
+        },
+        {
+          "label": "You're all caught up",
+          "description": "Say \"add a task to...\" to create one.",
+          "file": "Home.jsx"
+        },
+        {
+          "label": "Nothing scheduled",
+          "description": "Say \"remind me to stretch at 4pm\".",
+          "file": "Home.jsx"
+        },
+        {
+          "label": "Time with Seven",
           "description": "",
           "file": "Home.jsx"
         },
         {
           "label": "Plan",
-          "description": "",
-          "file": "Home.jsx"
-        },
-        {
-          "label": "Response Speed",
-          "description": "",
-          "file": "Home.jsx"
-        },
-        {
-          "label": "View Memory",
-          "description": "",
+          "description": "Invite a friend and both get a paid plan free",
           "file": "Home.jsx"
         }
       ],
-      "keywords": [],
+      "keywords": [
+        "dashboard",
+        "overview",
+        "home",
+        "today",
+        "summary",
+        "status"
+      ],
       "sections": []
     },
     {
@@ -1074,17 +1066,17 @@
       "id": "feedback",
       "route": "/feedback",
       "component": "Feedback",
-      "title": "Feedback & Issues",
-      "purpose": "Help improve Seven, every report matters",
+      "title": "Feedback",
+      "purpose": "Report a bug, request a feature or tell the team what to improve",
       "controls": [
         {
-          "label": "Category",
+          "label": "What is it about?",
           "description": "",
           "file": "Feedback.jsx"
         },
         {
-          "label": "Severity",
-          "description": "",
+          "label": "How bad is it?",
+          "description": "Critical means a crash or lost data.",
           "file": "Feedback.jsx"
         },
         {
@@ -1094,21 +1086,24 @@
         },
         {
           "label": "Email",
-          "description": "",
+          "description": "Optional. Only if you'd like a reply.",
           "file": "Feedback.jsx"
         },
         {
-          "label": "Sending",
-          "description": "",
-          "file": "Feedback.jsx"
-        },
-        {
-          "label": "Sent. Thank you.",
-          "description": "Sent to Google Sheets via Google Forms. Nothing collected automatically.",
+          "label": "Include app details",
+          "description": "Adds your Seven version and Windows version so bugs are easier to reproduce. Nothing else is sent.",
           "file": "Feedback.jsx"
         }
       ],
-      "keywords": [],
+      "keywords": [
+        "feedback",
+        "bug",
+        "report",
+        "issue",
+        "feature request",
+        "support",
+        "contact"
+      ],
       "sections": []
     },
     {
@@ -1116,55 +1111,27 @@
       "route": "/updates",
       "component": "Updates",
       "title": "Updates",
-      "purpose": "Keep Seven current",
+      "purpose": "Check for a new version of Seven, see what changed, download it and install it",
       "controls": [
         {
-          "label": "You are up to date",
-          "description": "",
+          "label": "Check for updates automatically",
+          "description": "Seven asks GitHub once a day and tells you when a new version is ready.",
           "file": "Updates.jsx"
         },
         {
-          "label": "Checking...",
-          "description": "",
-          "file": "Updates.jsx"
-        },
-        {
-          "label": "Check for updates",
-          "description": "",
-          "file": "Updates.jsx"
-        },
-        {
-          "label": "Checking for updates...",
-          "description": "",
-          "file": "Updates.jsx"
-        },
-        {
-          "label": "Security Update Required",
-          "description": "This update contains critical security fixes. Install as soon as possible.",
-          "file": "Updates.jsx"
-        },
-        {
-          "label": "Update ready to install",
-          "description": "",
-          "file": "Updates.jsx"
-        },
-        {
-          "label": "Restart and install",
-          "description": "",
-          "file": "Updates.jsx"
-        },
-        {
-          "label": "Downloading...",
-          "description": "",
-          "file": "Updates.jsx"
-        },
-        {
-          "label": "Download update",
-          "description": "This update downloads automatically in the background",
+          "label": "Download in the background",
+          "description": "This release downloads by itself. You choose when to install.",
           "file": "Updates.jsx"
         }
       ],
-      "keywords": [],
+      "keywords": [
+        "update",
+        "upgrade",
+        "new version",
+        "changelog",
+        "install",
+        "release notes"
+      ],
       "sections": []
     }
   ]
