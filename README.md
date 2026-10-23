@@ -1,166 +1,127 @@
-# Seven
+<p align="center">
+  <img src="assets/brand/logo.png" alt="Seven" width="96" />
+</p>
 
-A voice assistant that runs entirely on your Windows PC.
+<h1 align="center">Seven</h1>
 
-No cloud. No subscription required for core features. No data sent anywhere.
-Seven listens, thinks, and acts using models running locally on your hardware.
+<p align="center">
+  <strong>The layer between you and your computer.</strong><br />
+  Say it or type it, and it happens on your PC. Privately, and without the internet.
+</p>
 
----
-
-## What it does
-
-Seven understands natural language and takes real action on your computer.
-
-You speak (or type). Seven processes your request locally using Ollama and a
-local language model. Then it responds with voice and executes the action —
-whether that is launching an app, setting a reminder, managing your tasks,
-searching your files, or answering a question.
-
-Everything stays on your machine.
+<p align="center">
+  <a href="https://github.com/manikanta7cheruku/NEURAL-SHELL/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/manikanta7cheruku/NEURAL-SHELL/actions/workflows/ci.yml/badge.svg" /></a>
+  <img alt="Platform" src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0b5cad" />
+  <img alt="Runs locally" src="https://img.shields.io/badge/runs-100%25%20on%20device-2e7d32" />
+  <img alt="Version" src="https://img.shields.io/badge/version-1.3.4-6366f1" />
+</p>
 
 ---
 
-## Core capabilities
+## What Seven is
 
-**Voice control**
-Wake word detection, push-to-talk mode, speaker verification, interrupt
-mid-response, pause and resume with natural phrases.
+Computers make you do the translating: five apps to open, windows to arrange, settings to find, a list to check.
+Seven sits between you and Windows and does that work for you. It listens, understands, acts on the machine and
+remembers what matters, and all of it runs on your own computer.
 
-**Task management**
-Create, complete, and track tasks by voice. Subtasks, due dates, priorities,
-and a full task panel accessible via Alt+Shift+T at any time.
+```
+"Set brightness to 100"                      done in milliseconds, no AI guesswork
+"Put Chrome and File Explorer side by side"  windows arranged
+"Save this workspace as Work"                every app, window and tab remembered
+"Remind me to stretch in 20 minutes"         fires even when Seven is closed
+"What GPU do I have?"                        read live from your hardware
+"Set humor to 40%"                           Seven changes itself
+```
 
-**Schedules and reminders**
-Set reminders, alarms, timers, and recurring events by voice. Fires overlay
-notifications and speaks the alert even when the main window is closed.
+## What it can do today
 
-**System control**
-Launch and close apps, control volume and brightness, snap windows, search
-files, take screenshots, check battery — all by voice.
+| | |
+|---|---|
+| **Hands** | Open and close any app, folder or site. Snap, stack and arrange windows across monitors, pin, fade, undo. |
+| **System** | Volume, brightness, Wi-Fi, Bluetooth, media, dark mode, night light, do not disturb, airplane mode, battery. |
+| **Workspaces and triggers** | Save your whole desktop and restore it with one sentence. Your own phrases and hotkeys run anything. |
+| **Files** | Find files by name or by what is inside them, and open the best match. |
+| **Tasks and schedules** | To-dos with due dates and subtasks; reminders, alarms and timers that fire with the app closed. |
+| **Memory** | Remembers what you tell it, keeps the history when you change your mind, and shows you everything it knows. |
+| **Your documents** | Add PDFs, Word, PowerPoint and Excel files and ask questions about them, offline. |
+| **Conversation** | A local language model for everything else, honest about what it does not know. |
+| **Voice** | Wake word, push to talk, interrupt any time, speaker recognition. Or type in the Console. |
 
-**Persistent memory**
-Seven remembers facts you tell it across sessions using a local vector
-database. Upload your own documents and ask questions from them.
+Seven never claims an action worked unless it did: every action returns a receipt, and failures are reported plainly.
 
-**Triggers and workspaces**
-Map a voice phrase or hotkey to any action. Save a full app layout as a
-workspace and restore it in one command.
+## Private by design
 
-**Always-on status orb**
-A small floating indicator shows Seven's current state at all times.
-Click it to open the dashboard. Right-click for the navigation menu.
-
----
+Speech recognition, the AI model, memory and documents all run on your computer. Nothing you say is uploaded. Seven
+connects to the internet only for things you would expect: live lookups such as weather when you ask, update checks,
+licence activation, anonymous usage minutes (can be turned off in Settings) and feedback you choose to send. The full
+list, from the code, is in [privacy and data](docs/architecture/privacy-and-data.md).
 
 ## How it works
-You speak
-→ Microphone → Noise filtering → Speech to text
-→ 13-layer processing pipeline
-→ Local LLM via Ollama (if no direct action matched)
-→ Voice response + system action
 
-text
+```
+ microphone / keyboard
+        |
+      ears           noise handling, wake word, speech-to-text (faster-whisper), voice ID
+        |
+      brain          ordered layers: commands and memory answered instantly,
+        |            a local model (Ollama) only when nothing else can answer
+        |
+  hands + mouth      actions on Windows with receipts, natural speech (Piper)
+        |
+      memory         SQLite facts with history and provenance, semantic index
+```
 
+Read the [architecture overview](docs/architecture/overview.md) and the [brain](docs/components/brain.md) for depth.
 
-The pipeline checks your request against direct action handlers before
-reaching the language model. App launches, task creation, and system commands
-fire instantly without waiting for the AI.
+| Layer | Technology |
+|---|---|
+| Desktop shell | Electron |
+| Interface | React, Vite, Tailwind CSS |
+| Backend | Python 3.11, FastAPI on localhost |
+| Language model | Ollama (model chosen for your hardware) |
+| Speech | faster-whisper, Silero VAD, Piper TTS, TitaNet speaker ID |
+| Memory | SQLite (FTS5), ChromaDB, sentence-transformers |
+| Installer | Inno Setup |
 
----
+## Get Seven
 
-## Tech stack
+Download the latest installer from
+[Releases](https://github.com/manikanta7cheruku/seven-releases/releases/latest) and run it. The setup wizard
+installs the AI runtime and a model that fits your computer. After that, Seven updates itself.
 
-| Layer       | Technology                              |
-|-------------|----------------------------------------|
-| Shell       | Electron                               |
-| Frontend    | React, Vite, Tailwind CSS              |
-| Backend     | Python 3.11, FastAPI, Uvicorn          |
-| AI          | Ollama (LLaMA 3, Phi-3, Qwen, TinyLlama) |
-| Memory      | ChromaDB (local vector database)       |
-| Storage     | SQLite, JSON                           |
-| Voice in    | SpeechRecognition, PyAudio             |
-| Voice out   | Piper TTS (local neural voices)        |
-| Audio       | VAD, AEC, AGC, noise floor calibration |
+| | Minimum | Recommended |
+|---|---|---|
+| OS | Windows 10, 64-bit | Windows 11 |
+| Memory | 8 GB RAM | 16 GB RAM |
+| Graphics | Not required | NVIDIA with 6 GB VRAM or more |
+| Disk | 10 GB free | 20 GB free |
 
----
+## Plans
 
-## Hardware requirements
+Seven is free to use, fully local, on every plan. Pro and Ultimate raise limits on triggers, schedules and documents
+and add extras such as speaker recognition. See [plans and pricing](docs/product/plans-and-pricing.md).
 
-| Component | Minimum              | Recommended           |
-|-----------|----------------------|-----------------------|
-| OS        | Windows 10 x64       | Windows 11 x64        |
-| RAM       | 8 GB                 | 16 GB                 |
-| GPU       | 4 GB VRAM (optional) | 6+ GB VRAM (NVIDIA)   |
-| Storage   | 10 GB free           | 20 GB free            |
-| CPU       | 4 cores              | 8+ cores              |
+## Where it is going
 
-Seven runs without a GPU. The language model falls back to CPU inference,
-which is slower but fully functional.
+Seven is in beta hardening ahead of a closed beta. Next on the [roadmap](docs/product/roadmap.md): reading the screen
+and clicking by name, multi-step tasks you approve, a phone companion and plugins.
 
----
+## Documentation
 
-## Getting started
+| | |
+|---|---|
+| [Docs home](docs/README.md) | Everything, organised |
+| [Product overview](docs/product/overview.md), [PRD](docs/product/prd.md), [Roadmap](docs/product/roadmap.md) | What and why |
+| [Architecture](docs/architecture/overview.md), [Decisions](docs/architecture/decisions/README.md) | How it fits together |
+| [Components](docs/components/README.md) | Brain, ears, mouth, hands and the rest |
+| [Development setup](docs/development/setup.md), [Testing](docs/development/testing.md), [Releases](docs/development/release-process.md) | Working on Seven |
+| [HTTP API](docs/reference/http-api.md) | Every local endpoint (generated) |
 
-**Download the installer** from the
-[Releases](https://github.com/manikanta7cheruku/seven-releases/releases/latest)
-page and run it. The setup wizard handles everything: Ollama installation,
-model download, and initial configuration.
+## Contributing and security
 
-**First launch takes a few minutes** while the selected language model
-downloads. This is a one-time step.
+See [CONTRIBUTING.md](CONTRIBUTING.md). To report a vulnerability, follow [SECURITY.md](SECURITY.md).
 
----
+## License
 
-## Manual setup (development)
-
-```bash
-git clone https://github.com/manikanta7cheruku/seven-releases.git
-cd seven-releases
-
-python -m venv venv
-.\venv\Scripts\activate
-pip install -r requirements.txt
-
-cd frontend
-npm install
-npm run dev
-Install Ollama from ollama.com and pull a model:
-
-Bash
-
-ollama pull llama3
-Start Seven:
-
-Bash
-
-python main.py
-Privacy
-Seven is designed so your data never has to leave your machine.
-
-Data	Stored	Location
-Voice audio	Never	Processed in memory
-Conversations	Local only	ChromaDB on your PC
-User facts	Local only	ChromaDB on your PC
-Tasks, schedules	Local only	SQLite on your PC
-AI responses	Never sent	Generated locally
-Usage statistics	Not collected	
-Internet is only used for web search (when you explicitly ask), update
-checks (GitHub releases, no data sent), and optional feedback submission.
-
-Global shortcuts
-Shortcut	Action
-Alt + S	Show or hide Seven window
-Alt + Shift + T	Open floating task panel
-Shift (hold)	Push to talk (when enabled)
-Plans
-Seven is free to use with core features.
-
-Pro and Ultimate plans unlock higher limits on memory, schedules, triggers,
-and knowledge files. See the Plans page inside the app.
-
-License
-Seven is proprietary software. See LICENSE.txt for terms.
-
-Contact
-Built by Manikanta Cheruku.
-Feedback and bug reports: use the Feedback section inside the app.
+Seven is proprietary software by Seven Labs. The source is visible here for transparency; it is not open source.
+See [LICENSE.txt](LICENSE.txt).
