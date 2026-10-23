@@ -19,9 +19,20 @@ ARCHITECTURE:
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+import sys
 import threading
 import time
 import os
+
+# Hands and layers print emoji. Electron starts us with UTF-8, but a plain
+# "uvicorn" in a Windows console defaults to cp1252 and those prints would
+# raise inside actions (a volume change failed with a 'charmap' error).
+for _stream in (sys.stdout, sys.stderr):
+    if _stream and hasattr(_stream, "reconfigure"):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
 from seven_utils.version import get_version
 
 # Telemetry

@@ -63,6 +63,7 @@ WINDOW_ALIASES = {
     "visual studio code": ["visual studio code", "vs code", "vscode"],
     "notepad": ["notepad", "untitled - notepad"],
     "explorer": ["file explorer", "explorer"],
+    "file explorer": ["file explorer", "explorer"],
     "files": ["file explorer", "explorer"],
     "terminal": ["command prompt", "cmd", "windows powershell", "powershell", "terminal"],
     "cmd": ["command prompt", "cmd"],
@@ -121,6 +122,16 @@ def _find_window(target):
         search_terms = WINDOW_ALIASES[target_lower] + [target_lower]
 
     windows = _get_all_windows()
+
+    # File Explorer windows are titled after the open folder ("Downloads"),
+    # so find them by window class instead of title.
+    if target_lower in ("explorer", "file explorer", "files"):
+        for hwnd, title in windows:
+            try:
+                if win32gui.GetClassName(hwnd) == "CabinetWClass":
+                    return hwnd, title
+            except Exception:
+                pass
 
     # Pass 1: Exact title match (case-insensitive)
     for hwnd, title in windows:
@@ -306,6 +317,8 @@ def manage_window(params):
     if not WIN32_AVAILABLE:
         return False, "Window control unavailable. Install pywin32."
 
+    # Multi-word names travel as "file|||explorer" because tag params split on spaces.
+    params = {k: v.replace("|||", " ") if isinstance(v, str) else v for k, v in params.items()}
     action = params.get("action", "").lower()
     target = params.get("target", "").lower()
 

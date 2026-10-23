@@ -1,0 +1,113 @@
+{
+  "_about": "Content of the in-app Guide. Every phrase under tryIt and groups[].examples is checked by tests/test_guide_commands.py: it must be handled by Seven's instant layers (no language model), and when 'expect' is set the reply must carry that action. 'live' phrases depend on this PC's files and are skipped. Change a phrase here and the test tells you if Seven no longer understands it.",
+
+  "tryIt": [
+    { "id": "brightness", "title": "Max your brightness", "say": "Set brightness to 100", "expect": "SYS",
+      "detail": "Seven changes your screen brightness directly.", "undo": { "label": "Back to 60%", "say": "Set brightness to 60" } },
+    { "id": "chrome", "title": "Open Chrome", "say": "Open Chrome", "expect": "OPEN",
+      "detail": "Any installed app, by its everyday name." },
+    { "id": "explorer", "title": "Open File Explorer", "say": "Open File Explorer", "expect": "OPEN",
+      "detail": "Folders too: try \"Open downloads\"." },
+    { "id": "split", "title": "Put them side by side", "say": "Put Chrome and File Explorer side by side", "expect": "WINDOW",
+      "detail": "Seven arranges windows for you. Open both first." },
+    { "id": "volume", "title": "Set the volume", "say": "Set volume to 30", "expect": "SYS",
+      "detail": "Exact levels, louder, quieter or mute." },
+    { "id": "gpu", "title": "Ask about your PC", "say": "What GPU do I have",
+      "detail": "Seven reads your hardware live, no internet needed." },
+    { "id": "night", "title": "Turn on night light", "say": "Turn on night light", "expect": "SYS",
+      "detail": "Warmer colours for the evening.", "undo": { "label": "Turn it off", "say": "Turn off night light" } },
+    { "id": "timer", "title": "Start a timer", "say": "Set a timer for 5 minutes", "expect": "SCHED",
+      "detail": "Alerts you even when Seven is hidden.", "undo": { "label": "Cancel it", "say": "Cancel the timer" } }
+  ],
+
+  "groups": [
+    {
+      "id": "apps", "title": "Apps and windows", "page": "/console", "pageLabel": "Console",
+      "summary": "Seven has hands. It opens and closes apps, folders and sites, and moves windows around your screens.",
+      "examples": [
+        { "say": "Open calculator", "expect": "OPEN" },
+        { "say": "Open downloads", "expect": "OPEN" },
+        { "say": "Close File Explorer", "expect": "CLOSE" },
+        { "say": "Snap Chrome to the left", "expect": "WINDOW" },
+        { "say": "Maximize Chrome", "expect": "WINDOW" },
+        { "say": "Stack Chrome and Notepad", "expect": "WINDOW" },
+        { "say": "Make Chrome 50% transparent", "expect": "WINDOW" },
+        { "say": "Pin Notepad on top", "expect": "WINDOW" },
+        { "say": "Minimize all windows", "expect": "WINDOW" },
+        { "say": "Undo that", "expect": "WINDOW" }
+      ]
+    },
+    {
+      "id": "system", "title": "System controls", "page": "/console", "pageLabel": "Console",
+      "summary": "Volume, brightness, Wi-Fi, Bluetooth, dark mode, night light, do not disturb, airplane mode, media keys and battery.",
+      "examples": [
+        { "say": "Mute", "expect": "SYS" },
+        { "say": "Brightness down", "expect": "SYS" },
+        { "say": "Turn on dark mode", "expect": "SYS" },
+        { "say": "Turn on do not disturb", "expect": "SYS" },
+        { "say": "Is bluetooth on", "expect": "SYS" },
+        { "say": "Next song", "expect": "SYS" },
+        { "say": "What's my battery level", "expect": "SYS" }
+      ]
+    },
+    {
+      "id": "pc", "title": "Knows your computer", "page": "/settings?section=system", "pageLabel": "System settings",
+      "summary": "Ask about your processor, graphics card, memory and drives. Answers come from live readings on this PC.",
+      "examples": [
+        { "say": "What CPU do I have" },
+        { "say": "How much RAM do I have" },
+        { "say": "How full is my C drive" },
+        { "say": "What model are you using" }
+      ]
+    },
+    {
+      "id": "files", "title": "Find files", "page": "/console", "pageLabel": "Console",
+      "summary": "Seven indexes your drives and finds files by name or by what is inside documents, then opens the best match.",
+      "examples": [
+        { "say": "Find my resume", "live": true },
+        { "say": "Find the invoice pdf", "live": true }
+      ]
+    },
+    {
+      "id": "workspaces", "title": "Workspaces and triggers", "page": "/triggers", "pageLabel": "Triggers",
+      "summary": "Save the apps, windows and tabs you have open as a workspace and bring them all back with one sentence. Triggers run your own phrases or hotkeys.",
+      "examples": [
+        { "say": "Save this workspace as Focus", "expect": "WORKSPACE" },
+        { "say": "Restore workspace Focus" }
+      ]
+    },
+    {
+      "id": "tasks", "title": "Tasks", "page": "/tasks", "pageLabel": "Tasks",
+      "summary": "A to-do list you can fill by voice, with due dates, priorities and subtasks.",
+      "examples": [
+        { "say": "Add a task to call the bank tomorrow", "expect": "TASK" },
+        { "say": "What are my tasks" }
+      ]
+    },
+    {
+      "id": "schedules", "title": "Reminders, alarms and timers", "page": "/schedules", "pageLabel": "Schedules",
+      "summary": "One-off or repeating. They fire as a notification even when the Seven window is closed.",
+      "examples": [
+        { "say": "Remind me to stretch in 20 minutes", "expect": "SCHED" },
+        { "say": "Set an alarm for 7am", "expect": "SCHED" },
+        { "say": "Every Monday remind me to submit the report at 9am", "expect": "SCHED" },
+        { "say": "What reminders do I have" }
+      ]
+    },
+    {
+      "id": "memory", "title": "Memory", "page": "/memory", "pageLabel": "Memory",
+      "summary": "Tell Seven about yourself once. It remembers, updates facts when you correct it, and shows everything it knows on the Memory page.",
+      "examples": [
+        { "say": "Remember that my favorite editor is VS Code" }
+      ]
+    },
+    {
+      "id": "personality", "title": "Change Seven by talking", "page": "/settings?section=brain", "pageLabel": "Brain settings",
+      "summary": "Every setting can be changed in plain words. Seven confirms the new value and the old one.",
+      "examples": [
+        { "say": "Set humor to 60%" },
+        { "say": "Set honesty to 90%" }
+      ]
+    }
+  ]
+}

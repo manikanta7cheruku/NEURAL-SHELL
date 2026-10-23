@@ -106,7 +106,7 @@ export default function Updates() {
         )}
 
         <Section>
-          <Row label="Check for updates automatically" description="Seven asks GitHub once a day and tells you when a new version is ready.">
+          <Row label="Check for updates automatically" description="Seven checks shortly after it starts and every two hours, and tells you when a new version is ready.">
             <Toggle checked={config?.updates?.auto_check ?? true} onChange={v => saveConfig({ updates: { auto_check: v } })} label="Check automatically" />
           </Row>
           {info?.download_mode === 'auto' && (

@@ -5,7 +5,7 @@
     "productName": "SEVEN",
     "author": {
         "name": "Manikanta Cheruku",
-        "email": "your@email.com"
+        "email": "cherukumanikanta77@gmail.com"
     },
     "main": "electron/main.js",
     "scripts": {
@@ -22,7 +22,7 @@
         "dist": "npm run build:frontend && electron-builder --config frontend/electron-builder.yml",
         "dist:full": "node scripts/build.js",
         "prepare-python": "node scripts/prepare-python.js",
-    "backend:dev": "set SEVEN_BACKEND_EXTERNALLY_STARTED=1 && python main.js"
+    "backend:dev": "set SEVEN_BACKEND_EXTERNALLY_STARTED=1 && python main.py"
     },
     "devDependencies": {
         "concurrently": "^9.1.0",

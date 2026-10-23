@@ -49,7 +49,8 @@ except Exception:
     )
 
 os.makedirs(_SEVEN_DATA, exist_ok=True)
-TRIGGERS_DB = os.path.join(_SEVEN_DATA, "triggers.db")
+# SEVEN_TRIGGERS_DB lets tests use a throwaway database instead of the real one.
+TRIGGERS_DB = os.environ.get("SEVEN_TRIGGERS_DB") or os.path.join(_SEVEN_DATA, "triggers.db")
 
 print(Fore.GREEN + f"[TRIGGERS] DB: {TRIGGERS_DB}")
 
