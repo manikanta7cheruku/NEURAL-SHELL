@@ -18,7 +18,7 @@ export default function KnowledgePanel({ onClose }) {
       <div className="flex items-center justify-between px-4 py-3 border-b border-white/[0.06]">
         <div>
           <div className="text-[12px] font-semibold text-white/85">What I know about you</div>
-          <div className="text-[9px] text-white/30">Stored only on this computer</div>
+          <div className="text-[11.5px] text-white/30">Stored only on this computer</div>
         </div>
         <button onClick={onClose} className="text-white/30 hover:text-white/70"><X size={13} /></button>
       </div>
@@ -30,7 +30,7 @@ export default function KnowledgePanel({ onClose }) {
               <span className="text-[11px] text-white/70">{f.text}</span>
               <button onClick={() => forgetFact(f.id)} title="Forget this" className="opacity-0 group-hover:opacity-100 text-white/30 hover:text-red-400"><Trash2 size={11} /></button>
             </div>
-            <div className="text-[9px] text-white/30 mt-0.5">
+            <div className="text-[11.5px] text-white/30 mt-0.5">
               {f.origin === 'explicit' ? 'You said it' : 'Inferred'} · since {String(f.since).slice(0, 10)}
               {f.history?.length ? ` · before: ${f.history.join(', ')}` : ''}
             </div>
@@ -45,14 +45,14 @@ export default function KnowledgePanel({ onClose }) {
       </Section>
 
       <Section title="How you like me to talk" empty="">
-        <div className="text-[10.5px] text-white/50 px-1">
+        <div className="text-[12px] text-white/50 px-1">
           Answers: {p.style.verbosity || 'normal'} · Humor adjustment: {p.style.humor_bias || 0} · Tone: {p.style.formality || 'casual'}
         </div>
       </Section>
 
       <Section title="Things I'm curious about" empty="Nothing right now.">
         {p.open_questions.map((q) => (
-          <div key={q.id} className="text-[10.5px] text-white/45 px-1">{q.kind.replace(/_/g, ' ')}: {q.subject}</div>))}
+          <div key={q.id} className="text-[12px] text-white/45 px-1">{q.kind.replace(/_/g, ' ')}: {q.subject}</div>))}
       </Section>
     </div>
   );
@@ -62,8 +62,8 @@ function Section({ title, empty, children }) {
   const items = Array.isArray(children) ? children.flat().filter(Boolean) : [children].filter(Boolean);
   return (
     <div className="px-4 py-3 space-y-1.5">
-      <div className="text-[8.5px] uppercase tracking-widest text-white/25 pb-0.5">{title}</div>
-      {items.length ? items : (empty ? <p className="text-[10px] text-white/30">{empty}</p> : null)}
+      <div className="text-[11px] text-white/25 pb-0.5">{title}</div>
+      {items.length ? items : (empty ? <p className="text-[12px] text-white/30">{empty}</p> : null)}
     </div>
   );
 }

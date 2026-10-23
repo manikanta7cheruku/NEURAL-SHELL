@@ -10,17 +10,17 @@ import { Check, Copy } from 'lucide-react';
 function CodeBlock({ code, lang }) {
   const [copied, setCopied] = useState(false);
   return (
-    <div className="my-2 rounded-lg border border-white/8 bg-black/40 overflow-hidden">
-      <div className="flex items-center justify-between px-3 py-1 border-b border-white/6 text-[9px] text-white/35 font-mono">
+    <div className="my-2.5 overflow-hidden rounded-lg border border-s-border bg-s-bg">
+      <div className="flex items-center justify-between border-b border-s-border bg-s-card px-3 h-7 text-[11px] text-s-text-3">
         <span>{lang || 'code'}</span>
         <button
           onClick={() => { navigator.clipboard.writeText(code); setCopied(true); setTimeout(() => setCopied(false), 1500); }}
-          className="flex items-center gap-1 hover:text-white/70 transition-colors"
+          className="flex items-center gap-1 transition-colors hover:text-s-text"
         >
-          {copied ? <Check size={10} /> : <Copy size={10} />}{copied ? 'Copied' : 'Copy'}
+          {copied ? <Check size={12} /> : <Copy size={12} />}{copied ? 'Copied' : 'Copy'}
         </button>
       </div>
-      <pre className="p-3 text-[11px] leading-relaxed text-white/75 font-mono overflow-x-auto whitespace-pre">{code}</pre>
+      <pre className="overflow-x-auto whitespace-pre p-3 font-mono text-[12px] leading-relaxed text-s-text-2">{code}</pre>
     </div>
   );
 }
@@ -28,8 +28,8 @@ function CodeBlock({ code, lang }) {
 function Inline({ text }) {
   const parts = text.split(/(`[^`]+`|\*\*[^*]+\*\*)/g).filter(Boolean);
   return parts.map((p, i) => {
-    if (p.startsWith('`')) return <code key={i} className="px-1 py-px rounded bg-white/8 text-[11px] font-mono text-s-accent/90">{p.slice(1, -1)}</code>;
-    if (p.startsWith('**')) return <strong key={i} className="font-semibold text-white/90">{p.slice(2, -2)}</strong>;
+    if (p.startsWith('`')) return <code key={i} className="rounded bg-s-card-h px-1 py-px font-mono text-[12px] text-s-text">{p.slice(1, -1)}</code>;
+    if (p.startsWith('**')) return <strong key={i} className="font-semibold text-s-text">{p.slice(2, -2)}</strong>;
     return <span key={i}>{p}</span>;
   });
 }
@@ -49,16 +49,16 @@ export default function MessageContent({ text }) {
   if (last < clean.length) blocks.push({ type: 'text', body: clean.slice(last) });
 
   return (
-    <div className="text-[12.5px] leading-relaxed text-white/75 space-y-2">
+    <div className="space-y-2.5 text-[13px] leading-[1.65] text-s-text-2">
       {blocks.map((b, i) => {
         if (b.type === 'code') return <CodeBlock key={i} code={b.body} lang={b.lang} />;
         return b.body.split(/\n{2,}/).map((para, j) => {
           const lines = para.split('\n');
           if (lines.every((l) => /^\s*[-*]\s+/.test(l))) {
-            return <ul key={`${i}-${j}`} className="list-disc pl-5 space-y-0.5">{lines.map((l, k) => <li key={k}><Inline text={l.replace(/^\s*[-*]\s+/, '')} /></li>)}</ul>;
+            return <ul key={`${i}-${j}`} className="list-disc space-y-1 pl-5 marker:text-s-text-4">{lines.map((l, k) => <li key={k}><Inline text={l.replace(/^\s*[-*]\s+/, '')} /></li>)}</ul>;
           }
           if (lines.every((l) => /^\s*\d+[.)]\s+/.test(l))) {
-            return <ol key={`${i}-${j}`} className="list-decimal pl-5 space-y-0.5">{lines.map((l, k) => <li key={k}><Inline text={l.replace(/^\s*\d+[.)]\s+/, '')} /></li>)}</ol>;
+            return <ol key={`${i}-${j}`} className="list-decimal space-y-1 pl-5 marker:text-s-text-4">{lines.map((l, k) => <li key={k}><Inline text={l.replace(/^\s*\d+[.)]\s+/, '')} /></li>)}</ol>;
           }
           return <p key={`${i}-${j}`} className="whitespace-pre-wrap"><Inline text={para} /></p>;
         });
