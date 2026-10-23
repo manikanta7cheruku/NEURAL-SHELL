@@ -18,7 +18,10 @@ os.environ["HF_HUB_DISABLE_TELEMETRY"]     = "1"
 os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
 os.environ["HF_HUB_DISABLE_IMPLICIT_TOKEN"]= "1"
 os.environ["TOKENIZERS_PARALLELISM"]        = "false"
-os.environ["CUDA_VISIBLE_DEVICES"]          = ""
+# The embedder runs on the CPU because it is created with device="cpu". Do NOT hide the GPU here with
+# CUDA_VISIBLE_DEVICES: it applies to the whole process, which pushed Whisper onto the CPU and lagged the PC.
+os.environ.setdefault("USE_TF", "0")             # transformers must never pull in TensorFlow (seconds and GBs)
+os.environ.setdefault("TRANSFORMERS_NO_TF", "1")
 
 import logging
 logging.getLogger("chromadb.telemetry").setLevel(logging.CRITICAL)
@@ -31,23 +34,34 @@ import chromadb
 import datetime
 from colorama import Fore
 
-# Patch transformers to disable meta-tensor initialization on Windows CPU.
-# Must run before SentenceTransformer is imported.
-try:
-    import transformers.modeling_utils as _mu
-    _raw = _mu.PreTrainedModel.__dict__.get('from_pretrained')
-    if _raw is not None and hasattr(_raw, '__func__'):
-        _orig_fn = _raw.__func__
-    else:
-        _orig_fn = _mu.PreTrainedModel.from_pretrained
+_patched = False
 
-    def _no_meta(cls, *args, **kwargs):
-        kwargs['low_cpu_mem_usage'] = False
-        return _orig_fn(cls, *args, **kwargs)
 
-    _mu.PreTrainedModel.from_pretrained = classmethod(_no_meta)
-except Exception:
-    pass
+def _patch_transformers():
+    """
+    Disable meta-tensor initialisation on Windows CPU before SentenceTransformer loads.
+    Runs only when the embedder is actually built: importing transformers at module level cost
+    about 20 seconds of startup (it drags in torch, TensorFlow and Keras).
+    """
+    global _patched
+    if _patched:
+        return
+    _patched = True
+    try:
+        import transformers.modeling_utils as _mu
+        _raw = _mu.PreTrainedModel.__dict__.get('from_pretrained')
+        if _raw is not None and hasattr(_raw, '__func__'):
+            _orig_fn = _raw.__func__
+        else:
+            _orig_fn = _mu.PreTrainedModel.from_pretrained
+
+        def _no_meta(cls, *args, **kwargs):
+            kwargs['low_cpu_mem_usage'] = False
+            return _orig_fn(cls, *args, **kwargs)
+
+        _mu.PreTrainedModel.from_pretrained = classmethod(_no_meta)
+    except Exception:
+        pass
 
 
 # =============================================================================
@@ -100,6 +114,7 @@ def _load_offline_embedder_standalone(model_name: str):
     which is already built to work with ChromaDB's Rust query layer.
     Falls back to manual embedder only if chromadb utility is unavailable.
     """
+    _patch_transformers()
     try:
         from sentence_transformers import SentenceTransformer
     except Exception as e:
