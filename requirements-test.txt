@@ -1,0 +1,11 @@
+# Minimal dependencies for the test suite and CI.
+# The tests use a fake LLM and temporary databases, so voice, ML and Windows
+# automation packages from requirements.txt are not needed here.
+numpy>=1.26.0,<2.0.0
+requests
+colorama
+psutil
+fastapi
+pydantic
+chromadb==1.5.8
+ruff==0.17.2

@@ -1,0 +1,27 @@
+# Ruff lint settings for SEVEN's Python code.
+# CI enforces the bug-class rules below. Style cleanups (unused imports, f-strings
+# without placeholders, unused variables) are tracked separately and can be added
+# to `select` once the codebase is clean.
+
+target-version = "py311"
+extend-exclude = [
+    "venv",
+    "node_modules",
+    "frontend",
+    "web",
+    "docs",
+    "dist",
+    "dist-electron",
+    "dist-installer",
+    "python-dist",
+    "seven_data",
+]
+
+[lint]
+select = [
+    "E9",    # syntax errors
+    "F63",   # invalid comparisons
+    "F7",    # misplaced break/continue/return
+    "F82",   # undefined names
+    "F601",  # repeated dictionary keys
+]
