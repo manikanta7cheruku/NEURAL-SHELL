@@ -25,7 +25,14 @@ _ROUTE_RE = re.compile(r'<Route\s+path="(?P<path>[^"]+)"\s+element=\{<(?P<comp>\
 _IMPORT_RE = re.compile(r"import\s+(?P<name>\w+)\s+from\s+'(?P<path>\./pages/[^']+)'")
 _TEXT_RE = re.compile(r">\s*([^<>{}\n=][^<>{}]{1,170}?)\s*<")
 _HEADER_RE = re.compile(r'<PageHeader\s+title="([^"]+)"(?:\s+sub="([^"]*)")?')
-_DOC_RE = re.compile(r"export const SEVEN_DOC\s*=\s*(\{.*?\});", re.DOTALL)
+_SHELL_RE = re.compile(r'<PageShell\s+title="([^"]+)"(?:\s+description="([^"]*)")?')
+# <Row label="..." description="..."> and <Section title="..." description={`...`}> from components/ui.jsx
+_PROP_RE = re.compile(r'<(?P<tag>Row|Section)\s+(?:title|label)="(?P<label>[^"]+)"'
+                      r'(?:\s+description=(?:"(?P<d1>[^"]*)"|\{[`\'"](?P<d2>[^`]*?)[`\'"]\}))?')
+_NAV_RE = re.compile(r"to:\s*'(?P<to>/[^']*)',\s*label:\s*'(?P<label>[^']+)'")
+_PAGE_QUESTION_RE = re.compile(r"\b(?:page|screen|tab)\b")
+_SECTION_DEF_RE = re.compile(r"key:\s*'(?P<key>\w+)',\s*label:\s*'(?P<label>[^']+)'.*?component:\s*(?P<comp>\w+)")
+_DOC_RE = re.compile(r"SEVEN_DOC\s*=?\s*(?=\{)")
 _STOP = {"the", "a", "an", "of", "to", "in", "on", "and", "or", "is", "it", "my", "i", "you", "your", "do", "how",
          "what", "where", "can", "does", "for", "with", "this", "that", "me", "seven", "change", "set", "page",
          "section", "see", "find", "use", "turn"}
@@ -54,17 +61,49 @@ def _texts(src: str) -> List[Tuple[str, str]]:
     out = []
     for t in _TEXT_RE.findall(src):
         t = re.sub(r"\s+", " ", t).strip()
-        if not re.search(r"[A-Za-z]{3}", t) or "=>" in t or t.startswith(("//", "/*")):
+        if not re.search(r"[A-Za-z]{3}", t) or "=>" in t or t.startswith(("//", "/*")) or \
+                re.search(r"[;(){}]|&&|\|\||\breturn\b|\bconst\b", t):
             continue
         out.append(("description" if len(t) >= 28 else "label", t))
     return out
 
 
+def _prop_controls(src: str) -> List[Tuple[str, str]]:
+    """(label, description) from <Row label=...> and <Section title=...> props."""
+    out = []
+    for m in _PROP_RE.finditer(src):
+        desc = m.group("d1") or re.sub(r"\$\{[^}]*\}\.?\s*", "", m.group("d2") or "")
+        out.append((m.group("label").strip(), re.sub(r"\s+", " ", desc).strip()))
+    return out
+
+
+def _section_names(index_src: str) -> Dict[str, str]:
+    """Component file name -> section label, from a SECTIONS = [{ key, label, ..., component }] list."""
+    return {m.group("comp"): m.group("label") for m in _SECTION_DEF_RE.finditer(index_src)}
+
+
 def _controls(files: List[str]) -> List[Dict[str, str]]:
     controls, seen = [], set()
+    sections = _section_names(_read(files[0])) if files else {}
+    uses_props = any(_PROP_RE.search(_read(f)) for f in files)
     for path in files:
+        name = os.path.splitext(os.path.basename(path))[0]
+        src = _read(path)
+        props = _prop_controls(src)
+        if props:                                   # files built on the shared UI components
+            for label, desc in props:
+                if label.lower() in seen or len(label) > 45:
+                    continue
+                seen.add(label.lower())
+                ctrl = {"label": label, "description": desc, "file": os.path.basename(path)}
+                if name in sections:
+                    ctrl["section"] = sections[name]
+                controls.append(ctrl)
+            continue
+        if uses_props:
+            continue
         last = None
-        for kind, text in _texts(_read(path)):
+        for kind, text in _texts(src):
             if kind == "label":
                 if text.lower() in seen or len(text) > 45:
                     last = None
@@ -100,6 +139,7 @@ def source_hash(src_dir: str) -> str:
 def build(src_dir: str) -> Dict[str, Any]:
     """Generate the app map from frontend/src."""
     app = _read(os.path.join(src_dir, "App.jsx"))
+    nav = {m.group("to"): m.group("label") for m in _NAV_RE.finditer(_read(os.path.join(src_dir, "components", "Sidebar.jsx")))}
     imports = {m.group("name"): m.group("path") for m in _IMPORT_RE.finditer(app)}
     pages = []
     for m in _ROUTE_RE.finditer(app):
@@ -109,16 +149,16 @@ def build(src_dir: str) -> Dict[str, Any]:
             continue
         files = _page_files(file)
         text = _read(file)
-        header = _HEADER_RE.search(text)
+        header = _HEADER_RE.search(text) or _SHELL_RE.search(text)
         doc: Dict[str, Any] = {}
         dm = _DOC_RE.search(text)
         if dm:
             try:
-                doc = json.loads(dm.group(1))
+                doc, _end = json.JSONDecoder().raw_decode(text, dm.end())
             except ValueError:
                 doc = {}
-        controls = _controls(files)
-        title = (header.group(1) if header else None) or (controls[0]["label"] if controls else comp)
+        controls = [dict(c, file=os.path.basename(file)) for c in doc.get("controls", [])] + _controls(files)
+        title = (header.group(1) if header else None) or nav.get(route) or (controls[0]["label"] if controls else comp)
         purpose = doc.get("purpose") or (header.group(2) if header and header.group(2) else "")
         pages.append({
             "id": route.strip("/") or "home", "route": route, "component": comp, "title": title,
@@ -174,8 +214,16 @@ def refresh_if_stale(path: str = DATA_PATH) -> bool:
     return True
 
 
+def _stem(t: str) -> str:
+    if len(t) > 4 and t.endswith("ies"):
+        return t[:-3] + "y"
+    if len(t) > 3 and t.endswith("s") and not t.endswith("ss"):
+        return t[:-1]
+    return t
+
+
 def _toks(text: str) -> set:
-    return {t for t in re.findall(r"[a-z0-9]+", (text or "").lower()) if t not in _STOP and len(t) > 1}
+    return {_stem(t) for t in re.findall(r"[a-z0-9]+", (text or "").lower()) if t not in _STOP and len(t) > 1}
 
 
 def search(question: str, limit: int = 3, path: str = DATA_PATH) -> List[Dict[str, Any]]:
@@ -187,13 +235,15 @@ def search(question: str, limit: int = 3, path: str = DATA_PATH) -> List[Dict[st
     for page in load(path).get("pages", []):
         page_words = _toks(" ".join([page["title"], page.get("purpose", ""), page["id"],
                                      " ".join(page.get("keywords", []))]))
-        base = len(q & page_words) + 2 * len(q & _toks(page["title"] + " " + page["id"]))
+        named = q & _toks(page["title"] + " " + page["id"])
+        base = len(q & page_words) + 3 * len(named)
         best_ctrl, best = None, 0
         for c in page.get("controls", []):
-            s = len(q & _toks(c["label"] + " " + c.get("description", ""))) * 2 - (0 if c["label"].lower() in
-                                                                                      question.lower() else 0)
+            s = 3 * len(q & _toks(c["label"])) + len(q & _toks(c.get("description", "")))
             if s > best:
                 best_ctrl, best = c, s
+        if named and _PAGE_QUESTION_RE.search(question.lower()) and best <= base:
+            best_ctrl = None                      # "what is the memory page for": describe the page itself
         score = base + best
         if score:
             hits.append({"score": score, "page": page, "control": best_ctrl})
@@ -204,6 +254,8 @@ def search(question: str, limit: int = 3, path: str = DATA_PATH) -> List[Dict[st
 def describe(hit: Dict[str, Any]) -> str:
     page, ctrl = hit["page"], hit["control"]
     where = f"{page['title']} (the {page['id']} page in the sidebar)"
+    if ctrl and ctrl.get("section"):
+        where = f"{page['title']}, in the {ctrl['section']} section"
     if ctrl:
         extra = f" {ctrl['description']}" if ctrl.get("description") else ""
         return f"That's in {where}, under \"{ctrl['label']}\".{extra}"

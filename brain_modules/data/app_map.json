@@ -1,6 +1,6 @@
 {
   "app_map_version": 1,
-  "source_hash": "8955e5ea2f7356f5",
+  "source_hash": "5d7073c821a8a133",
   "pages": [
     {
       "id": "home",
@@ -42,7 +42,7 @@
       "id": "dashboard",
       "route": "/dashboard",
       "component": "Home",
-      "title": "Undo",
+      "title": "Dashboard",
       "purpose": "",
       "controls": [
         {
@@ -72,17 +72,12 @@
         },
         {
           "label": "Dismiss",
-          "description": "!t.completed && t.due_date && new Date(t.due_date + 'T00:00:00').getTime()",
+          "description": "",
           "file": "Home.jsx"
         },
         {
           "label": "Dashboard",
           "description": "Seven is ready. Say \"Hey Seven\" to begin.",
-          "file": "Home.jsx"
-        },
-        {
-          "label": "filteredTasks.length && (",
-          "description": "Say \"remind me\" to create a schedule",
           "file": "Home.jsx"
         },
         {
@@ -113,12 +108,12 @@
       "id": "console",
       "route": "/console",
       "component": "Console",
-      "title": "unsure, said so",
+      "title": "Console",
       "purpose": "",
       "controls": [
         {
           "label": "unsure, said so",
-          "description": ") : msg.status === 'error' ? (",
+          "description": "Drop to add to your knowledge",
           "file": "Console.jsx"
         },
         {
@@ -149,22 +144,42 @@
       "id": "memory",
       "route": "/memory",
       "component": "Memory",
-      "title": "You",
-      "purpose": "",
+      "title": "Memory",
+      "purpose": "What Seven knows about you and every saved conversation, with when each was learned or said",
       "controls": [
         {
-          "label": "You",
+          "label": "Facts",
+          "description": "Everything Seven knows about you. Search, filter by category, edit, see history or delete a fact.",
+          "file": "Memory.jsx"
+        },
+        {
+          "label": "Add fact",
+          "description": "Tell Seven something to remember without chatting.",
+          "file": "Memory.jsx"
+        },
+        {
+          "label": "Conversations",
+          "description": "Every chat and voice conversation with timestamps. Search all messages, export or delete one, or continue it in the Console.",
+          "file": "Memory.jsx"
+        },
+        {
+          "label": "Delete a fact",
+          "description": "Hover a fact and press the trash icon. Seven won't bring it up again.",
+          "file": "Memory.jsx"
+        },
+        {
+          "label": "Loading history",
+          "description": "No earlier versions. This is the first value Seven learned.",
+          "file": "Memory.jsx"
+        },
+        {
+          "label": "Cancel",
           "description": "",
           "file": "Memory.jsx"
         },
         {
-          "label": "VII",
+          "label": "Save",
           "description": "",
-          "file": "Memory.jsx"
-        },
-        {
-          "label": "No conversations yet",
-          "description": "Start chatting with Seven to build your conversation history.",
           "file": "Memory.jsx"
         },
         {
@@ -173,61 +188,44 @@
           "file": "Memory.jsx"
         },
         {
-          "label": "Loading structured facts...",
+          "label": "Category",
           "description": "",
           "file": "Memory.jsx"
         },
         {
-          "label": "Add structured fact",
-          "description": "Chat with Seven and mention preferences, work, or identity details to see them here.",
-          "file": "Memory.jsx"
-        },
-        {
-          "label": "Update in place",
+          "label": "Continue in Console",
           "description": "",
           "file": "Memory.jsx"
         },
         {
-          "label": "Supersede (keep history)",
+          "label": "Summary.",
           "description": "",
           "file": "Memory.jsx"
         },
         {
-          "label": "Loading history...",
-          "description": ") : history.length === 0 ? (",
-          "file": "Memory.jsx"
-        },
-        {
-          "label": "No revision history",
+          "label": "Voice",
           "description": "",
-          "file": "Memory.jsx"
-        },
-        {
-          "label": "Storage Capacity Reached",
-          "description": "",
-          "file": "Memory.jsx"
-        },
-        {
-          "label": "Memory",
-          "description": "Everything Seven has learned, stored locally on your disk",
           "file": "Memory.jsx"
         }
       ],
-      "keywords": [],
+      "keywords": [
+        "memory",
+        "memories",
+        "facts",
+        "remember",
+        "conversations",
+        "history",
+        "transcript"
+      ],
       "sections": []
     },
     {
       "id": "schedules",
       "route": "/schedules",
       "component": "Schedules",
-      "title": "0 && diff",
+      "title": "Schedules",
       "purpose": "",
       "controls": [
-        {
-          "label": "0 && diff",
-          "description": "",
-          "file": "Schedules.jsx"
-        },
         {
           "label": "overdue",
           "description": "",
@@ -255,11 +253,6 @@
         },
         {
           "label": "Schedules",
-          "description": "",
-          "file": "Schedules.jsx"
-        },
-        {
-          "label": "isOverdue(s.time)) && (",
           "description": "",
           "file": "Schedules.jsx"
         },
@@ -296,7 +289,7 @@
       "id": "tasks",
       "route": "/tasks",
       "component": "Tasks",
-      "title": "Clear",
+      "title": "Tasks",
       "purpose": "",
       "controls": [
         {
@@ -336,7 +329,7 @@
         },
         {
           "label": "Add",
-          "description": "e.stopPropagation(); const dateLabel = dateVal ? fmtDate(dateVal.split('T')[0]) : null; return (",
+          "description": "",
           "file": "Tasks.jsx"
         },
         {
@@ -351,7 +344,7 @@
         },
         {
           "label": "Tasks",
-          "description": ") : filtered.length === 0 ? (",
+          "description": "",
           "file": "Tasks.jsx"
         }
       ],
@@ -362,7 +355,7 @@
       "id": "triggers",
       "route": "/triggers",
       "component": "Triggers",
-      "title": "Seven Task Panel Hotkey",
+      "title": "Triggers",
       "purpose": "",
       "controls": [
         {
@@ -392,7 +385,7 @@
         },
         {
           "label": "Plan limit warning",
-          "description": "t.action_type === 'open_workspace').length; return (",
+          "description": "",
           "file": "Triggers.jsx"
         },
         {
@@ -402,7 +395,7 @@
         },
         {
           "label": "Create Trigger",
-          "description": ") : compact ? ( /* Compact list mode with inline form injection */",
+          "description": "",
           "file": "Triggers.jsx"
         }
       ],
@@ -455,419 +448,398 @@
       "route": "/settings",
       "component": "Settings",
       "title": "Settings",
-      "purpose": "",
+      "purpose": "Everything you can configure: your profile and plan, the brain (model, personality, answers), voice, privacy and data, and system options",
       "controls": [
         {
-          "label": "Settings",
-          "description": "",
-          "file": "index.jsx"
-        },
-        {
           "label": "Profile",
-          "description": "Your account details and plan",
-          "file": "AccountSection.jsx"
-        },
-        {
-          "label": "Edit",
-          "description": "",
-          "file": "AccountSection.jsx"
-        },
-        {
-          "label": "Cancel",
-          "description": "",
-          "file": "AccountSection.jsx"
+          "description": "How Seven addresses you, and the email linked to your license.",
+          "file": "AccountSection.jsx",
+          "section": "Account"
         },
         {
           "label": "Name",
           "description": "",
-          "file": "AccountSection.jsx"
+          "file": "AccountSection.jsx",
+          "section": "Account"
         },
         {
           "label": "Email",
           "description": "",
-          "file": "AccountSection.jsx"
+          "file": "AccountSection.jsx",
+          "section": "Account"
         },
         {
           "label": "Plan",
           "description": "",
-          "file": "AccountSection.jsx"
+          "file": "AccountSection.jsx",
+          "section": "Account"
         },
         {
-          "label": "License",
+          "label": "Current plan",
+          "description": "Facts and conversation history are unlimited on every plan.",
+          "file": "AccountSection.jsx",
+          "section": "Account"
+        },
+        {
+          "label": "License key",
           "description": "",
-          "file": "AccountSection.jsx"
+          "file": "AccountSection.jsx",
+          "section": "Account"
         },
         {
-          "label": "How to use",
-          "description": "",
-          "file": "AccountSection.jsx"
+          "label": "Referrals",
+          "description": "When a friend you invite uses Seven for 7 hours, they get Pro and you get Ultimate, each free for one month.",
+          "file": "AccountSection.jsx",
+          "section": "Account"
         },
         {
-          "label": "Ambient Panel",
-          "description": "The overlay panel near the orb",
-          "file": "AmbientSection.jsx"
-        },
-        {
-          "label": "Background Opacity",
-          "description": "How transparent the panel appears",
-          "file": "AmbientSection.jsx"
-        },
-        {
-          "label": "Preview",
-          "description": "Changes apply immediately to the orb panel.",
-          "file": "AmbientSection.jsx"
-        },
-        {
-          "label": "Backup & Restore",
-          "description": "",
-          "file": "BackupSection.jsx"
-        },
-        {
-          "label": "Export or import your data",
-          "description": "Export your facts, conversations, and schedules as a backup file. Import to restore on the same or a new device.",
-          "file": "BackupSection.jsx"
-        },
-        {
-          "label": "Export",
-          "description": "Download all your data as JSON. Safe to store or transfer.",
-          "file": "BackupSection.jsx"
-        },
-        {
-          "label": "Import",
-          "description": "Restore from backup. Adds to existing data \u2014 does not replace.",
-          "file": "BackupSection.jsx"
-        },
-        {
-          "label": "Brain Configuration",
-          "description": "",
-          "file": "BrainSection.jsx"
-        },
-        {
-          "label": "Model",
-          "description": "",
-          "file": "BrainSection.jsx"
-        },
-        {
-          "label": "auto",
-          "description": "",
-          "file": "BrainSection.jsx"
-        },
-        {
-          "label": "Loading models...",
-          "description": ") : !models.ollama_running ? (",
-          "file": "BrainSection.jsx"
-        },
-        {
-          "label": "No models installed. Run:",
-          "description": "",
-          "file": "BrainSection.jsx"
-        },
-        {
-          "label": "ollama pull llama3.2",
-          "description": "",
-          "file": "BrainSection.jsx"
-        },
-        {
-          "label": "Type",
-          "description": "",
-          "file": "BrainSection.jsx"
-        },
-        {
-          "label": "or pick specific model.",
-          "description": "",
-          "file": "BrainSection.jsx"
-        },
-        {
-          "label": "Recommended:",
-          "description": "Low = precise and factual. High = creative but may go off-script.",
-          "file": "BrainSection.jsx"
-        },
-        {
-          "label": "Personality",
-          "description": "",
-          "file": "BrainSection.jsx"
-        },
-        {
-          "label": "Inspired by TARS",
-          "description": "",
-          "file": "BrainSection.jsx"
-        },
-        {
-          "label": "Humor",
-          "description": "How dry and witty Seven sounds.",
-          "file": "BrainSection.jsx"
-        },
-        {
-          "label": "Deadpan",
-          "description": "",
-          "file": "BrainSection.jsx"
-        },
-        {
-          "label": "Witty",
-          "description": "",
-          "file": "BrainSection.jsx"
-        },
-        {
-          "label": "Honesty",
-          "description": "How direct when you're wrong.",
-          "file": "BrainSection.jsx"
-        },
-        {
-          "label": "Diplomatic",
-          "description": "",
-          "file": "BrainSection.jsx"
-        },
-        {
-          "label": "Brutal",
-          "description": "",
-          "file": "BrainSection.jsx"
-        },
-        {
-          "label": "Search Behavior",
-          "description": "",
-          "file": "BrainSection.jsx"
-        },
-        {
-          "label": "Max Results",
-          "description": "How many files to show per search. Fewer = faster, less clutter.",
-          "file": "BrainSection.jsx"
-        },
-        {
-          "label": "3 (minimal)",
-          "description": "",
-          "file": "BrainSection.jsx"
-        },
-        {
-          "label": "20 (broad)",
-          "description": "",
-          "file": "BrainSection.jsx"
-        },
-        {
-          "label": "Reference Memory",
-          "description": "How long Seven remembers \"the second one\" or \"open it again\".",
-          "file": "BrainSection.jsx"
-        },
-        {
-          "label": "15s (short)",
-          "description": "",
-          "file": "BrainSection.jsx"
-        },
-        {
-          "label": "5min (long)",
-          "description": "",
-          "file": "BrainSection.jsx"
-        },
-        {
-          "label": "Auto-Open Best Match",
-          "description": "Open the top result automatically. Off = list results only, wait for choice.",
-          "file": "BrainSection.jsx"
-        },
-        {
-          "label": "Search Inside Documents",
-          "description": "Look inside PDF and DOCX contents, not just filenames. Uses more disk.",
-          "file": "BrainSection.jsx"
-        },
-        {
-          "label": "Streaming",
-          "description": "Seven speaks as it thinks. Faster first word, slight choppiness. Off = waits for full answer, then speaks smoothly.",
-          "file": "BrainSection.jsx"
-        },
-        {
-          "label": "Danger Zone",
-          "description": "",
-          "file": "DangerSection.jsx"
-        },
-        {
-          "label": "Repair Installation",
-          "description": "Re-run the setup wizard to fix missing AI engine, models, or dependencies. Your data is preserved.",
-          "file": "DangerSection.jsx"
-        },
-        {
-          "label": "Repair",
-          "description": "",
-          "file": "DangerSection.jsx"
-        },
-        {
-          "label": "Clear All Memory",
-          "description": "Permanently delete all facts and conversations. Export first if needed.",
-          "file": "DangerSection.jsx"
-        },
-        {
-          "label": "Clear Memory",
-          "description": "",
-          "file": "DangerSection.jsx"
-        },
-        {
-          "label": "Loading hardware...",
-          "description": "",
-          "file": "HardwareCard.jsx"
-        },
-        {
-          "label": "Hardware",
-          "description": "",
-          "file": "HardwareCard.jsx"
-        },
-        {
-          "label": "Your machine's capabilities",
-          "description": "",
-          "file": "HardwareCard.jsx"
-        },
-        {
-          "label": "Installed Models",
-          "description": "",
-          "file": "HardwareCard.jsx"
-        },
-        {
-          "label": "Panel Hotkey",
-          "description": "Global shortcut to open the floating task panel from anywhere.",
-          "file": "PanelHotkeySection.jsx"
-        },
-        {
-          "label": "Refer & Earn",
-          "description": "Share Seven with a friend and both get free premium",
-          "file": "ReferralSection.jsx"
-        },
-        {
-          "label": "How it works",
-          "description": "",
-          "file": "ReferralSection.jsx"
-        },
-        {
-          "label": "You Get",
-          "description": "",
-          "file": "ReferralSection.jsx"
-        },
-        {
-          "label": "Ultimate",
-          "description": "",
-          "file": "ReferralSection.jsx"
-        },
-        {
-          "label": "Free for 1 month",
-          "description": "",
-          "file": "ReferralSection.jsx"
-        },
-        {
-          "label": "Friend Gets",
-          "description": "",
-          "file": "ReferralSection.jsx"
-        },
-        {
-          "label": "Pro",
-          "description": "",
-          "file": "ReferralSection.jsx"
-        },
-        {
-          "label": "Your Code",
-          "description": "Copy includes a pre-written message and the download link",
-          "file": "ReferralSection.jsx"
+          "label": "Your code",
+          "description": "Copying includes a short message and the download link.",
+          "file": "AccountSection.jsx",
+          "section": "Account"
         },
         {
           "label": "Share",
           "description": "",
-          "file": "ReferralSection.jsx"
+          "file": "AccountSection.jsx",
+          "section": "Account"
         },
         {
-          "label": "WhatsApp",
+          "label": "Progress",
           "description": "",
-          "file": "ReferralSection.jsx"
+          "file": "AccountSection.jsx",
+          "section": "Account"
         },
         {
-          "label": "X / Twitter",
+          "label": "Model",
+          "description": "The local language model that writes Seven's replies. Runs on this computer through Ollama.",
+          "file": "BrainSection.jsx",
+          "section": "Brain"
+        },
+        {
+          "label": "Reply model",
           "description": "",
-          "file": "ReferralSection.jsx"
+          "file": "BrainSection.jsx",
+          "section": "Brain"
         },
         {
-          "label": "More",
+          "label": "Personality",
+          "description": "Tone only. These never change facts, actions or what Seven is allowed to do.",
+          "file": "BrainSection.jsx",
+          "section": "Brain"
+        },
+        {
+          "label": "Honesty",
+          "description": "How directly Seven tells you when you're wrong.",
+          "file": "BrainSection.jsx",
+          "section": "Brain"
+        },
+        {
+          "label": "Humor",
+          "description": "How dry and witty Seven sounds.",
+          "file": "BrainSection.jsx",
+          "section": "Brain"
+        },
+        {
+          "label": "Answers",
           "description": "",
-          "file": "ReferralSection.jsx"
+          "file": "BrainSection.jsx",
+          "section": "Brain"
         },
         {
-          "label": "Your Progress",
+          "label": "Temperature",
+          "description": "Lower is more precise and repeatable; higher is more varied. Factual answers are always kept low.",
+          "file": "BrainSection.jsx",
+          "section": "Brain"
+        },
+        {
+          "label": "Stream replies",
+          "description": "Show and speak the answer as it's written. Off waits for the full reply before speaking.",
+          "file": "BrainSection.jsx",
+          "section": "Brain"
+        },
+        {
+          "label": "Follow-up questions",
+          "description": "How often Seven asks you something back to understand you better.",
+          "file": "BrainSection.jsx",
+          "section": "Brain"
+        },
+        {
+          "label": "Model for hard questions",
+          "description": "Optional. Used only for questions that need deeper reasoning.",
+          "file": "BrainSection.jsx",
+          "section": "Brain"
+        },
+        {
+          "label": "Context",
           "description": "",
-          "file": "ReferralSection.jsx"
+          "file": "BrainSection.jsx",
+          "section": "Brain"
         },
         {
-          "label": "Completed referrals",
+          "label": "Conversation context",
+          "description": "How far back Seven reads the current chat when it replies.",
+          "file": "BrainSection.jsx",
+          "section": "Brain"
+        },
+        {
+          "label": "Reference memory",
+          "description": "How long \"open the second one\" or \"do it again\" still refers to your last action.",
+          "file": "BrainSection.jsx",
+          "section": "Brain"
+        },
+        {
+          "label": "File and app search",
           "description": "",
-          "file": "ReferralSection.jsx"
+          "file": "BrainSection.jsx",
+          "section": "Brain"
         },
         {
-          "label": "Friends in progress",
+          "label": "Results per search",
+          "description": "Fewer results are faster to read out.",
+          "file": "BrainSection.jsx",
+          "section": "Brain"
+        },
+        {
+          "label": "Open the best match",
+          "description": "Open the top result right away. Off lists results and waits for you to choose.",
+          "file": "BrainSection.jsx",
+          "section": "Brain"
+        },
+        {
+          "label": "Search inside documents",
+          "description": "Match words inside PDF and Word files, not only file names.",
+          "file": "BrainSection.jsx",
+          "section": "Brain"
+        },
+        {
+          "label": "Open unknown apps as websites",
+          "description": "If an app isn't installed, try its website instead.",
+          "file": "BrainSection.jsx",
+          "section": "Brain"
+        },
+        {
+          "label": "Online features",
+          "description": "Seven's language model always runs on this computer. These are the only things that use the internet.",
+          "file": "PrivacySection.jsx",
+          "section": "Privacy & data"
+        },
+        {
+          "label": "Web search",
+          "description": "Look up live information such as news and weather. Only the search text is sent to the search provider.",
+          "file": "PrivacySection.jsx",
+          "section": "Privacy & data"
+        },
+        {
+          "label": "Usage statistics",
+          "description": "Send a device id, your email if you added one, your country and how long Seven is active. Conversations and memories are never sent.",
+          "file": "PrivacySection.jsx",
+          "section": "Privacy & data"
+        },
+        {
+          "label": "Check for updates",
+          "description": "Ask GitHub once a day whether a new version of Seven is available.",
+          "file": "PrivacySection.jsx",
+          "section": "Privacy & data"
+        },
+        {
+          "label": "Your memory",
+          "description": "Facts and conversations are stored only on this computer.",
+          "file": "PrivacySection.jsx",
+          "section": "Privacy & data"
+        },
+        {
+          "label": "Stored",
           "description": "",
-          "file": "ReferralSection.jsx"
+          "file": "PrivacySection.jsx",
+          "section": "Privacy & data"
         },
         {
-          "label": "Voice Engine",
+          "label": "Size on disk",
           "description": "",
-          "file": "VoiceSection.jsx"
+          "file": "PrivacySection.jsx",
+          "section": "Privacy & data"
         },
         {
-          "label": "Offline",
+          "label": "Location",
           "description": "",
-          "file": "VoiceSection.jsx"
+          "file": "PrivacySection.jsx",
+          "section": "Privacy & data"
         },
         {
-          "label": "Loading voices...",
+          "label": "Backup",
+          "description": "A single JSON file with your facts, conversations, schedules, tasks, triggers and workspaces.",
+          "file": "PrivacySection.jsx",
+          "section": "Privacy & data"
+        },
+        {
+          "label": "Export",
+          "description": "Save a copy you can restore on this or another computer.",
+          "file": "PrivacySection.jsx",
+          "section": "Privacy & data"
+        },
+        {
+          "label": "Import",
+          "description": "Adds the backup to what you already have. Nothing is replaced.",
+          "file": "PrivacySection.jsx",
+          "section": "Privacy & data"
+        },
+        {
+          "label": "Clear all memory",
           "description": "",
-          "file": "VoiceSection.jsx"
+          "file": "PrivacySection.jsx",
+          "section": "Privacy & data"
         },
         {
-          "label": "Neural \u00b7 Human Quality",
+          "label": "Delete everything Seven remembers",
+          "description": "Every fact, conversation, goal and learned preference. This can't be undone, so download a backup first.",
+          "file": "PrivacySection.jsx",
+          "section": "Privacy & data"
+        },
+        {
+          "label": "This computer",
+          "description": "Live hardware readings. Seven uses the same values when you ask about your PC.",
+          "file": "SystemSection.jsx",
+          "section": "System"
+        },
+        {
+          "label": "Operating system",
           "description": "",
-          "file": "VoiceSection.jsx"
+          "file": "SystemSection.jsx",
+          "section": "System"
         },
         {
-          "label": "Not installed",
+          "label": "Processor",
           "description": "",
-          "file": "VoiceSection.jsx"
+          "file": "SystemSection.jsx",
+          "section": "System"
         },
         {
-          "label": "Windows Built-in",
+          "label": "Memory",
+          "description": "available",
+          "file": "SystemSection.jsx",
+          "section": "System"
+        },
+        {
+          "label": "Graphics",
           "description": "",
-          "file": "VoiceSection.jsx"
+          "file": "SystemSection.jsx",
+          "section": "System"
         },
         {
-          "label": "Speed",
+          "label": "Running for",
           "description": "",
-          "file": "VoiceSection.jsx"
+          "file": "SystemSection.jsx",
+          "section": "System"
         },
         {
-          "label": "Voice Control Commands",
-          "description": "Words that control Seven's listening behavior",
-          "file": "VoiceSection.jsx"
-        },
-        {
-          "label": "Upgrade",
+          "label": "Installed models",
           "description": "",
-          "file": "VoiceSection.jsx"
+          "file": "SystemSection.jsx",
+          "section": "System"
         },
         {
-          "label": "+ Add",
-          "description": "",
-          "file": "VoiceSection.jsx"
+          "label": "Floating panel",
+          "description": "The panel that appears next to the Seven orb.",
+          "file": "SystemSection.jsx",
+          "section": "System"
         },
         {
-          "label": "Speech Recognition",
-          "description": "",
-          "file": "VoiceSection.jsx"
+          "label": "Background",
+          "description": "How much of your desktop shows through. Applies immediately.",
+          "file": "SystemSection.jsx",
+          "section": "System"
         },
         {
-          "label": "Loading...",
+          "label": "Task panel shortcut",
+          "description": "Opens the floating task panel from anywhere in Windows.",
+          "file": "SystemSection.jsx",
+          "section": "System"
+        },
+        {
+          "label": "Shortcut",
           "description": "",
-          "file": "VoiceSection.jsx"
+          "file": "SystemSection.jsx",
+          "section": "System"
+        },
+        {
+          "label": "Repair installation",
+          "description": "",
+          "file": "SystemSection.jsx",
+          "section": "System"
+        },
+        {
+          "label": "Reinstall missing components",
+          "description": "Runs setup again to fix the AI engine, models or dependencies. Your memory, tasks, schedules and triggers are kept.",
+          "file": "SystemSection.jsx",
+          "section": "System"
+        },
+        {
+          "label": "Appearance",
+          "description": "Choose how Seven looks. Match Windows follows your Windows light or dark setting.",
+          "file": "SystemSection.jsx",
+          "section": "System"
+        },
+        {
+          "label": "Speaking voice",
+          "description": "Runs offline. Neural voices sound more natural; Windows voices use less memory.",
+          "file": "VoiceSection.jsx",
+          "section": "Voice"
+        },
+        {
+          "label": "Control words",
+          "description": "Phrases that change how Seven listens. Say them at any time.",
+          "file": "VoiceSection.jsx",
+          "section": "Voice"
+        },
+        {
+          "label": "Speech recognition",
+          "description": "How Seven turns your voice into text. Separate from the model that writes replies. Larger models make fewer mistakes but are slower without a graphics card.",
+          "file": "VoiceSection.jsx",
+          "section": "Voice"
+        },
+        {
+          "label": "Voice security",
+          "description": "",
+          "file": "VoiceSection.jsx",
+          "section": "Voice"
+        },
+        {
+          "label": "Push to talk",
+          "description": "Seven listens only while you hold Shift.",
+          "file": "VoiceSection.jsx",
+          "section": "Voice"
+        },
+        {
+          "label": "Require a wake word",
+          "description": "Seven ignores speech that doesn\\'t start with a wake word. \"Hey Seven, open Chrome\" runs \"open Chrome\".",
+          "file": "VoiceSection.jsx",
+          "section": "Voice"
+        },
+        {
+          "label": "Speaker verification",
+          "description": "Respond only to enrolled voices.",
+          "file": "VoiceSection.jsx",
+          "section": "Voice"
         }
       ],
-      "keywords": [],
+      "keywords": [
+        "settings",
+        "preferences",
+        "configure",
+        "options",
+        "voice",
+        "model",
+        "personality",
+        "privacy",
+        "hardware",
+        "backup"
+      ],
       "sections": [
         "AccountSection",
-        "AmbientSection",
-        "BackupSection",
         "BrainSection",
-        "DangerSection",
-        "HardwareCard",
-        "PanelHotkeySection",
-        "ReferralSection",
+        "PrivacySection",
+        "SystemSection",
         "VoiceSection"
       ]
     },
@@ -875,141 +847,46 @@
       "id": "plans",
       "route": "/plans",
       "component": "Plans",
-      "title": "Plans & Pricing",
-      "purpose": "Choose the plan that fits you",
+      "title": "Plans",
+      "purpose": "Compare Free, Pro and Ultimate, buy a plan, activate a license key or start a free trial",
       "controls": [
         {
-          "label": "Your Current Plan",
+          "label": "Compare plans",
+          "description": "Limits for schedules, triggers, knowledge files and more on each plan.",
+          "file": "Plans.jsx"
+        },
+        {
+          "label": "Activate a license key",
+          "description": "Paste the key from your purchase email.",
+          "file": "Plans.jsx"
+        },
+        {
+          "label": "Start trial",
+          "description": "Try Pro free for 14 days.",
+          "file": "Plans.jsx"
+        },
+        {
+          "label": "License",
           "description": "",
           "file": "Plans.jsx"
         },
         {
-          "label": "TRIAL",
-          "description": "",
-          "file": "Plans.jsx"
-        },
-        {
-          "label": "Lifetime access",
-          "description": "",
-          "file": "Plans.jsx"
-        },
-        {
-          "label": ") : daysUntilExpiry",
-          "description": "Expired \u2014 activate a new key to continue",
-          "file": "Plans.jsx"
-        },
-        {
-          "label": "Guide",
-          "description": "",
-          "file": "Plans.jsx"
-        },
-        {
-          "label": "Included in your plan",
-          "description": "",
-          "file": "Plans.jsx"
-        },
-        {
-          "label": "View Future Features",
-          "description": "",
-          "file": "Plans.jsx"
-        },
-        {
-          "label": "Current Plan",
-          "description": ") : tier === 'free' && plan.tier !== 'free' ? (",
-          "file": "Plans.jsx"
-        },
-        {
-          "label": "Upgrade to Ultimate \u2192",
-          "description": "",
-          "file": "Plans.jsx"
-        },
-        {
-          "label": "Close Details",
-          "description": "Coming in Phase 2: The Senses",
-          "file": "Plans.jsx"
-        },
-        {
-          "label": "special \"Founder\" badge",
-          "description": "",
-          "file": "Plans.jsx"
-        },
-        {
-          "label": "+ priority beta access",
-          "description": "",
-          "file": "Plans.jsx"
-        },
-        {
-          "label": "Close",
-          "description": "Already purchased? Enter your license key below",
-          "file": "Plans.jsx"
-        },
-        {
-          "label": "Activate",
-          "description": "",
-          "file": "Plans.jsx"
-        },
-        {
-          "label": "Purchase here",
-          "description": "Refer Friends - Get Premium Free",
-          "file": "Plans.jsx"
-        },
-        {
-          "label": "7 hours",
-          "description": "",
-          "file": "Plans.jsx"
-        },
-        {
-          "label": "Ultimate free for 1 month",
-          "description": "",
-          "file": "Plans.jsx"
-        },
-        {
-          "label": "and they get",
-          "description": "",
-          "file": "Plans.jsx"
-        },
-        {
-          "label": "Pro free for 1 month",
-          "description": "",
-          "file": "Plans.jsx"
-        },
-        {
-          "label": "Your Referral Code",
-          "description": "",
-          "file": "Plans.jsx"
-        },
-        {
-          "label": "Message that gets copied",
-          "description": "Hey! I use Seven AI, a private voice assistant that runs 100% on your PC. No cloud, no data leaving your device.",
-          "file": "Plans.jsx"
-        },
-        {
-          "label": "Friends Completed",
-          "description": "",
-          "file": "Plans.jsx"
-        },
-        {
-          "label": "\u2192 You got Ultimate",
-          "description": "",
-          "file": "Plans.jsx"
-        },
-        {
-          "label": "In Progress",
-          "description": "",
-          "file": "Plans.jsx"
-        },
-        {
-          "label": "Using Seven now",
-          "description": "",
-          "file": "Plans.jsx"
-        },
-        {
-          "label": "How It Works",
-          "description": "",
+          "label": "Try Pro free for 14 days",
+          "description": "No payment needed. Your plan returns to Free when the trial ends.",
           "file": "Plans.jsx"
         }
       ],
-      "keywords": [],
+      "keywords": [
+        "plans",
+        "pricing",
+        "price",
+        "upgrade",
+        "pro",
+        "ultimate",
+        "license",
+        "trial",
+        "subscription"
+      ],
       "sections": []
     },
     {
@@ -1096,7 +973,7 @@
         },
         {
           "label": "Next Steps",
-          "description": "1. Check your email inbox (and spam folder)",
+          "description": "2. Copy the license key we send you",
           "file": "Purchase.jsx"
         },
         {
@@ -1202,11 +1079,6 @@
           "file": "Feedback.jsx"
         },
         {
-          "label": "(optional)",
-          "description": "",
-          "file": "Feedback.jsx"
-        },
-        {
           "label": "Sending",
           "description": "",
           "file": "Feedback.jsx"
@@ -1259,11 +1131,6 @@
         },
         {
           "label": "Restart and install",
-          "description": "",
-          "file": "Updates.jsx"
-        },
-        {
-          "label": ") : downloading ? (",
           "description": "",
           "file": "Updates.jsx"
         },
