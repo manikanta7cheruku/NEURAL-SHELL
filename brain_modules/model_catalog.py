@@ -49,8 +49,14 @@ CATALOG: List[Dict[str, Any]] = [
 _BY_ID = {m["id"]: m for m in CATALOG}
 
 
+# A name without a tag means what Ollama pulls by default ("llama3.2" is the 3B model).
+_DEFAULT_TAG = {"llama3.2": "llama3.2:3b", "qwen2.5": "qwen2.5:7b", "llama3.1": "llama3.1:8b",
+                "qwen2.5-coder": "qwen2.5-coder:7b", "gemma2": "gemma2:9b"}
+
+
 def _base(model_id: str) -> str:
-    return (model_id or "").strip().lower().removesuffix(":latest")
+    name = (model_id or "").strip().lower().removesuffix(":latest")
+    return _DEFAULT_TAG.get(name, name)
 
 
 def get(model_id: str) -> Optional[Dict[str, Any]]:

@@ -30,7 +30,8 @@ class Catalog(unittest.TestCase):
     def test_context_window_per_model(self):
         self.assertEqual(model_catalog.context_window("llama3.2:1b"), 4096)
         self.assertEqual(model_catalog.context_window("qwen2.5:7b"), 8192)
-        self.assertEqual(model_catalog.context_window("llama3.2:1b:latest".rsplit(":", 1)[0]), 4096)
+        self.assertEqual(model_catalog.get("llama3.2")["id"], "llama3.2:3b")      # Ollama's default tag
+        self.assertEqual(model_catalog.get("qwen2.5:latest")["id"], "qwen2.5:7b")
         self.assertEqual(model_catalog.context_window("someone/custom-13b"), 8192)
 
 
@@ -49,7 +50,7 @@ class ExplainsItself(BrainTest):
         self.assertEqual(LLM_CALLS, [])
 
     def test_model_details_only_when_asked(self):
-        self.ask("Set your model to llama3.2")
+        self.ask("Set your model to llama3.2:1b")
         short = self.ask("What model are you using")
         self.assertIn("Llama 3.2 1B", short)
         self.assertNotIn("less suited", short)
