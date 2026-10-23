@@ -174,7 +174,8 @@ function launchOverlayDaemon() {
 // PYTHON PROCESS MANAGEMENT
 // ============================================================================
 function startPython() {
-  if (process.env.SEVEN_BACKEND_EXTERNALLY_STARTED === '1') {
+  // Trimmed: on Windows `SET X=1 && next` stores "1 " with a trailing space, which started a second backend.
+  if ((process.env.SEVEN_BACKEND_EXTERNALLY_STARTED || '').trim() === '1') {
     console.log('[PYTHON] Backend started externally, skipping internal spawn.');
     return;
   }
@@ -858,9 +859,10 @@ function purgeLingeringDaemonsAsync() {
   // panel_host.js / overlay_daemon.js are launched via SEVEN.exe (Electron),
   // not python.exe, so they were never relevant to this python-only filter
   // and have been dropped from the pattern.
+  // panel_server.py is left alone: the panel host owns it, and killing it on every Seven start left the
+  // Alt+Shift+T panel without data for a few seconds.
   const targets = [
-    'trigger_daemon.py', 'schedule_daemon.py',
-    'panel_server.py', 'offline_tab_listener.py'
+    'trigger_daemon.py', 'schedule_daemon.py', 'offline_tab_listener.py'
   ];
   const pattern = targets.join('|').replace(/\./g, '\\.');
 
@@ -893,7 +895,13 @@ if (!gotTheLock) {
 
     // CRITICAL: Free port 7777 synchronously (fast netstat, ~100ms).
     // This is the ONLY thing that must block — prevents EADDRINUSE.
-    freePort7777Sync();
+    // Not when the backend was started separately (npm run dev): it is already up in a couple of
+    // seconds now, and this used to kill it, leaving the app on "Backend Unreachable".
+    if ((process.env.SEVEN_BACKEND_EXTERNALLY_STARTED || '').trim() === '1') {
+      console.log('[STARTUP] Backend started externally; leaving port 7777 alone.');
+    } else {
+      freePort7777Sync();
+    }
 
     // Clean up lingering daemons in background (non-blocking).
     // Uses PowerShell Get-Process instead of WMI — 10x faster and

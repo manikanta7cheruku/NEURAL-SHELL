@@ -20,6 +20,16 @@ def load_all_modules(ctx):
     """
     print("[SYSTEM] Loading AI modules...")
 
+    # ── Native libraries before CUDA ───────────────────────────────────────
+    # Loading pyarrow (pulled in by sentence-transformers for memory) after Whisper has
+    # started CUDA crashed the process with an access violation (exit 0xC0000005). Load
+    # these native libraries here, on this thread, before ears starts the GPU. ~1 second.
+    for _native in ("pyarrow", "pyarrow.dataset", "pandas", "sklearn.utils"):
+        try:
+            __import__(_native)
+        except Exception:
+            pass
+
     # ── Ears (core only - no heavy models on startup) ──────────────────────
     try:
         from ears import listen

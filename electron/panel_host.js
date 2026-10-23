@@ -1,7 +1,8 @@
 /**
  * panel_host.js
  * Independent background Electron host for the Task Panel.
- * Floating rounded glass card, top-right, margined — not docked full-height.
+ * Owns the Alt+Shift+T hotkey and a warm glass panel window, and keeps
+ * running when Seven's main window is closed.
  */
 
 const { app, BrowserWindow, globalShortcut, ipcMain, screen, Tray, Menu, nativeImage } = require('electron');
@@ -128,112 +129,123 @@ function stopPanelServer() {
   panelServer = null;
 }
 
-// ── Floating rounded card window (top-right, margined) ──────────────────────
+// ── Panel window ─────────────────────────────────────────────────────────────
+//
+// One window is created at start-up and kept warm: opening and closing only
+// show and hide it, so the hotkey responds instantly every time. It used to be
+// reloaded on every open and shown when the reload finished, which made it
+// slow and, when a reload stalled, never appear at all.
+//
+// On Windows 11 the window uses the system acrylic material (real blur of
+// whatever is behind it, rounded by the OS). Elsewhere it falls back to a
+// transparent window with a CSS glass card.
 
-function createPanelWindow() {
-  // Window is hidden, not destroyed, between opens — but reloaded fresh
-  // from disk every time it's reopened. This fixes two separate bugs we
-  // hit with the alternatives: (a) hide-without-reload silently served a
-  // stale in-memory page forever after the first open per session, and
-  // (b) destroy-and-recreate-every-time hits a well-documented Electron/
-  // Windows bug where a freshly created transparent window briefly paints
-  // solid black before the DWM alpha channel finishes initializing —
-  // consistent with the black borders you're seeing, and would also
-  // explain screenshot tools failing to capture it correctly.
-  if (panelWindow && !panelWindow.isDestroyed()) {
-    panelWindow.webContents.once('did-finish-load', () => {
-      panelWindow.show();
-      panelWindow.focus();
-    });
-    panelWindow.webContents.reloadIgnoringCache();
-    return;
-  }
+const PANEL_W = 304;
+const NATIVE_GLASS = process.platform === 'win32' && (() => {
+  try { return parseInt(require('os').release().split('.')[2], 10) >= 22621; } catch { return false; }
+})();
 
-  const display = screen.getPrimaryDisplay();
-  const workArea = display.workArea;
-  const panelW = 340;
-  const panelH = Math.min(720, workArea.height - 32);
+let _hideTimer = null;
+let _lastToggle = 0;
+let _hadFocus = false;   // auto-close on click-away only after the panel really had focus
 
+function panelBounds() {
+  const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
+  const h = Math.min(560, area.height - 24);   // compact: the list scrolls inside
+  return NATIVE_GLASS
+    ? { width: PANEL_W, height: h, x: area.x + area.width - PANEL_W - 12, y: area.y + 12 }
+    : { width: PANEL_W + 32, height: h + 20, x: area.x + area.width - PANEL_W - 28, y: area.y + 2 };
+}
+
+function ensurePanelWindow() {
+  if (panelWindow && !panelWindow.isDestroyed()) return panelWindow;
   panelWindow = new BrowserWindow({
-    width: panelW,
-    height: panelH,
-    x: workArea.x + workArea.width - panelW - 16,
-    y: workArea.y + 16,
+    ...panelBounds(),
     frame: false,
-    transparent: true,
-    backgroundColor: '#00000000',
-    // backgroundMaterial/vibrancy removed: confirmed incompatible with
-    // transparent:true on Windows (electron/electron#48440) — silently
-    // did nothing. True desktop-blur + rounded floating corners can't
-    // currently combine in Electron on Windows; going CSS-only instead.
+    show: false,
     alwaysOnTop: true,
     skipTaskbar: true,
     resizable: false,
     movable: false,
     minimizable: false,
     maximizable: false,
-    hasShadow: false,
+    fullscreenable: false,
     focusable: true,
-    show: false,
+    ...(NATIVE_GLASS
+      ? { backgroundMaterial: 'acrylic', backgroundColor: '#00000000', roundedCorners: true, hasShadow: true }
+      : { transparent: true, backgroundColor: '#00000000', hasShadow: false }),
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
       preload: path.join(ELECTRON_DIR, 'panel_preload.js'),
       backgroundThrottling: false,
+      additionalArguments: [
+        `--panel-hotkey=${currentHotkey || DEFAULT_HOTKEY}`,
+        ...(NATIVE_GLASS ? ['--native-blur'] : []),
+      ],
     },
   });
-
   panelWindow.setAlwaysOnTop(true, 'floating-toplevel');
   panelWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   panelWindow.loadFile(PANEL_HTML);
-  if (process.env.SEVEN_PANEL_DEBUG === '1') {
-    panelWindow.webContents.openDevTools({ mode: 'detach' });
-  }
+  if (process.env.SEVEN_PANEL_DEBUG === '1') panelWindow.webContents.openDevTools({ mode: 'detach' });
 
-  panelWindow.once('ready-to-show', () => {
-    // Small delay before the very first show: a freshly created
-    // transparent window on Windows can paint solid black for the first
-    // frame or two before compositing settles. This only happens once
-    // per Panel Host process lifetime now, since reopens reuse this
-    // same warmed-up window via reload() above.
-    setTimeout(() => {
-      if (panelWindow && !panelWindow.isDestroyed()) {
-        panelWindow.show();
-        panelWindow.focus();
-      }
-    }, 40);
-  });
-
+  // Windows often refuses focus to a background app. The panel used to treat "never focused" as
+  // "clicked away" and hid itself 150 ms after opening: the hotkey seemed to work only sometimes.
+  panelWindow.on('focus', () => { _hadFocus = true; });
   panelWindow.on('blur', () => {
     setTimeout(() => {
-      if (_pinned) return;
-      if (panelWindow && !panelWindow.isDestroyed() && !panelWindow.isFocused()) closePanelWindow();
-    }, 200);
+      if (_pinned || !_hadFocus || !panelWindow || panelWindow.isDestroyed()) return;
+      if (panelWindow.isVisible() && !panelWindow.isFocused()) closePanelWindow();
+    }, 150);
   });
-
-  panelWindow.on('closed', () => {
+  panelWindow.on('closed', () => { panelWindow = null; });
+  // A crashed renderer would leave the hotkey showing a blank window: start over.
+  panelWindow.webContents.on('render-process-gone', () => {
+    try { panelWindow.destroy(); } catch {}
     panelWindow = null;
+    setTimeout(ensurePanelWindow, 500);
   });
+  return panelWindow;
 }
 
-function closePanelWindow() {
+function runInPanel(code) {
   if (!panelWindow || panelWindow.isDestroyed()) return;
+  panelWindow.webContents.executeJavaScript(code).catch(() => {});
+}
 
-  panelWindow.webContents.executeJavaScript(
-    `(function(){var p=document.getElementById('panel');if(p){p.classList.remove('open');p.classList.add('closing');}})()`
-  ).catch(() => {});
+function createPanelWindow() {
+  const win = ensurePanelWindow();
+  clearTimeout(_hideTimer);
+  _hideTimer = null;
+  win.setBounds(panelBounds());            // follow the screen the cursor is on
+  _hadFocus = false;
+  win.show();
+  win.moveTop();
+  win.focus();
+  runInPanel('window.panelShow && window.panelShow()');
+}
 
-  setTimeout(() => {
+function closePanelWindow(immediate = false) {
+  if (!panelWindow || panelWindow.isDestroyed() || !panelWindow.isVisible()) return;
+  runInPanel('window.panelHide && window.panelHide()');
+  clearTimeout(_hideTimer);
+  _hideTimer = setTimeout(() => {
+    _hideTimer = null;
     if (panelWindow && !panelWindow.isDestroyed()) panelWindow.hide();
-  }, 260);
+  }, immediate ? 0 : 170);
 }
 
 function togglePanel() {
-  if (panelWindow && !panelWindow.isDestroyed() && panelWindow.isVisible()) closePanelWindow();
+  const now = Date.now();
+  if (now - _lastToggle < 220) return;     // a held or bouncing hotkey must not open and close at once
+  _lastToggle = now;
+  const open = panelWindow && !panelWindow.isDestroyed() && panelWindow.isVisible() && !_hideTimer;
+  if (open) closePanelWindow();
   else createPanelWindow();
 }
 
-ipcMain.on('panel-close', () => closePanelWindow());
+ipcMain.on('panel-close', () => closePanelWindow(true));   // the page already played its exit animation
 ipcMain.on('panel-set-pinned', (_e, pinned) => { _pinned = !!pinned; });
 ipcMain.on('panel-open-seven-tasks', () => {
   try {
@@ -279,15 +291,12 @@ function startCommandServer() {
     res.writeHead(404); res.end(JSON.stringify({ ok: false }));
   });
   commandServer.listen(COMMAND_PORT, '127.0.0.1');
-  commandServer.on('error', (e) => {
-    if (e.code === 'EADDRINUSE') {
-      try {
-        const { execSync } = require('node:child_process');
-        const pids = execSync(`powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort ${COMMAND_PORT} -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess"`).toString().trim().split(/\r?\n/).filter(p=>p.trim());
-        for (const pid of pids) if (parseInt(pid) && parseInt(pid) !== process.pid) execSync(`taskkill /pid ${pid} /f`, { windowsHide: true });
-      } catch {}
-      setTimeout(startCommandServer, 1000);
-    }
+  commandServer.on('error', async (e) => {
+    if (e.code !== 'EADDRINUSE') return;
+    // Another healthy host owns the panel: leave it alone and exit. This used to force-kill that host,
+    // so every Seven start could end with no panel host at all and a dead hotkey.
+    if (await isAnotherHostAlive()) { app.isQuitting = true; app.quit(); return; }
+    setTimeout(startCommandServer, 1500);
   });
 }
 
@@ -314,14 +323,34 @@ function createTray() {
   } catch (e) {}
 }
 
-app.whenReady().then(async () => {
-  if (await isAnotherHostAlive()) { app.quit(); }
-  registerHotkey(readPanelHotkey());
-  watchConfig();
-  createTray();
-  startPanelServer();
-  startCommandServer();
-});
+// Only one host may own the hotkey.
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.whenReady().then(async () => {
+    if (await isAnotherHostAlive()) { app.isQuitting = true; app.quit(); return; }
+    registerHotkey(readPanelHotkey());
+    watchConfig();
+    createTray();
+    startPanelServer();
+    startCommandServer();
+    ensurePanelWindow();                   // warm, so the first open is instant
+    enableStartAtLogin();
+  });
+}
+
+// The panel must work while Seven is closed and right after Windows starts, so the installed host signs
+// itself in at login. Development runs (electron from node_modules) are left alone.
+function enableStartAtLogin() {
+  try {
+    if (!app.isPackaged && !/SEVEN\.exe$/i.test(process.execPath)) return;
+    app.setLoginItemSettings({
+      openAtLogin: true,
+      path: process.execPath,
+      args: [`--user-data-dir=${path.join(SEVEN_DATA, 'panel_user_data')}`, '--panel-host'],
+    });
+  } catch {}
+}
 
 app.on('before-quit', () => {
   app.isQuitting = true;

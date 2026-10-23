@@ -64,7 +64,20 @@ def os_name() -> str:
     return ", ".join(parts[:1]) + (f" ({', '.join(parts[1:])})" if len(parts) > 1 else "")
 
 
+_gpu_cache: Dict[str, Any] = {"at": 0.0, "value": None}
+_snap_cache: Dict[str, Any] = {"at": 0.0, "value": None}
+
+
 def _nvidia() -> Optional[Dict[str, Any]]:
+    # Starting nvidia-smi costs real time; the dashboard and home screen ask every few seconds.
+    if time.time() - _gpu_cache["at"] < 10:
+        return _gpu_cache["value"]
+    _gpu_cache["value"] = _nvidia_read()
+    _gpu_cache["at"] = time.time()
+    return _gpu_cache["value"]
+
+
+def _nvidia_read() -> Optional[Dict[str, Any]]:
     try:
         out = subprocess.check_output(
             ["nvidia-smi", "--query-gpu=name,memory.total,memory.used,utilization.gpu,temperature.gpu",
@@ -112,14 +125,23 @@ def _static_info() -> Dict[str, Any]:
 
 
 def snapshot() -> Dict[str, Any]:
-    """Everything, with live usage. Never raises."""
+    """Everything, with live usage. Never raises. Readings are reused for 3 seconds."""
+    if _snap_cache["value"] is not None and time.time() - _snap_cache["at"] < 3:
+        return dict(_snap_cache["value"])
+    info = _snapshot()
+    _snap_cache.update(at=time.time(), value=info)
+    return dict(info)
+
+
+def _snapshot() -> Dict[str, Any]:
     info = _static_info()
     try:
         import psutil
         vm = psutil.virtual_memory()
         info["ram"] = {"total_gb": round(vm.total / 1024 ** 3, 1), "used_gb": round(vm.used / 1024 ** 3, 1),
                        "free_gb": round(vm.available / 1024 ** 3, 1), "percent": int(vm.percent)}
-        info["cpu_load"] = int(psutil.cpu_percent(interval=0.3))
+        # Non-blocking: load since the previous reading. A blocking 0.3 s sample stalled every request.
+        info["cpu_load"] = int(psutil.cpu_percent(interval=None))
         info["uptime_s"] = int(time.time() - psutil.boot_time())
         disks = []
         for part in psutil.disk_partitions(all=False):
@@ -296,3 +318,10 @@ def prompt_context(reader=None) -> str:
     """One line of machine facts for the model, used when a question depends on the hardware."""
     s = (reader or snapshot)()
     return "User's computer: " + _specs(s)[len("You're on "):]
+
+
+try:                                   # prime the non-blocking CPU reading
+    import psutil as _ps
+    _ps.cpu_percent(interval=None)
+except Exception:
+    pass

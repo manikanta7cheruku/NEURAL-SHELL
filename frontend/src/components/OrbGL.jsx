@@ -223,10 +223,11 @@ export default function OrbGL({ state = 'idle', size = 260 }) {
       speak: u('uSpeak'), hover: u('uHover'), spin: u('uSpin'), mouse: u('uMouse'), a: u('uColA'), b: u('uColB'),
     };
 
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    // The orb is soft-edged, so a reduced internal resolution looks the same and costs far less GPU time.
+    const dpr = Math.min(window.devicePixelRatio || 1, 1.5) * 0.8;
     const W = Math.round(size * 1.6);
-    el.width = W * dpr;
-    el.height = W * dpr;
+    el.width = Math.round(W * dpr);
+    el.height = Math.round(W * dpr);
     el.style.width = `${W}px`;
     el.style.height = `${W}px`;
     gl.viewport(0, 0, el.width, el.height);
@@ -252,6 +253,9 @@ export default function OrbGL({ state = 'idle', size = 260 }) {
 
     let raf = 0, last = performance.now(), t = Math.random() * 100;
     const frame = now => {
+      // 30 fps while calm and untouched, 60 fps while Seven is active or the pointer is near; nothing while hidden.
+      const busy = target.current !== STATES.idle || pointer.near > 0.05 || cur.think > 0.02 || cur.speak > 0.02;
+      if (document.hidden || (!busy && now - last < 32)) { raf = requestAnimationFrame(frame); return; }
       const dt = Math.min(0.05, (now - last) / 1000);
       last = now;
       t += dt * (reduce ? 0.3 : 1);

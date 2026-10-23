@@ -22,8 +22,8 @@
 <div id="panel">
   <div class="panel-header">
     <div class="header-left">
-      <div class="eyebrow"><span class="status-pulse" id="brand-dot" aria-hidden="true"></span><span>SEVEN COMMAND CENTER</span></div>
-      <div class="header-brand"><span class="header-title">Your focus, in one place.</span><span class="header-sub" id="header-sub">connecting</span></div>
+      <div class="eyebrow"><span class="wordmark">SEVEN</span><span class="status-pulse" id="brand-dot" aria-hidden="true"></span><span class="header-sub" id="header-sub">connecting</span></div>
+      <div class="header-brand"><span class="header-title">Tasks, triggers and schedules</span></div>
     </div>
     <div class="header-actions">
       <button class="icon-btn" onclick="toggleSearch()" title="Search (Ctrl+F)">
@@ -65,11 +65,11 @@
   </div>
 
   <div class="search-wrap" id="search-wrap">
-    <input class="search-input" id="search-input" placeholder="Search..." autocomplete="off">
+    <input class="search-input" id="search-input" placeholder="Search" autocomplete="off">
   </div>
 
   <div class="quick-add" id="quick-add">
-    <input class="quick-input" id="quick-input" placeholder="Add a task... (Enter to save)" autocomplete="off" spellcheck="false">
+    <input class="quick-input" id="quick-input" placeholder="Add a task and press Enter" autocomplete="off" spellcheck="false">
   </div>
 
   <div class="tab-content active" id="tab-tasks">
@@ -120,8 +120,8 @@
 
   <div class="modal-overlay" id="closeall-modal" style="display:none">
     <div class="modal-card">
-      <h3 class="modal-title">Close Workspace?</h3>
-      <p class="modal-desc" id="closeall-desc">This will close all open applications and save your session. You can restore them later.</p>
+      <h3 class="modal-title">Close everything?</h3>
+      <p class="modal-desc" id="closeall-desc">Seven saves your open apps as a workspace first, so you can bring them all back.</p>
       <div class="modal-actions">
         <button class="modal-btn secondary" onclick="dismissCloseAll()">Cancel</button>
         <button class="modal-btn primary" onclick="executeCloseAll()">Close All</button>

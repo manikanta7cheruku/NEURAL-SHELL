@@ -10,6 +10,30 @@ window._allTasks = [];
 window._allSchedules = [];
 window._allTriggers = [];
 let _filteredTasks = [];
+let _visible = false;
+
+window.panelShow = function panelShow() {
+  const panel = document.getElementById('panel');
+  _visible = true;
+  if (panel) {
+    panel.classList.remove('closing', 'open');
+    void panel.offsetWidth;                    // restart the entrance animation
+    panel.classList.add('open');
+  }
+  loadAll();
+  const quick = document.getElementById('quick-input');
+  if (quick && _currentTab === 'tasks') setTimeout(() => quick.focus({ preventScroll: true }), 60);
+};
+
+window.panelHide = function panelHide() {
+  _visible = false;
+  if (typeof stopSchedulesTimer === 'function') stopSchedulesTimer();
+  const panel = document.getElementById('panel');
+  if (panel) {
+    panel.classList.remove('open');
+    panel.classList.add('closing');
+  }
+};
 
 /** tags may be array, JSON string, or comma-separated string */
 function normalizeTags(tags) {
@@ -31,7 +55,6 @@ function taskHasPin(t) {
 }
 
 window.addEventListener('DOMContentLoaded', () => {
-  console.log('[PANEL BUILD] 2026-09-16-offline-fallback — if this exact line is not in your console after a full process restart, you are testing a stale cached build, not this one.');
   // FAST-BOOT: Load cached data immediately so UI is instantly populated
   try {
     const cachedTasks = localStorage.getItem('seven_cached_tasks');
@@ -41,14 +64,13 @@ window.addEventListener('DOMContentLoaded', () => {
     }
   } catch(e) {}
 
-  requestAnimationFrame(() => {
-    setTimeout(() => {
-      const panel = document.getElementById('panel');
-      if (panel) panel.classList.add('open');
-    }, 20);
-  });
+  // Windows 11 draws real acrylic glass behind the page; the card then fills the window.
+  if (window.electronAPI?.nativeBlur) document.body.classList.add('native-glass');
 
-  loadAll();
+  // The host keeps this window warm and calls panelShow/panelHide. Opened any other way (a browser,
+  // the old host), show straight away.
+  if (!window.electronAPI) window.panelShow();
+  else loadAll();
 
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
@@ -79,11 +101,11 @@ window.addEventListener('DOMContentLoaded', () => {
       if (e.key === 'Enter' && quickInput.value.trim()) {
         const text = quickInput.value.trim();
         quickInput.value = '';
-        quickInput.placeholder = 'Adding task...';
+        quickInput.placeholder = 'Adding';
         const ok = await createTask(text);
-        quickInput.placeholder = ok ? 'Added. Type another...' : 'Failed. Try again.';
+        quickInput.placeholder = ok ? 'Added. Type another' : 'That did not save. Try again';
         setTimeout(() => {
-          quickInput.placeholder = 'Add a task... (Enter to save)';
+          quickInput.placeholder = 'Add a task and press Enter';
         }, 1500);
         if (ok) loadAll();
       }
@@ -97,8 +119,8 @@ window.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // Periodic poll for sync
-  setInterval(loadAll, 10000);
+  // Keep in sync while visible only; a hidden panel costs nothing.
+  setInterval(() => { if (_visible) loadAll(); }, 10000);
 
   // Set hint for hotkey
   const hint = document.getElementById('footer-hk');
@@ -305,18 +327,14 @@ function closePanel() {
     stopSchedulesTimer();
   }
 
-  const panel = document.getElementById('panel');
-  if (panel) {
-    panel.classList.remove('open');
-    panel.classList.add('closing');
-  }
+  window.panelHide();
   setTimeout(() => {
     if (window.electronAPI?.closePanel) {
       window.electronAPI.closePanel();
     } else {
       window.close();
     }
-  }, 320);
+  }, 170);
 }
 
 function openSevenTasks() {
