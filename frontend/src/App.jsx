@@ -5,6 +5,7 @@ import ScheduleAlert  from './components/ScheduleAlert';
 import TitleBar       from './components/TitleBar';
 import UpdateBanner   from './components/UpdateBanner';
 import AdminMessageBanner from './components/AdminMessageBanner';
+import { Toaster }    from './components/ui';
 import Landing        from './pages/Landing';
 import Home           from './pages/Home';
 import Console        from './pages/Console';
@@ -86,6 +87,7 @@ function MainApp({ isFirstLaunch }) {
           </Routes>
         </main>
       </div>
+      <Toaster />
     </div>
   );
 }
