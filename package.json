@@ -22,7 +22,7 @@
         "dist": "npm run build:frontend && electron-builder --config frontend/electron-builder.yml",
         "dist:full": "node scripts/build.js",
         "prepare-python": "node scripts/prepare-python.js",
-    "backend:dev": "set SEVEN_BACKEND_EXTERNALLY_STARTED=1&& python main.py"
+    "backend:dev": "set SEVEN_BACKEND_EXTERNALLY_STARTED=1&& set SEVEN_ELECTRON_MODE=1&& python main.py"
     },
     "devDependencies": {
         "concurrently": "^9.1.0",

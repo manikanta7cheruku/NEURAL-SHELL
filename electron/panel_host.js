@@ -140,7 +140,7 @@ function stopPanelServer() {
 // whatever is behind it, rounded by the OS). Elsewhere it falls back to a
 // transparent window with a CSS glass card.
 
-const PANEL_W = 344;
+const PANEL_W = 304;
 const NATIVE_GLASS = process.platform === 'win32' && (() => {
   try { return parseInt(require('os').release().split('.')[2], 10) >= 22621; } catch { return false; }
 })();
