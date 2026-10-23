@@ -134,25 +134,11 @@ def recommend_model(hardware=None):
     has_gpu = hardware["gpu"]["available"]
     ram = hardware["ram_gb"]
     
-    tiers = config.KEY.get("brain", {}).get("model_tiers", {
-        "high": "llama3",
-        "medium": "phi3:mini",
-        "low": "qwen2:1.5b",
-        "minimum": "tinyllama"
-    })
-    
-    if has_gpu and vram >= 8:
-        return tiers["high"], "high", f"Graphics card with {vram} GB of VRAM, so a full-size model runs well"
-    elif has_gpu and vram >= 4:
-        return tiers["medium"], "medium", f"Graphics card with {vram} GB of VRAM, so a mid-size model is the best balance"
-    elif has_gpu and vram >= 2:
-        return tiers["low"], "low", f"Graphics card with {vram} GB of VRAM, so a small model keeps replies fast"
-    elif ram >= 16:
-        return tiers["low"], "low", f"No graphics card, {ram} GB of RAM, so the model runs on the processor"
-    elif ram >= 8:
-        return tiers["minimum"], "minimum", "Limited hardware, so the smallest model keeps Seven responsive"
-    else:
-        return tiers["minimum"], "minimum", "Low-end system, so the smallest model keeps Seven responsive"
+    from brain_modules import model_catalog
+    rec = model_catalog.recommend(vram, ram, has_gpu)
+    tier = {"qwen2.5:7b": "high", "llama3.2:3b": "medium"}.get(rec["id"], "minimum")
+    reason = rec["reason"][0].upper() + rec["reason"][1:]
+    return rec["id"], tier, reason
 
 
 # =========================================================================
