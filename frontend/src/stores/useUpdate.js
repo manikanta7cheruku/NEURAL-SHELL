@@ -10,7 +10,7 @@ const useUpdate = create((set, get) => ({
   downloadPath:     null,
   error:            null,
   info:             null,          // full update object from server
-  currentVersion:   '1.2.7',
+  currentVersion:   '',
   dismissed:        false,         // user dismissed the banner this session
 
   // ── Poll status from Python backend ──
@@ -26,7 +26,8 @@ const useUpdate = create((set, get) => ({
         downloadPath:     d.download_path     ?? null,
         error:            d.error             ?? null,
         info:             d.info              ?? null,
-        currentVersion:   d.current_version   ?? '1.1.0',
+        currentVersion:   d.current_version   ?? get().currentVersion,
+        lastChecked:      d.last_check || d.last_checked || get().lastChecked,
       });
     } catch {
       // Backend offline — ignore silently

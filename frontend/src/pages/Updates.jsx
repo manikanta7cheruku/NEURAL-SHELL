@@ -1,314 +1,118 @@
-import { useEffect, useRef, useState } from 'react';
+/**
+ * Updates: one status card (up to date, checking, available, downloading,
+ * ready to install), what's new, and whether Seven checks automatically.
+ */
+/* SEVEN_DOC {"purpose": "Check for a new version of Seven, see what changed, download it and install it",
+              "keywords": ["update", "upgrade", "new version", "changelog", "install", "release notes"]} */
+import { useEffect } from 'react';
+import { RefreshCw, Download, Check, ArrowRight, ShieldAlert, Loader2, RotateCw } from 'lucide-react';
 import useUpdate from '../stores/useUpdate';
-import PageHeader from '../components/PageHeader';
+import useConfig from '../stores/useConfig';
+import { PageShell, Section, Row, Button, Toggle, Badge } from '../components/ui';
+import { cx } from '../lib/cx';
+import { relativeTime } from '../lib/format';
+import { saveConfig } from './settings/save';
 
-function VersionBadge({ label, version, accent }) {
-  return (
-    <div className={`px-4 py-3 rounded-xl border ${
-      accent ? 'bg-s-accent/5 border-s-accent/20' : 'bg-s-card border-s-border'
-    }`}>
-      <p className="text-[9px] text-s-text-4 tracking-[0.2em] mb-1">{label}</p>
-      <p className={`text-sm font-mono font-semibold ${
-        accent ? 'text-s-accent' : 'text-s-text-2'
-      }`}>
-        {version}
-      </p>
-    </div>
-  );
-}
-
-function HoverButton({ onClick, disabled, children, className = '' }) {
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      className={`group relative py-3.5 rounded-xl border border-s-border bg-s-card text-[13px] font-medium tracking-wide text-s-text-2 hover:text-s-text transition-all duration-500 flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed ${className}`}
-    >
-      {/* The Wrapper Border Effect */}
-      <span className="absolute inset-[-1px] rounded-xl border border-s-text-3/50 scale-x-0 transition-transform duration-500 ease-out group-hover:scale-x-100 pointer-events-none" />
-
-      {/* Button content needs to stay on top of the absolute border */}
-      <span className="relative z-10 flex items-center justify-center gap-2">
-        {children}
-      </span>
-    </button>
-  );
+function StatusIcon({ state }) {
+  const base = 'flex h-10 w-10 shrink-0 items-center justify-center rounded-full';
+  if (state === 'checking') return <span className={cx(base, 'bg-s-card-h text-s-text-2')}><Loader2 size={18} className="animate-spin" /></span>;
+  if (state === 'current') return <span className={cx(base, 'bg-s-green/12 text-s-green')}><Check size={18} /></span>;
+  if (state === 'ready') return <span className={cx(base, 'bg-s-accent/12 text-s-accent-h')}><RotateCw size={17} /></span>;
+  return <span className={cx(base, 'bg-s-accent/12 text-s-accent-h')}><Download size={17} /></span>;
 }
 
 export default function Updates() {
-  const {
-    updateAvailable, checking, downloading, downloadProgress,
-    downloadPath, error, info, currentVersion,
-    fetchStatus, checkNow, startDownload, installUpdate,
-  } = useUpdate();
+  const { updateAvailable, checking, downloading, downloadProgress, downloadPath, error, info, currentVersion, lastChecked,
+          fetchStatus, checkNow, startDownload, installUpdate } = useUpdate();
+  const { config } = useConfig();
+  const ready = !!downloadPath && downloadProgress === 100;
+  const state = ready ? 'ready' : downloading ? 'downloading' : updateAvailable ? 'available' : checking ? 'checking' : 'current';
 
-  const pollRef = useRef(null);
-  const downloadReady = !!downloadPath && downloadProgress === 100;
-
+  useEffect(() => { fetchStatus(); }, [fetchStatus]);
   useEffect(() => {
-    fetchStatus();
-    pollRef.current = setInterval(() => {
-      if (downloading || checking) fetchStatus();
-    }, 1000);
-    return () => clearInterval(pollRef.current);
-  }, [downloading, checking]);
+    if (!downloading && !checking) return undefined;
+    const id = setInterval(fetchStatus, downloading ? 500 : 1000);
+    return () => clearInterval(id);
+  }, [downloading, checking, fetchStatus]);
 
-  useEffect(() => {
-    if (downloading) {
-      const id = setInterval(fetchStatus, 500);
-      return () => clearInterval(id);
-    }
-  }, [downloading]);
+  const title = {
+    current: "You're up to date",
+    checking: 'Checking for updates',
+    available: `Seven ${info?.version} is available`,
+    downloading: `Downloading Seven ${info?.version}`,
+    ready: 'Ready to install',
+  }[state];
+  const subtitle = {
+    current: `Seven ${currentVersion || ''} is the latest version.${lastChecked ? ` Checked ${relativeTime(lastChecked)}.` : ''}`,
+    checking: 'This takes a few seconds.',
+    available: `You have ${currentVersion}.${info?.size_mb ? ` Download size ${info.size_mb} MB.` : ''}`,
+    downloading: 'Seven keeps working while this downloads.',
+    ready: `Seven closes, installs ${info?.version} and reopens. It takes about 30 seconds.`,
+  }[state];
 
-  // ── Up to date ──
-  if (!updateAvailable && !checking) {
-    return (
-      <div className="h-full flex flex-col">
-        <PageHeader
-          title="Updates"
-          sub="Keep Seven current"
-          right={
-            <span className="text-[10px] text-s-text-4 font-mono tracking-widest">
-              v{currentVersion}
-            </span>
-          }
-        />
-        <div className="flex-1 flex items-center justify-center p-8">
-          <div className="max-w-xs w-full space-y-8 text-center">
-
-            {/* Check icon */}
-            <div className="space-y-4">
-              <div className="w-14 h-14 rounded-2xl bg-s-card border border-s-border flex items-center justify-center mx-auto">
-                <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
-                  <path d="M5 11L9 15L17 7" stroke="#45454d" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                </svg>
-              </div>
-              <div className="space-y-1.5">
-                <h3 className="text-[15px] font-semibold text-s-text tracking-tight">
-                  You are up to date
-                </h3>
-                <p className="text-[12px] text-s-text-4 font-light">
-                  Seven {currentVersion || '1.2.7'} is the latest version
-                </p>
-              </div>
-            </div>
-
-            {/* Error */}
-            {error && (
-              <div className="px-4 py-3 rounded-xl bg-s-red/5 border border-s-red/15 text-left">
-                <p className="text-[11px] text-s-red">{error}</p>
-              </div>
-            )}
-
-            {/* Check button */}
-            <div className="w-full flex justify-center">
-              <HoverButton
-                onClick={checkNow}
-                disabled={checking}
-                className="w-full max-w-xs"
-              >
-                {checking ? (
-                  <>
-                    <div className="w-3 h-3 rounded-full border border-s-text-3/30 border-t-s-text-3 animate-spin" />
-                    Checking...
-                  </>
-                ) : (
-                  <>
-                    <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
-                      <path d="M11 6.5A4.5 4.5 0 112 6.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
-                      <path d="M11 3.5V6.5H8" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
-                    </svg>
-                    Check for updates
-                  </>
-                )}
-              </HoverButton>
-            </div>
-
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // ── Checking ──
-  if (checking && !updateAvailable) {
-    return (
-      <div className="h-full flex flex-col">
-        <PageHeader title="Updates" sub="Keep Seven current" />
-        <div className="flex-1 flex items-center justify-center">
-          <div className="flex items-center gap-3">
-            <div className="w-3 h-3 rounded-full border border-s-accent/30 border-t-s-accent animate-spin" />
-            <span className="text-[13px] text-s-text-3 font-light">Checking for updates...</span>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // ── Update available ──
   return (
-    <div className="h-full flex flex-col">
-      <PageHeader
-        title="Updates"
-        sub="Keep Seven current"
-        right={
-          <span className="text-[10px] text-s-text-4 font-mono tracking-widest">
-            v{currentVersion}
-          </span>
-        }
-      />
-
-      <div className="flex-1 overflow-y-auto">
-        <div className="p-5 space-y-4 max-w-lg mx-auto">
-
-          {/* Critical notice */}
-          {info?.is_critical && (
-            <div className="px-4 py-3 rounded-xl bg-s-red/5 border border-s-red/20">
-              <p className="text-[11px] font-medium text-s-red mb-0.5">
-                Security Update Required
-              </p>
-              <p className="text-[10px] text-s-text-4 font-light">
-                This update contains critical security fixes. Install as soon as possible.
-              </p>
+    <PageShell title="Updates" description={currentVersion ? `Seven ${currentVersion} is installed` : 'Keep Seven current'}>
+      <div className="mx-auto max-w-[720px] space-y-4 px-6 py-5">
+        {info?.is_critical && updateAvailable && (
+          <div className="flex items-start gap-3 rounded-lg border border-s-red/30 bg-s-red/5 px-4 py-3">
+            <ShieldAlert size={16} className="mt-0.5 shrink-0 text-s-red" />
+            <div className="text-[12.5px]">
+              <p className="font-medium text-s-text">Security update</p>
+              <p className="text-s-text-2">This version fixes a security problem. Install it as soon as you can.</p>
             </div>
-          )}
-
-          {/* Version row */}
-          <div className="grid grid-cols-3 gap-3 items-center">
-            <VersionBadge label="INSTALLED" version={"v" + currentVersion} />
-            <div className="flex items-center justify-center">
-              <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-                <path d="M3 9H15M15 9L10 4M15 9L10 14"
-                  stroke="#6366f1" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
-            </div>
-            <VersionBadge label="AVAILABLE" version={"v" + info?.version} accent />
           </div>
+        )}
 
-          {/* Changelog — Android style */}
-          {info?.changelog?.length > 0 && (
-            <div className="bg-s-card border border-s-border rounded-xl overflow-hidden">
-              <div className="px-4 py-3 border-b border-s-border">
-                <p className="text-[11px] font-medium text-s-text-2 tracking-wide">
-                  What&apos;s new in {info.version}
-                </p>
-                <p className="text-[9px] text-s-text-4 mt-0.5">
-                  Released {info?.published_at
-                    ? new Date(info.published_at).toLocaleDateString('en-IN', {
-                        day: 'numeric', month: 'short', year: 'numeric'
-                      })
-                    : 'recently'}
-                </p>
-              </div>
-              <div className="divide-y divide-s-border/50">
-                {info.changelog.map((line, i) => (
-                  <div key={i} className="flex items-start gap-3 px-4 py-3">
-                    <div className="w-1.5 h-1.5 rounded-full bg-s-accent/40 mt-1.5 flex-shrink-0" />
-                    <p className="text-[12px] text-s-text-3 font-light leading-relaxed">
-                      {line}
-                    </p>
-                  </div>
-                ))}
-              </div>
-              {info?.size_mb > 0 && (
-                <div className="px-4 py-2.5 border-t border-s-border bg-s-bg/50">
-                  <span className="text-[10px] text-s-text-4 font-mono">
-                    {info.size_mb} MB
-                  </span>
-                </div>
-              )}
+        <section className="rounded-lg border border-s-border bg-s-surface p-4 shadow-[var(--s-shadow)]">
+          <div className="flex items-center gap-4">
+            <StatusIcon state={state} />
+            <div className="min-w-0 flex-1">
+              <h2 className="text-[14px] font-semibold text-s-text">{title}</h2>
+              <p className="mt-0.5 text-[12px] text-s-text-3">{subtitle}</p>
             </div>
-          )}
-
-          {/* Download progress */}
-          {downloading && (
-            <div className="bg-s-card border border-s-border rounded-xl px-4 py-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-[12px] text-s-text-2 font-light">
-                  Downloading Seven {info?.version}
-                </span>
-                <span className="text-[11px] text-s-accent font-mono">
-                  {downloadProgress}%
-                </span>
-              </div>
-              <div className="h-1 bg-s-border rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-s-accent transition-all duration-300 rounded-full"
-                  style={{ width: downloadProgress + "%" }}
-                />
-              </div>
-              <p className="text-[10px] text-s-text-4">
-                Seven will continue working while this downloads
-              </p>
-            </div>
-          )}
-
-          {/* Download ready */}
-          {downloadReady && !downloading && (
-            <div className="bg-s-accent/5 border border-s-accent/20 rounded-xl px-4 py-4">
-              <div className="flex items-start gap-3">
-                <div className="w-8 h-8 rounded-lg bg-s-accent/10 border border-s-accent/20 flex items-center justify-center flex-shrink-0 mt-0.5">
-                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                    <path d="M3 7L6 10L11 4" stroke="#6366f1" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                  </svg>
-                </div>
-                <div className="flex-1">
-                  <p className="text-[12px] text-s-text font-medium mb-1">
-                    Update ready to install
-                  </p>
-                  <p className="text-[11px] text-s-text-4 font-light leading-relaxed">
-                    Seven will close, install version {info?.version}, and reopen automatically. This takes about 30 seconds.
-                  </p>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Error */}
-          {error && (
-            <div className="px-4 py-3 rounded-xl bg-s-red/5 border border-s-red/15">
-              <p className="text-[11px] text-s-red">{error}</p>
-            </div>
-          )}
-
-          {/* Action buttons */}
-          <div className="flex gap-3 w-full justify-center">
-            {downloadReady ? (
-              <button
-                onClick={installUpdate}
-                className="w-full max-w-sm mx-auto py-3.5 rounded-xl bg-s-accent text-white text-[13px] font-medium tracking-wide hover:bg-s-accent/90 active:scale-[0.98] transition-all duration-200 flex items-center justify-center gap-2 shadow-lg shadow-s-accent/20"
-              >
-                <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
-                  <path d="M6.5 1V8M6.5 8L9.5 5M6.5 8L3.5 5M2 11H11"
-                    stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
-                </svg>
-                Restart and install
-              </button>
-            ) : downloading ? (
-              <HoverButton disabled className="flex-1">
-                <div className="w-3 h-3 rounded-full border border-s-text-4/30 border-t-s-text-4 animate-spin" />
-                Downloading...
-              </HoverButton>
-            ) : (
-                <HoverButton onClick={startDownload} className="flex-1">
-                <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
-                  <path d="M6.5 2V9M6.5 9L3 5.5M6.5 9L10 5.5M1.5 11H11.5"
-                    stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
-                </svg>
-                Download update
-              </HoverButton>
-            )}
+            {state === 'current' && <Button icon={RefreshCw} onClick={checkNow}>Check now</Button>}
+            {state === 'available' && <Button variant="primary" icon={Download} onClick={startDownload}>Download</Button>}
+            {state === 'ready' && <Button variant="primary" icon={RotateCw} onClick={installUpdate}>Restart and install</Button>}
           </div>
-
-          {/* Silent note */}
-          {info?.download_mode === 'auto' && !downloading && !downloadReady && (
-            <p className="text-[10px] text-s-text-4 text-center">
-              This update downloads automatically in the background
-            </p>
+          {(state === 'available' || state === 'downloading' || state === 'ready') && info?.version && (
+            <div className="mt-4 flex items-center gap-2 text-[12px]">
+              <Badge>{currentVersion}</Badge><ArrowRight size={13} className="text-s-text-4" /><Badge tone="accent">{info.version}</Badge>
+            </div>
           )}
+          <div className={cx('grid transition-[grid-template-rows,opacity] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]',
+                             state === 'downloading' ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0')}>
+            <div className="overflow-hidden">
+              <div className="mt-4 flex items-center gap-3">
+                <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-s-card-h">
+                  <div className="h-full rounded-full bg-s-accent transition-[width] duration-500 ease-out" style={{ width: `${downloadProgress}%` }} />
+                </div>
+                <span className="w-10 text-right text-[12px] tabular-nums text-s-text-2">{downloadProgress}%</span>
+              </div>
+            </div>
+          </div>
+          {error && <p className="mt-3 text-[12px] text-s-red">{error}</p>}
+        </section>
 
-        </div>
+        {info?.changelog?.length > 0 && updateAvailable && (
+          <Section title={`What's new in ${info.version}`}
+                   description={info.published_at ? `Released ${new Date(info.published_at).toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' })}` : undefined}>
+            <ul className="space-y-2 px-4 py-3">
+              {info.changelog.map((line, i) => (
+                <li key={i} className="flex gap-2.5 text-[12.5px] leading-relaxed text-s-text-2">
+                  <span className="mt-[7px] h-1 w-1 shrink-0 rounded-full bg-s-text-4" />{line}
+                </li>))}
+            </ul>
+          </Section>
+        )}
+
+        <Section>
+          <Row label="Check for updates automatically" description="Seven asks GitHub once a day and tells you when a new version is ready.">
+            <Toggle checked={config?.updates?.auto_check ?? true} onChange={v => saveConfig({ updates: { auto_check: v } })} label="Check automatically" />
+          </Row>
+          {info?.download_mode === 'auto' && (
+            <Row label="Download in the background" description="This release downloads by itself. You choose when to install." />)}
+        </Section>
       </div>
-    </div>
+    </PageShell>
   );
 }
