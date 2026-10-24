@@ -112,13 +112,22 @@ def app_help_answer(text: str) -> Optional[str]:
     return app_map.describe(hits[0])
 
 
-def capability_list_answer(norm: str) -> str:
+def capability_list_answer(norm: str, state=None) -> str:
     toks = set(norm.split())
     if toks & {"app", "apps", "programs", "applications", "open"}:
         cap = capabilities.get("apps")
         base = capabilities.describe(cap)
         return base + " I don't keep a list of every app. If it's installed, say \"open\" and its name and I'll find it."
-    return capabilities.overview()
+    # Asked again in the same chat: a short reply, not the same paragraph word for word.
+    turn = getattr(state, "turn", None)
+    last = getattr(state, "last_overview_turn", None)
+    brief = turn is not None and last is not None and turn - last <= 8
+    if state is not None and turn is not None:
+        try:
+            state.last_overview_turn = turn
+        except Exception:
+            pass
+    return capabilities.overview(brief=brief)
 
 
 def value_answer() -> str:
@@ -135,11 +144,118 @@ def symbol_answer() -> str:
             "and this computer, running entirely on this machine.")
 
 
+# ── Seven explaining itself: model, context, memory, learning, reasoning ─────────────────────────
+# Asked for, never volunteered. Every number is read live, so the answer is true for this install.
+
+def _active_model() -> str:
+    try:
+        from brain_modules import self_model
+        return self_model.get_runtime_state()["model_name"]
+    except Exception:
+        return "an unknown model"
+
+
+def _words(tokens: int) -> str:
+    return f"{int(round(tokens * 0.75, -2)):,}"
+
+
+def model_answer(ctx, config) -> str:
+    """What model runs Seven, and what it is good and less good at."""
+    from brain_modules import model_catalog
+    name = _active_model()
+    entry = model_catalog.get(name)
+    if not entry:
+        return (f"I'm running {name} on this computer through Ollama. It isn't one of the models I know the "
+                "details of, so I can't tell you its strengths. Settings, Brain lists the ones I do.")
+    text = (f"I'm running {entry['name']} by {entry['maker']}, {entry['params']} parameters, on this computer "
+            f"through Ollama. It's good at {entry['good_at']}, and less suited to {entry['weak_at']}. "
+            f"It reads about {_words(model_catalog.context_window(name))} words of our conversation at a time.")
+    try:
+        from brain_modules import system_info
+        snap = system_info.snapshot()
+        gpu = snap.get("gpu") or {}
+        rec = model_catalog.recommend(float(gpu.get("vram_gb") or 0), float((snap.get("ram") or {}).get("total_gb") or 0),
+                                      bool(gpu.get("name")))
+        better = model_catalog.get(rec["id"])
+        if better and better["size_gb"] > entry["size_gb"]:
+            text += (f" If you want sharper answers, {better['name']} suits this PC; you can download and switch "
+                     "to it in Settings, Brain.")
+    except Exception:
+        pass
+    return text
+
+
+def context_answer(ctx, config) -> str:
+    """How much Seven reads at once versus how much it keeps."""
+    from brain_modules import chat_history, model_catalog
+    ttl = int(_cfg(config, "brain.history_ttl_seconds", 1800) or 1800)
+    span = f"{ttl // 3600} hour{'s' if ttl >= 7200 else ''}" if ttl >= 3600 else f"{max(1, ttl // 60)} minutes"
+    try:
+        from memory import conversation_store, facts_store
+        key = getattr(ctx, "speaker_key", None)
+        stored = (f" So far that's {facts_store.count_facts(key)} things about you and "
+                  f"{conversation_store.count_conversations(key)} conversations.")
+    except Exception:
+        stored = ""
+    return ("Think of it as two kinds of memory. In the moment, the model reads about "
+            f"{_words(model_catalog.context_window(_active_model()))} words at once: roughly the last "
+            f"{chat_history.MAX_TURNS} exchanges of this chat from the past {span}. Beyond that, nothing is "
+            "thrown away. Every conversation and everything you tell me is kept on this computer, limited only by "
+            f"disk space.{stored} I look those up when they matter, like when you ask about yourself or say "
+            '"last time", instead of rereading everything for every reply. That keeps me fast.')
+
+
+def learning_answer() -> str:
+    return ("Yes, in the ways that matter for you. I learn from what you tell me and from how things go: facts "
+            "about you and your corrections (keeping the history), your goals, which app you mean by a name, which "
+            "actions tend to fail, and how you like me to talk. What I don't do is retrain the model itself, so my "
+            "general intelligence stays the same while what I know about you and this computer keeps growing. "
+            "All of it stays on this machine, and you can see or delete it on the Memory page.")
+
+
+_HOW = {
+    "layer_03_identity": "That's built into me. Facts about myself, the time and your PC are read directly, not "
+                         "generated, so they can't be made up.",
+    "layer_025_social": "Just a quick reply. Small talk doesn't need the AI model, so it's answered instantly.",
+    "layer_05_memory": "From what you told me earlier, stored on this computer. No guessing involved.",
+    "layer_06_personal_filter": "I didn't have anything stored about that, so I said so rather than guess.",
+    "layer_035_router": "From my own knowledge of this app and what you've told me, not from the AI model.",
+    "layer_034_settings": "That was a settings change. I made it directly and confirmed the new value.",
+    "layer_56_live_guard": "That needed live information I couldn't get, so I told you instead of guessing.",
+}
+
+
+def reasoning_answer(ctx) -> str:
+    """Why Seven answered the previous message the way it did, from that turn's trace."""
+    trace = dict(getattr(getattr(ctx, "state", None), "trace", None) or {})
+    by = trace.get("answered_by") or ""
+    if not by:
+        return "I don't have a record of my last answer in this chat yet. Ask me something and then ask again."
+    if by == "layer_08_llm":
+        model = trace.get("model") or _active_model()
+        from brain_modules import model_catalog
+        entry = model_catalog.get(model)
+        who = entry["name"] if entry else model
+        src = [s.replace("_", " ") for s in trace.get("sources") or []]
+        used = (f", using {', '.join(src)} as evidence" if src
+                else ", from its general knowledge. Nothing you told me was involved")
+        extra = ""
+        if trace.get("mode") == "deep":
+            extra += " I treated it as a harder question and took more care over it."
+        if trace.get("uncertainty"):
+            extra += " Part of it was uncertain, and I was told to say so rather than guess."
+        return f"That reply was written by the language model, {who}, running on this computer{used}.{extra}"
+    if by.startswith(("layer_45", "layer_43", "layer_036", "layer_38", "layer_59")):
+        return ("That was a direct command. I handled it instantly in code, without the AI model, and then checked "
+                "whether the action actually worked before telling you.")
+    return _HOW.get(by, "That came from one of my built-in skills rather than the AI model, so it's exact.")
+
+
 def answer(label: str, ctx, config) -> Optional[str]:
     """Dispatch a routed self-knowledge intent. None means 'not mine, let the pipeline continue'."""
     norm = ctx.norm_in
     if label == "capability_list":
-        return capability_list_answer(norm)
+        return capability_list_answer(norm, getattr(ctx, "state", None))
     if label == "capability_check":
         reply = capabilities.answer_can_you(norm)
         if reply:
@@ -154,6 +270,14 @@ def answer(label: str, ctx, config) -> Optional[str]:
         return status_answer(norm, ctx, config)
     if label == "self_value":
         return value_answer()
+    if label == "self_model":
+        return model_answer(ctx, config)
+    if label == "self_context":
+        return context_answer(ctx, config)
+    if label == "self_learning":
+        return learning_answer()
+    if label == "self_reasoning":
+        return reasoning_answer(ctx)
     if label == "self_symbol":
         return symbol_answer()
     return None

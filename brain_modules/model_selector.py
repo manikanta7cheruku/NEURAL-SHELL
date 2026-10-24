@@ -166,32 +166,14 @@ def select_model() -> str:
     print(Fore.CYAN + f"[MODEL] Detected: VRAM={vram_gb}GB, RAM={ram_gb}GB")
     print(Fore.CYAN + f"[MODEL] Installed models: {installed}")
 
+    from brain_modules import model_catalog
     if not installed:
-        print(Fore.RED + "[MODEL] No models installed in Ollama. Defaulting to tinyllama.")
-        return "tinyllama"
+        rec = model_catalog.recommend(vram_gb, ram_gb, vram_gb > 0)["id"]
+        print(Fore.RED + f"[MODEL] No models installed in Ollama. Expecting {rec}.")
+        return rec
 
-    chosen = None
-
-    if vram_gb > 0:
-        # GPU path
-        for min_vram, models in VRAM_MODEL_MATRIX:
-            if vram_gb >= min_vram:
-                chosen = _find_best_available(models, installed)
-                if chosen:
-                    break
-    
-    if not chosen:
-        # CPU/RAM path
-        for min_ram, models in RAM_MODEL_MATRIX:
-            if ram_gb >= min_ram:
-                chosen = _find_best_available(models, installed)
-                if chosen:
-                    break
-
-    if not chosen:
-        # Last resort — just use whatever is installed
-        chosen = installed[0]
-        print(Fore.YELLOW + f"[MODEL] No matrix match — using first available: {chosen}")
+    # One catalog decides for setup, Settings and Automatic (brain_modules/model_catalog.py).
+    chosen = model_catalog.best_installed(installed, vram_gb, ram_gb, vram_gb > 0)
 
     # Save back to config so Settings UI shows it
     try:

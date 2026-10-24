@@ -22,7 +22,8 @@ import logging
 import time
 
 from brain_modules import (brain_settings, capabilities, chat_history, conversation_state as cs, curiosity,
-                           decision_policy, goals, learning, ollama_client, prompt_builder, speech_acts)
+                           decision_policy, goals, learning, model_catalog, ollama_client, prompt_builder,
+                           speech_acts)
 from brain_modules.layer_result import LayerResult
 from brain_modules.response_filter import SentenceChunker, StreamSanitizer, clean_final, is_trailer
 
@@ -151,7 +152,7 @@ def process(ctx, deps):
         "temperature": gen["temperature"], "num_predict": _budget(ctx, is_voice, profile, gen["token_multiplier"]),
         "repeat_penalty": 1.1, "repeat_last_n": 64, "top_p": 0.9,
         "stop": ["###", "<reference_only>", "</reference_only>"] + (["\n\n"] if is_voice else []),
-        "num_ctx": 2048 if "tinyllama" in (model or "").lower() else 4096,
+        "num_ctx": model_catalog.context_window(model),     # constant per model, so Ollama's cache stays warm
     }
     payload = {"model": model, "messages": messages, "keep_alive": "24h", "options": options}
 

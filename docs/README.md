@@ -16,6 +16,7 @@ these documents explain what Seven is, how it is built and how it is shipped.
 | Understand one part in depth | [Components](components/README.md), starting with the [Brain](components/brain.md) |
 | Run Seven from source and make a change | [Development setup](development/setup.md), [Testing](development/testing.md), [Contributing](../CONTRIBUTING.md) |
 | Ship a release | [Release process](development/release-process.md) |
+| Build the installer and test as a brand-new user | [Installer and fresh-install testing](development/installer-and-fresh-install-testing.md) |
 | Know what data Seven keeps and what leaves the machine | [Privacy and data](architecture/privacy-and-data.md), [Security policy](../SECURITY.md) |
 | Look up an endpoint | [HTTP API reference](reference/http-api.md) (generated) |
 | Know why something was built a certain way | [Architecture decisions](architecture/decisions/README.md) |
@@ -45,6 +46,7 @@ docs/
     testing.md                  test layers and how to run them
     coding-standards.md         conventions for Python, React and writing
     release-process.md          versioning, CI, installer, publishing an update
+    installer-and-fresh-install-testing.md   build the installer, test as a new user, device ID
   operations/
     troubleshooting.md          common problems and where to look
   reference/

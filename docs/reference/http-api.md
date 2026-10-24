@@ -6,7 +6,7 @@ The backend listens on `http://127.0.0.1:7777` only (never on the network). The 
 the overlay and the Chrome extension are its only clients. There is no authentication because nothing outside
 this computer can reach it.
 
-181 endpoints in 25 files.
+185 endpoints in 26 files.
 
 ## `backend/admin_server.py`
 
@@ -166,6 +166,15 @@ this computer can reach it.
 | POST | `/api/memory/import` | Import ALL user data from backup JSON. Auto-patches DB schema on the fly. |
 | GET | `/api/memory/overview` | What Seven remembers, from the stores the brain uses |
 | GET | `/api/memory/stats` | Memory statistics |
+
+## `backend/routes/models.py`
+
+| Method | Path | What it does |
+|---|---|---|
+| GET | `/api/models` | Model catalog with what is installed, in use and recommended for this PC |
+| GET | `/api/models/pull` | Progress of the current model download |
+| POST | `/api/models/pull` | Download a model in the background |
+| DELETE | `/api/models/{name:path}` | Remove a downloaded model |
 
 ## `backend/routes/panel_extras.py`
 

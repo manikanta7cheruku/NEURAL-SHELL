@@ -70,7 +70,7 @@ export default function StepDone({ onComplete }) {
   return (
     <div className="max-w-2xl space-y-12 text-center pt-8">
       <div className="space-y-3">
-        <h2 className="text-[40px] font-bold text-white tracking-tight leading-none">Setup Complete</h2>
+        <h2 className="text-[30px] font-semibold text-white tracking-tight leading-none">You're all set</h2>
         <p className="text-[13px] text-white/40 font-light max-w-sm mx-auto">Your private AI environment is ready. Seven will greet you when it comes online.</p>
       </div>
 

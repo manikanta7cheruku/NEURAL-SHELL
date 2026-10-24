@@ -7,8 +7,9 @@
 import { useEffect, useState } from 'react';
 import { MessageSquareText } from 'lucide-react';
 import api from '../../api';
-import { Section, Row, Body, Toggle, Slider, Segmented, Select, Badge } from '../../components/ui';
+import { Section, Row, Toggle, Slider, Segmented, Select } from '../../components/ui';
 import { saveBrain } from './save';
+import ModelPicker from './ModelPicker';
 
 const honestyLabel = v => (v <= 20 ? 'Diplomatic' : v <= 50 ? 'Tactful' : v <= 80 ? 'Direct' : v <= 95 ? 'Blunt' : 'No filter');
 const humorLabel = v => (v <= 10 ? 'Deadpan' : v <= 30 ? 'Mostly serious' : v <= 60 ? 'Dry wit' : v <= 85 ? 'Playful' : 'Maximum sarcasm');
@@ -19,19 +20,15 @@ const CONTEXT_WINDOWS = [
   { value: 3600, label: '1 hour' }, { value: 14400, label: '4 hours' }, { value: 86400, label: '24 hours' },
 ];
 
-const TIERS = { small: 'Small, fastest', medium: 'Medium, balanced', large: 'Large, most capable' };
-
 export default function BrainSection({ config }) {
   const [brain, setBrain] = useState(() => config.brain || {});
   const [models, setModels] = useState(null);
-  const [hw, setHw] = useState(null);
   const [seen, setSeen] = useState(config.brain);
   if (config.brain !== seen) { setSeen(config.brain); setBrain(b => ({ ...b, ...(config.brain || {}) })); }
   useEffect(() => {
     api.get('/config/brain').then(r => setBrain(b => ({ ...b, ...r.data }))).catch(() => {});
     api.get('/config/brain/available-models').then(r => setModels(r.data))
        .catch(() => setModels({ tiers: {}, all: [], ollama_running: false }));
-    api.get('/hardware').then(r => setHw(r.data)).catch(() => {});
   }, []);
 
   const change = async (key, value, before = brain[key]) => {
@@ -42,37 +39,13 @@ export default function BrainSection({ config }) {
   };
 
   const v = (key, fallback) => brain[key] ?? fallback;
-  const modelOptions = [{ value: 'auto', label: models?.recommended ? `Automatic (${models.recommended})` : 'Automatic' }];
-  if (models?.tiers) {
-    for (const tier of ['small', 'medium', 'large']) {
-      const items = models.tiers[tier] || [];
-      if (items.length) modelOptions.push({ group: TIERS[tier], items: items.map(m => ({ value: m.name, label: `${m.name}  ·  ${m.size_gb} GB` })) });
-    }
-  }
-  const current = v('model_name', 'auto');
-  if (current !== 'auto' && models && !models.all?.includes(current)) {
-    modelOptions.push({ value: current, label: `${current} (not installed)` });
-  }
   const reasoningOptions = [{ value: '', label: 'Same as main model' },
     ...(models?.all || []).map(n => ({ value: n, label: n }))];
 
   return (
     <>
-      <Section title="Model" description="The local language model that writes Seven's replies. Runs on this computer through Ollama.">
-        <Row label="Reply model"
-             description={models && !models.ollama_running
-               ? 'Ollama is not running, so installed models cannot be listed. Start Ollama and reopen Settings.'
-               : 'Changes apply from your next message. Automatic picks the best installed model for your hardware.'}>
-          <Select value={current} options={modelOptions} onChange={val => change('model_name', val)} className="w-72"
-                  disabled={!models} />
-        </Row>
-        {hw?.recommended_model && (
-          <Body className="flex items-center gap-2 text-[12px] text-s-text-3">
-            Recommended for this computer
-            <Badge tone="accent">{hw.recommended_model}</Badge>
-            {hw.recommendation_reason && <span className="text-s-text-4">{hw.recommendation_reason}</span>}
-          </Body>
-        )}
+      <Section title="Model" description="The language model that writes Seven's replies, running on this computer through Ollama. Bigger models are smarter and need more memory.">
+        <ModelPicker value={v('model_name', 'auto')} onChange={val => change('model_name', val)} />
       </Section>
 
       <Section title="Personality" description="Tone only. These never change facts, actions or what Seven is allowed to do.">
@@ -139,7 +112,7 @@ export default function BrainSection({ config }) {
         <div className="text-[12px] leading-relaxed text-s-text-3">
           <p className="text-[13px] font-medium text-s-text">You can also ask Seven</p>
           <p className="mt-1">
-            "Set honesty to 75%", "be a bit funnier", "turn off streaming", "switch your model to llama3.2"
+            "Set honesty to 75%", "be a bit funnier", "turn off streaming", "switch your model to qwen2.5"
             or "what are your settings". Seven confirms what changed, and this page updates when you come back to it.
           </p>
         </div>

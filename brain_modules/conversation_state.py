@@ -85,6 +85,7 @@ class State:
     last_failed_open: Optional[Tuple[str, int]] = None
     ignored: int = 0
     last_question_turn: int = -100
+    last_overview_turn: Optional[int] = None     # when Seven last listed its abilities in this chat
     trace: Dict[str, Any] = field(default_factory=dict)
     last_used: float = 0.0
 

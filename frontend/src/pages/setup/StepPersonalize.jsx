@@ -56,7 +56,7 @@ export default function StepPersonalize() {
     <div className="max-w-3xl space-y-8">
       <div className="space-y-3">
         <div className="text-[10px] text-white/50 tracking-[0.3em] font-medium uppercase">Step 3 of 6</div>
-        <h2 className="text-[32px] font-bold text-white tracking-tight">System Voice</h2>
+        <h2 className="text-[24px] font-semibold text-white tracking-tight">Choose Seven's voice</h2>
         <p className="text-[12px] text-white/40 font-light">Choose how Seven sounds. Neural voices offer high-fidelity speech synthesis, while SAPI voices run with zero processing overhead.</p>
       </div>
 
