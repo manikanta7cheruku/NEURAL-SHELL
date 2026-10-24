@@ -1,5 +1,10 @@
 # Workspace Modules — Architecture & Developer Reference
 
+> **Current design: [docs/components/workspaces.md](../../docs/components/workspaces.md).** Since 1.4, browser tabs
+> are captured per window through UI Automation (`browser_capture.py`, `browser_tabs.py`) and restored by
+> `browser_restore.py`; `actions.py` is the one entry point for saving and restoring. The sections below describe the
+> extension and profile machinery, which still feeds tab addresses, and parts of them predate that change.
+
 > **Project:** SEVEN Private AI Voice Assistant v1.4.3+
 > **Author:** Manikanta Cheruku
 > **Last Updated:** 2026-09-22
