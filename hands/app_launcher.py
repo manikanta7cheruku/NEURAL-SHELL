@@ -473,6 +473,35 @@ def _focus_worker(target, delay):
             print(Fore.YELLOW + f"[FOCUS] Window force activation error: {e}")
 
 
+# What the fast-launch commands are called in the installed-apps index, for when they are not on the PATH
+# (VS Code's "code" usually isn't, which once sent "open vscode" to a website).
+_INSTALLED_NAME = {"code": "Visual Studio Code", "winword": "Word", "excel": "Excel", "powerpnt": "PowerPoint",
+                   "obs64": "OBS Studio", "telegram": "Telegram", "discord": "Discord", "steam": "Steam",
+                   "vlc": "VLC media player", "zoom": "Zoom", "outlook": "Outlook", "notepad++": "Notepad++",
+                   "chrome": "Google Chrome", "firefox": "Firefox", "wt": "Terminal"}
+_WINDOWS_TOOLS = {"notepad", "mspaint", "cmd", "powershell", "taskmgr", "explorer", "control", "regedit", "charmap",
+                  "snippingtool", "calc", "devmgmt.msc", "diskmgmt.msc", "services.msc", "eventvwr.msc"}
+
+
+def _resolve_exe(target: str):
+    """A runnable path or launch command for a fast-launch exe, or None when it isn't installed."""
+    import shutil
+    if target in _WINDOWS_TOOLS:
+        return target
+    for name in (target, f"{target}.exe", f"{target}.cmd"):
+        found = shutil.which(name)
+        if found:
+            return found
+    try:
+        from hands.app_discovery import search_apps
+        hits = search_apps(_INSTALLED_NAME.get(target, target), limit=1)
+        if hits and hits[0].get("score", 0) >= 500:
+            return hits[0]["launch"]
+    except Exception:
+        pass
+    return None
+
+
 def _fast_launch(app_name: str) -> bool:
     """Try fast launch table. Returns True if launched."""
     clean = app_name.lower().strip()
@@ -491,12 +520,15 @@ def _fast_launch(app_name: str) -> bool:
             os.startfile(target)
             focus_target_window(target)
         else:
-            try:
-                os.startfile(target)
-                focus_target_window(target)
-            except FileNotFoundError:
-                proc = subprocess.Popen(target, creationflags=_CREATE_NO_WINDOW)
+            resolved = _resolve_exe(target)
+            if resolved is None:
+                return False                        # not installed: let discovery decide, never a website
+            if resolved.startswith("explorer.exe shell:AppsFolder") or not os.path.isabs(resolved):
+                proc = subprocess.Popen(resolved, shell=True, creationflags=_CREATE_NO_WINDOW)
                 focus_target_window(proc)
+            else:
+                os.startfile(resolved)
+                focus_target_window(target)
         print(Fore.GREEN + f"   -> Fast launch: {target}")
         return True
     except Exception as e:
