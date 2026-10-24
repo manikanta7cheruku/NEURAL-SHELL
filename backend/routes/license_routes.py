@@ -157,12 +157,8 @@ def get_plan_usage():
         convo_count = 0
 
     try:
-        _appdata  = os.environ.get("APPDATA", os.path.expanduser("~"))
-        _know_dir = os.path.join(_appdata, "SEVEN", "seven_data", "knowledge")
-        file_count = len([
-            f for f in os.listdir(_know_dir)
-            if os.path.isfile(os.path.join(_know_dir, f))
-        ]) if os.path.exists(_know_dir) else 0
+        from knowledge import store as _knowledge
+        file_count = len(_knowledge.documents())
     except Exception:
         file_count = 0
 

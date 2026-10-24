@@ -27,6 +27,11 @@ import os
 # transformers would otherwise import TensorFlow too: many seconds and gigabytes Seven never uses.
 os.environ.setdefault("USE_TF", "0")
 os.environ.setdefault("TRANSFORMERS_NO_TF", "1")
+try:
+    from seven_utils import hf_offline
+    hf_offline.enable()
+except ImportError:
+    pass
 
 def _evict_offline_listener() -> None:
     """

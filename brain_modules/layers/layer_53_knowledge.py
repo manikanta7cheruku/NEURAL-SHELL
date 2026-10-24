@@ -1,100 +1,74 @@
 """
 =============================================================================
-LAYER 5.3: KNOWLEDGE BASE SEARCH
+LAYER 5.3: DOCUMENTS
 
-Searches local knowledge base (indexed PDFs, docs, etc) for factual queries.
-Writes results to ctx.knowledge_context.
+Finds passages in the user's document library for the model to answer from (knowledge/core.py builds the
+block and its formatting rules: tables, lists, page citations).
 
-v2.0: Removed over-aggressive gate conditions.
-      Now searches KB for any non-trivial question when KB has content.
+Two cases:
+    - The chat has documents attached (the paperclip in the Console, or "Ask Seven" on the Knowledge page).
+      Every question in that chat is about them, so we always search them. Summaries and outlines get
+      passages from across the whole document.
+    - No attachment: search the whole library only when the question looks like study material or points at
+      a document, and keep only passages that clearly match.
 =============================================================================
 """
+
+import re
 
 from colorama import Fore
 from brain_modules.layer_result import LayerResult
 
+_DOC_REFERENCE = re.compile(
+    r"\b(?:in|from|according to|based on) (?:the|my|this|that) (?:file|document|doc|pdf|notes|book|textbook|paper|"
+    r"slides?|deck|sheet|spreadsheet|chapter|syllabus)\b|\b(?:my|the|this|uploaded) (?:notes|pdf|document|textbook|"
+    r"syllabus|slides)\b|\bsummari[sz]e\b|\buploaded\b", re.I)
 
-# Phrases that explicitly reference uploaded documents
-_DOC_TRIGGERS = [
-    "in this", "in the file", "in the document", "in the pdf",
-    "from the file", "from the document", "uploaded", "indexed",
-    "what does it", "what does the", "summarize", "summary",
-    "what is in", "what are in", "contents of", "content of",
-    "explain this", "explain the", "what's in",
-]
+_STUDY = re.compile(
+    r"\b(?:explain|define|definition|describe|difference between|compare|summari[sz]e|what (?:is|are|was|were) (?:a |an |the )?"
+    r"\w+|how (?:does|do|is|are)|why (?:does|do|is|are)|list (?:the|all)|types of|advantages|disadvantages|formula|"
+    r"theorem|derive|example of|steps|chapter|unit \d|question \d|mcq|quiz me|important questions)\b", re.I)
 
-# Hard skip — these are clearly not knowledge questions
-_HARD_SKIP = [
-    "open ", "close ", "play ", "pause ", "mute",
-    "volume", "brightness", "remind me", "schedule",
-    "what time", "what day", "weather",
-]
+_NOT_FOR_DOCS = re.compile(
+    r"^(?:open|close|play|pause|mute|unmute|set|turn|remind|schedule|launch|start|stop)\b|\b(?:volume|brightness|"
+    r"weather|what time|what day|battery)\b", re.I)
+
+
+def _context_tokens(deps) -> int:
+    try:
+        from brain_modules import model_catalog
+        return model_catalog.context_window(deps.get("model_name") or "")
+    except Exception:
+        return 4096
 
 
 def process(ctx, deps):
-    # Always skip commands and greetings
-    if (ctx.is_command or ctx.is_greeting or ctx.is_action_cmd
-            or "VISUAL_REPORT:" in ctx.prompt_text):
+    if ctx.is_command or ctx.is_greeting or ctx.is_action_cmd or "VISUAL_REPORT:" in ctx.prompt_text:
         return LayerResult.pass_through()
-
-    # Skip short inputs — arithmetic, one-liners, simple factual questions
-    # that have nothing to do with uploaded documents.
-    # Minimum 5 words. "What comes after 20" is 4 words — should never
-    # touch the knowledge base.
-    if len(ctx.words) < 5:
+    if _NOT_FOR_DOCS.search(ctx.clean_in):
         return LayerResult.pass_through()
-
-    # Skip hard-skip system commands
-    if any(skip in ctx.clean_in for skip in _HARD_SKIP):
-        return LayerResult.pass_through()
-
-    # Check if KB has any content at all — if empty, skip entirely
     try:
-        from knowledge.core import knowledge_collection
-        if knowledge_collection.count() == 0:
-            return LayerResult.pass_through()
+        from knowledge import core, store
     except Exception:
         return LayerResult.pass_through()
 
-    # Doc-reference trigger: user explicitly references uploaded content
-    # These bypass ALL other gates — always search
-    is_doc_reference = any(t in ctx.clean_in for t in _DOC_TRIGGERS)
+    attached = store.attached(ctx.conversation_id) + [d for d in getattr(ctx, "documents", []) if d]
+    attached = list(dict.fromkeys(i for i in attached if (store.get(i) or {}).get("status") == "ready"))
+    query = ctx.resolved_text or ctx.prompt_text
+    if attached:
+        found = core.context_for(query, attached, _context_tokens(deps), scoped=True)
+    else:
+        if not store.has_documents() or len(ctx.words) < 3:
+            return LayerResult.pass_through()
+        if not (_DOC_REFERENCE.search(query) or _STUDY.search(query)):
+            return LayerResult.pass_through()
+        found = core.context_for(query, None, _context_tokens(deps), scoped=bool(_DOC_REFERENCE.search(query)))
 
-    # Only search knowledge base for domain questions or doc references.
-    # Generic question words alone ("what", "how", "why") are not sufficient
-    # to justify a knowledge search — they match everything including
-    # arithmetic, personal questions, and casual conversation.
-    # The relevance threshold in knowledge/core.py is the final quality gate,
-    # but we avoid the ChromaDB call entirely for clearly non-document queries.
-    _DOMAIN_SIGNALS = [
-        "explain", "define", "describe", "difference between",
-        "compare", "summarize", "summary", "how does", "how do",
-        "what is a", "what are", "tell me about", "give me",
-        "according to", "based on", "from the", "in the",
-        "research", "study", "report", "document", "paper",
-        "article", "chapter", "section", "topic", "subject",
-        "theory", "concept", "method", "process", "algorithm",
-        "history of", "types of", "examples of", "list of",
-        "benefits of", "disadvantages of", "advantages of",
-    ]
-    is_domain_question = any(s in ctx.clean_in for s in _DOMAIN_SIGNALS)
-    should_search = is_doc_reference or is_domain_question
-
-    if not should_search:
-        return LayerResult.pass_through()
-
-    try:
-        from knowledge import search_knowledge
-        results = search_knowledge(ctx.prompt_text, top_k=5)
-        if results and len(results.strip()) > 50:
-            ctx.knowledge_context = results
-            print(Fore.CYAN + f"[BRAIN] Knowledge: found relevant content "
-                              f"({len(results)} chars)")
-        else:
-            print(Fore.CYAN + "[BRAIN] Knowledge: no relevant match")
-    except ImportError:
-        pass
-    except Exception as e:
-        print(Fore.YELLOW + f"[BRAIN] Knowledge search error: {e}")
-
+    if found["text"]:
+        ctx.knowledge_context = found["text"]
+        ctx.knowledge_hits = [{"name": h["name"], "label": h.get("label") or h.get("section") or ""}
+                              for h in found["hits"] if found["whole"] or h["keyword"] > 0 or h["score"] >= 0.35]
+        ctx.knowledge_whole = found["whole"]
+        print(Fore.CYAN + f"[BRAIN] Documents: {len(found['hits'])} passages"
+                          f"{' across the whole document' if found['whole'] else ''}")
     return LayerResult.pass_through()
