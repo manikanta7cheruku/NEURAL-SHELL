@@ -305,8 +305,12 @@ def looks_like_reference(user_text: str) -> bool:
     if word_set & set(_REFERENCE_ORDINALS.keys()):
         return True
 
-    # Signal 2: last/first/final
-    if word_set & _REFERENCE_LAST or word_set & _REFERENCE_FIRST:
+    # Signal 2: last/first/final. "top" and "bottom" also describe places on screen ("pin notepad on top"),
+    # so they count only as "the top one", "top result" and the like.
+    position_words = {"top", "bottom"}
+    if (word_set & (_REFERENCE_LAST - position_words)) or (word_set & (_REFERENCE_FIRST - position_words)):
+        return True
+    if word_set & position_words and re.search(r"\b(?:the )?(?:top|bottom)(?: one| result| match| file| item)\b", clean):
         return True
 
     # Signal 3: numeric reference like "open 2" or "the 3rd"
