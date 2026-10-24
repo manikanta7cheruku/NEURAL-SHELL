@@ -13,6 +13,21 @@ Students and anyone working from notes add their PDFs, Word files, slides and sh
 Seven answers from the document, cites the page, and formats study answers as tables and lists. Everything is read
 and stored on the computer; nothing is uploaded.
 
+## How Seven reads a document (it has no eyes)
+
+Seven does not look at pages the way a person does. It reads the text stored inside the file:
+
+- **PDF**: the text layer of each page (pypdf). A PDF made from a scan is only pictures of pages, with no text layer,
+  so there is nothing to read until it is converted with OCR (optical character recognition). Seven says so instead of
+  answering from nothing.
+- **Word**: paragraphs, headings and tables, in order (python-docx).
+- **PowerPoint**: the text on each slide, tables and speaker notes (python-pptx).
+- **Excel**: each sheet's cells, row by row (openpyxl).
+- **Text and Markdown**: as they are.
+
+Pictures, charts and handwriting are not read; equations typed as text are. Reading happens once, when the file is
+added; questions are answered from the stored passages in a fraction of a second.
+
 ## How it works
 
 ```

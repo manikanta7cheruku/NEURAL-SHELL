@@ -9,7 +9,8 @@ is for, how it works, the data it keeps, how it fails and how it is tested.
 | [Brain](brain.md) | Understands each message and decides: act, answer from evidence, or ask the model | `brain.py`, `brain_modules/` | **Complete** |
 | [Ears](ears.md) | Microphone to clean text: noise handling, wake word, speech-to-text, voice ID | `ears/` | Outline |
 | [Mouth](mouth.md) | Speaks replies, stops when interrupted | `mouth/` | Outline |
-| [Hands](hands.md) | Apps, windows, system settings, files, workspaces | `hands/` | Outline |
+| [Hands](hands.md) | Apps, windows, system settings, files | `hands/` | Complete |
+| [Workspaces](workspaces.md) | Save everything open, restore only what is missing | `hands/workspace_modules/` | Complete |
 | [Memory](memory.md) | Facts, conversations, learning and command log stores | `memory/` | Outline (model in the brain doc) |
 | [Knowledge](knowledge.md) | The user's documents, read locally and answered with page citations | `knowledge/` | Complete |
 | [Backend API](backend-api.md) | Local HTTP API for the app and helper processes | `backend/` | Outline |
