@@ -5,6 +5,15 @@ Fires reminders and battery alerts even when Seven is fully closed.
 Includes direct voice playback via Seven's mouth.speaker module.
 """
 
+import os as _os
+import sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+try:
+    from seven_utils import gentle as _gentle
+    _gentle.cap_threads(2)
+    _gentle.background()          # a helper that waits for hotkeys and reminders never competes with the user
+except Exception:
+    pass
 import json
 import os
 import sys
