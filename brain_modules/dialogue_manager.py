@@ -291,6 +291,10 @@ def looks_like_reference(user_text: str) -> bool:
     words = re.findall(r"[a-z0-9]+", clean)
     word_set = set(words)
 
+    # "the last pdf I downloaded" is about the PC, not about the list Seven just showed.
+    if word_set & {"downloaded", "downloads", "saved", "recorded", "took", "latest", "newest", "recent"}:
+        return False
+
     # Signal 1: ordinal words
     if word_set & set(_REFERENCE_ORDINALS.keys()):
         return True
