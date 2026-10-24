@@ -181,6 +181,7 @@ const useChatSessions = create((set, get) => ({
       set({ sending: false, phase: 'idle', abortController: null });
       get().attachServerIds(convId);
       get().refreshList();
+      setTimeout(() => get().refreshList(), 2500);    // Seven names the chat in the background after a reply
     }
   },
 

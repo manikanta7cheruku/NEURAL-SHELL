@@ -182,6 +182,9 @@ def save_completed_turn(prompt_text, response_text, speaker_id, source="chat", p
             try:
                 from memory import conversation_store
                 conversation_store.add_message(conversation_id, "assistant", r, source=source)
+                if os.environ.get("SEVEN_TEST") != "1":
+                    from brain_modules import chat_title
+                    chat_title.maybe_retitle(conversation_id, current_model())
             except Exception as exc:
                 _log.warning("assistant message not saved: %s", exc)
                 conversation_state.get(tkey).trace["storage_error"] = str(exc)
