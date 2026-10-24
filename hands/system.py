@@ -31,6 +31,7 @@ TAG FORMAT:
 """
 
 import subprocess
+import time
 import ctypes
 import os
 from colorama import Fore
@@ -777,6 +778,44 @@ def _airplane_mode(enable=True):
 
 
 # =========================================================================
+# SESSION AND SCREEN
+# =========================================================================
+
+def _lock():
+    import ctypes
+    if ctypes.windll.user32.LockWorkStation():
+        command_log.log_command("SYS", "lock", True, "LockWorkStation")
+        return True, "Locked."
+    return False, "Windows didn't lock the PC."
+
+
+def _screenshot():
+    """Full screen to Pictures\Screenshots, after Seven's reply has been read."""
+    try:
+        from PIL import ImageGrab
+    except ImportError:
+        return False, "Screenshots need Pillow, which is missing. Reinstall Seven."
+    import datetime
+    time.sleep(0.4)
+    folder = os.path.join(os.path.expanduser("~"), "Pictures", "Screenshots")
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, datetime.datetime.now().strftime("Screenshot %Y-%m-%d %H%M%S.png"))
+    ImageGrab.grab(all_screens=True).save(path)
+    command_log.log_command("SYS", "screenshot", True, path)
+    return True, f"Saved to Pictures, Screenshots as {os.path.basename(path)}."
+
+
+def _empty_recycle_bin():
+    import ctypes
+    flags = 0x1 | 0x2 | 0x4            # no confirmation dialog, no progress UI, no sound
+    result = ctypes.windll.shell32.SHEmptyRecycleBinW(None, None, flags)
+    if result in (0, -2147418113):     # S_OK, or E_UNEXPECTED when it was already empty
+        command_log.log_command("SYS", "empty_recycle_bin", True, "SHEmptyRecycleBinW")
+        return True, "Recycle Bin emptied."
+    return False, f"Windows couldn't empty the Recycle Bin (code {result})."
+
+
+# =========================================================================
 # PUBLIC API — Main entry point
 # =========================================================================
 
@@ -877,6 +916,14 @@ def manage_system(params):
     elif action == "airplane_off":
         return _airplane_mode(enable=False)
     
+    # --- SESSION AND SCREEN ---
+    elif action == "lock":
+        return _lock()
+    elif action == "screenshot":
+        return _screenshot()
+    elif action == "empty_recycle_bin":
+        return _empty_recycle_bin()
+
     else:
         return False, f"Unknown system action: {action}"
 

@@ -729,14 +729,43 @@ def _focus_silent(hwnd):
         pass
 
 
+_SEVEN_PROCESSES = {"seven.exe", "electron.exe"}
+
+
+def _is_seven_window(hwnd) -> bool:
+    """Seven's own windows (the app, the side panel, overlays)."""
+    try:
+        import psutil
+        import win32process
+        _, pid = win32process.GetWindowThreadProcessId(hwnd)
+        if psutil.Process(pid).name().lower() in _SEVEN_PROCESSES:
+            return True
+    except Exception:
+        pass
+    return win32gui.GetWindowText(hwnd).strip().upper() == "SEVEN"
+
+
+def _usable(hwnd) -> bool:
+    try:
+        title = win32gui.GetWindowText(hwnd)
+        return bool(win32gui.IsWindowVisible(hwnd) and title.strip() and title != "Program Manager"
+                    and not win32gui.IsIconic(hwnd) and not _is_seven_window(hwnd))
+    except Exception:
+        return False
+
+
 def _get_focused_window():
-    """Get the currently focused/foreground window. Used for 'this' context."""
+    """The window "this" means. When the user is typing to Seven, Seven has focus, so "this window" is the one
+    they were using just before: the next window down the Z-order that isn't Seven's."""
     try:
         hwnd = win32gui.GetForegroundWindow()
-        title = win32gui.GetWindowText(hwnd)
-        if title and title.strip() and title != "Program Manager":
-            return hwnd, title
-    except:
+        steps = 0
+        while hwnd and steps < 200:
+            if _usable(hwnd):
+                return hwnd, win32gui.GetWindowText(hwnd)
+            hwnd = win32gui.GetWindow(hwnd, win32con.GW_HWNDNEXT)
+            steps += 1
+    except Exception:
         pass
     return None, None
 
