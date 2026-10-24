@@ -67,8 +67,8 @@ const useStatus = create((set, get) => ({
 
   color: () => {
     const s = get();
-    if (s.thinking) return '#a855f7';
-    if (s.speaking) return '#6366f1';
+    if (s.thinking) return 'var(--color-s-yellow)';
+    if (s.speaking) return 'var(--color-s-accent)';
     if (s.listening) return '#22c55e';
     return '#45454d';
   },

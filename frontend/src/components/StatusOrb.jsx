@@ -7,7 +7,7 @@ import ConversationPanel from './ConversationPanel';
  * States:
  *   Idle      → dim grey, slow breathing pulse
  *   Listening → green, soft glow
- *   Thinking  → purple, faster pulse
+ *   Thinking  → brass, faster pulse
  *   Speaking  → accent blue, active glow
  * 
  * ConversationPanel sits BELOW the orb.
@@ -19,8 +19,8 @@ export default function StatusOrb() {
 
   // Derive visual state from boolean flags
   const orbState = (() => {
-    if (thinking)  return { color: '#a855f7', label: 'Thinking',  ring: 'shadow-purple-500/40',  anim: 'animate-pulse' };
-    if (speaking)  return { color: '#6366f1', label: 'Speaking',  ring: 'shadow-indigo-500/40',  anim: 'animate-pulse' };
+    if (thinking)  return { color: 'var(--color-s-yellow)', label: 'Thinking',  ring: 'shadow-s-yellow/40',  anim: 'animate-pulse' };
+    if (speaking)  return { color: 'var(--color-s-accent)', label: 'Speaking',  ring: 'shadow-s-accent/40',  anim: 'animate-pulse' };
     if (listening) return { color: '#22c55e', label: 'Listening', ring: 'shadow-green-500/30',   anim: '' };
     return           { color: '#3f3f46',  label: 'Idle',      ring: 'shadow-zinc-700/20',    anim: '' };
   })();

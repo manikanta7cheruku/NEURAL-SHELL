@@ -26,10 +26,10 @@
   --text-muted:     rgba(255, 255, 255, 0.50);
   --text-dim:       rgba(255, 255, 255, 0.34);
 
-  --accent:       #6366f1;
+  --accent:       #3cc8b4;
   --accent-light: #a5b4fc;
   --accent-rgb:   99, 102, 241;
-  --accent-dim:   rgba(99, 102, 241, 0.16);
+  --accent-dim:   rgba(60, 200, 180, 0.16);
   --success:      #34d399;
   --warn:         #fbbf24;
   --warn-dim:     rgba(251, 191, 36, 0.13);

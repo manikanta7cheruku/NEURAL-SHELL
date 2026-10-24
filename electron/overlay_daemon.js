@@ -22,7 +22,7 @@ const { app, BrowserWindow, screen, ipcMain } = require('electron');
 const path = require('node:path');
 const net  = require('node:net');
 
-const IPC_PORT = 7891;
+const IPC_PORT = Number(process.env.SEVEN_OVERLAY_PORT) || 7891;   // override only for testing a second copy
 
 // DO NOT use app.requestSingleInstanceLock() here.
 // On Windows NSIS builds, Electron derives the lock key from the installer appId
@@ -45,19 +45,39 @@ let arrangeAppNames = [];
 // WINDOW CREATION
 // ─────────────────────────────────────────────────────────────────────────
 
+// The status card is a small window of real Windows glass (acrylic): the desktop blurs through it, with no drawn
+// shadow. It fades in and out by window opacity, since the glass itself can't be animated with CSS.
+const NOTIF_W = 360;
+const NOTIF_H = 56;
+
+function fadeWindow(win, to, ms, done) {
+  if (!win || win.isDestroyed()) return;
+  clearInterval(win.__fade);
+  const from = win.getOpacity();
+  const start = Date.now();
+  win.__fade = setInterval(() => {
+    if (win.isDestroyed()) { clearInterval(win.__fade); return; }
+    const t = Math.min(1, (Date.now() - start) / ms);
+    const eased = 1 - Math.pow(1 - t, 3);
+    win.setOpacity(from + (to - from) * eased);
+    if (t >= 1) { clearInterval(win.__fade); if (done) done(); }
+  }, 16);
+}
+
 function createNotifWindow() {
-  const { width: sw } = screen.getPrimaryDisplay().workArea;
-  const W = 380;
-  const H = 82;
+  const { width: sw, y: top } = screen.getPrimaryDisplay().workArea;
+  const W = NOTIF_W;
+  const H = NOTIF_H;
 
   notifWindow = new BrowserWindow({
     width:              W,
     height:             H,
     x:                  Math.round((sw - W) / 2),
-    y:                  0,
+    y:                  top + 12,
     frame:              false,
-    transparent:        true,
+    transparent:        false,
     backgroundColor:    '#00000000',
+    backgroundMaterial: 'acrylic',
     alwaysOnTop:        true,
     skipTaskbar:        true,
     resizable:          false,
@@ -252,12 +272,11 @@ function showNotification(data) {
     return;
   }
 
-  // Force-reset: hide, reposition, then show fresh
+  // Fresh card: centre it on the primary screen, just below the top edge, fully transparent until it fades in.
   try {
-    notifWindow.hide();
-    const { width: sw } = screen.getPrimaryDisplay().workArea;
-    const W = 360;
-    notifWindow.setPosition(Math.round((sw - W) / 2), 0);
+    const { width: sw, y: top } = screen.getPrimaryDisplay().workArea;
+    notifWindow.setOpacity(0);
+    notifWindow.setBounds({ x: Math.round((sw - NOTIF_W) / 2), y: top + 12, width: NOTIF_W, height: NOTIF_H });
   } catch (e) {}
 
   // Inject data & trigger animation
@@ -284,6 +303,7 @@ function showNotification(data) {
 
   notifWindow.showInactive();
   notifWindow.moveTop();
+  fadeWindow(notifWindow, 1, 180);
   // Give card enough time: hold duration + animations (600ms in + 500ms out) + buffer
   scheduleAutoHide(notifWindow, (data.holdMs || 4500) + 1500);
 }
@@ -334,7 +354,10 @@ function showArrangement(data) {
 // Hide handlers (called by HTML after animation completes)
 ipcMain.on('overlay-close', (event) => {
   const senderWin = BrowserWindow.fromWebContents(event.sender);
-  if (senderWin && !senderWin.isDestroyed()) {
+  if (!senderWin || senderWin.isDestroyed()) return;
+  if (senderWin === notifWindow) {
+    fadeWindow(senderWin, 0, 200, () => senderWin.hide());     // glass fades out, never blinks away
+  } else {
     senderWin.hide();
   }
 });
