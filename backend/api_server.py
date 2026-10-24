@@ -33,6 +33,19 @@ try:
 except ImportError:
     pass
 
+
+class _DropClientResets:
+    """Browsers and the extension drop connections all the time; asyncio logs each as an error with a traceback,
+    which filled python_crash.log. They are not errors."""
+
+    def filter(self, record):
+        exc = record.exc_info[1] if record.exc_info else None
+        return not isinstance(exc, (ConnectionResetError, ConnectionAbortedError))
+
+
+import logging as _logging  # noqa: E402
+_logging.getLogger("asyncio").addFilter(_DropClientResets())
+
 def _evict_offline_listener() -> None:
     """
     While Seven is closed, a small listener (hands/workspace_modules/offline_tab_listener.py) keeps port 7777

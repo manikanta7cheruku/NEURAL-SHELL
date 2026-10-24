@@ -30,8 +30,12 @@ if _app_path and _app_path not in sys.path:
     sys.path.insert(0, _app_path)
 
 # Before anything imports huggingface_hub: never ask huggingface.co about a model that is already on disk.
-from seven_utils import hf_offline
+from seven_utils import gentle, hf_offline
 hf_offline.enable()
+# Before NumPy and PyTorch load: a few cores, and below-normal priority while the models load, so starting Seven
+# never makes the rest of Windows stutter.
+gentle.cap_threads()
+gentle.background(seconds=90)
 
 # ── System init (VC++, numpy, logging) ──────────────────────────────
 from main_modules.startup.system_init import (

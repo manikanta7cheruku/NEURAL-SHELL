@@ -157,8 +157,8 @@ def process(ctx, deps):
                 phrase_safe = phrase.replace(" ", "|||")
                 ctx.is_command = True
                 return LayerResult.stop(
-                    f"Firing trigger '{trigger['name']}'. "
-                    f"###TRIGGER: action=fire phrase={phrase_safe}"
+                    f"Running {trigger['name']}. "
+                    f"###TRIGGER: action=fire id={trigger['id']} phrase={phrase_safe}"
                 )
 
     except Exception as e:

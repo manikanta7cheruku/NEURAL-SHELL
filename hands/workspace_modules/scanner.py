@@ -52,11 +52,12 @@ TERMINALS = {
 
 # ── Public API ───────────────────────────────────────────────────────────
 
-def scan_current(keep_handles: bool = False):
+def scan_current(keep_handles: bool = False, read_tabs: bool = True):
     """
     Scan all visible user-opened windows and return app configs.
     Filters out system utilities, Seven's own processes, GPU overlays.
     keep_handles: keep the live "pid" and "hwnd" (restore compares against them); saved workspaces never need them.
+    read_tabs: read every browser tab (saving needs it; restore skips it, browser_restore reads tabs per profile).
     """
     print(Fore.CYAN + "[WORKSPACE] Scanning desktop...")
     t0 = time.time()
@@ -131,7 +132,11 @@ def scan_current(keep_handles: bool = False):
 
     from hands.workspace_modules.enrichment import enrich_vscode, enrich_explorer
     from hands.workspace_modules.browser_capture import enrich_browsers
-    enrich_browsers(apps)
+    if read_tabs:
+        enrich_browsers(apps)
+    else:
+        for a in apps:
+            a.pop("_is_browser", None)
     enrich_vscode(apps)
 
     try:

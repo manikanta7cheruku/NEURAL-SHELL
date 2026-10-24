@@ -18,6 +18,15 @@ RESPONSIBILITIES (delegated to modules):
   trigger_modules.reload_poller    → DB change watcher
 =============================================================================
 """
+import os as _os
+import sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+try:
+    from seven_utils import gentle as _gentle
+    _gentle.cap_threads(2)
+    _gentle.background()          # a helper that waits for hotkeys and reminders never competes with the user
+except Exception:
+    pass
 import sys
 import os
 import time
@@ -157,6 +166,17 @@ def main():
         return
 
     print("[TRIGGER DAEMON] Starting...")
+
+    def _prewarm():
+        """Load the workspace code and the UI Automation client now, not on the first hotkey press."""
+        try:
+            from hands.workspace_modules import restore, scanner  # noqa: F401
+            from hands.workspace_modules.browser_tabs import _uia
+            _uia()
+            print("[TRIGGER DAEMON] Workspace restore ready")
+        except Exception as e:
+            print(f"[TRIGGER DAEMON] Prewarm skipped: {e}")
+    threading.Thread(target=_prewarm, daemon=True, name="WorkspacePrewarm").start()
 
     # Load initial triggers
     triggers = load_triggers()

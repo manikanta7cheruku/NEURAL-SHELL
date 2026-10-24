@@ -108,114 +108,110 @@ class VoiceListener(threading.Thread):
         print(f"[VOICE TRIGGER] Reload complete: "
               f"{len(self._phrase_map)} phrases")
 
+    @staticmethod
+    def _seven_is_listening() -> bool:
+        """True while the Seven app's backend is running: it hears voice-trigger phrases itself
+        (brain layer 4.5h), and two processes on one microphone close each other's streams.
+        /api/version exists only in the real backend, not in the offline tab listener on the same port."""
+        import urllib.request
+        try:
+            with urllib.request.urlopen("http://127.0.0.1:7777/api/version", timeout=0.4) as r:
+                return r.status == 200
+        except Exception:
+            return False
+
     def run(self):
         """
-        Main listener loop.
-        Delays 10s at start to let pynput keyboard hook stabilize.
+        Main listener loop. Only listens while the Seven app is closed, reopens the microphone with a growing pause
+        when the stream drops, and never spins (a dropped stream once logged 19 MB of errors and kept the CPU busy).
         """
         time.sleep(10.0)
         print("[VOICE TRIGGER] Listener started — watching for phrases...")
-
-        # Open microphone using safe global import reference
-        try:
-            mic     = sr.Microphone()
-            mic_ctx = mic.__enter__()
-            recognizer = sr.Recognizer()
-        except Exception as e:
-            print(f"[VOICE TRIGGER] Microphone unavailable: {e}")
+        failures = 0
+        mic = mic_ctx = None
+        recognizer = sr.Recognizer() if hasattr(sr, "Recognizer") else None
+        if recognizer is None:
+            print("[VOICE TRIGGER] speech_recognition unavailable")
             return
+
+        def _close():
+            nonlocal mic, mic_ctx
+            if mic is not None:
+                try:
+                    mic.__exit__(None, None, None)
+                except Exception:
+                    pass
+            mic = mic_ctx = None
 
         try:
             while not self.stop_event.is_set():
+                if not self._phrase_map or self._seven_is_listening():
+                    _close()                                  # Seven handles phrases; give it the microphone
+                    self.stop_event.wait(5.0)
+                    continue
 
-                # Capture audio chunk
+                if mic_ctx is None:
+                    try:
+                        mic = sr.Microphone()
+                        mic_ctx = mic.__enter__()
+                        failures = 0
+                    except Exception as e:
+                        failures += 1
+                        wait = min(60.0, 2.0 ** min(failures, 6))
+                        if failures in (1, 3, 6) or failures % 20 == 0:
+                            print(f"[VOICE TRIGGER] Microphone unavailable ({e}); retrying in {wait:.0f}s")
+                        _close()
+                        self.stop_event.wait(wait)
+                        continue
+
                 try:
-                    audio = recognizer.listen(
-                        mic_ctx,
-                        timeout=1.5,
-                        phrase_time_limit=4
-                    )
+                    audio = recognizer.listen(mic_ctx, timeout=1.5, phrase_time_limit=4)
                 except sr.WaitTimeoutError:
                     continue
                 except Exception as e:
-                    print(f"[VOICE TRIGGER] Capture error: {e}")
-                    time.sleep(0.5)
+                    failures += 1
+                    if failures in (1, 3, 6) or failures % 20 == 0:
+                        print(f"[VOICE TRIGGER] Capture error ({e}); reopening the microphone")
+                    _close()
+                    self.stop_event.wait(min(60.0, 2.0 ** min(failures, 6)))
                     continue
+                failures = 0
 
                 if not self._model:
                     continue
-
-                # Transcribe in RAM
-                try:
-                    import io as _io
-                    wav_bytes = audio.get_wav_data()
-                    wav_buf   = _io.BytesIO(wav_bytes)
-
-                    result = self._model.transcribe(
-                        wav_buf,
-                        beam_size=1,
-                        language="en",
-                        no_speech_threshold=0.6,
-                        log_prob_threshold=-1.0,
-                        vad_filter=True,
-                    )
-
-                    if isinstance(result, tuple):
-                        segments = list(result[0])
-                    else:
-                        segments = list(result)
-
-                    text = "".join(s.text for s in segments).strip().lower()
-
-                except Exception as e:
-                    print(f"[VOICE TRIGGER] Transcription error: {e}")
-                    continue
-
-                if not text or len(text) < 2:
-                    continue
-
-                # Clean punctuation for matching
-                clean = text.replace(".", "").replace(",", "") \
-                              .replace("?", "").strip()
-
-                # Match against all configured phrases
-                best_phrase  = None
-                best_score   = 0
-                best_trigger = None
-
-                try:
-                    from rapidfuzz import fuzz as _rfuzz
-                except ImportError:
-                    continue
-
-                for phrase, trigger in self._phrase_map.items():
-                    score = _rfuzz.partial_ratio(phrase, clean)
-                    if score >= 82 and score > best_score:
-                        best_score   = score
-                        best_phrase  = phrase
-                        best_trigger = trigger
-
-                if best_trigger:
-                    print(
-                        f"[VOICE TRIGGER] Match: '{best_phrase}' "
-                        f"in '{clean}' (score={best_score}) "
-                        f"-> '{best_trigger.get('name')}'"
-                    )
-                    threading.Thread(
-                        target=execute_trigger,
-                        args=(best_trigger,),
-                        daemon=True
-                    ).start()
-
-                    # Brief pause after firing — prevents double-fire
-                    time.sleep(2.0)
-
+                self._handle_audio(audio)
         finally:
-            try:
-                mic.__exit__(None, None, None)
-                print("[VOICE TRIGGER] Microphone released")
-            except Exception:
-                pass
+            _close()
+            print("[VOICE TRIGGER] Microphone released")
+
+    def _handle_audio(self, audio):
+        try:
+            import io as _io
+            result = self._model.transcribe(_io.BytesIO(audio.get_wav_data()), beam_size=1, language="en",
+                                            no_speech_threshold=0.6, log_prob_threshold=-1.0, vad_filter=True)
+            segments = list(result[0]) if isinstance(result, tuple) else list(result)
+            text = "".join(s.text for s in segments).strip().lower()
+        except Exception as e:
+            print(f"[VOICE TRIGGER] Transcription error: {e}")
+            return
+        if not text or len(text) < 2:
+            return
+        clean = text.replace(".", "").replace(",", "").replace("?", "").strip()
+        try:
+            from rapidfuzz import fuzz as _rfuzz
+        except ImportError:
+            return
+        best_phrase, best_score, best_trigger = None, 0, None
+        for phrase, trigger in self._phrase_map.items():
+            score = _rfuzz.partial_ratio(phrase, clean)
+            if score >= 82 and score > best_score:
+                best_phrase, best_score, best_trigger = phrase, score, trigger
+        if best_trigger:
+            print(f"[VOICE TRIGGER] Match: '{best_phrase}' in '{clean}' (score={best_score}) "
+                  f"-> '{best_trigger.get('name')}'")
+            threading.Thread(target=execute_trigger, args=(best_trigger,), daemon=True).start()
+            self.stop_event.wait(2.0)                      # no double fire
+
 
     def stop(self):
         """Signal the listener loop to stop.""" 
