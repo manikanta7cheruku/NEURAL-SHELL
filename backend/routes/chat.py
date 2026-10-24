@@ -235,8 +235,14 @@ def _gate_risky(full_response: str, speaker_id: str, conv_id: str):
     if not risky:
         return None, None
     tags = " ".join(f"###{k}: {a.strip()}" for k, a in risky)
-    names = ", ".join(a.strip().replace("ALL_", "all ") for _k, a in risky)
-    return tags, brain.request_confirmation(speaker_id, conv_id, tags, f"That would affect {names}, and unsaved work could be lost.")
+    if any("empty_recycle_bin" in a for _k, a in risky):
+        why = "That permanently deletes everything in the Recycle Bin."
+    elif any("airplane_on" in a for _k, a in risky):
+        why = "That turns off Wi-Fi and Bluetooth, so you'll go offline."
+    else:
+        names = ", ".join(a.strip().replace("ALL_", "all ") for _k, a in risky)
+        why = f"That would close {names}, and unsaved work could be lost."
+    return tags, brain.request_confirmation(speaker_id, conv_id, tags, why)
 
 
 def _finish_string(response, req, conv_id):

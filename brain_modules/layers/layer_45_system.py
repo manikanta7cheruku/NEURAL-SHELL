@@ -42,8 +42,24 @@ _POLITENESS_PREFIXES = [
 ]
 
 
+# Session and screen actions, said many ways. Emptying the Recycle Bin asks for a yes first (brain.needs_confirmation).
+_DIRECT = (
+    (re.compile(r"^(?:please )?(?:lock (?:my |the )?(?:pc|computer|laptop|screen|system|windows)|lock it|lock up)$"),
+     "action=lock", "Locking."),
+    (re.compile(r"^(?:please )?(?:take|grab|capture) (?:a |an )?(?:screenshot|screen ?shot|screen capture|snapshot of "
+                r"(?:my|the) screen)$|^screenshot(?: (?:my|the) screen)?$"),
+     "action=screenshot", "Got it."),
+    (re.compile(r"^(?:please )?(?:empty|clear|clean(?: out)?) (?:the |my )?(?:recycle ?bin|trash|bin)$"),
+     "action=empty_recycle_bin", "Emptying the Recycle Bin."),
+)
+
+
 def process(ctx, deps):
     clean_in = ctx.clean_in
+    for pattern, tag, speech in _DIRECT:
+        if pattern.match(clean_in.strip(" .!?")):
+            ctx.is_command = True
+            return LayerResult.stop(f"{speech} ###SYS: {tag}")
 
     _has_sys = any(t in clean_in for t in SYSTEM_TRIGGER_WORDS)
 
