@@ -17,10 +17,8 @@ the brain and the enforcement cannot disagree. Change a limit there and everythi
 | Triggers | 7 | 77 | Unlimited |
 | Schedules | 7 | 77 | Unlimited |
 | Recurring schedules | No | No | Yes |
-| Knowledge files | 1 | 7 | Unlimited |
+| Knowledge files | 3 | 7 | Unlimited |
 | Web lookups per day | 7 | 77 | Unlimited |
-| URL shortcuts, app aliases, custom paths | 3 / 3 / 1 | 7 each | Unlimited |
-| Window control | Basic | Advanced | Full |
 | Voice recognition (speaker ID) | No | No | Yes |
 | Memory export | No | No | Yes |
 | Devices per licence | 1 | 1 | 3 |
@@ -33,6 +31,13 @@ the brain and the enforcement cannot disagree. Change a limit there and everythi
 | Ultimate | 199 | 999 | 1,999 |
 
 A 14-day Pro trial is available from the Plans page.
+
+Only limits the code enforces appear here. App aliases, URL shortcuts, custom commands, custom paths and window
+control levels were listed before 1.4 but never enforced, so they were removed. Seven still learns spelling
+shortcuts on its own (say "camra" once, confirm, and it opens Camera next time); that is not a plan feature.
+
+Only limits that the code enforces appear here. App aliases, URL shortcuts, custom commands, custom paths and
+window control levels were listed in earlier versions but never enforced, so they were removed in 1.4.
 
 ## How licensing works
 

@@ -32,7 +32,6 @@ const TAGLINES = {
 };
 const PERIODS = [{ value: 'monthly', label: 'Monthly' }, { value: 'yearly', label: 'Yearly' }, { value: 'lifetime', label: 'Lifetime' }];
 const PERIOD_SUFFIX = { monthly: '/month', yearly: '/year', lifetime: 'one time' };
-const WINDOW = { basic: 'Basic', advanced: 'Advanced', full: 'Full' };
 
 // Rows of the comparison table: [label, value(features) => display]
 const ROWS = [
@@ -42,10 +41,6 @@ const ROWS = [
   ['Triggers and hotkeys', f => f.triggers],
   ['Knowledge files', f => f.knowledge_files],
   ['Web searches per day', f => f.web_searches_per_day],
-  ['App aliases', f => f.app_aliases],
-  ['URL shortcuts', f => f.url_shortcuts],
-  ['Custom commands', f => f.custom_commands],
-  ['Window control', f => WINDOW[f.window_control] || f.window_control],
   ['Recurring schedules', f => f.recurring_schedules],
   ['Voice recognition', f => f.voice_recognition],
   ['Memory export', f => f.memory_export],
