@@ -13,7 +13,8 @@
                 {"label": "Complete a task", "description": "Tick the circle next to it. You have a few seconds to undo."},
                 {"label": "Edit a task", "description": "Click a task to open its notes and subtasks, or double-click the title to rename it."}
               ]} */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Plus, Check, Trash2, Calendar, Pencil, X, ChevronDown, ListChecks, CheckCircle2 } from 'lucide-react';
 import useTasks from '../stores/useTasks';
 import { PageShell, Segmented, Button, Input, Dialog, EmptyState, LoadingRows } from '../components/ui';
@@ -59,16 +60,32 @@ function groupTasks(tasks) {
 
 // ── Date picker ─────────────────────────────────────────────────────────────
 
+// Drawn above the page (a portal at a fixed position under its button, or above it when the window is short), so the
+// list below can never cover it or clip it.
 function DateMenu({ date, time, onChange, onClose }) {
   const ref = useRef(null);
+  const marker = useRef(null);
+  const [pos, setPos] = useState(null);
+  useLayoutEffect(() => {
+    const host = marker.current?.parentElement;
+    if (!host) return;
+    const r = host.getBoundingClientRect();
+    const W = 256, H = 104;
+    const below = r.bottom + 6;
+    setPos({ top: below + H > window.innerHeight - 8 ? Math.max(8, r.top - H - 6) : below,
+             left: Math.max(8, Math.min(r.left, window.innerWidth - W - 8)) });
+  }, []);
   useEffect(() => {
     const away = e => { if (ref.current && !ref.current.contains(e.target)) onClose(); };
     const t = setTimeout(() => document.addEventListener('mousedown', away), 0);
-    return () => { clearTimeout(t); document.removeEventListener('mousedown', away); };
+    window.addEventListener('resize', onClose);
+    return () => { clearTimeout(t); document.removeEventListener('mousedown', away); window.removeEventListener('resize', onClose); };
   }, [onClose]);
   const quick = [['Today', addDays(0)], ['Tomorrow', addDays(1)], ['Next week', addDays(7)]];
-  return (
-    <div ref={ref} className="absolute z-30 mt-1.5 w-64 rounded-lg border border-s-border bg-s-surface p-2.5 shadow-[var(--s-shadow-raised)] animate-[dialogReveal_140ms_ease-out]">
+  if (!pos) return <span ref={marker} className="hidden" />;
+  return createPortal(
+    <div ref={ref} style={{ position: 'fixed', top: pos.top, left: pos.left }}
+         className="z-[1100] w-64 rounded-lg border border-s-border bg-s-surface p-2.5 shadow-[var(--s-shadow-raised)] animate-[dialogReveal_140ms_ease-out]">
       <div className="flex flex-wrap gap-1">
         {quick.map(([label, value]) => (
           <button key={label} onClick={() => onChange(value, time)}
@@ -81,8 +98,7 @@ function DateMenu({ date, time, onChange, onClose }) {
         <Input type="date" value={date || ''} onChange={e => onChange(e.target.value, time)} className="flex-1" aria-label="Due date" />
         <Input type="time" value={time || ''} disabled={!date} onChange={e => onChange(date, e.target.value)} className="w-24" aria-label="Due time" />
       </div>
-    </div>
-  );
+    </div>, document.body);
 }
 
 // ── Quick add ───────────────────────────────────────────────────────────────

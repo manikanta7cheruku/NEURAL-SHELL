@@ -256,19 +256,28 @@ export function LoadingRows({ rows = 4 }) {
 export function Dialog({ open, title, description, children, confirmLabel = 'Confirm', tone = 'default',
                          onConfirm, onCancel, busy, confirmDisabled }) {
   const confirmRef = useRef(null);
+  const boxRef = useRef(null);
+  const cancelRef = useRef(onCancel);
   const titleId = useId();
+  useEffect(() => { cancelRef.current = onCancel; }, [onCancel]);
+  // Runs when the dialog opens, not on every render: parents pass a new onCancel each time, and re-running this
+  // used to pull focus back to the button after every keystroke, so forms inside dialogs couldn't be typed into.
   useEffect(() => {
     if (!open) return;
-    const t = setTimeout(() => confirmRef.current?.focus(), 30);
-    const onKey = e => { if (e.key === 'Escape') onCancel(); };
+    const t = setTimeout(() => {
+      const field = boxRef.current?.querySelector('input:not([type=hidden]), textarea, select');
+      if (field) { if (!boxRef.current.contains(document.activeElement)) field.focus(); }
+      else confirmRef.current?.focus();
+    }, 30);
+    const onKey = e => { if (e.key === 'Escape') cancelRef.current?.(); };
     window.addEventListener('keydown', onKey);
     return () => { clearTimeout(t); window.removeEventListener('keydown', onKey); };
-  }, [open, onCancel]);
+  }, [open]);
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-[1000] flex items-center justify-center p-6" onMouseDown={onCancel}>
       <div className="absolute inset-0 bg-[var(--s-scrim)] animate-[fadeIn_120ms_ease-out]" />
-      <div role="dialog" aria-modal="true" aria-labelledby={titleId}
+      <div ref={boxRef} role="dialog" aria-modal="true" aria-labelledby={titleId}
            onMouseDown={e => e.stopPropagation()}
            className="relative w-full max-w-[420px] rounded-xl border border-s-border bg-s-surface shadow-[var(--s-shadow-raised)]
                       animate-[dialogReveal_160ms_ease-out]">
