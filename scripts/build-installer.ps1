@@ -27,6 +27,16 @@ npx electron-builder --config electron-builder.yml --x64 --dir
 if ($LASTEXITCODE -ne 0) { throw "electron-builder failed" }
 if (-not (Test-Path "$out\win-unpacked\SEVEN.exe")) { throw "win-unpacked\SEVEN.exe missing" }
 
+# 4b. Every path must fit inside Windows' 260-character limit once installed. The install folder
+#     (C:\Users\<name>\AppData\Local\Programs\SEVEN\) can take about 100 characters on its own.
+$maxRelative = 150
+$base = (Resolve-Path "$out\win-unpacked").Path.Length + 1
+$tooLong = Get-ChildItem "$out\win-unpacked" -Recurse -File | Where-Object { $_.FullName.Length - $base -gt $maxRelative }
+if ($tooLong) {
+  $tooLong | Select-Object -First 10 | ForEach-Object { Write-Host $_.FullName.Substring($base) -ForegroundColor Yellow }
+  throw "$($tooLong.Count) packaged paths are longer than $maxRelative characters and would not install. Exclude them in electron-builder.yml."
+}
+
 # 5. Compile the installer
 $iscc = @(
   "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
