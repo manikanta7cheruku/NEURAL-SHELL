@@ -3,229 +3,148 @@
 <head>
 <meta charset="UTF-8">
 <meta name="color-scheme" content="dark">
+<!--
+  seven_overlay/notification.html
+  The status card at the top centre of the screen. The overlay daemon (electron/overlay_daemon.js) keeps it loaded
+  and calls window.__applyNotifData({title, subtitle, detail, holdMs, state, replace}).
+
+  state:    "working" (spinner and a moving hairline, no sound), "done" (check, soft chime), "error", "info"
+  replace:  true updates a card that is already showing, in place ("Scanning..." becomes "Saved")
+-->
 <style>
   *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 380px; height: 82px; background: transparent; overflow: hidden;
+               font-family: 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
 
-  html, body {
-    width: 380px;
-    height: 82px;
-    background: transparent;
-    overflow: hidden;
-    font-family: 'Segoe UI', 'Inter', system-ui, -apple-system, sans-serif;
-    -webkit-font-smoothing: antialiased;
-  }
+  .wrap { position: absolute; inset: 0; display: flex; justify-content: center; align-items: flex-start; padding-top: 10px; }
 
   .card {
-    position: relative;
-    width: 100%;
-    height: 100%;
-    background: rgba(14, 14, 18, 0.92);
-    border-radius: 0 0 16px 16px;
-    border-left:   1px solid rgba(255, 255, 255, 0.08);
-    border-right:  1px solid rgba(255, 255, 255, 0.08);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.10);
-    padding: 14px 20px;
-    display: flex;
-    align-items: center;
-    backdrop-filter: blur(32px) saturate(120%);
-    -webkit-backdrop-filter: blur(32px) saturate(120%);
-    transform: translateY(-100%);
-    opacity: 0;
-    will-change: transform, opacity;
-    cursor: pointer;
-    user-select: none;
-    box-shadow:
-      0 8px 32px rgba(0, 0, 0, 0.3),
-      0 0 0 1px rgba(255, 255, 255, 0.03);
+    position: relative; display: flex; align-items: center; gap: 12px;
+    min-width: 280px; max-width: 360px; height: 58px; padding: 0 16px 0 12px;
+    background: rgba(17, 17, 21, 0.94);
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    border-radius: 16px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.38), 0 1px 0 rgba(255, 255, 255, 0.05) inset;
+    overflow: hidden; cursor: default; user-select: none;
+    transform: translateY(-140%) scale(0.98); opacity: 0;
+    transition: min-width 280ms cubic-bezier(0.32, 0.72, 0, 1);
   }
+  .card.show   { animation: drop 520ms cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+  .card.hiding { animation: lift 320ms cubic-bezier(0.55, 0, 0.85, 0.35) forwards; }
+  @keyframes drop { from { transform: translateY(-140%) scale(0.98); opacity: 0; } to { transform: none; opacity: 1; } }
+  @keyframes lift { from { transform: none; opacity: 1; } to { transform: translateY(-140%) scale(0.98); opacity: 0; } }
 
-  .card::before {
-    content: '';
-    position: absolute;
-    top: 0; left: 0; right: 0;
-    height: 45%;
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, transparent 100%);
-    pointer-events: none;
-    border-radius: 0 0 16px 16px;
-  }
+  /* State mark */
+  .mark { position: relative; width: 30px; height: 30px; flex-shrink: 0; border-radius: 50%;
+          display: grid; place-items: center; background: rgba(255, 255, 255, 0.06);
+          transition: background-color 240ms ease; }
+  .mark svg { position: absolute; inset: 0; width: 30px; height: 30px; }
+  .ring  { fill: none; stroke: #8b8cf8; stroke-width: 2; stroke-linecap: round; stroke-dasharray: 44 120;
+           transform-origin: 50% 50%; animation: spin 900ms linear infinite; opacity: 0; transition: opacity 200ms; }
+  .check { fill: none; stroke: #3ccf7a; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round;
+           stroke-dasharray: 22; stroke-dashoffset: 22; opacity: 0; }
+  .bang  { fill: #f26d6d; opacity: 0; }
+  .seven { font: 600 12px/1 'Segoe UI', system-ui; color: rgba(255, 255, 255, 0.85); opacity: 0; letter-spacing: 0.02em; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes draw { to { stroke-dashoffset: 0; } }
 
-  .card::after {
-    content: '';
-    position: absolute;
-    left: 20%; right: 20%;
-    bottom: 0;
-    height: 1px;
-    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.18), transparent);
-    pointer-events: none;
-  }
+  .card[data-state="working"] .ring  { opacity: 1; }
+  .card[data-state="done"]    .mark  { background: rgba(60, 207, 122, 0.14); }
+  .card[data-state="done"]    .check { opacity: 1; animation: draw 360ms 80ms cubic-bezier(0.65, 0, 0.35, 1) forwards; }
+  .card[data-state="error"]   .mark  { background: rgba(242, 109, 109, 0.14); }
+  .card[data-state="error"]   .bang  { opacity: 1; }
+  .card[data-state="info"]    .seven { opacity: 1; }
 
-  .card.show {
-    animation: slideDown 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-  }
-  .card.hiding {
-    animation: slideUp 0.35s cubic-bezier(0.55, 0, 0.85, 0.35) forwards;
-  }
+  .text { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 3px; }
+  .title { font-size: 13px; font-weight: 600; color: rgba(255, 255, 255, 0.96); letter-spacing: -0.01em;
+           white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sub { display: flex; align-items: center; gap: 7px; font-size: 11.5px; color: rgba(255, 255, 255, 0.55);
+         white-space: nowrap; overflow: hidden; }
+  .sub span { overflow: hidden; text-overflow: ellipsis; }
+  .detail { font-family: 'Cascadia Mono', 'JetBrains Mono', Consolas, monospace; font-size: 10.5px;
+            color: rgba(255, 255, 255, 0.72); padding: 1px 6px; border-radius: 5px; background: rgba(255, 255, 255, 0.06);
+            flex-shrink: 0; }
 
-  @keyframes slideDown {
-    0%   { transform: translateY(-100%); opacity: 0; }
-    100% { transform: translateY(0);     opacity: 1; }
-  }
-  @keyframes slideUp {
-    0%   { transform: translateY(0);     opacity: 1; }
-    100% { transform: translateY(-100%); opacity: 0; }
-  }
+  /* Working: a hairline that travels along the bottom edge */
+  .line { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; overflow: hidden; opacity: 0; transition: opacity 200ms; }
+  .line::before { content: ''; position: absolute; top: 0; bottom: 0; width: 38%;
+                  background: linear-gradient(90deg, transparent, #8b8cf8, transparent);
+                  animation: travel 1.25s cubic-bezier(0.45, 0, 0.55, 1) infinite; }
+  .card[data-state="working"] .line { opacity: 0.9; }
+  @keyframes travel { from { transform: translateX(-110%); } to { transform: translateX(290%); } }
 
-  .accent-bar {
-    width: 3px;
-    height: 34px;
-    background: linear-gradient(180deg,
-      rgba(200, 180, 255, 0.9) 0%,
-      rgba(140, 110, 240, 0.8) 50%,
-      rgba(110, 80, 220, 0.7) 100%);
-    border-radius: 3px;
-    margin-right: 14px;
-    flex-shrink: 0;
-    box-shadow:
-      0 0 8px rgba(160, 130, 255, 0.6),
-      0 0 20px rgba(150, 120, 255, 0.25);
-    position: relative;
-    z-index: 2;
-  }
-
-  .text {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-    position: relative;
-    z-index: 2;
-  }
-
-  .title {
-    font-size: 13px;
-    font-weight: 600;
-    color: rgba(255, 255, 255, 0.95);
-    letter-spacing: -0.01em;
-    line-height: 1.2;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
-  }
-
-  .subtitle-row {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 11px;
-    line-height: 1.2;
-    white-space: nowrap;
-    overflow: hidden;
-  }
-
-  .subtitle {
-    color: rgba(255, 255, 255, 0.6);
-    font-weight: 400;
-    letter-spacing: -0.005em;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .dot {
-    width: 2px;
-    height: 2px;
-    border-radius: 50%;
-    background: rgba(255, 255, 255, 0.35);
-    flex-shrink: 0;
-  }
-
-  .detail {
-    color: rgba(200, 180, 255, 0.8);
-    font-weight: 500;
-    letter-spacing: -0.005em;
-    font-size: 10.5px;
-  }
+  .fade { animation: fade 220ms ease; }
+  @keyframes fade { from { opacity: 0.25; transform: translateY(2px); } to { opacity: 1; transform: none; } }
 </style>
 </head>
 <body>
-
-<div class="card" id="card" onclick="retract()">
-  <div class="accent-bar"></div>
-  <div class="text">
-    <div class="title" id="titleEl">Seven</div>
-    <div class="subtitle-row">
-      <span class="subtitle" id="subtitleEl"></span>
-      <span class="dot" id="dotEl" style="display:none"></span>
-      <span class="detail" id="detailEl" style="display:none"></span>
+<div class="wrap">
+  <div class="card" id="card" data-state="info" onclick="retract()">
+    <div class="mark">
+      <svg viewBox="0 0 30 30" aria-hidden="true">
+        <circle class="ring" cx="15" cy="15" r="11"></circle>
+        <path class="check" d="M9.5 15.5l3.6 3.4 7.4-7.6"></path>
+        <rect class="bang" x="14" y="8.5" width="2" height="8.5" rx="1"></rect>
+        <rect class="bang" x="14" y="19.2" width="2" height="2.2" rx="1"></rect>
+      </svg>
+      <span class="seven">7</span>
     </div>
+    <div class="text" id="text">
+      <div class="title" id="titleEl">Seven</div>
+      <div class="sub"><span id="subtitleEl"></span><em class="detail" id="detailEl" style="display:none"></em></div>
+    </div>
+    <div class="line"></div>
   </div>
 </div>
 
 <script>
   let _timer = null;
 
-  function playChime() {
+  function chime() {
     try {
       const ctx = new (window.AudioContext || window.webkitAudioContext)();
-      const now = ctx.currentTime;
-      function tone(freq, start, dur, vol) {
-        const osc  = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.type = 'sine';
-        osc.frequency.value = freq;
-        gain.gain.setValueAtTime(vol, start);
-        gain.gain.exponentialRampToValueAtTime(0.001, start + dur);
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.start(start);
-        osc.stop(start + dur);
-      }
-      tone(523.25, now,        0.22, 0.12);
-      tone(659.25, now + 0.12, 0.28, 0.10);
-    } catch(e) {}
+      const t = ctx.currentTime;
+      [[659.25, 0, 0.18, 0.07], [987.77, 0.09, 0.26, 0.05]].forEach(([f, s, d, v]) => {
+        const o = ctx.createOscillator(), g = ctx.createGain();
+        o.type = 'sine'; o.frequency.value = f;
+        g.gain.setValueAtTime(0.0001, t + s);
+        g.gain.exponentialRampToValueAtTime(v, t + s + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + s + d);
+        o.connect(g); g.connect(ctx.destination); o.start(t + s); o.stop(t + s + d + 0.05);
+      });
+    } catch (e) {}
   }
 
   function applyData(data) {
-    const { title = 'Seven', subtitle = '', detail = '', holdMs = 4500 } = data;
-
+    const { title = 'Seven', subtitle = '', detail = '', holdMs = 4000, state = 'info', replace = false } = data;
+    const card = document.getElementById('card');
+    const showing = card.classList.contains('show') && !card.classList.contains('hiding');
     if (_timer) { clearTimeout(_timer); _timer = null; }
 
     document.getElementById('titleEl').textContent = title;
     document.getElementById('subtitleEl').textContent = subtitle;
+    const det = document.getElementById('detailEl');
+    det.textContent = detail;
+    det.style.display = detail ? '' : 'none';
+    card.dataset.state = ['working', 'done', 'error', 'info'].includes(state) ? state : 'info';
 
-    const detEl = document.getElementById('detailEl');
-    const dotEl = document.getElementById('dotEl');
-    if (detail) {
-      detEl.textContent = detail;
-      detEl.style.display = '';
-      if (subtitle) dotEl.style.display = '';
+    if (replace && showing) {
+      const text = document.getElementById('text');
+      text.classList.remove('fade'); void text.offsetWidth; text.classList.add('fade');
     } else {
-      detEl.style.display = 'none';
-      dotEl.style.display = 'none';
+      card.classList.remove('show', 'hiding'); void card.offsetWidth; card.classList.add('show');
     }
-
-    const card = document.getElementById('card');
-    card.classList.remove('show', 'hiding');
-    void card.offsetWidth;
-    card.classList.add('show');
-
-    playChime();
-
-    _timer = setTimeout(retract, holdMs);
+    if (state === 'done') chime();
+    if (state !== 'working') _timer = setTimeout(retract, holdMs);
+    else _timer = setTimeout(retract, Math.max(holdMs, 20000));    // a stuck "working" card still leaves
   }
-
   window.__applyNotifData = applyData;
 
   if (!window.__NOTIF_DATA__) {
     const p = new URLSearchParams(window.location.search);
     if (p.get('title')) {
-      requestAnimationFrame(() => applyData({
-        title:    p.get('title')    || 'Seven',
-        subtitle: p.get('subtitle') || '',
-        detail:   p.get('detail')   || '',
-        holdMs:   parseInt(p.get('holdMs') || '4500'),
-      }));
+      requestAnimationFrame(() => applyData({ title: p.get('title'), subtitle: p.get('subtitle') || '',
+        detail: p.get('detail') || '', holdMs: parseInt(p.get('holdMs') || '4000'), state: p.get('state') || 'info' }));
     }
   }
 
@@ -235,11 +154,7 @@
     if (card.classList.contains('hiding')) return;
     card.classList.remove('show');
     card.classList.add('hiding');
-    setTimeout(() => {
-      if (window.electronAPI && window.electronAPI.close) {
-        window.electronAPI.close();
-      }
-    }, 380);
+    setTimeout(() => { if (window.electronAPI && window.electronAPI.close) window.electronAPI.close(); }, 340);
   }
 </script>
 </body>

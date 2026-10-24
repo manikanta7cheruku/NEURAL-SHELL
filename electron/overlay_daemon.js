@@ -244,6 +244,14 @@ function showNotification(data) {
     return;
   }
 
+  // An update to a card that is showing ("Scanning..." becoming "Saved") morphs in place, without sliding again.
+  if (data.replace && notifWindow.isVisible()) {
+    notifWindow.webContents.executeJavaScript(
+      `window.__applyNotifData && window.__applyNotifData(${JSON.stringify(data)})`).catch(() => {});
+    scheduleAutoHide(notifWindow, (data.holdMs || 4500) + 1500);
+    return;
+  }
+
   // Force-reset: hide, reposition, then show fresh
   try {
     notifWindow.hide();
@@ -337,14 +345,17 @@ ipcMain.on('apply-layout', (event, payload) => {
 
 // Auto-hide safety: force-hide notification after 8s no matter what
 // Prevents stuck cards if animation callback never fires
+const _autoHide = new Map();   // one safety timer per window, so a finished "working" card can't hide its update
+
 function scheduleAutoHide(win, maxMs) {
   if (!win) return;
-  setTimeout(() => {
+  clearTimeout(_autoHide.get(win.id));
+  _autoHide.set(win.id, setTimeout(() => {
     if (win && !win.isDestroyed() && win.isVisible()) {
       console.log('[OVERLAY DAEMON] Auto-hide safety triggered');
       win.hide();
     }
-  }, maxMs);
+  }, maxMs));
 }
 
 // ─────────────────────────────────────────────────────────────────────────

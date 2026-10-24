@@ -135,6 +135,8 @@ def process(ctx, deps):
     if ctx.first_word not in ["open", "show", "find", "display",
                                "launch", "view", "pull", "bring"]:
         return LayerResult.pass_through()
+    if re.search(r"\b(?:workspaces?|triggers?)\b", ctx.clean_in):
+        return LayerResult.pass_through()          # Seven's own workspaces and triggers, never files
     attached = _open_attached(ctx)
     if attached:
         return LayerResult.stop(attached)
