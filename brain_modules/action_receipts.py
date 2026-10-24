@@ -70,6 +70,8 @@ def run_action(kind: str, target: str, fn: Callable[[], object],
     ms = int((time.time() - t0) * 1000)
     if ret is False:
         return ActionReceipt(kind, target, "failed", "the action reported failure", ms)
+    if isinstance(ret, str):            # the action describes its own result ("Saved Study: 9 apps and 37 tabs.")
+        return ActionReceipt(kind, target, "success", ret, ms, True)
     if verify is not None:
         try:
             ok = verify()

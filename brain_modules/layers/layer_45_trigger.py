@@ -25,6 +25,8 @@ Tag format:
 """
 
 from colorama import Fore
+import re
+
 from brain_modules.layer_result import LayerResult
 
 
@@ -63,8 +65,28 @@ _WORKSPACE_LIST_TRIGGERS = [
 ]
 
 
+# "scan my current workspace", "capture my setup", "save what I have open as Study", "snapshot my desktop"
+_SCAN_RE = re.compile(
+    r"^(?:please |can you |could you )?(?:scan|capture|snapshot|save|remember|record|grab|store|keep)"
+    r"(?: (?:my|the|this|current|whole|entire|all))*"
+    r" (?:workspace|work space|desktop|setup|set up|screen setup|open apps|open windows|windows|apps|"
+    r"everything(?: i have)?(?: that's)? open|what i have open|what's open|what is open|what i'm working on)"
+    r"(?: (?:right )?now)?(?: (?:as|called|named) (?P<name>.+))?$")
+
+
+def _save_tag(name: str) -> str:
+    return "action=save" + (f" name={name.replace(' ', '|||')}" if name else "")
+
+
 def process(ctx, deps):
     clean_in = ctx.clean_in
+
+    m = _SCAN_RE.match(clean_in.strip(" .!?"))
+    if m:
+        name = (m.group("name") or "").strip(" .,!\"'")
+        ctx.is_command = True
+        what = f"to save it as {name}" if name else ""
+        return LayerResult.stop(f"Scanning your workspace {what}".strip() + ". ###WORKSPACE: " + _save_tag(name))
 
     # ── Workspace save ─────────────────────────────────────────────
     for trigger in sorted(_WORKSPACE_SAVE_TRIGGERS, key=len, reverse=True):
@@ -76,19 +98,9 @@ def process(ctx, deps):
                     name = name[len(art):].strip()
             name = name.strip('.,!-:;"\' ')
 
-            if not name:
-                return LayerResult.stop(
-                    "What should I call this workspace? "
-                    'Say "save workspace as Focus" for example.'
-                )
-
-            # Use pipe delimiter for multi-word names
-            name_safe = name.replace(" ", "|||")
             ctx.is_command = True
-            return LayerResult.stop(
-                f"Scanning your desktop to save workspace '{name}'. "
-                f"###WORKSPACE: action=save name={name_safe}"
-            )
+            what = f"to save it as {name}" if name else ""
+            return LayerResult.stop(f"Scanning your workspace {what}".strip() + ". ###WORKSPACE: " + _save_tag(name))
 
     # ── Workspace restore ──────────────────────────────────────────
     for trigger in sorted(_WORKSPACE_RESTORE_TRIGGERS, key=len, reverse=True):
