@@ -54,7 +54,10 @@ venv\Scripts\python.exe -m uvicorn backend.api_server:app --host 127.0.0.1 --por
 ```
 
 To run the full desktop shell in development: `npm run dev` in the project root (starts the backend, Vite and Electron
-together).
+together). `scripts/dev-backend.js` picks the backend's Python: the bundled `python-dist` runtime if it exists (the one
+users get), then `venv`, then `python` on PATH, skipping any that cannot import `ssl` and `websockets`. The first line
+of backend output says which one it chose. If a Python's `ssl` is broken, uvicorn quietly loses WebSocket support and
+the UI's live status fails with "Unexpected response code: 200".
 
 Only one backend can own port 7777. If an installed copy of Seven is running, quit it first (tray icon, Quit).
 
