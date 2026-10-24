@@ -36,7 +36,7 @@ class ActionReceipt:
         return asdict(self)
 
 
-def verify_running(target: str, expect: bool = True, timeout: float = 1.2) -> Optional[bool]:
+def verify_running(target: str, expect: bool = True, timeout: float = 3.5) -> Optional[bool]:
     """True/False if a matching process is (not) running; None when it cannot be checked."""
     try:
         import psutil

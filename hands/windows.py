@@ -356,6 +356,10 @@ def manage_window(params):
             return False, "No target window specified."
 
         hwnd, title = _find_window(target)
+        if not hwnd and params.get("fallback") == "open":
+            # "show whatsapp" when WhatsApp isn't running: open it instead of failing.
+            from hands.core import open_app
+            return (True, f"Opened {target}") if open_app(target) else (False, f"Couldn't open {target}")
         if not hwnd:
             return False, f"Can't find window: {target}"
 
