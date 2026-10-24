@@ -360,6 +360,23 @@ def overview(brief: bool = False, rng=None, variant: int = 0) -> str:
     return " ".join(parts)
 
 
+def overview_list() -> str:
+    """The abilities as a list, for "tell me in a list what you can do". One line each, with an example."""
+    rank = {cid: i for i, cid in enumerate(_ORDER)}
+    lines = []
+    for cap in sorted(all_capabilities(), key=lambda c: rank.get(c.id, len(_ORDER))):
+        state, reason = status(cap.id)
+        if cap.id in ("voice", "speaker_id"):
+            continue
+        what = _SPOKEN.get(cap.id, cap.summary.rstrip("."))
+        what = what[0].upper() + what[1:]
+        example = f' Try "{cap.examples[0]}".' if cap.examples else ""
+        note = "" if state == "available" else f" (not available right now: {reason})"
+        lines.append(f"- **{cap.title}**: {what}.{example}{note}")
+    lines.append("- **Not yet**: seeing your screen or clicking inside other apps.")
+    return "Here's what I can do:\n\n" + "\n".join(lines)
+
+
 def fallback_summary() -> str:
     """Used when the language model is unreachable."""
     return overview()

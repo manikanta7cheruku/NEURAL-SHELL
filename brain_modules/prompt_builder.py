@@ -8,9 +8,9 @@ STRUCTURE (and why):
                means Ollama's prompt cache can reuse it between turns, which
                is the biggest first-token latency win after keeping the model
                loaded.
-    [few-shot] two tiny example exchanges as real user/assistant messages.
-               Examples written as text inside the system prompt are what
-               leaked into replies before ("Want me to add that as a task?").
+    (no few-shot examples: small models took example exchanges for real
+               conversation and kept bringing them up, so tone lives in the
+               system prompt only)
     [history]  recent real turns, time-limited.
     [user]     the new message, prefixed by a <reference_only> block ONLY when
                the turn needs memory, web, documents or capabilities.
@@ -30,13 +30,6 @@ from typing import List, Optional
 
 SEVEN_NAME = "Seven"
 SEVEN_CREATOR = "Seven Labs"
-
-_EXAMPLES = (
-    ("i'm bored",
-     "Then let's fix that. Want a game, a project idea, or something to tidy up on your machine?"),
-    ("is python or javascript better for a beginner",
-     "Python. Cleaner syntax, fewer traps. Pick JavaScript only if you want websites first."),
-)
 
 _TIME_TOKENS = frozenset({
     "today", "tomorrow", "yesterday", "tonight", "date", "day", "month", "year",
@@ -237,9 +230,6 @@ def build_messages(*, user_text: str, speaker_name: str = "", history: Optional[
     now = now or datetime.now()
     messages = [{"role": "system", "content": build_system_prompt(
         speaker_name, humor, honesty, profile, is_voice, mood_label)}]
-    for user_ex, seven_ex in _EXAMPLES:
-        messages.append({"role": "user", "content": user_ex})
-        messages.append({"role": "assistant", "content": seven_ex})
     for m in history or []:
         if m.get("role") in ("user", "assistant") and m.get("content"):
             messages.append({"role": m["role"], "content": m["content"]})

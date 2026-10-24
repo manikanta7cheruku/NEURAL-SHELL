@@ -410,10 +410,16 @@ def think(prompt_text, speaker_id="default", stream_mode="sentence", conversatio
         return result
     if ctx.answered_by != "layer_08_llm":
         st.trace = {"answered_by": ctx.answered_by, "intent": getattr(ctx.intent, "label", None),
+                    "detail": getattr(ctx, "answered_detail", None),
                     "storage_error": storage_error, "confirmed": ctx.confirmed}
         save_completed_turn(prompt_text, result, speaker_id, source=source, persist=False,
                             conversation_id=conv_id, thread_key=tkey)
         conversation_state.observe_reply(st, result or "")
+        try:
+            from brain_modules import followups
+            followups.remember(st, result or "")
+        except Exception as exc:
+            _log.debug("follow-up memory skipped: %s", exc)
     return result
 
 

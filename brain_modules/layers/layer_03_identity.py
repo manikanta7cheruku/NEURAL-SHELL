@@ -182,6 +182,7 @@ def process(ctx, deps=None) -> LayerResult:
         else:
             machine = system_info.answer(ctx.prompt_text)
             if machine:
+                ctx.answered_detail = "pc"
                 return LayerResult.stop(machine)
     except Exception as exc:
         _log.debug("system info skipped: %s", exc)
