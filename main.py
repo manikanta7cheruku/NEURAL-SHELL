@@ -29,6 +29,10 @@ _app_path = os.environ.get('SEVEN_APP_PATH', '')
 if _app_path and _app_path not in sys.path:
     sys.path.insert(0, _app_path)
 
+# Before anything imports huggingface_hub: never ask huggingface.co about a model that is already on disk.
+from seven_utils import hf_offline
+hf_offline.enable()
+
 # ── System init (VC++, numpy, logging) ──────────────────────────────
 from main_modules.startup.system_init import (
     ensure_vcredist, apply_numpy_patch, setup_logging, setup_sentry

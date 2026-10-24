@@ -11,6 +11,7 @@ from a canned paragraph, so two related questions cannot contradict each other
 """
 
 import os
+import re
 import time
 from typing import Any, Dict, List, Optional
 
@@ -112,7 +113,17 @@ def app_help_answer(text: str) -> Optional[str]:
     return app_map.describe(hits[0])
 
 
-def capability_list_answer(norm: str, state=None) -> str:
+def model_can_phrase(name: str = "") -> bool:
+    """Models of 3B and up phrase an answer from given facts well; the 1B model drifts, so it gets a template."""
+    from brain_modules import model_catalog
+    name = name or _active_model()
+    entry = model_catalog.get(name)
+    if entry:
+        return entry["size_gb"] >= 2.0
+    return bool(re.search(r"\b(?:[3-9]|[1-9]\d)(?:\.\d)?b\b", (name or "").lower()))
+
+
+def capability_list_answer(norm: str, state=None, ctx=None) -> str:
     toks = set(norm.split())
     if toks & {"app", "apps", "programs", "applications", "open"}:
         cap = capabilities.get("apps")
@@ -122,12 +133,20 @@ def capability_list_answer(norm: str, state=None) -> str:
     turn = getattr(state, "turn", None)
     last = getattr(state, "last_overview_turn", None)
     brief = turn is not None and last is not None and turn - last <= 8
+    asked = (getattr(state, "overview_count", 0) or 0) + 1
     if state is not None and turn is not None:
         try:
-            state.last_overview_turn = turn
+            state.last_overview_turn, state.overview_count = turn, asked
         except Exception:
             pass
-    return capabilities.overview(brief=brief)
+    if ctx is not None and getattr(ctx, "stream_mode", "") != "sentence" and model_can_phrase():
+        # The facts come from the registry; the model only says them, so it reads like a person, not a script.
+        ctx.inject_capabilities = True
+        if brief:
+            ctx.hints.append("The user asked what you can do a moment ago. Answer in one or two sentences, worded "
+                             "differently, and point them to the Guide page for clickable examples.")
+        return None
+    return capabilities.overview(brief=brief, variant=asked)
 
 
 def value_answer() -> str:
@@ -255,7 +274,7 @@ def answer(label: str, ctx, config) -> Optional[str]:
     """Dispatch a routed self-knowledge intent. None means 'not mine, let the pipeline continue'."""
     norm = ctx.norm_in
     if label == "capability_list":
-        return capability_list_answer(norm, getattr(ctx, "state", None))
+        return capability_list_answer(norm, getattr(ctx, "state", None), ctx)
     if label == "capability_check":
         reply = capabilities.answer_can_you(norm)
         if reply:
