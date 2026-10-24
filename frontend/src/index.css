@@ -1,26 +1,37 @@
 @import "tailwindcss";
 
+/* ─────────────────────────────────────────────────────────────────────────────────────────────────
+   SEVEN PALETTE. Change the app's colours here and only here; every page reads these tokens.
+
+   Four brand colours:
+     Ink     the warm near-black the app sits on          --color-s-bg / surface / card
+     Bone    warm off-white for text                       --color-s-text and its lighter steps
+     Lagoon  the one accent: primary buttons, focus, on    --color-s-accent
+     Brass   highlights, "thinking", warnings              --color-s-yellow (and s-purple, kept for old names)
+   Plus quiet semantic colours for success (green), errors (red) and information (blue).
+   The light theme below redefines the same names.
+   ───────────────────────────────────────────────────────────────────────────────────────────────── */
 @theme {
-  --color-s-bg: #09090b;
-  --color-s-surface: #0c0c0f;
-  --color-s-card: #141418;
-  --color-s-card-h: #1a1a1f;
-  --color-s-border: #23232a;
-  --color-s-border-l: #2e2e38;
-  --color-s-accent: #6366f1;
-  --color-s-accent-h: #818cf8;
-  --color-s-accent-dim: #4f46e5;
-  --color-s-text: #f0f0f3;
-  --color-s-text-2: #a0a0ab;
-  --color-s-text-3: #6b6b76;
-  --color-s-text-4: #45454d;
-  --color-s-green: #22c55e;
-  --color-s-red: #ef4444;
-  --color-s-yellow: #eab308;
-  --color-s-blue: #3b82f6;
-  --color-s-purple: #a855f7;
-  --color-s-cyan: #06b6d4;
-  --color-s-on-accent: #ffffff;
+  --color-s-bg: #0d0e10;
+  --color-s-surface: #121316;
+  --color-s-card: #18191d;
+  --color-s-card-h: #1f2025;
+  --color-s-border: #26272d;
+  --color-s-border-l: #34363d;
+  --color-s-accent: #3cc8b4;
+  --color-s-accent-h: #62d8c7;
+  --color-s-accent-dim: #22978a;
+  --color-s-text: #edeae4;
+  --color-s-text-2: #b4b1aa;
+  --color-s-text-3: #807e78;
+  --color-s-text-4: #57554f;
+  --color-s-green: #4cc38a;
+  --color-s-red: #ef6b62;
+  --color-s-yellow: #e2b25b;
+  --color-s-blue: #6ea8f5;
+  --color-s-purple: #d29a6c;
+  --color-s-cyan: #3cc8b4;
+  --color-s-on-accent: #04201c;
   --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
   --font-mono: 'JetBrains Mono', 'Consolas', monospace;
   --font-display: 'Michroma', 'Inter', system-ui, sans-serif;
@@ -37,25 +48,26 @@
 
 :root[data-theme="light"] {
   color-scheme: light;
-  --color-s-bg: #f7f7f8;
+  --color-s-bg: #f6f5f2;
   --color-s-surface: #ffffff;
-  --color-s-card: #f2f2f4;
-  --color-s-card-h: #ebebef;
-  --color-s-border: #e4e4e9;
-  --color-s-border-l: #d4d4db;
-  --color-s-accent: #4f46e5;
-  --color-s-accent-h: #4338ca;
-  --color-s-accent-dim: #6366f1;
-  --color-s-text: #111114;
-  --color-s-text-2: #3b3b43;
-  --color-s-text-3: #6b6b76;
-  --color-s-text-4: #9b9ba5;
-  --color-s-green: #15803d;
-  --color-s-red: #dc2626;
-  --color-s-yellow: #b45309;
-  --color-s-blue: #2563eb;
-  --color-s-purple: #7c3aed;
-  --color-s-cyan: #0e7490;
+  --color-s-card: #f0eee9;
+  --color-s-card-h: #e8e5df;
+  --color-s-border: #e3e0d9;
+  --color-s-border-l: #d2cec5;
+  --color-s-accent: #0f8a7b;
+  --color-s-accent-h: #0b7064;
+  --color-s-accent-dim: #16a593;
+  --color-s-on-accent: #ffffff;
+  --color-s-text: #18191b;
+  --color-s-text-2: #45454a;
+  --color-s-text-3: #6f6d69;
+  --color-s-text-4: #a4a19b;
+  --color-s-green: #1d7f53;
+  --color-s-red: #c8443b;
+  --color-s-yellow: #a66f12;
+  --color-s-blue: #2b67c4;
+  --color-s-purple: #a8643a;
+  --color-s-cyan: #0f8a7b;
   /* Older pages use white-with-opacity for text and tints, and white/black for inverted
      buttons; swapping the two keeps them readable on a light background. */
   --color-white: #111114;
@@ -84,12 +96,26 @@ body {
 
 #root { height: 100vh; overflow: hidden; }
 
+/* Every clickable thing eases its hover and focus changes instead of snapping. Utilities that set their own
+   transition still win, because this sits in the base layer. */
+@layer base {
+  a, button, [role="button"], [role="switch"], [role="tab"], summary, input, select, textarea {
+    transition-property: color, background-color, border-color, box-shadow, opacity;
+    transition-duration: 180ms;
+    transition-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+}
+
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--color-s-border); border-radius: 8px; border: 2px solid var(--color-s-bg); }
 ::-webkit-scrollbar-thumb:hover { background: var(--color-s-border-l); }
 
-body, aside, header, section, main { transition: background-color 160ms ease, border-color 160ms ease; }
+/* Theme switches fade. In the base layer, so components that animate their own width (panels, sidebar) keep
+   their transitions: an unlayered rule here used to override them and made panels snap shut. */
+@layer base {
+  body, aside, header, section, main { transition: background-color 160ms ease, border-color 160ms ease; }
+}
 
 .tabular-nums { font-variant-numeric: tabular-nums; }
 
@@ -114,7 +140,7 @@ body, aside, header, section, main { transition: background-color 160ms ease, bo
   transition: transform 120ms ease;
 }
 .s-range:hover::-webkit-slider-thumb { transform: scale(1.12); }
-.s-range:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.35); }
+.s-range:focus-visible { outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-s-accent) 35%, transparent); }
 
 @keyframes fadeIn {
   from { opacity: 0; }

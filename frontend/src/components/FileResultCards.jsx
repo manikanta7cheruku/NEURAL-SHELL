@@ -1,156 +1,101 @@
 /**
  * FileResultCards.jsx
- * 
- * Renders file search results as numbered cards inline in chat.
- * Top match highlighted with s-accent border. Click to open file.
- * Matches Console.jsx design language (compact, 10px, glassmorphic).
+ *
+ * File search results under a reply: one quiet row per file with its type, name, folder and age. The file Seven
+ * opened is marked. Hovering a row offers Open and Show in folder. Five rows show at first; the rest on request.
  */
-
+import { createElement, useState } from 'react';
+import {
+  File, FileAudio, FileCode, FileDoc, FileImage, FilePdf, FilePpt, FileText, FileVideo, FileXls, FileZip, Folder,
+  FolderOpen, ArrowSquareOut,
+} from '@phosphor-icons/react';
 import api from '../api';
+import { cx } from '../lib/cx';
 
-const EXT_ICONS = {
-  pdf:  '📄',
-  doc:  '📝', docx: '📝', txt: '📝', md: '📝', rtf: '📝',
-  xls:  '📊', xlsx: '📊', csv: '📊',
-  ppt:  '📽', pptx: '📽',
-  jpg:  '🖼', jpeg: '🖼', png: '🖼', gif: '🖼', webp: '🖼', bmp: '🖼', svg: '🖼',
-  mp4:  '🎬', mkv: '🎬', avi: '🎬', mov: '🎬', wmv: '🎬', webm: '🎬',
-  mp3:  '🎵', wav: '🎵', flac: '🎵', ogg: '🎵', m4a: '🎵',
-  zip:  '📦', rar: '📦', '7z': '📦', tar: '📦', gz: '📦',
-  exe:  '⚙', msi: '⚙',
-  py:   '💻', js: '💻', jsx: '💻', ts: '💻', tsx: '💻',
-  html: '💻', css: '💻', json: '💻', xml: '💻',
-  folder: '📁',
-};
+const KIND = [
+  [['pdf'], FilePdf], [['doc', 'docx', 'rtf', 'odt'], FileDoc], [['txt', 'md'], FileText],
+  [['xls', 'xlsx', 'csv'], FileXls], [['ppt', 'pptx'], FilePpt],
+  [['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'heic'], FileImage],
+  [['mp4', 'mkv', 'avi', 'mov', 'wmv', 'webm'], FileVideo], [['mp3', 'wav', 'flac', 'ogg', 'm4a', 'aac'], FileAudio],
+  [['zip', 'rar', '7z', 'tar', 'gz'], FileZip],
+  [['py', 'js', 'jsx', 'ts', 'tsx', 'html', 'css', 'json', 'xml', 'java', 'cpp', 'c', 'cs'], FileCode],
+];
 
-function getIcon(item) {
-  if (item.is_folder) return EXT_ICONS.folder;
+function iconFor(item) {
   const ext = (item.ext || '').toLowerCase().replace('.', '');
-  return EXT_ICONS[ext] || '📄';
+  if (item.is_folder || ext === 'folder') return Folder;
+  return (KIND.find(([exts]) => exts.includes(ext)) || [null, File])[1];
 }
 
-function formatSize(mb) {
-  if (!mb || mb === 0) return '';
-  if (mb < 1) return `${Math.round(mb * 1024)} KB`;
-  if (mb < 1024) return `${mb.toFixed(1)} MB`;
-  return `${(mb / 1024).toFixed(1)} GB`;
+function age(value) {
+  if (!value) return '';
+  const d = new Date(String(value).replace(' ', 'T'));
+  if (Number.isNaN(d.getTime())) return '';
+  const days = Math.floor((Date.now() - d.getTime()) / 86400000);
+  if (days <= 0) return 'today';
+  if (days === 1) return 'yesterday';
+  if (days < 7) return `${days} days ago`;
+  if (days < 30) return `${Math.floor(days / 7)} wk ago`;
+  if (days < 365) return `${Math.floor(days / 30)} mo ago`;
+  return `${Math.floor(days / 365)} yr ago`;
 }
 
-function formatModified(iso) {
-  if (!iso) return '';
-  try {
-    const d = new Date(iso);
-    const now = new Date();
-    const diffDays = Math.floor((now - d) / (1000 * 60 * 60 * 24));
-    if (diffDays === 0) return 'today';
-    if (diffDays === 1) return 'yesterday';
-    if (diffDays < 7) return `${diffDays}d ago`;
-    if (diffDays < 30) return `${Math.floor(diffDays / 7)}w ago`;
-    if (diffDays < 365) return `${Math.floor(diffDays / 30)}mo ago`;
-    return `${Math.floor(diffDays / 365)}y ago`;
-  } catch {
-    return '';
-  }
+function folderOf(path = '') {
+  const parts = path.split(/[\\/]/).filter(Boolean);
+  return parts.length > 1 ? parts[parts.length - 2] : '';
 }
 
-async function openFile(path) {
-  try {
-    await api.post('/files/open', { path });
-  } catch (e) {
-    console.error('Failed to open file:', e);
-  }
+const open = (path, reveal = false) => api.post('/files/open', { path, reveal }).catch(() => {});
+
+function Row({ item, opened }) {
+  const when = age(item.modified);
+  return (
+    <div className="group/row flex h-11 items-center gap-3 rounded-md px-2.5 hover:bg-s-card">
+      {createElement(iconFor(item), { size: 18, weight: 'light', className: 'shrink-0 text-s-text-3' })}
+      <button onClick={() => open(item.path)} title={item.path} className="min-w-0 flex-1 text-left">
+        <div className="flex items-center gap-2">
+          <span className="truncate text-[12.5px] text-s-text">{item.name}</span>
+          {opened && <span className="shrink-0 rounded px-1.5 text-[10.5px] text-s-text-3 ring-1 ring-s-border">Opened</span>}
+        </div>
+        <div className="truncate text-[11px] text-s-text-4">
+          {[folderOf(item.path), when].filter(Boolean).join(' · ')}
+        </div>
+      </button>
+      <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity duration-200 group-hover/row:opacity-100 focus-within:opacity-100">
+        <button onClick={() => open(item.path)} title="Open" aria-label={`Open ${item.name}`}
+                className="flex h-7 w-7 items-center justify-center rounded-md text-s-text-3 hover:bg-s-card-h hover:text-s-text">
+          <ArrowSquareOut size={15} />
+        </button>
+        <button onClick={() => open(item.path, true)} title="Show in folder" aria-label={`Show ${item.name} in its folder`}
+                className="flex h-7 w-7 items-center justify-center rounded-md text-s-text-3 hover:bg-s-card-h hover:text-s-text">
+          <FolderOpen size={15} />
+        </button>
+      </div>
+    </div>
+  );
 }
 
 export default function FileResultCards({ data }) {
-  if (!data || !data.results || data.results.length === 0) return null;
-
-  const { query, count, shown, results } = data;
-  const displayCount = shown || results.length;
+  const [all, setAll] = useState(false);
+  if (!data?.results?.length) return null;
+  const { query, results } = data;
+  const opened = /opened|opening/i.test(data.message || '') || data.opened !== false;
+  const shown = all ? results : results.slice(0, 5);
 
   return (
-    <div className="mt-3 pt-3 border-t border-white/[0.05] space-y-1.5">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-1">
-        <span className="text-[11px] text-white/30 font-medium">
-          {query ? `Files matching "${query}"` : 'Files found'}
-        </span>
-        <span className="text-[11px] text-white/25 font-mono">
-          {displayCount < count ? `${displayCount} of ${count}` : `${count}`}
-        </span>
+    <div className="mt-3 overflow-hidden rounded-lg border border-s-border bg-s-surface">
+      <div className="flex h-8 items-center justify-between border-b border-s-border px-3 text-[11px] text-s-text-4">
+        <span className="truncate">{query ? <>Files for <span className="text-s-text-3">"{query}"</span></> : 'Files'}</span>
+        <span className="tabular-nums">{results.length}</span>
       </div>
-
-      {/* Cards */}
-      {results.map((item, idx) => {
-        const isTop = idx === 0;
-        return (
-          <button
-            key={`${item.path}-${idx}`}
-            onClick={() => openFile(item.path)}
-            className={`w-full text-left group transition-all duration-150 rounded-lg border ${
-              isTop
-                ? 'border-s-accent/25 bg-s-accent/[0.04] hover:bg-s-accent/[0.08] hover:border-s-accent/40'
-                : 'border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.04] hover:border-white/[0.12]'
-            }`}
-          >
-            <div className="flex items-start gap-2.5 px-2.5 py-2">
-              {/* Number + Icon */}
-              <div className="flex flex-col items-center gap-0.5 shrink-0 pt-0.5 w-4">
-                <span
-                  className={`text-[11px] font-mono font-semibold ${
-                    isTop ? 'text-s-accent/90' : 'text-white/35'
-                  }`}
-                >
-                  {idx + 1}
-                </span>
-                <span className="text-[11px] leading-none">{getIcon(item)}</span>
-              </div>
-
-              {/* Details */}
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-1.5">
-                  <span
-                    className={`text-[12px] font-medium truncate ${
-                      isTop ? 'text-white/90' : 'text-white/70'
-                    }`}
-                  >
-                    {item.name}
-                  </span>
-                  {isTop && (
-                    <span className="text-[11px] text-s-accent/70 font-semibold shrink-0">
-                      Opened
-                    </span>
-                  )}
-                </div>
-                <div className="text-[11px] text-white/30 truncate mt-0.5 font-mono" title={item.path}>
-                  {item.folder || item.path}
-                </div>
-                <div className="flex items-center gap-1.5 mt-0.5 text-[11px] text-white/25">
-                  {item.size_mb > 0 && <span>{formatSize(item.size_mb)}</span>}
-                  {item.modified && (
-                    <>
-                      {item.size_mb > 0 && <span>·</span>}
-                      <span>{formatModified(item.modified)}</span>
-                    </>
-                  )}
-                  {item.score != null && (
-                    <>
-                      <span>·</span>
-                      <span className="font-mono opacity-70">{item.score}</span>
-                    </>
-                  )}
-                </div>
-              </div>
-
-              {/* Chevron */}
-              <div className="text-white/20 group-hover:text-white/50 transition-colors pt-1 shrink-0">
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                  <path d="M9 18l6-6-6-6" />
-                </svg>
-              </div>
-            </div>
-          </button>
-        );
-      })}
+      <div className="p-1">
+        {shown.map((item, i) => <Row key={`${item.path}-${i}`} item={item} opened={opened && i === 0} />)}
+      </div>
+      {results.length > 5 && (
+        <button onClick={() => setAll(!all)}
+                className={cx('flex h-8 w-full items-center justify-center border-t border-s-border text-[11.5px] text-s-text-3 hover:bg-s-card hover:text-s-text')}>
+          {all ? 'Show fewer' : `Show ${results.length - 5} more`}
+        </button>)}
     </div>
   );
 }

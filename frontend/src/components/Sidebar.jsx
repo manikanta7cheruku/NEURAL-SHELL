@@ -1,74 +1,55 @@
 /**
  * Sidebar.jsx
  *
- * Collapsible navigation: 224px with labels, or a 60px icon rail with tooltips.
- * The choice is remembered per device; Ctrl+B toggles it. Badges: pending tasks
- * (from useTasks), enabled triggers (polled every 30s) and an update dot.
+ * Navigation, 208px wide, or a 56px icon rail. The control to switch sits at the top beside the mark (Ctrl+B also
+ * works). On the rail, resting the pointer on it glides the full sidebar open over the page; moving away glides it
+ * back. Badges: pending tasks, enabled triggers, and a dot when an update is ready.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import {
-  LayoutDashboard, Terminal, CheckSquare, Calendar, Radio, Brain, BookOpen,
-  CreditCard, Settings, RefreshCw, BookMarked, MessageSquare, Cpu, PanelLeftClose, PanelLeftOpen,
-} from 'lucide-react';
+  ArrowsClockwise, BookOpenText, Brain, CalendarBlank, ChatCircleText, ChatTeardropText, CheckSquareOffset,
+  Compass, CreditCard, GearSix, House, Lightning, SidebarSimple,
+} from '@phosphor-icons/react';
 import api from '../api';
+import Mark from './Mark';
 import useStatus from '../stores/useStatus';
 import useUpdate from '../stores/useUpdate';
 import useTasks from '../stores/useTasks';
+import { cx } from '../lib/cx';
 
 const SECTIONS = [
-  {
-    label: null,
-    items: [
-      { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-      { to: '/console',   label: 'Console',   icon: Terminal },
-    ],
-  },
-  {
-    label: 'Work',
-    items: [
-      { to: '/tasks',     label: 'Tasks',     icon: CheckSquare, badge: 'tasks' },
-      { to: '/schedules', label: 'Schedules', icon: Calendar },
-      { to: '/triggers',  label: 'Triggers',  icon: Radio, badge: 'triggers' },
-    ],
-  },
-  {
-    label: 'Intelligence',
-    items: [
-      { to: '/memory',    label: 'Memory',    icon: Brain },
-      { to: '/knowledge', label: 'Knowledge', icon: BookOpen },
-    ],
-  },
-  {
-    label: 'Account',
-    items: [
-      { to: '/plans',    label: 'Plans',    icon: CreditCard },
-      { to: '/settings', label: 'Settings', icon: Settings },
-      { to: '/updates',  label: 'Updates',  icon: RefreshCw, badge: 'update' },
-      { to: '/guide',     label: 'Guide',    icon: BookMarked },
-      { to: '/feedback', label: 'Feedback', icon: MessageSquare },
-    ],
-  },
+  { label: null, items: [
+    { to: '/dashboard', label: 'Home', icon: House },
+    { to: '/console', label: 'Chat', icon: ChatCircleText },
+  ] },
+  { label: 'Work', items: [
+    { to: '/tasks', label: 'Tasks', icon: CheckSquareOffset, badge: 'tasks' },
+    { to: '/schedules', label: 'Schedules', icon: CalendarBlank },
+    { to: '/triggers', label: 'Triggers', icon: Lightning, badge: 'triggers' },
+  ] },
+  { label: 'Intelligence', items: [
+    { to: '/memory', label: 'Memory', icon: Brain },
+    { to: '/knowledge', label: 'Knowledge', icon: BookOpenText },
+  ] },
+  { label: 'Account', items: [
+    { to: '/plans', label: 'Plans', icon: CreditCard },
+    { to: '/settings', label: 'Settings', icon: GearSix },
+    { to: '/updates', label: 'Updates', icon: ArrowsClockwise, badge: 'update' },
+    { to: '/guide', label: 'Guide', icon: Compass },
+    { to: '/feedback', label: 'Feedback', icon: ChatTeardropText },
+  ] },
 ];
 
 const STORAGE_KEY = 'seven.sidebar.collapsed';
+const EASE = 'ease-[cubic-bezier(0.32,0.72,0,1)]';
 
 function readCollapsed() {
   try { return localStorage.getItem(STORAGE_KEY) === '1'; } catch { return false; }
 }
 
-function Count({ n }) {
-  if (!n) return null;
-  return (
-    <span className="ml-auto min-w-[20px] rounded-full bg-s-card-h px-1.5 text-center text-[11px] font-medium
-                     leading-5 text-s-text-2 tabular-nums">
-      {n > 99 ? '99+' : n}
-    </span>
-  );
-}
-
-function NavItem({ item, collapsed, badges }) {
+function NavItem({ item, open, badges }) {
   const loc = useLocation();
   const Icon = item.icon;
   const active = loc.pathname === item.to;
@@ -76,33 +57,54 @@ function NavItem({ item, collapsed, badges }) {
   const dot = item.badge === 'update' && badges.update;
 
   return (
-    <NavLink to={item.to} title={collapsed ? item.label : undefined} aria-label={item.label}
-             className={`group relative flex h-[30px] items-center gap-2.5 rounded-md text-[12.5px] transition-colors duration-150
-                         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-s-accent/60
-                         ${collapsed ? 'justify-center px-0' : 'px-2.5'}
-                         ${active ? 'bg-s-card-h text-s-text font-medium'
-                                  : 'text-s-text-3 hover:bg-s-card hover:text-s-text'}`}>
-      {active && <span className="absolute left-0 top-2 bottom-2 w-[2px] rounded-full bg-s-accent" />}
-      <Icon size={16} className={`shrink-0 ${active ? 'text-s-accent-h' : 'text-s-text-3 group-hover:text-s-text-2'}`} />
-      {!collapsed && <span className="truncate">{item.label}</span>}
-      {!collapsed && <Count n={count} />}
-      {dot && <span className={`h-1.5 w-1.5 rounded-full bg-s-yellow ${collapsed ? 'absolute right-2 top-2' : 'ml-auto'}`} />}
-      {collapsed && count > 0 && <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-s-accent" />}
+    <NavLink to={item.to} title={open ? undefined : item.label} aria-label={item.label}
+             className={cx('group relative flex h-8 items-center rounded-md pl-[11px] pr-2 text-[12.5px]',
+                           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-s-accent/50',
+                           active ? 'bg-s-card text-s-text' : 'text-s-text-3 hover:bg-s-card/60 hover:text-s-text-2')}>
+      <span className={cx('absolute left-0 top-1.5 bottom-1.5 w-[2px] rounded-full bg-s-accent transition-opacity duration-200',
+                          active ? 'opacity-100' : 'opacity-0')} />
+      <Icon size={17} weight={active ? 'fill' : 'regular'}
+            className={cx('shrink-0 transition-colors duration-200', active ? 'text-s-accent' : 'text-s-text-3 group-hover:text-s-text-2')} />
+      <span className={cx('ml-3 truncate transition-opacity duration-200', open ? 'opacity-100' : 'opacity-0')}>{item.label}</span>
+      {open && count > 0 && (
+        <span className="ml-auto min-w-[18px] rounded-[5px] bg-s-card-h px-1 text-center text-[10.5px] font-medium leading-[18px] text-s-text-3 tabular-nums">
+          {count > 99 ? '99+' : count}
+        </span>)}
+      {dot && <span className={cx('h-1.5 w-1.5 rounded-full bg-s-yellow', open ? 'ml-auto' : 'absolute right-1.5 top-1.5')} />}
+      {!open && count > 0 && <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-s-accent" />}
     </NavLink>
   );
 }
 
 export default function Sidebar() {
   const [collapsed, setCollapsed] = useState(readCollapsed);
-  const { connected, label, color } = useStatus();
+  const [peek, setPeek] = useState(false);
+  const peekTimer = useRef(null);
+  const { connected, label } = useStatus();
   const { updateAvailable, dismissed } = useUpdate();
   const { stats } = useTasks();
   const [triggers, setTriggers] = useState(0);
 
-  const toggle = () => setCollapsed(c => {
-    try { localStorage.setItem(STORAGE_KEY, c ? '0' : '1'); } catch {}
-    return !c;
-  });
+  const open = !collapsed || peek;
+
+  const toggle = () => {
+    setPeek(false);
+    setCollapsed(c => {
+      try { localStorage.setItem(STORAGE_KEY, c ? '0' : '1'); } catch { /* per-device preference only */ }
+      return !c;
+    });
+  };
+
+  // Rail hover: open after a short rest, close a little after leaving, so passing the pointer across never flickers.
+  const onEnter = () => {
+    if (!collapsed) return;
+    clearTimeout(peekTimer.current);
+    peekTimer.current = setTimeout(() => setPeek(true), 140);
+  };
+  const onLeave = () => {
+    clearTimeout(peekTimer.current);
+    peekTimer.current = setTimeout(() => setPeek(false), 220);
+  };
 
   useEffect(() => {
     const onKey = e => {
@@ -112,7 +114,7 @@ export default function Sidebar() {
       }
     };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    return () => { window.removeEventListener('keydown', onKey); clearTimeout(peekTimer.current); };
   }, []);
 
   useEffect(() => {
@@ -132,58 +134,58 @@ export default function Sidebar() {
   }, []);
 
   const badges = { tasks: stats?.pending ?? 0, triggers, update: updateAvailable && !dismissed };
+  const state = connected ? label() : 'Offline';
+  const stateDot = !connected ? 'bg-s-red' : state === 'Listening' ? 'bg-s-green' : state === 'Thinking' ? 'bg-s-yellow'
+    : state === 'Speaking' ? 'bg-s-accent' : 'bg-s-text-4';
 
   return (
-    <aside className={`flex h-full shrink-0 select-none flex-col border-r border-s-border bg-s-surface
-                       transition-[width] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] ${collapsed ? 'w-[56px]' : 'w-52'}`}>
-      <div className={`flex h-12 items-center border-b border-s-border ${collapsed ? 'justify-center' : 'px-3.5'}`}>
-        <NavLink to="/" title="Seven home" className="flex min-w-0 items-center gap-2.5 rounded-lg
-                                                     focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-s-accent/60">
-          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-s-accent/25 bg-s-accent/10">
-            <Cpu size={14} className="text-s-accent-h" />
+    <div className={cx('relative h-full shrink-0 transition-[width] duration-300', EASE, collapsed ? 'w-14' : 'w-52')}>
+      <aside onMouseEnter={onEnter} onMouseLeave={onLeave}
+             className={cx('absolute inset-y-0 left-0 z-40 flex select-none flex-col overflow-hidden border-r border-s-border bg-s-surface',
+                           'transition-[width,box-shadow] duration-300', EASE,
+                           open ? 'w-52' : 'w-14', collapsed && peek && 'shadow-[var(--s-shadow-raised)]')}>
+        <div className="flex h-12 shrink-0 items-center gap-2.5 border-b border-s-border pl-[15px] pr-2">
+          <NavLink to="/" title="Seven" className="rounded-[7px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-s-accent/50">
+            <Mark size={26} />
+          </NavLink>
+          <div className={cx('min-w-0 flex-1 transition-opacity duration-200', open ? 'opacity-100' : 'opacity-0')}>
+            <div className="text-[13px] font-semibold leading-tight text-s-text">Seven</div>
+            <div className="mt-0.5 flex items-center gap-1.5 text-[11px] leading-tight text-s-text-3">
+              <span className={cx('h-1.5 w-1.5 rounded-full', stateDot, state === 'Listening' && 'animate-pulse')} />
+              <span className="truncate">{state}</span>
+            </div>
           </div>
-          {!collapsed && (
-            <div className="min-w-0">
-              <div className="text-[13px] font-semibold tracking-[0.08em] text-s-text">SEVEN</div>
-              <div className="flex items-center gap-1.5 text-[11px]" style={{ color: color() }}>
-                <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: color() }} />
-                <span className="truncate">{label()}</span>
+          <button onClick={toggle} aria-label={collapsed ? 'Keep sidebar open' : 'Collapse sidebar'}
+                  title={collapsed ? 'Keep open (Ctrl+B)' : 'Collapse (Ctrl+B)'}
+                  className={cx('flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-s-text-3 hover:bg-s-card hover:text-s-text',
+                                'transition-opacity duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-s-accent/50',
+                                open ? 'opacity-100' : 'pointer-events-none opacity-0')}>
+            <SidebarSimple size={16} />
+          </button>
+        </div>
+
+        <nav aria-label="Main" className="flex-1 space-y-5 overflow-y-auto overflow-x-hidden px-2 py-3">
+          {SECTIONS.map((section, i) => (
+            <div key={section.label || i}>
+              {section.label && (
+                <div className={cx('mb-1 h-4 px-[11px] text-[10.5px] font-medium uppercase tracking-[0.08em] text-s-text-4 transition-opacity duration-200',
+                                   open ? 'opacity-100' : 'opacity-0')}>
+                  {section.label}
+                </div>)}
+              <div className="space-y-0.5">
+                {section.items.map(item => <NavItem key={item.to} item={item} open={open} badges={badges} />)}
               </div>
             </div>
-          )}
-        </NavLink>
-      </div>
+          ))}
+        </nav>
 
-      <nav aria-label="Main" className={`flex-1 space-y-4 overflow-y-auto py-3 ${collapsed ? 'px-2' : 'px-2.5'}`}>
-        {SECTIONS.map((section, i) => (
-          <div key={section.label || i}>
-            {section.label && !collapsed && (
-              <div className="mb-1 px-2.5 text-[11px] font-medium text-s-text-4">{section.label}</div>
-            )}
-            {section.label && collapsed && <div className="mx-2 mb-2 h-px bg-s-border" />}
-            <div className="space-y-0.5">
-              {section.items.map(item => (
-                <NavItem key={item.to} item={item} collapsed={collapsed} badges={badges} />
-              ))}
-            </div>
-          </div>
-        ))}
-      </nav>
-
-      <div className={`flex h-11 items-center border-t border-s-border ${collapsed ? 'justify-center' : 'justify-between px-4'}`}>
-        {!collapsed && (
-          <div className="flex items-center gap-2 text-[12px] text-s-text-3">
-            <span className={`h-1.5 w-1.5 rounded-full ${connected ? 'bg-s-green' : 'bg-s-red'}`} />
-            {connected ? 'Running locally' : 'Offline'}
-          </div>
-        )}
-        <button onClick={toggle} title={collapsed ? 'Expand sidebar (Ctrl+B)' : 'Collapse sidebar (Ctrl+B)'}
-                aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-                className="flex h-7 w-7 items-center justify-center rounded-md text-s-text-3 transition-colors
-                           hover:bg-s-card hover:text-s-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-s-accent/60">
-          {collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
-        </button>
-      </div>
-    </aside>
+        <div className="flex h-10 shrink-0 items-center border-t border-s-border pl-[19px] text-[11.5px] text-s-text-4">
+          <span className={cx('h-1.5 w-1.5 shrink-0 rounded-full', connected ? 'bg-s-green/80' : 'bg-s-red')} />
+          <span className={cx('ml-3 truncate transition-opacity duration-200', open ? 'opacity-100' : 'opacity-0')}>
+            {connected ? 'Running on this PC' : 'Not connected'}
+          </span>
+        </div>
+      </aside>
+    </div>
   );
 }

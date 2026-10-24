@@ -78,7 +78,7 @@ export default function Purchase() {
         <div className="max-w-4xl mx-auto space-y-4">
 
           {/* Beta Notice Banner */}
-          <div className="bg-gradient-to-r from-s-accent/10 to-purple-500/10 border border-s-accent/30 rounded p-4 shadow-sm">
+          <div className="bg-gradient-to-r from-s-accent/10 to-s-yellow/10 border border-s-accent/30 rounded p-4 shadow-sm">
             <div className="flex items-start gap-3">
               <div className="w-10 h-10 rounded-full bg-s-accent/20 flex items-center justify-center flex-shrink-0 text-s-accent">
                 <Zap size={20} />

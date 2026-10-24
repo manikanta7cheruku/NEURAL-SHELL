@@ -22,7 +22,7 @@ export default function MoodGraph() {
 
   const moodColors = {
     frustrated: '#ef4444', down: '#f97316', slightly_off: '#eab308',
-    neutral: '#6b7280', content: '#22c55e', happy: '#3b82f6', excited: '#a855f7'
+    neutral: '#6b7280', content: '#22c55e', happy: '#3b82f6', excited: 'var(--color-s-yellow)'
   };
 
   if (data.length < 2) {
@@ -57,7 +57,7 @@ export default function MoodGraph() {
             formatter={(v) => [v.toFixed(2), 'Mood']}
             labelFormatter={() => ''}
           />
-          <Line type="monotone" dataKey="v" stroke="#6366f1" strokeWidth={2} dot={{ fill: '#6366f1', r: 2, strokeWidth: 0 }} activeDot={{ r: 4, fill: '#818cf8' }} />
+          <Line type="monotone" dataKey="v" stroke="var(--color-s-accent)" strokeWidth={2} dot={{ fill: 'var(--color-s-accent)', r: 2, strokeWidth: 0 }} activeDot={{ r: 4, fill: 'var(--color-s-accent-h)' }} />
         </LineChart>
       </ResponsiveContainer>
     </div>

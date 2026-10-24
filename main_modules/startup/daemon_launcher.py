@@ -220,7 +220,7 @@ def launch_indexers():
         def _delayed_content_index():
             """Wait for file index to build first, then index content."""
             import time as _t
-            _t.sleep(30)
+            _t.sleep(300)                   # reading file contents is heavier; wait until the PC is idle-ish
             try:
                 from hands.file_content import build_content_index
                 build_content_index()

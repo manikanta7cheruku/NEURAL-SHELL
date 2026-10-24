@@ -16,7 +16,8 @@ from brain_modules.layer_result import LayerResult
 
 _log = logging.getLogger("seven.layer035")
 _ANSWERED_HERE = {"capability_list", "capability_check", "app_help", "data_flow", "status_check",
-                  "self_value", "self_symbol", "self_model", "self_context", "self_learning", "self_reasoning"}
+                  "self_value", "self_symbol", "self_model", "self_context", "self_learning", "self_reasoning",
+                  "self_share"}
 _RE_DATA_WHERE = re.compile(
     r"^(?:where|how) (?:is|are|do you|does seven) (?:my |our )?(?:data|information|info|stuff|memories|memory|"
     r"conversations|chats|history|facts)(?: (?:stored|saved|kept|store|save|keep))?(?: it| them)?$|"

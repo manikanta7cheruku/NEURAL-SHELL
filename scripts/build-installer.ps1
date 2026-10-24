@@ -16,6 +16,15 @@ Start-Sleep -Seconds 2
 # 2. Clean
 if (Test-Path $out) { cmd /c "rd /S /Q ""$out""" }
 
+# 2b. The installer ships every Python package already installed, so a new user's PC never runs pip on first launch
+#     (slow, and it made Windows sluggish). Install anything requirements.txt gained since the last build, then check.
+$bundled = Join-Path $root 'python-dist\python\python.exe'
+if (-not (Test-Path $bundled)) { throw "python-dist is missing. Run: npm run prepare-python" }
+& $bundled -m pip install -r requirements.txt --disable-pip-version-check --no-warn-script-location -q
+if ($LASTEXITCODE -ne 0) { throw "Installing requirements into the bundled Python failed" }
+& $bundled -c "import pypdf, docx, pptx, openpyxl, chromadb, sentence_transformers, faster_whisper, fastapi, PIL, comtypes, win32com"
+if ($LASTEXITCODE -ne 0) { throw "The bundled Python is missing a package Seven needs" }
+
 # 3. Frontend
 Push-Location frontend
 npm run build

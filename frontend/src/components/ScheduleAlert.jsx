@@ -2,8 +2,8 @@ import { useEffect, useState, useRef } from 'react';
 import api from '../api';
 
 const TYPE_CONFIG = {
-  alarm:    { icon: '⏰', color: '#6366f1', label: 'Alarm'    },
-  reminder: { icon: '🔔', color: '#8b5cf6', label: 'Reminder' },
+  alarm:    { icon: '⏰', color: 'var(--color-s-accent)', label: 'Alarm'    },
+  reminder: { icon: '🔔', color: 'var(--color-s-yellow)', label: 'Reminder' },
   timer:    { icon: '⏱',  color: '#06b6d4', label: 'Timer'    },
   event:    { icon: '📅', color: '#10b981', label: 'Event'    },
 };

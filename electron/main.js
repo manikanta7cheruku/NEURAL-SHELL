@@ -428,7 +428,7 @@ function createMainWindow() {
     minHeight:       600,
     frame:           false,
     title:           'SEVEN',
-    backgroundColor: '#09090b',
+    backgroundColor: '#0d0e10',
     show:            false,
     icon:            fs.existsSync(iconPath) ? iconPath : undefined,
     webPreferences: {
@@ -522,8 +522,8 @@ function showOrbContextMenu() {
   const menuTemplate = [
     { label: 'SEVEN', enabled: false },
     { type: 'separator' },
-    { label: 'Dashboard', click: () => navigateTo('/dashboard') },
-    { label: 'Console',   click: () => navigateTo('/console') },
+    { label: 'Home', click: () => navigateTo('/dashboard') },
+    { label: 'Chat',   click: () => navigateTo('/console') },
     { label: 'Memory',    click: () => navigateTo('/memory') },
     { label: 'Commands',  click: () => navigateTo('/commands') },
     { type: 'separator' },
@@ -597,7 +597,7 @@ function createTray() {
   const contextMenu = Menu.buildFromTemplate([
     { label: 'Show SEVEN', click: () => navigateTo('/') },
     { type: 'separator' },
-    { label: 'Console',  click: () => navigateTo('/console') },
+    { label: 'Chat',  click: () => navigateTo('/console') },
     { label: 'Settings', click: () => navigateTo('/settings') },
     { type: 'separator' },
     { label: 'Quit SEVEN', click: () => {

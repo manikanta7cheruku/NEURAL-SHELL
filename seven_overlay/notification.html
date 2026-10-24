@@ -5,96 +5,87 @@
 <meta name="color-scheme" content="dark">
 <!--
   seven_overlay/notification.html
-  The status card at the top centre of the screen. The overlay daemon (electron/overlay_daemon.js) keeps it loaded
-  and calls window.__applyNotifData({title, subtitle, detail, holdMs, state, replace}).
+  The status card at the top centre of the screen. It lives in a 360x56 window of Windows glass (acrylic, see
+  electron/overlay_daemon.js), so the desktop blurs through it; this page only tints the glass and draws the content.
+  The daemon fades the window in and out and calls window.__applyNotifData({title, subtitle, detail, holdMs, state,
+  replace}).
 
-  state:    "working" (spinner and a moving hairline, no sound), "done" (check, soft chime), "error", "info"
-  replace:  true updates a card that is already showing, in place ("Scanning..." becomes "Saved")
+  state:    "working" (a spinner and a travelling hairline, no sound), "done" (a drawn check, soft chime),
+            "error", "info" (a short accent line)
+  replace:  true updates the card that is showing, in place ("Scanning" becomes "Saved")
 -->
 <style>
   *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
-  html, body { width: 380px; height: 82px; background: transparent; overflow: hidden;
+  :root {
+    --lagoon: #3cc8b4; --bone: #edeae4; --muted: rgba(237, 234, 228, 0.58);
+    --ok: #4cc38a; --err: #ef6b62;
+  }
+  html, body { width: 360px; height: 56px; overflow: hidden; background: transparent;
                font-family: 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
 
-  .wrap { position: absolute; inset: 0; display: flex; justify-content: center; align-items: flex-start; padding-top: 10px; }
-
   .card {
-    position: relative; display: flex; align-items: center; gap: 12px;
-    min-width: 280px; max-width: 360px; height: 58px; padding: 0 16px 0 12px;
-    background: rgba(17, 17, 21, 0.94);
-    border: 1px solid rgba(255, 255, 255, 0.09);
-    border-radius: 16px;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.38), 0 1px 0 rgba(255, 255, 255, 0.05) inset;
-    overflow: hidden; cursor: default; user-select: none;
-    transform: translateY(-140%) scale(0.98); opacity: 0;
-    transition: min-width 280ms cubic-bezier(0.32, 0.72, 0, 1);
+    position: absolute; inset: 0; display: flex; align-items: center; gap: 12px; padding: 0 16px 0 14px;
+    background: rgba(20, 21, 24, 0.52);                 /* a tint over the real glass, light enough to read through */
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;                                   /* matches Windows 11 window corners */
+    overflow: hidden; user-select: none; cursor: default;
   }
-  .card.show   { animation: drop 520ms cubic-bezier(0.16, 1, 0.3, 1) forwards; }
-  .card.hiding { animation: lift 320ms cubic-bezier(0.55, 0, 0.85, 0.35) forwards; }
-  @keyframes drop { from { transform: translateY(-140%) scale(0.98); opacity: 0; } to { transform: none; opacity: 1; } }
-  @keyframes lift { from { transform: none; opacity: 1; } to { transform: translateY(-140%) scale(0.98); opacity: 0; } }
+  .card::before {                                         /* a faint top highlight, like light on a pane of glass */
+    content: ''; position: absolute; left: 0; right: 0; top: 0; height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.14), transparent);
+  }
 
-  /* State mark */
-  .mark { position: relative; width: 30px; height: 30px; flex-shrink: 0; border-radius: 50%;
-          display: grid; place-items: center; background: rgba(255, 255, 255, 0.06);
-          transition: background-color 240ms ease; }
-  .mark svg { position: absolute; inset: 0; width: 30px; height: 30px; }
-  .ring  { fill: none; stroke: #8b8cf8; stroke-width: 2; stroke-linecap: round; stroke-dasharray: 44 120;
-           transform-origin: 50% 50%; animation: spin 900ms linear infinite; opacity: 0; transition: opacity 200ms; }
-  .check { fill: none; stroke: #3ccf7a; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round;
-           stroke-dasharray: 22; stroke-dashoffset: 22; opacity: 0; }
-  .bang  { fill: #f26d6d; opacity: 0; }
-  .seven { font: 600 12px/1 'Segoe UI', system-ui; color: rgba(255, 255, 255, 0.85); opacity: 0; letter-spacing: 0.02em; }
+  .mark { position: relative; width: 22px; height: 22px; flex-shrink: 0; display: grid; place-items: center; }
+  .mark svg { position: absolute; inset: 0; width: 22px; height: 22px; overflow: visible; }
+  .line  { width: 3px; height: 18px; border-radius: 2px; background: var(--lagoon); opacity: 0; transition: opacity 180ms ease; }
+  .ring  { fill: none; stroke: var(--lagoon); stroke-width: 1.8; stroke-linecap: round; stroke-dasharray: 34 100;
+           transform-origin: 50% 50%; animation: spin 0.9s linear infinite; opacity: 0; transition: opacity 180ms ease; }
+  .check { fill: none; stroke: var(--ok); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+           stroke-dasharray: 20; stroke-dashoffset: 20; opacity: 0; }
+  .bang  { fill: var(--err); opacity: 0; transition: opacity 180ms ease; }
   @keyframes spin { to { transform: rotate(360deg); } }
   @keyframes draw { to { stroke-dashoffset: 0; } }
 
+  .card[data-state="info"]    .line  { opacity: 1; }
   .card[data-state="working"] .ring  { opacity: 1; }
-  .card[data-state="done"]    .mark  { background: rgba(60, 207, 122, 0.14); }
-  .card[data-state="done"]    .check { opacity: 1; animation: draw 360ms 80ms cubic-bezier(0.65, 0, 0.35, 1) forwards; }
-  .card[data-state="error"]   .mark  { background: rgba(242, 109, 109, 0.14); }
+  .card[data-state="done"]    .check { opacity: 1; animation: draw 340ms 60ms cubic-bezier(0.65, 0, 0.35, 1) forwards; }
   .card[data-state="error"]   .bang  { opacity: 1; }
-  .card[data-state="info"]    .seven { opacity: 1; }
 
-  .text { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 3px; }
-  .title { font-size: 13px; font-weight: 600; color: rgba(255, 255, 255, 0.96); letter-spacing: -0.01em;
+  .text { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+  .title { font-size: 13px; font-weight: 600; color: var(--bone); letter-spacing: -0.005em;
            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .sub { display: flex; align-items: center; gap: 7px; font-size: 11.5px; color: rgba(255, 255, 255, 0.55);
-         white-space: nowrap; overflow: hidden; }
+  .sub { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; }
   .sub span { overflow: hidden; text-overflow: ellipsis; }
-  .detail { font-family: 'Cascadia Mono', 'JetBrains Mono', Consolas, monospace; font-size: 10.5px; font-style: normal;
-            color: rgba(255, 255, 255, 0.72); padding: 1px 6px; border-radius: 5px; background: rgba(255, 255, 255, 0.06);
-            flex-shrink: 0; }
+  .detail { flex-shrink: 0; font: 500 10.5px/1.6 'Cascadia Mono', Consolas, monospace; color: rgba(237, 234, 228, 0.78);
+            padding: 0 6px; border-radius: 4px; background: rgba(255, 255, 255, 0.07); }
 
-  /* Working: a hairline that travels along the bottom edge */
-  .line { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; overflow: hidden; opacity: 0; transition: opacity 200ms; }
-  .line::before { content: ''; position: absolute; top: 0; bottom: 0; width: 38%;
-                  background: linear-gradient(90deg, transparent, #8b8cf8, transparent);
-                  animation: travel 1.25s cubic-bezier(0.45, 0, 0.55, 1) infinite; }
-  .card[data-state="working"] .line { opacity: 0.9; }
-  @keyframes travel { from { transform: translateX(-110%); } to { transform: translateX(290%); } }
+  .trail { position: absolute; left: 0; right: 0; bottom: 0; height: 1.5px; overflow: hidden; opacity: 0; transition: opacity 180ms ease; }
+  .trail::before { content: ''; position: absolute; top: 0; bottom: 0; width: 34%;
+                   background: linear-gradient(90deg, transparent, var(--lagoon), transparent);
+                   animation: travel 1.3s cubic-bezier(0.45, 0, 0.55, 1) infinite; }
+  .card[data-state="working"] .trail { opacity: 0.85; }
+  @keyframes travel { from { transform: translateX(-110%); } to { transform: translateX(300%); } }
 
-  .fade { animation: fade 220ms ease; }
-  @keyframes fade { from { opacity: 0.25; transform: translateY(2px); } to { opacity: 1; transform: none; } }
+  .text.enter { animation: enter 260ms cubic-bezier(0.22, 1, 0.36, 1); }
+  @keyframes enter { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <div class="card" id="card" data-state="info" onclick="retract()">
-    <div class="mark">
-      <svg viewBox="0 0 30 30" aria-hidden="true">
-        <circle class="ring" cx="15" cy="15" r="11"></circle>
-        <path class="check" d="M9.5 15.5l3.6 3.4 7.4-7.6"></path>
-        <rect class="bang" x="14" y="8.5" width="2" height="8.5" rx="1"></rect>
-        <rect class="bang" x="14" y="19.2" width="2" height="2.2" rx="1"></rect>
-      </svg>
-      <span class="seven">7</span>
-    </div>
-    <div class="text" id="text">
-      <div class="title" id="titleEl">Seven</div>
-      <div class="sub"><span id="subtitleEl"></span><em class="detail" id="detailEl" style="display:none"></em></div>
-    </div>
-    <div class="line"></div>
+<div class="card" id="card" data-state="info">
+  <div class="mark" aria-hidden="true">
+    <span class="line"></span>
+    <svg viewBox="0 0 22 22">
+      <circle class="ring" cx="11" cy="11" r="8"></circle>
+      <path class="check" d="M6.6 11.4l2.9 2.8 5.9-6.1"></path>
+      <rect class="bang" x="10.1" y="5.6" width="1.8" height="7.4" rx="0.9"></rect>
+      <rect class="bang" x="10.1" y="14.6" width="1.8" height="1.9" rx="0.9"></rect>
+    </svg>
   </div>
+  <div class="text" id="text">
+    <div class="title" id="titleEl">Seven</div>
+    <div class="sub"><span id="subtitleEl"></span><span class="detail" id="detailEl" style="display:none"></span></div>
+  </div>
+  <div class="trail"></div>
 </div>
 
 <script>
@@ -104,7 +95,7 @@
     try {
       const ctx = new (window.AudioContext || window.webkitAudioContext)();
       const t = ctx.currentTime;
-      [[659.25, 0, 0.18, 0.07], [987.77, 0.09, 0.26, 0.05]].forEach(([f, s, d, v]) => {
+      [[659.25, 0, 0.16, 0.05], [987.77, 0.08, 0.24, 0.035]].forEach(([f, s, d, v]) => {
         const o = ctx.createOscillator(), g = ctx.createGain();
         o.type = 'sine'; o.frequency.value = f;
         g.gain.setValueAtTime(0.0001, t + s);
@@ -116,9 +107,8 @@
   }
 
   function applyData(data) {
-    const { title = 'Seven', subtitle = '', detail = '', holdMs = 4000, state = 'info', replace = false } = data;
+    const { title = 'Seven', subtitle = '', detail = '', holdMs = 4000, state = 'info' } = data;
     const card = document.getElementById('card');
-    const showing = card.classList.contains('show') && !card.classList.contains('hiding');
     if (_timer) { clearTimeout(_timer); _timer = null; }
 
     document.getElementById('titleEl').textContent = title;
@@ -128,33 +118,17 @@
     det.style.display = detail ? '' : 'none';
     card.dataset.state = ['working', 'done', 'error', 'info'].includes(state) ? state : 'info';
 
-    if (replace && showing) {
-      const text = document.getElementById('text');
-      text.classList.remove('fade'); void text.offsetWidth; text.classList.add('fade');
-    } else {
-      card.classList.remove('show', 'hiding'); void card.offsetWidth; card.classList.add('show');
-    }
+    const text = document.getElementById('text');
+    text.classList.remove('enter'); void text.offsetWidth; text.classList.add('enter');
+
     if (state === 'done') chime();
-    if (state !== 'working') _timer = setTimeout(retract, holdMs);
-    else _timer = setTimeout(retract, Math.max(holdMs, 20000));    // a stuck "working" card still leaves
+    _timer = setTimeout(retract, state === 'working' ? Math.max(holdMs, 20000) : holdMs);
   }
   window.__applyNotifData = applyData;
 
-  if (!window.__NOTIF_DATA__) {
-    const p = new URLSearchParams(window.location.search);
-    if (p.get('title')) {
-      requestAnimationFrame(() => applyData({ title: p.get('title'), subtitle: p.get('subtitle') || '',
-        detail: p.get('detail') || '', holdMs: parseInt(p.get('holdMs') || '4000'), state: p.get('state') || 'info' }));
-    }
-  }
-
   function retract() {
     if (_timer) { clearTimeout(_timer); _timer = null; }
-    const card = document.getElementById('card');
-    if (card.classList.contains('hiding')) return;
-    card.classList.remove('show');
-    card.classList.add('hiding');
-    setTimeout(() => { if (window.electronAPI && window.electronAPI.close) window.electronAPI.close(); }, 340);
+    if (window.electronAPI && window.electronAPI.close) window.electronAPI.close();   // the daemon fades the glass out
   }
 </script>
 </body>
