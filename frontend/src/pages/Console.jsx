@@ -247,6 +247,9 @@ function Empty({ onPick }) {
             <div className="mt-0.5 text-[11.5px] text-s-text-3">{hint}</div>
           </button>))}
       </div>
+      <a href="#/guide" className="mt-4 text-[12px] text-s-text-3 underline decoration-s-border-l underline-offset-4 hover:text-s-text hover:decoration-s-text-3">
+        See everything Seven can do, with examples you can run
+      </a>
     </div>
   );
 }
