@@ -118,12 +118,13 @@ procedure RemoveAutostart();
 var
   ResultCode: Integer;
   Name: String;
-  Names: array[0..1] of String;
+  Names: array[0..2] of String;
   I: Integer;
 begin
   Names[0] := 'SevenTriggerDaemon';
   Names[1] := 'SevenOverlayDaemon';
-  for I := 0 to 1 do
+  Names[2] := 'SevenScheduleDaemon'; // only older builds registered this one
+  for I := 0 to 2 do
   begin
     Name := Names[I];
     Exec(ExpandConstant('{sys}\schtasks.exe'), '/Delete /F /TN ' + Name, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
