@@ -16,6 +16,21 @@ from trigger_modules.config import PROJECT_ROOT
 _overlay_spawn_lock = threading.Lock()
 
 
+def find_electron() -> str:
+    """SEVEN.exe next to resources/app when installed, the dev Electron otherwise, '' when neither exists."""
+    app_path = os.environ.get('SEVEN_APP_PATH') or PROJECT_ROOT
+    install_root = os.path.dirname(os.path.dirname(app_path))
+    for c in [os.path.join(install_root, "SEVEN.exe"), os.path.join(install_root, "seven.exe")]:
+        if os.path.exists(c):
+            return c
+    for rel in [os.path.join("node_modules", "electron", "dist", "electron.exe"),
+                os.path.join("node_modules", ".bin", "electron.cmd")]:
+        c = os.path.join(PROJECT_ROOT, rel)
+        if os.path.exists(c):
+            return c
+    return ""
+
+
 # ─────────────────────────────────────────────────────────────────────────
 # TCP MESSAGE HELPERS
 # ─────────────────────────────────────────────────────────────────────────
@@ -68,29 +83,7 @@ def ensure_overlay_alive_safe() -> bool:
         print("[TRIGGER DAEMON] Overlay daemon down — spawning...")
 
         app_path = os.environ.get('SEVEN_APP_PATH') or PROJECT_ROOT
-        resources_dir = os.path.dirname(app_path)
-        install_root = os.path.dirname(resources_dir)
-
-        electron_exe = None
-        for c in [
-            os.path.join(install_root, "SEVEN.exe"),
-            os.path.join(install_root, "seven.exe"),
-        ]:
-            if os.path.exists(c):
-                electron_exe = c
-                break
-
-        # Fall back to dev node_modules if not running packaged
-        if not electron_exe:
-            for _rel in [
-                os.path.join("node_modules", "electron", "dist", "electron.exe"),
-                os.path.join("node_modules", ".bin", "electron.cmd"),
-            ]:
-                _c = os.path.join(PROJECT_ROOT, _rel)
-                if os.path.exists(_c):
-                    electron_exe = _c
-                    break
-
+        electron_exe = find_electron()
         if not electron_exe:
             print("[TRIGGER DAEMON] Electron executable not found.")
             return False
