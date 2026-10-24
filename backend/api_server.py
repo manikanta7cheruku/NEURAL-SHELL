@@ -167,8 +167,6 @@ def plan_limit_error(feature_name: str, limit_check: dict) -> HTTPException:
         "conversation_history":  "saved conversations",
         "knowledge_files":       "knowledge files",
         "schedules":             "schedules",
-        "app_aliases":           "app aliases / URL shortcuts",
-        "custom_paths":          "custom app paths",
         "web_searches_per_day":  "web searches today",
     }
     item_name = messages.get(feature_name, feature_name)

@@ -180,7 +180,7 @@ def get_plan_usage():
         "features": {
             "facts":         usage_item(facts_count,    features.get("facts_limit",          7)),
             "conversations": usage_item(convo_count,    features.get("conversation_history",  7)),
-            "knowledge":     usage_item(file_count,     features.get("knowledge_files",        1)),
+            "knowledge":     usage_item(file_count,     features.get("knowledge_files",        3)),
             "schedules":     usage_item(schedule_count, features.get("schedules",              7)),
         },
         "capabilities": {
