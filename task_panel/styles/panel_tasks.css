@@ -113,7 +113,7 @@
 
 .card-action-btn.check:hover {
   border-color: var(--accent-light);
-  background: rgba(99, 102, 241, 0.12);
+  background: rgba(60, 200, 180, 0.12);
   transform: scale(1.15);
 }
 
@@ -283,7 +283,7 @@
 .countdown {
   margin-top: 10px;
   background: var(--accent-dim);
-  border: 1px solid rgba(99, 102, 241, 0.15);
+  border: 1px solid rgba(60, 200, 180, 0.15);
   border-radius: var(--radius-sm);
   padding: 8px 12px;
   display: flex;

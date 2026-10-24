@@ -70,16 +70,24 @@ export function Body({ children, className }) {
 
 // ── Controls ────────────────────────────────────────────────────────────────
 
+/**
+ * Switch. A quiet track with a hairline edge; on, it fills with the accent. The thumb glides with a soft ease and
+ * stretches a little while pressed, the way a physical switch gives under a finger.
+ */
 export function Toggle({ checked, onChange, disabled, label }) {
   return (
     <button type="button" role="switch" aria-checked={!!checked} aria-label={label} disabled={disabled}
             onClick={() => onChange(!checked)}
-            className={cx('relative inline-flex h-[18px] w-8 shrink-0 items-center rounded-full transition-colors duration-200',
-                          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-s-accent/60 focus-visible:ring-offset-2 focus-visible:ring-offset-s-bg',
-                          checked ? 'bg-s-accent' : 'bg-s-border-l',
-                          disabled && 'opacity-40 cursor-not-allowed')}>
-      <span className={cx('inline-block h-[14px] w-[14px] rounded-full bg-s-on-accent shadow-sm transition-transform duration-200 ease-out',
-                          checked ? 'translate-x-[16px]' : 'translate-x-[2px]')} />
+            className={cx('group/sw relative inline-flex h-[18px] w-[30px] shrink-0 items-center rounded-full',
+                          'transition-[background-color,box-shadow] duration-200 ease-[cubic-bezier(0.2,0.8,0.2,1)]',
+                          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-s-accent/50 focus-visible:ring-offset-2 focus-visible:ring-offset-s-bg',
+                          checked ? 'bg-s-accent shadow-[inset_0_0_0_1px_rgba(0,0,0,0.08)]'
+                                  : 'bg-s-card-h shadow-[inset_0_0_0_1px_var(--color-s-border-l)] hover:bg-s-border',
+                          disabled ? 'cursor-not-allowed opacity-40' : 'cursor-pointer')}>
+      <span className={cx('absolute top-[3px] h-3 rounded-full transition-all duration-200 ease-[cubic-bezier(0.2,0.8,0.2,1)]',
+                          'w-3 group-active/sw:w-[15px]',
+                          checked ? 'left-[15px] bg-s-on-accent group-active/sw:left-[12px]'
+                                  : 'left-[3px] bg-s-text-3 group-hover/sw:bg-s-text-2')} />
     </button>
   );
 }
@@ -168,10 +176,10 @@ export function Input({ className, ...props }) {
 }
 
 const BUTTON = {
-  primary: 'bg-s-accent text-s-on-accent hover:bg-s-accent-h',
+  primary: 'bg-s-accent text-s-on-accent hover:bg-s-accent-h shadow-[inset_0_1px_0_rgba(255,255,255,0.18)]',
   secondary: 'border border-s-border bg-s-card text-s-text hover:bg-s-card-h hover:border-s-border-l',
   ghost: 'text-s-text-2 hover:text-s-text hover:bg-s-card',
-  danger: 'border border-s-red/30 text-s-red hover:bg-s-red/10',
+  danger: 'border border-s-red/30 text-s-red hover:bg-s-red/10 hover:border-s-red/45',
 };
 
 export const Button = forwardRef(function Button(
@@ -179,7 +187,8 @@ export const Button = forwardRef(function Button(
   return (
     <button ref={ref} type="button" {...props} disabled={props.disabled || loading}
             className={cx('inline-flex items-center justify-center gap-1.5 rounded-md font-medium whitespace-nowrap',
-                          'transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed',
+                          'transition-[background-color,border-color,color,box-shadow,transform] duration-200 ease-[cubic-bezier(0.2,0.8,0.2,1)]',
+                          'active:translate-y-px disabled:opacity-50 disabled:cursor-not-allowed disabled:active:translate-y-0',
                           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-s-accent/60',
                           size === 'sm' ? 'h-6 px-2 text-[11.5px]' : 'h-7 px-3 text-[12px]',
                           BUTTON[variant], className)}>

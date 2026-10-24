@@ -12,9 +12,9 @@
   --text-muted:     rgba(255, 255, 255, 0.45);
   --text-dim:       rgba(255, 255, 255, 0.25);
 
-  --accent:         #6366f1;
-  --accent-light:   #818cf8;
-  --accent-dim:     rgba(99, 102, 241, 0.12);
+  --accent:         #3cc8b4;
+  --accent-light:   #62d8c7;
+  --accent-dim:     rgba(60, 200, 180, 0.12);
   --accent-rgb:     99, 102, 241;
 
   --success:        #10b981;

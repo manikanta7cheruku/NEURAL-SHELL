@@ -316,7 +316,7 @@ export default function Guide() {
             <div className="grid grid-cols-1 gap-2.5 md:grid-cols-3">
               {[
                 [Mic, 'Voice', <>Say {wake}, then what you need. Hold <Kbd>Shift</Kbd> to talk without the wake word. Talk over Seven or say "stop" to interrupt. Say {pause} to pause and "{resume}" to resume.</>],
-                [MessageSquare, 'Console', <>Type anything, the same as speaking. Seven shows what it did after each reply, and chats are saved so you can pick them up later.</>, '/console'],
+                [MessageSquare, 'Chat', <>Type anything, the same as speaking. Seven shows what it did after each reply, and chats are saved so you can pick them up later.</>, '/console'],
                 [PanelRight, 'Task panel', <>Press <Kbd>Alt</Kbd> <Kbd>Shift</Kbd> <Kbd>T</Kbd> anywhere for a small panel with your tasks and reminders, on top of whatever you are doing.</>],
               ].map(([I, title, body, to]) => (
                 <div key={title} className="rounded-lg border border-s-border bg-s-surface p-3.5 shadow-[var(--s-shadow)]">
