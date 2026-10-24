@@ -327,12 +327,13 @@ def _with_prefix(ctx, result):
     return f"{acks} {result}".strip()
 
 
-def think(prompt_text, speaker_id="default", stream_mode="sentence", conversation_id=None):
+def think(prompt_text, speaker_id="default", stream_mode="sentence", conversation_id=None, documents=None):
     """
     Run the pipeline for one message.
 
     stream_mode: "sentence" (voice), "token" (console), "text" (a string).
     conversation_id: the chat this message belongs to (None = current chat).
+    documents: library ids attached to this message; they stay attached to the chat.
     """
     global USER_NAME
     ensure_name_loaded()
@@ -387,6 +388,13 @@ def think(prompt_text, speaker_id="default", stream_mode="sentence", conversatio
     ctx.stream_mode, ctx.speaker_key = stream_mode, key
     ctx.conversation_id, ctx.thread_key = conv_id, tkey
     ctx.user_msg_id, ctx.storage_error = user_msg_id, storage_error
+    if documents:
+        ctx.documents = list(documents)
+        try:
+            from knowledge import store
+            store.attach(conv_id, ctx.documents)
+        except Exception as exc:
+            _log.warning("documents not attached: %s", exc)
     deps = {"seven_memory": seven_memory, "mood_engine": mood_engine, "config": config, "model_name": current_model()}
     deps.update(EXTRA_DEPS)
 

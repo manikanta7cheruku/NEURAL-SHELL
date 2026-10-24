@@ -55,6 +55,8 @@ def _budget(ctx, is_voice, profile, multiplier) -> int:
         base = 160 if count else 100 if long else 70
     else:
         base = 400 if (count or long) else 160 if ctx.web_searched else 240
+    if ctx.knowledge_context and not is_voice:
+        base = 1100 if ctx.knowledge_whole else 750       # tables and study notes need room
     if profile.get("verbosity") == "brief":
         base = min(base, 60 if is_voice else 120)
     elif profile.get("verbosity") == "detailed":
@@ -165,6 +167,8 @@ def process(ctx, deps):
                               ("earlier_chats", any(n.startswith("From an earlier chat") for n in notes))) if v]
     st.trace = {"intent": getattr(ctx.intent, "label", None), "mode": decision.mode, "sources": sources,
                 "uncertainty": bool(decision.uncertainty), "model": model, "answered_by": "layer_08_llm"}
+    if ctx.knowledge_hits:
+        st.trace["citations"] = list({(h["name"], h["label"]): h for h in ctx.knowledge_hits}.values())[:8]
 
     def _finalize(parts, completed, failed):
         if failed or is_visual:

@@ -15,6 +15,7 @@ NEW in v4:
 =============================================================================
 """
 
+import re
 import traceback
 from colorama import Fore
 from brain_modules.layer_result import LayerResult
@@ -89,10 +90,31 @@ def _is_likely_app(target: str) -> bool:
     return False
 
 
+_ATTACHED_REF = re.compile(r"^(?:open|show|view|display) (?:the|this|that|my) (?:pdf|document|doc|file|notes|slides|sheet)$")
+
+
+def _open_attached(ctx):
+    """In a chat with an attached document, "open the pdf" means that document, not a search of the PC."""
+    if not _ATTACHED_REF.match(ctx.clean_in.strip(" .!?")):
+        return None
+    try:
+        from knowledge import store
+        ids = store.attached(ctx.conversation_id)
+    except Exception:
+        return None
+    if not ids:
+        return None
+    doc = store.get(ids[-1])
+    return f"Opened {doc['name']}." if store.open_original(doc["id"]) else f"I couldn't open {doc['name']}."
+
+
 def process(ctx, deps):
     if ctx.first_word not in ["open", "show", "find", "display",
                                "launch", "view", "pull", "bring"]:
         return LayerResult.pass_through()
+    attached = _open_attached(ctx)
+    if attached:
+        return LayerResult.stop(attached)
 
     config = deps.get("config")
 
