@@ -27,23 +27,24 @@ class SetupCompleteRequest(BaseModel):
     model_name:   Optional[str]  = ""
 
 
-@router.get("/api/setup/existing-identity")
+@router.get("/api/setup/existing-identity", summary="An earlier Seven account on this PC, if any")
 def get_existing_identity():
-    """Check if device has previously registered identity on server."""
+    """Setup asks this first: one account per PC, so a returning user can continue or start fresh."""
     try:
-        import telemetry as tel
-        import requests as _req
-
-        device_id  = tel.get_device_id()
-        SERVER_URL = "https://seven-server-a825.onrender.com"
-        r = _req.get(f"{SERVER_URL}/api/device/{device_id}", timeout=5)
-        if r.status_code == 200:
-            data = r.json()
-            return {"found": True, "name": data.get("name"), "email": data.get("email")}
-        return {"found": False}
+        from backend import account
+        return account.existing()
     except Exception as e:
         print(f"[SETUP] Identity check failed: {e}")
         return {"found": False}
+
+
+@router.post("/api/setup/start-fresh", summary="Back up and clear this PC's Seven data for a new person")
+def start_fresh():
+    from backend import account
+    try:
+        return account.start_fresh()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Could not start fresh: {e}")
 
 @router.post("/api/setup/welcome-greeting")
 def welcome_greeting():

@@ -1,5 +1,78 @@
 import { useEffect, useState } from 'react';
+import api from '../../api';
 import useSetup from '../../stores/useSetup';
+
+const plural = (n, word) => `${n.toLocaleString()} ${word}${n === 1 ? '' : 's'}`;
+
+/**
+ * One account per PC. If this PC was used before (data left after an uninstall, or the device is registered on the
+ * Seven server), offer to continue as that person or start fresh. Starting fresh backs everything up first.
+ */
+function ReturningUser({ account, onContinue, onFresh }) {
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const l = account.local || {};
+  const facts = [l.conversations && plural(l.conversations, 'conversation'), l.facts && plural(l.facts, 'saved fact'),
+                 l.documents && plural(l.documents, 'document'), l.tasks && plural(l.tasks, 'task')].filter(Boolean);
+  const who = account.name || 'the previous user';
+
+  const fresh = async () => {
+    setBusy(true); setError('');
+    try { await api.post('/setup/start-fresh'); onFresh(); }
+    catch (e) { setError(e.response?.data?.detail || 'Could not start fresh.'); setBusy(false); }
+  };
+
+  return (
+    <div className="rounded-2xl border border-white/[0.1] bg-white/[0.025] p-6">
+      <div className="flex items-start gap-4">
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white text-[15px] font-semibold text-black">
+          {(account.name || '?').slice(0, 1).toUpperCase()}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="text-[15px] font-medium text-white">This PC already has a Seven account</div>
+          <p className="mt-1 text-[12px] font-light leading-relaxed text-white/50">
+            {account.name ? <>Set up for <span className="text-white/80">{account.name}</span></> : 'Set up before'}
+            {account.email ? <> ({account.email})</> : null}
+            {account.tier ? <> on the {account.tier.charAt(0).toUpperCase() + account.tier.slice(1)} plan</> : null}.
+            {facts.length > 0 && <> Still here: {facts.join(', ')}.</>}
+          </p>
+        </div>
+      </div>
+
+      {!confirming ? (
+        <div className="mt-6 flex flex-wrap items-center gap-3">
+          <button onClick={onContinue}
+                  className="flex items-center gap-3 rounded-xl bg-white px-6 py-3 text-[12px] font-semibold tracking-wide text-black transition-all hover:-translate-y-0.5 hover:bg-white/90">
+            Continue as {who}
+          </button>
+          <button onClick={() => setConfirming(true)}
+                  className="rounded-xl border border-white/[0.12] px-6 py-3 text-[12px] font-medium text-white/70 transition-colors hover:border-white/25 hover:text-white">
+            Start fresh as someone new
+          </button>
+        </div>
+      ) : (
+        <div className="mt-6 rounded-xl border border-white/[0.08] bg-black/30 p-4">
+          <p className="text-[12px] leading-relaxed text-white/70">
+            Seven copies {who}'s conversations, memory, documents and tasks to a backup folder, then starts empty for you.
+            Nothing is deleted. The plan belongs to this PC, so it stays.
+          </p>
+          {error && <p className="mt-2 text-[11.5px] text-red-400">{error}</p>}
+          <div className="mt-4 flex gap-3">
+            <button onClick={fresh} disabled={busy}
+                    className="rounded-lg bg-white px-5 py-2.5 text-[12px] font-semibold text-black transition-colors hover:bg-white/90 disabled:opacity-60">
+              {busy ? 'Backing up' : 'Back up and start fresh'}
+            </button>
+            <button onClick={() => setConfirming(false)} disabled={busy}
+                    className="rounded-lg px-4 py-2.5 text-[12px] text-white/50 transition-colors hover:text-white">
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 const PILLARS = [
   { label: 'RUNS ON THIS PC', value: 'Local', desc: 'Speech, the AI model and your memory all run on this computer.' },
@@ -8,13 +81,22 @@ const PILLARS = [
 ];
 
 export default function StepWelcome() {
-  const { next } = useSetup();
+  const { next, goTo, setField } = useSetup();
   const [ready, setReady] = useState(false);
+  const [account, setAccount] = useState(null);
 
   useEffect(() => {
     const t = setTimeout(() => setReady(true), 100);
-    return () => clearTimeout(t);
+    let live = true;
+    api.get('/setup/existing-identity').then(r => { if (live && r.data?.found) setAccount(r.data); }).catch(() => {});
+    return () => { clearTimeout(t); live = false; };
   }, []);
+
+  const continueAs = () => {
+    if (account.name) setField('name', account.name);
+    if (account.email) setField('email', account.email);
+    goTo(account.name && account.email ? 3 : 2);      // skip "About you" when Seven already knows it
+  };
 
   return (
     <div className={`space-y-12 transition-all duration-700 ease-out ${ready ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-6'}`}>
@@ -50,6 +132,7 @@ export default function StepWelcome() {
         ))}
       </div>
 
+      {account ? <ReturningUser account={account} onContinue={continueAs} onFresh={() => { setAccount(null); next(); }} /> : (
       <div className="flex items-center justify-between gap-8 pt-6 border-t border-white/[0.05]">
         <div className="space-y-1">
           <div className="text-[11px] text-white/80 font-medium">About 5 to 10 minutes</div>
@@ -60,6 +143,7 @@ export default function StepWelcome() {
           <svg width="10" height="10" viewBox="0 0 24 24" fill="none"><path d="M5 12h14M12 5l7 7-7 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
         </button>
       </div>
+      )}
     </div>
   );
 }

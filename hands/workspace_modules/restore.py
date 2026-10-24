@@ -20,6 +20,9 @@ from hands.workspace_modules.filters import is_seven_process
 _restore_in_progress = threading.Lock()
 
 
+_DOCUMENT_APPS = {"word", "excel", "powerpoint", "notepad", "notepad++", "sublime"}
+
+
 def should_restore(cfg: dict) -> bool:
     """Only skip Seven's own processes."""
     exe  = (cfg.get("exe_path") or "").lower()
@@ -67,7 +70,7 @@ def smart_restore(apps_config):
             _per_prof_future = _pool.submit(get_open_chrome_tabs_per_profile)
 
             try:
-                current = scan_current()
+                current = scan_current(keep_handles=True)
             except Exception:
                 current = []
 
@@ -172,6 +175,7 @@ def smart_restore(apps_config):
 
         missing      = []
         already_open = 0
+        browsers_opened = 0
 
         for cfg in filtered_apps:
           try:
@@ -184,144 +188,28 @@ def smart_restore(apps_config):
             name = (cfg.get("name") or "").lower()
             tabs = cfg.get("tabs", [])
 
-            if t in ("chrome", "edge", "brave", "firefox"):
-                has_visible_browser_window = any(
-                    (app.get("type") or "").lower() == t for app in current
-                )
-
-                # COLD START: caller marked browser as fully closed
-                if cfg.get("_browser_closed") and tabs:
-                    print(Fore.GREEN + f"[WORKSPACE] {t.title()} marked "
-                          f"_browser_closed — restoring all {len(tabs)} "
-                          f"tab(s) for profile '{prof}' (offline mode)")
-                    missing.append(cfg)
-                    continue
-
-                if not has_visible_browser_window and not tabs:
-                    already_open += 1
-                    continue
-
-                if not has_visible_browser_window and tabs:
-                    print(Fore.GREEN + f"[WORKSPACE] {t.title()} is closed — "
-                          f"restoring all {len(tabs)} tab(s) for profile '{prof}'")
-                    new_cfg = dict(cfg)
-                    new_cfg["_browser_closed"] = True
-                    missing.append(new_cfg)
-                    continue
-
-                # Browser is visible — dedup tabs
-                if tabs:
-                    missing_tabs = []
-                    skipped_tabs = 0
-
-                    if _no_tab_data:
-                        # OFFLINE: No extension data available.
-                        # Check if THIS SPECIFIC profile directory is open
-                        # using multi-layer detection (cmdline + windows +
-                        # session lock files).
-                        # - Profile OPEN → skip entirely (cannot dedup tabs
-                        #   without extension data; launching would duplicate)
-                        # - Profile CLOSED → launch all saved tabs
-                        from hands.workspace_modules.app_restorers import (
-                            _is_profile_dir_open,
-                        )
-                        pdir = (cfg.get("profile_dir") or "").strip()
-                        if pdir and _is_profile_dir_open(pdir):
-                            already_open += 1
-                            print(Fore.CYAN + f"[WORKSPACE] {name}: Profile "
-                                  f"'{pdir}' is open (offline mode — skipping "
-                                  f"to prevent duplicates; individual closed "
-                                  f"tabs cannot be recovered without Seven "
-                                  f"backend running)")
-                            continue
-                        else:
-                            missing_tabs = list(tabs)
-                            print(Fore.GREEN + f"[WORKSPACE] {name}: Profile "
-                                  f"'{pdir or '?'}' not open (offline) — "
-                                  f"cold-launching {len(missing_tabs)} tab(s)")
-                    else:
-                        # ONLINE: Per-profile deduplication.
-                        # Match on profile_dir (disk directory) against
-                        # the re-keyed per_profile_urls. This guarantees
-                        # each account's tabs are checked ONLY against
-                        # that account's live URLs — never cross-profile.
-                        pdir = (cfg.get("profile_dir") or "").strip()
-                        prof_live_urls = set()
-
-                        if per_profile_urls and pdir:
-                            # Exact match on disk directory
-                            if pdir in per_profile_urls:
-                                prof_live_urls = per_profile_urls[pdir]
-                            else:
-                                # Case-insensitive match
-                                pdir_lower = pdir.lower()
-                                for pk, urls in per_profile_urls.items():
-                                    if pk.lower() == pdir_lower:
-                                        prof_live_urls = urls
-                                        break
-
-                        # Fallback: match on profile_name if dir didn't match
-                        if not prof_live_urls and per_profile_urls and prof:
-                            if prof in per_profile_urls:
-                                prof_live_urls = per_profile_urls[prof]
-                            else:
-                                for pk, urls in per_profile_urls.items():
-                                    if pk.lower() == prof.lower():
-                                        prof_live_urls = urls
-                                        break
-
-                        # Last resort: global URLs (only if zero per-profile data)
-                        if not prof_live_urls and not per_profile_urls and open_chrome_urls_norm:
-                            prof_live_urls = open_chrome_urls_norm
-
-                        # Build per-profile domain set for fuzzy matching
-                        prof_live_domains = set()
-                        for _u in prof_live_urls:
-                            try:
-                                _d = extract_domain(_u)
-                                if _d:
-                                    prof_live_domains.add(_d)
-                            except Exception:
-                                pass
-
-                        for tab in tabs:
-                            tab_url = tab.get("url", "")
-                            if not tab_url:
-                                continue
-
-                            tab_norm = normalize_url(tab_url)
-
-                            # Check 1: Exact match against THIS profile only
-                            if tab_norm in prof_live_urls:
-                                skipped_tabs += 1
-                                continue
-
-                            # Check 2: Fuzzy match against THIS profile only
-                            if prof_live_urls and url_matches(
-                                tab_url, prof_live_urls, prof_live_domains
-                            ):
-                                skipped_tabs += 1
-                                continue
-
-                            missing_tabs.append(tab)
-
-                    if not missing_tabs:
-                        already_open += 1
-                        print(Fore.CYAN + f"[WORKSPACE] {name}: "
-                              f"All {skipped_tabs} tabs already open")
-                    else:
-                        new_cfg = dict(cfg)
-                        new_cfg["tabs"] = missing_tabs
-                        new_cfg["_partial"] = True
-                        missing.append(new_cfg)
-                        print(Fore.GREEN + f"[WORKSPACE] {name}: "
-                              f"{len(missing_tabs)} missing, "
-                              f"{skipped_tabs} already open")
+            if t in ("chrome", "edge", "brave") and tabs:
+                # browser_restore.py compares tab by tab against what is open in that profile right now,
+                # so a window only counts as opened when a tab really had to be opened.
+                from hands.workspace_modules.browser_restore import restore_browser
+                if restore_browser(cfg)["opened"]:
+                    browsers_opened += 1
                 else:
-                    if prof and prof in open_profiles:
-                        already_open += 1
-                    else:
-                        missing.append(cfg)
+                    already_open += 1
+            elif t in ("chrome", "edge", "brave", "firefox"):
+                if tabs:
+                    missing.append(cfg)
+                else:
+                    already_open += 1
+
+            elif cfg.get("open_files") and t in _DOCUMENT_APPS:
+                # Word, Excel, PowerPoint and editors: what matters is the document, not whether the app runs.
+                open_now = {f.lower() for app in current for f in (app.get("open_files") or [])}
+                wanted = [f for f in cfg["open_files"] if f.lower() not in open_now and os.path.exists(f)]
+                if wanted:
+                    missing.append({**cfg, "open_files": wanted})
+                else:
+                    already_open += 1
 
             elif t == "vscode":
                 if ws and ws in open_ws_paths:
@@ -431,7 +319,7 @@ def smart_restore(apps_config):
         else:
             print(Fore.GREEN + "[WORKSPACE] All apps already open")
 
-        return len(missing), already_open
+        return len(missing) + browsers_opened, already_open
 
     finally:
         _restore_in_progress.release()

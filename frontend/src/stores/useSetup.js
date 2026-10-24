@@ -29,6 +29,7 @@ const useSetup = create((set, get) => ({
   // ── Navigation ──
   next: () => set(s => ({ step: Math.min(s.step + 1, s.total), error: null })),
   back: () => set(s => ({ step: Math.max(s.step - 1, 1),       error: null })),
+  goTo: (n) => set(s => ({ step: Math.min(Math.max(n, 1), s.total), error: null })),
 
   // ── Field updates ──
   setField:   (key, value) => set(s => ({ data: { ...s.data, [key]: value }, error: null })),

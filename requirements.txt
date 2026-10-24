@@ -22,6 +22,7 @@ pyaudio
 # --- App Control ---
 AppOpener
 pyautogui
+Pillow
 
 # --- Memory System ---
 chromadb==1.5.8

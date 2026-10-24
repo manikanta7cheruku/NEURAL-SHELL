@@ -52,10 +52,11 @@ TERMINALS = {
 
 # ── Public API ───────────────────────────────────────────────────────────
 
-def scan_current():
+def scan_current(keep_handles: bool = False):
     """
     Scan all visible user-opened windows and return app configs.
     Filters out system utilities, Seven's own processes, GPU overlays.
+    keep_handles: keep the live "pid" and "hwnd" (restore compares against them); saved workspaces never need them.
     """
     print(Fore.CYAN + "[WORKSPACE] Scanning desktop...")
     t0 = time.time()
@@ -105,7 +106,8 @@ def scan_current():
 
             cfg = _classify(exe_name, exe_path, title, win_info, proc)
             if cfg:
-                cfg["pid"] = pid  # Attached for document capture process lookup
+                cfg["pid"] = pid    # for document capture
+                cfg["hwnd"] = hwnd  # for reading browser tabs and matching Explorer folders; not saved
                 apps.append(cfg)
 
         except Exception:
@@ -127,10 +129,9 @@ def scan_current():
         )
     ]
 
-    from hands.workspace_modules.enrichment import (
-        enrich_chrome, enrich_vscode, enrich_explorer
-    )
-    enrich_chrome(apps)
+    from hands.workspace_modules.enrichment import enrich_vscode, enrich_explorer
+    from hands.workspace_modules.browser_capture import enrich_browsers
+    enrich_browsers(apps)
     enrich_vscode(apps)
 
     try:
@@ -147,6 +148,9 @@ def scan_current():
         apps = capture_open_documents(apps)
     except Exception as _doc_err:
         print(Fore.YELLOW + f"[WORKSPACE] Document capture skipped: {_doc_err}")
+
+    if not keep_handles:
+        apps = [{k: v for k, v in a.items() if k not in ("pid", "hwnd")} for a in apps]
 
     elapsed = int((time.time() - t0) * 1000)
     print(Fore.GREEN + f"[WORKSPACE] Scanned {len(apps)} apps in {elapsed}ms")

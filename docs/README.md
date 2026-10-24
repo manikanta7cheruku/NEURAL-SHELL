@@ -38,7 +38,10 @@ docs/
   components/
     README.md                   index and status of each component
     brain.md                    complete: pipeline, memory, actions, learning
-    ears.md, mouth.md, hands.md, memory.md, knowledge.md,
+    hands.md                    complete: apps, windows, system, files
+    workspaces.md               complete: capture, browser tabs, restore without duplicates
+    knowledge.md                complete: documents, how Seven reads them
+    ears.md, mouth.md, memory.md,
     backend-api.md, frontend.md, desktop-shell.md,
     background-services.md, licensing-and-updates.md   outlines, filled in as each part is reworked
   development/

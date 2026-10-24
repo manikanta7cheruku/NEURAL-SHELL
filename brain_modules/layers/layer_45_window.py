@@ -109,9 +109,12 @@ def process(ctx, deps):
     _position = _parts.get("position", "")
     _mode     = _parts.get("mode", "")
 
+    if _target.split(" ")[0] in ("this", "current", "it", "active"):
+        _target = "that window"           # the one the user was in before typing to Seven
     speech = _get_speech(_action, _target, _position, _mode, _parts)
 
     if speech:
+        speech = speech[0].upper() + speech[1:]
         return LayerResult.stop(f"{speech} ###WINDOW: {tag_params}")
     return LayerResult.stop(f"###WINDOW: {tag_params}")
 

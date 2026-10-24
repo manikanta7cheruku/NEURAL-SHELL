@@ -288,18 +288,23 @@ def _score_file(filename: str, keywords: list, target_extensions: list,
             if name_no_ext == kw_lower or name_no_ext == kw_singular:
                 kw_score = 1000
             elif name_no_ext.startswith(kw_lower) or name_no_ext.startswith(kw_singular):
-                kw_score = 500
+                # "trip" starts "trip_goa" (a word) and "tripoli" (a different word): only the first is strong.
+                rest = name_no_ext[len(kw_lower if name_no_ext.startswith(kw_lower) else kw_singular):]
+                kw_score = 500 if not rest or not rest[0].isalpha() else 120
             elif kw_lower in name_words or kw_singular in name_words:
                 kw_score = 300
-            elif HAS_FUZZY:
+            elif HAS_FUZZY and len(name_no_ext) >= len(kw_lower) - 1:
+                # partial_ratio scores a short name inside the keyword as 100 ("tr" in "trip"), so only fuzzy-match
+                # names at least as long as the keyword.
+                # Short words fuzz into anything ("trip" ~ "TRIM_2019"), so they need a near-exact match.
                 ratio = _fuzz.partial_ratio(kw_lower, name_no_ext)
-                if ratio >= 80:
+                if ratio >= (92 if len(kw_lower) <= 5 else 80):
                     kw_score = int(ratio * 2)
             if kw_score == 0 and len(kw_lower) >= 3:
                 if _soundex(kw_lower) == _soundex(name_no_ext):
                     kw_score = 150
-            if kw_score == 0 and (kw_lower in name_lower or kw_singular in name_lower):
-                kw_score = 100
+            if kw_score == 0 and len(kw_lower) >= 5 and (kw_lower in name_lower or kw_singular in name_lower):
+                kw_score = 100          # inside a longer word ("budget" in "familybudget2025")
 
             if kw_score > 0:
                 matched_specific += 1
@@ -320,7 +325,9 @@ def _score_file(filename: str, keywords: list, target_extensions: list,
     if type_kws and target_extensions:
         if ext in target_extensions:
             score += 50
-        elif specific_kws:
+        elif is_folder and not looking_for_folder:
+            return 0                    # asked for a video, got a folder
+        elif specific_kws and score >= 500:      # strong name match in another format ("resume.txt")
             score = max(0, score - 200)
         else:
             return 0
@@ -585,8 +592,110 @@ def search_files(query: str, max_results: int = None, user_name: str = "") -> li
         except Exception as e:
             print(Fore.YELLOW + f"[FILES] Content search error: {e}")
 
+    # Windows' own search index: files Seven's index skipped, and matches on the folder name
+    # ("trip video" -> Videos\Goa trip\VID_0012.mp4).
+    if len(results) < max_results or not results or results[0]["score"] < 500:
+        results = _merge_windows_search(results, keywords, target_extensions, looking_for_folder, user_name)
+
+    if target_extensions:               # "pdf", "video": every result must be that kind, whichever search found it
+        results = [r for r in results if r["ext"] in target_extensions
+                   or (looking_for_folder and r["ext"] == "folder")]
+    _personal_boost(results)
     results.sort(key=lambda x: x["score"], reverse=True)
     return results[:max_results]
+
+
+CONFIDENT_SCORE = 250     # below this the top result is a guess: list the matches instead of opening one
+
+
+def _merge_windows_search(results, keywords, target_extensions, looking_for_folder, user_name):
+    try:
+        from hands import windows_search
+    except ImportError:
+        return results
+    specific = [k for k in keywords if k not in _TYPE_MAP]
+    seen = {r["path"].lower() for r in results}
+    for row in windows_search.search(specific, target_extensions or None):
+        if row["path"].lower() in seen:
+            continue
+        seen.add(row["path"].lower())
+        score = _score_file(row["name"], keywords, target_extensions, row["mtime"], user_name,
+                            looking_for_folder, row["is_folder"])
+        if score == 0 and row["folder_hit"] and (not target_extensions or row["ext"] in target_extensions):
+            score = 250
+        if score:
+            results.append({"name": row["name"], "path": row["path"], "size_kb": 0, "ext": row["ext"] or "folder",
+                            "modified": (datetime.fromtimestamp(row["mtime"]).strftime("%Y-%m-%d %H:%M")
+                                         if row["mtime"] else ""),
+                            "score": score})
+    return results
+
+
+_USER_PLACES = ("\\desktop\\", "\\documents\\", "\\downloads\\", "\\onedrive\\")
+
+
+def _personal_boost(results):
+    """Prefer what is the user's own: files they opened lately, files with their name, files in their folders."""
+    try:
+        from hands import windows_search
+        recent = windows_search.recent_items()
+        owner = windows_search.owner_names()
+    except Exception:
+        recent, owner = {}, []
+    now = time.time()
+    for r in results:
+        name = r["name"].lower()
+        opened = recent.get(name)
+        if opened:
+            age = (now - opened) / 86400
+            r["score"] += 400 if age < 7 else 250 if age < 30 else 120
+        if any(w in name for w in owner):
+            r["score"] += 150
+        if any(place in r["path"].lower() for place in _USER_PLACES):
+            r["score"] += 40
+
+
+_RECENT_RE = re.compile(r"\b(?:last|latest|newest|most recent|recent(?:ly)?)\b")
+
+
+def latest_file(query: str):
+    """"the last pdf I downloaded", "my latest screenshot", "the most recent video I saved".
+    Returns the newest matching file as a result dict, or None."""
+    q = query.lower()
+    if not _RECENT_RE.search(q):
+        return None
+    exts = sorted({e for w in re.findall(r"[a-z]+", q) for e in _TYPE_MAP.get(w, [])})
+    home = os.path.expanduser("~")
+    if "download" in q:
+        roots = [os.path.join(home, "Downloads")]
+    elif "screenshot" in q:
+        roots = [os.path.join(home, "Pictures", "Screenshots"), os.path.join(home, "OneDrive", "Pictures", "Screenshots")]
+    elif "desktop" in q:
+        roots = [os.path.join(home, "Desktop"), os.path.join(home, "OneDrive", "Desktop")]
+    elif "document" in q and not exts:
+        roots = [os.path.join(home, "Documents")]
+    else:
+        roots = [os.path.join(home, d) for d in ("Downloads", "Desktop", "Documents", "Pictures", "Videos", "Music")]
+    if not exts and "download" not in q:
+        return None
+    best = None
+    for root in roots:
+        try:
+            with os.scandir(root) as entries:
+                for e in entries:
+                    if not e.is_file() or (exts and os.path.splitext(e.name)[1].lower() not in exts):
+                        continue
+                    if e.name.lower().endswith((".crdownload", ".part", ".tmp", ".ini")):
+                        continue
+                    mtime = e.stat().st_mtime
+                    if best is None or mtime > best[0]:
+                        best = (mtime, e.path, e.name)
+        except OSError:
+            continue
+    if not best:
+        return None
+    return {"name": best[2], "path": best[1], "size_kb": 0, "ext": os.path.splitext(best[2])[1].lower(),
+            "modified": datetime.fromtimestamp(best[0]).strftime("%Y-%m-%d %H:%M"), "score": 1000}
 
 
 def _fts_escape(text: str) -> str:
@@ -764,6 +873,8 @@ def _search_walk(keywords, target_extensions, looking_for_folder,
 
 # -- Open File / Folder --
 def open_file(path: str) -> bool:
+    if os.environ.get("SEVEN_TEST") == "1":          # tests never open the user's files
+        return os.path.exists(path)
     try:
         if os.path.isdir(path):
             subprocess.Popen(f'explorer "{path}"', shell=True)
@@ -805,11 +916,13 @@ def format_results_for_speech(results: list, query: str,
         ])
 
     if opened:
-        return random.choice([
-            f"I found {count} matches. Opened the best one, the rest are in the chat.",
-            f"Got {count} of them. Opened the top match. Others are listed below.",
-            f"Found {count} files. Opened the most likely one for you.",
-        ])
+        top = results[0]
+        where = os.path.basename(os.path.dirname(top.get("path", ""))) or "your PC"
+        name = top.get("name", "")
+        label = name if len(name) <= 48 else "the best match"
+        others = count - 1
+        return (f"Opened {label} from {where}. "
+                f"{others} other match{'es are' if others != 1 else ' is'} in the chat if it's not the one.")
 
     return random.choice([
         f"I found {count} matches for {query}. Which one did you want?",

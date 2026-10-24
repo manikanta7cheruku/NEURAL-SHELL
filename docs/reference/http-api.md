@@ -6,7 +6,7 @@ The backend listens on `http://127.0.0.1:7777` only (never on the network). The 
 the overlay and the Chrome extension are its only clients. There is no authentication because nothing outside
 this computer can reach it.
 
-185 endpoints in 26 files.
+192 endpoints in 26 files.
 
 ## `backend/admin_server.py`
 
@@ -125,11 +125,17 @@ this computer can reach it.
 
 | Method | Path | What it does |
 |---|---|---|
+| POST | `/api/knowledge/attach` | Attach documents to a chat |
+| GET | `/api/knowledge/attached` | Documents attached to a chat |
 | DELETE | `/api/knowledge/clear` | _Not documented yet_ |
-| DELETE | `/api/knowledge/file/{filename}` | _Not documented yet_ |
-| GET | `/api/knowledge/search` | _Not documented yet_ |
-| GET | `/api/knowledge/stats` | Get knowledge base stats. Returns empty stats if indexer not ready. |
-| POST | `/api/knowledge/upload` | _Not documented yet_ |
+| GET | `/api/knowledge/documents` | Documents in the library, with reading progress |
+| POST | `/api/knowledge/documents` | Add a document to the library |
+| DELETE | `/api/knowledge/documents/{doc_id}` | Remove a document |
+| GET | `/api/knowledge/documents/{doc_id}` | One document with its sections and a preview |
+| POST | `/api/knowledge/documents/{doc_id}/open` | Open the original file |
+| POST | `/api/knowledge/documents/{doc_id}/retry` | Read a document again |
+| GET | `/api/knowledge/search` | Find passages in your documents |
+| GET | `/api/knowledge/stats` | _Not documented yet_ |
 
 ## `backend/routes/license_routes.py`
 
@@ -209,8 +215,9 @@ this computer can reach it.
 | POST | `/api/bootstrap/start-ollama` | Start Ollama service if not already running. |
 | GET | `/api/bootstrap/status` | Poll for live environment setup progress. |
 | POST | `/api/setup/complete` | Called when user finishes setup wizard. |
-| GET | `/api/setup/existing-identity` | Check if device has previously registered identity on server. |
+| GET | `/api/setup/existing-identity` | An earlier Seven account on this PC, if any |
 | POST | `/api/setup/preview-voice` | Preview a voice. Interrupts any currently playing preview first. |
+| POST | `/api/setup/start-fresh` | Back up and clear this PC's Seven data for a new person |
 | GET | `/api/setup/voices` | Returns Piper TTS voices + Windows SAPI voices. |
 | POST | `/api/setup/welcome-greeting` | Trigger Seven's first-time welcome greeting after setup completes. |
 | GET | `/api/setup/whisper-debug` | Debug endpoint to see all whisper_model changes. |

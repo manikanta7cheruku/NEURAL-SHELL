@@ -49,15 +49,10 @@ TIER_FEATURES = {
         "tasks": -1,         # Unlimited
         "triggers": 7,
         "workspaces": -1,    # Unlimited
-        "knowledge_files": 1,
+        "knowledge_files": 3,
         "schedules": 7,
         "web_searches_per_day": 7,
-        "url_shortcuts": 3,
-        "app_aliases": 3,
-        "custom_commands": 1,
-        "custom_paths": 1,
         "voice_recognition": False,
-        "window_control": "basic",
         "memory_export": False,
         "recurring_schedules": False,
         "max_devices": 1
@@ -71,12 +66,7 @@ TIER_FEATURES = {
         "knowledge_files": 7,
         "schedules": 77,
         "web_searches_per_day": 77,
-        "url_shortcuts": 7,
-        "app_aliases": 7,
-        "custom_commands": 7,
-        "custom_paths": 7,
         "voice_recognition": False,
-        "window_control": "advanced",
         "memory_export": False,
         "recurring_schedules": False,
         "max_devices": 1
@@ -90,12 +80,7 @@ TIER_FEATURES = {
         "knowledge_files": -1,
         "schedules": -1,
         "web_searches_per_day": -1,
-        "url_shortcuts": -1,
-        "app_aliases": -1,
-        "custom_commands": -1,
-        "custom_paths": -1,
         "voice_recognition": True,
-        "window_control": "full",
         "memory_export": True,
         "recurring_schedules": True,
         "max_devices": 3

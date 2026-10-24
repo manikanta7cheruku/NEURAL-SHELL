@@ -272,7 +272,7 @@ async def scan_current_workspace():
             # Remove internal fields before sending to frontend
             clean_apps = []
             for app in apps:
-                clean = {k: v for k, v in app.items() if k != "pid"}
+                clean = {k: v for k, v in app.items() if k not in ("pid", "hwnd")}
                 clean_apps.append(clean)
 
             return {
@@ -364,13 +364,8 @@ def restore_workspace(workspace_id: int, stats_only: bool = False):
 
         # stats_only=True means daemon already restored — just update stats
         if not stats_only:
-            import threading
-            from hands.workspace import smart_restore
-            threading.Thread(
-                target=smart_restore,
-                args=(workspace["apps"],),
-                daemon=True
-            ).start()
+            from hands.workspace_modules import actions
+            actions.restore(workspace)        # background, with the status card at the top of the screen
 
         return {
             "success":   True,
