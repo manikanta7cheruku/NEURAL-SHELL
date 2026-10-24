@@ -138,7 +138,7 @@ export default function Commands() {
       if (detail?.error === 'plan_limit_reached') {
         setLimitError(e);
       } else {
-        alert(detail || 'Invalid path — make sure it exists on your PC');
+        alert(detail || 'That path does not exist on this PC');
       }
     }
   };
@@ -282,7 +282,7 @@ export default function Commands() {
             <div className="bg-s-card border border-s-border rounded p-3">
               <div className="flex items-center justify-between mb-2">
                 <div className="text-[9px] text-s-text-4 uppercase tracking-wider font-medium">
-                  Add path — .exe, .png, .pdf, .mp4, any file or folder
+                  Add a path: an .exe, a document, an image or any folder
                 </div>
                 <div className={`text-[9px] font-mono ${pathAtLimit ? 'text-s-red' : 'text-s-text-4'}`}>
                   {pathCounter}

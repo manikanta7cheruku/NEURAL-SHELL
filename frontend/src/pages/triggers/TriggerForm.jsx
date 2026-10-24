@@ -22,11 +22,11 @@ function MultiInput({ values, onChange, placeholder }) {
       {values.length > 0 && (
         <div className="flex flex-wrap gap-1">
           {values.map((v, i) => (
-            <span key={i} className="flex items-center gap-1 text-[11.5px] text-white/60
-                                      bg-white/[0.04] border border-white/8 px-2 py-0.5 rounded-md">
+            <span key={i} className="flex items-center gap-1 text-[11.5px] text-s-text-2
+                                      bg-s-bg border border-s-border px-2 py-0.5 rounded-md">
               {v}
               <button onClick={() => onChange(values.filter((_, idx) => idx !== i))}
-                      className="text-white/30 hover:text-white/70 transition-colors">
+                      className="text-s-text-4 hover:text-s-text-2 transition-colors">
                 <X size={8} />
               </button>
             </span>
@@ -37,12 +37,12 @@ function MultiInput({ values, onChange, placeholder }) {
         <input value={current} onChange={e => setCurrent(e.target.value)}
                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); add(); } }}
                placeholder={placeholder}
-               className="flex-1 bg-white/[0.03] border border-white/8 rounded-lg px-3 py-2
-                          text-[11px] text-white/80 placeholder-white/20 outline-none
-                          focus:border-white/15 transition-colors" />
+               className="flex-1 bg-s-bg border border-s-border rounded-lg px-3 py-2
+                          text-[12.5px] text-s-text placeholder:text-s-text-4 outline-none
+                          focus:border-s-border-l transition-colors" />
         <button onClick={add} disabled={!current.trim()}
-                className="px-2.5 py-2 rounded-lg bg-white/[0.04] border border-white/8
-                           text-[11.5px] text-white/50 hover:text-white/80 hover:bg-white/[0.06]
+                className="px-2.5 py-2 rounded-lg bg-s-bg border border-s-border
+                           text-[11.5px] text-s-text-3 hover:text-s-text hover:bg-s-bg
                            disabled:opacity-20 transition-all">
           <Plus size={12} />
         </button>
@@ -149,39 +149,28 @@ export default function TriggerForm({ initial, onSave, onCancel, workspaces }) {
   };
 
   return (
-    <div className="col-span-2 bg-white/[0.015] border border-s-accent/20 rounded-lg
-                    overflow-hidden transition-all duration-300 ease-out">
-      <div className="p-5 space-y-4">
-
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <h3 className="text-[12px] font-semibold text-white/80">
-            {isEdit ? `Editing: ${initial.name}` : 'New Trigger'}
-          </h3>
-          <button onClick={onCancel} className="text-white/25 hover:text-white/60 transition-colors">
-            <X size={14} />
-          </button>
-        </div>
+    <div>
+      <div className="space-y-5">
 
         {/* Name */}
         <div>
-          <label className="text-[11px] text-white/35 font-semibold mb-1 block">
+          <label className="mb-1.5 block text-[11.5px] font-medium text-s-text-2">
             Name
           </label>
           <input value={name} onChange={e => setName(e.target.value.slice(0, 60))}
                  placeholder="Focus Mode, Morning Setup, Quick Chrome..."
                  maxLength={60}
-                 className="w-full bg-white/[0.03] border border-white/8 rounded-lg px-3 py-2
-                            text-[11px] text-white/80 placeholder-white/20 outline-none
-                            focus:border-white/15 transition-colors" />
+                 className="w-full bg-s-bg border border-s-border rounded-lg px-3 py-2
+                            text-[12.5px] text-s-text placeholder:text-s-text-4 outline-none
+                            focus:border-s-border-l transition-colors" />
           {name.length >= 50 && (
-            <p className="text-[11px] text-white/25 mt-1 text-right">{name.length}/60</p>
+            <p className="text-[11px] text-s-text-4 mt-1 text-right">{name.length}/60</p>
           )}
         </div>
 
         {/* Action type */}
         <div>
-          <label className="text-[11px] text-white/35 font-semibold mb-1 block">
+          <label className="mb-1.5 block text-[11.5px] font-medium text-s-text-2">
             What should this trigger do?
           </label>
           <div className="grid grid-cols-7 gap-1">
@@ -207,7 +196,7 @@ export default function TriggerForm({ initial, onSave, onCancel, workspaces }) {
                                     text-[11px] transition-all duration-150
                           ${actionType === key
                             ? 'bg-s-accent/8 text-s-accent border border-s-accent/15'
-                            : 'bg-[#0a0a0c] text-white/40 border border-white/6 hover:text-white/60 hover:bg-white/[0.04]'
+                            : 'bg-[#0a0a0c] text-s-text-3 border border-s-border hover:text-s-text-2 hover:bg-s-bg'
                           }`}>
                   <Icon size={13} />
                   <span className="font-medium text-center leading-tight">{cfg.label}</span>
@@ -219,7 +208,7 @@ export default function TriggerForm({ initial, onSave, onCancel, workspaces }) {
 
         {/* Action value */}
         <div>
-          <label className="text-[11px] text-white/35 font-semibold mb-1 block">
+          <label className="mb-1.5 block text-[11.5px] font-medium text-s-text-2">
             {actionType === 'open_app'    ? 'Apps (add multiple)' :
              actionType === 'open_url'    ? 'URLs (add multiple)' :
              actionType === 'open_file' || actionType === 'open_folder' ? 'Paths' :
@@ -242,19 +231,19 @@ export default function TriggerForm({ initial, onSave, onCancel, workspaces }) {
           {actionType === 'open_workspace' && (
             <div className="space-y-2">
               <select value={workspaceId} onChange={e => setWorkspaceId(e.target.value)}
-                      className="w-full bg-white/[0.03] border border-white/8 rounded-lg px-3 py-2
-                                 text-[11px] text-white/70 outline-none cursor-pointer
-                                 focus:border-white/15 transition-colors">
-                <option value="" className="bg-[#111] text-white/50">Select workspace...</option>
+                      className="w-full bg-s-bg border border-s-border rounded-lg px-3 py-2
+                                 text-[11px] text-s-text-2 outline-none cursor-pointer
+                                 focus:border-s-border-l transition-colors">
+                <option value="" className="bg-[#111] text-s-text-3">Select workspace...</option>
                 {workspaces.map(w => (
-                  <option key={w.id} value={w.id} className="bg-[#111] text-white/80">
+                  <option key={w.id} value={w.id} className="bg-[#111] text-s-text">
                     {w.name} ({(w.apps || []).length} apps)
                   </option>
                 ))}
               </select>
 
               <div className="flex items-center gap-2 px-3 py-2 rounded-lg
-                              bg-white/[0.015] border border-white/5
+                              bg-s-card border border-s-border
                               opacity-55 cursor-not-allowed relative">
                 <input type="checkbox"
                        checked={false}
@@ -262,7 +251,7 @@ export default function TriggerForm({ initial, onSave, onCancel, workspaces }) {
                        className="accent-white/20 cursor-not-allowed" />
                 <div className="flex-1">
                   <div className="flex items-center gap-2">
-                    <p className="text-[12px] text-white/45 font-medium">Show live preview</p>
+                    <p className="text-[12px] text-s-text-3 font-medium">Show live preview</p>
                     <span className="text-[11px] font-bold tracking-widest
                                      px-1.5 py-0.5 rounded
                                      bg-amber-500/12 border border-amber-500/25
@@ -270,9 +259,9 @@ export default function TriggerForm({ initial, onSave, onCancel, workspaces }) {
                       Coming Soon
                     </span>
                   </div>
-                  <p className="text-[11px] text-white/30 mt-0.5">
+                  <p className="text-[11px] text-s-text-4 mt-0.5">
                     Visual preview lets you drag app tiles to reposition before restoring.
-                    Currently in development — enable in the next release.
+                    In development. It arrives in the next release.
                   </p>
                 </div>
               </div>
@@ -293,7 +282,7 @@ export default function TriggerForm({ initial, onSave, onCancel, workspaces }) {
                                       transition-all duration-150
                             ${cmdTarget === t.key
                               ? 'bg-s-accent/8 text-s-accent border border-s-accent/15'
-                              : 'text-white/30 border border-white/6 hover:text-white/55 hover:bg-white/[0.03]'}`}>
+                              : 'text-s-text-4 border border-s-border hover:text-s-text-3 hover:bg-s-bg'}`}>
                     {t.label}
                   </button>
                 ))}
@@ -301,49 +290,49 @@ export default function TriggerForm({ initial, onSave, onCancel, workspaces }) {
 
               <input value={command} onChange={e => setCommand(e.target.value)}
                      placeholder={cmdTarget === 'terminal' ? 'e.g. npm run dev, python main.py, git pull' : 'e.g. cd M:\\project && npm run dev'}
-                     className="w-full bg-white/[0.03] border border-white/8 rounded-lg px-3 py-2
-                                text-[11px] text-white/80 placeholder-white/20 outline-none
-                                focus:border-white/15 transition-colors font-mono" />
+                     className="w-full bg-s-bg border border-s-border rounded-lg px-3 py-2
+                                text-[12.5px] text-s-text placeholder:text-s-text-4 outline-none
+                                focus:border-s-border-l transition-colors font-mono" />
 
-              <div className="px-3 py-2.5 rounded-lg bg-[#0a0a0c] border border-white/5 space-y-1.5">
+              <div className="px-3 py-2.5 rounded-lg bg-[#0a0a0c] border border-s-border space-y-1.5">
                 {cmdTarget === 'terminal' ? (
                   <>
-                    <p className="text-[11px] text-white/40 font-medium">Type into terminal mode</p>
-                    <p className="text-[11px] text-white/30 leading-relaxed">
+                    <p className="text-[11px] text-s-text-3 font-medium">Type into terminal mode</p>
+                    <p className="text-[11px] text-s-text-4 leading-relaxed">
                       Click inside any terminal first (VS Code, PowerShell, cmd, Windows Terminal),
                       then fire the hotkey. Seven types the command and hits Enter automatically.
                       Works in any terminal, anywhere.
                     </p>
                     <div className="flex items-start gap-1.5 mt-1 px-2 py-1.5 rounded-lg
-                                    bg-white/[0.02] border border-white/[0.06]">
-                      <span className="text-[11px] text-white/50 leading-relaxed">
-                        Use a safe hotkey combo like <span className="font-mono text-white/70">Ctrl+F5</span> or <span className="font-mono text-white/70">Alt+F2</span>.
-                        Avoid single keys or <span className="font-mono text-white/70">Shift+letter</span> — they will fire while typing normally.
+                                    bg-s-card border border-s-border">
+                      <span className="text-[11px] text-s-text-3 leading-relaxed">
+                        Use a safe hotkey combo like <span className="font-mono text-s-text-2">Ctrl+F5</span> or <span className="font-mono text-s-text-2">Alt+F2</span>.
+                        Avoid single keys or <span className="font-mono text-s-text-2">Shift+letter</span>: they would fire while typing normally.
                       </span>
                     </div>
                   </>
                 ) : (
                   <>
-                    <p className="text-[11px] text-white/40 font-medium">Background (silent) mode</p>
-                    <p className="text-[11px] text-white/30 leading-relaxed">
+                    <p className="text-[11px] text-s-text-3 font-medium">Background (silent) mode</p>
+                    <p className="text-[11px] text-s-text-4 leading-relaxed">
                       Runs the command silently with no terminal window. Use for scripts, git operations,
                       or anything that does not need you to see the output.
                     </p>
-                    <p className="text-[11px] text-white/30 leading-relaxed">
+                    <p className="text-[11px] text-s-text-4 leading-relaxed">
                       To run in a specific folder:
-                      <span className="text-white/55 font-mono"> cd M:\your-project {"&&"} npm run build</span>
+                      <span className="text-s-text-3 font-mono"> cd M:\your-project {"&&"} npm run build</span>
                     </p>
                   </>
                 )}
                 <div className="flex flex-wrap gap-1 pt-0.5">
-                  <p className="text-[11px] text-white/20 w-full">Quick insert:</p>
+                  <p className="text-[11px] text-s-text-4 w-full">Quick insert:</p>
                   {(cmdTarget === 'terminal'
                     ? ['npm run dev', 'npm run build', 'python main.py', 'git pull', 'git status', 'npm install']
                     : ['npm run dev', 'git pull', 'git status', 'ipconfig', 'shutdown /s /t 60', 'shutdown /a']
                   ).map(ex => (
                     <button key={ex} onClick={() => setCommand(ex)}
-                            className="text-[11px] text-white/30 bg-white/[0.03] border border-white/6
-                                       px-2 py-0.5 rounded hover:text-white/60 hover:bg-white/[0.05]
+                            className="text-[11px] text-s-text-4 bg-s-bg border border-s-border
+                                       px-2 py-0.5 rounded hover:text-s-text-2 hover:bg-s-bg
                                        transition-all font-mono">
                       {ex}
                     </button>
@@ -356,20 +345,20 @@ export default function TriggerForm({ initial, onSave, onCancel, workspaces }) {
             <div className="space-y-2">
               <input value={action} onChange={e => setAction(e.target.value)}
                      placeholder="e.g., volume 50, brightness max, mute, show my tasks"
-                     className="w-full bg-white/[0.03] border border-white/8 rounded-lg px-3 py-2
-                                text-[11px] text-white/80 placeholder-white/20 outline-none
-                                focus:border-white/15 transition-colors" />
-              <div className="px-3 py-2.5 rounded-lg bg-[#0a0a0c] border border-white/5 space-y-1.5">
-                <p className="text-[11px] text-white/40 font-medium">How to use</p>
-                <p className="text-[11px] text-white/30 leading-relaxed">
+                     className="w-full bg-s-bg border border-s-border rounded-lg px-3 py-2
+                                text-[12.5px] text-s-text placeholder:text-s-text-4 outline-none
+                                focus:border-s-border-l transition-colors" />
+              <div className="px-3 py-2.5 rounded-lg bg-[#0a0a0c] border border-s-border space-y-1.5">
+                <p className="text-[11px] text-s-text-3 font-medium">How to use</p>
+                <p className="text-[11px] text-s-text-4 leading-relaxed">
                   Use a single direct command. Seven executes it instantly without the LLM.
-                  Use <span className="text-white/55 font-mono">Open App</span> or <span className="text-white/55 font-mono">Run Command</span> action types for launching apps or running scripts.
+                  Use <span className="text-s-text-3 font-mono">Open App</span> or <span className="text-s-text-3 font-mono">Run Command</span> action types for launching apps or running scripts.
                 </p>
-                <p className="text-[11px] text-white/30 leading-relaxed">
+                <p className="text-[11px] text-s-text-4 leading-relaxed">
                   Best for: volume, brightness, mute, system controls, and showing Seven panels.
                 </p>
                 <div className="flex flex-wrap gap-1 pt-0.5">
-                  <p className="text-[11px] text-white/20 w-full">Quick insert:</p>
+                  <p className="text-[11px] text-s-text-4 w-full">Quick insert:</p>
                   {[
                     'volume 50',
                     'brightness max',
@@ -379,8 +368,8 @@ export default function TriggerForm({ initial, onSave, onCancel, workspaces }) {
                     'show my schedule',
                   ].map(ex => (
                     <button key={ex} onClick={() => setAction(ex)}
-                            className="text-[11px] text-white/30 bg-white/[0.03] border border-white/6
-                                       px-2 py-0.5 rounded hover:text-white/60 hover:bg-white/[0.05]
+                            className="text-[11px] text-s-text-4 bg-s-bg border border-s-border
+                                       px-2 py-0.5 rounded hover:text-s-text-2 hover:bg-s-bg
                                        transition-all">
                       {ex}
                     </button>
@@ -393,20 +382,20 @@ export default function TriggerForm({ initial, onSave, onCancel, workspaces }) {
 
         {/* Activation methods */}
         <div>
-          <label className="text-[11px] text-white/35 font-semibold
+          <label className="text-[11.5px] font-medium text-s-text-2
                             mb-2 block">How to activate</label>
           <div className="space-y-2.5">
 
             {/* Hotkey */}
             <div className="flex items-center gap-2.5">
-              <Keyboard size={12} className="text-white/25 flex-shrink-0" />
-              <div className={`flex-1 bg-white/[0.03] border rounded-lg px-3 py-2
+              <Keyboard size={12} className="text-s-text-4 flex-shrink-0" />
+              <div className={`flex-1 bg-s-bg border rounded-lg px-3 py-2
                               text-[12px] cursor-pointer transition-all
                               ${recording
                                 ? 'border-s-accent/30 text-s-accent'
                                 : hotkey
-                                  ? 'border-white/10 text-white/70'
-                                  : 'border-white/8 text-white/30'}`}
+                                  ? 'border-s-border text-s-text-2'
+                                  : 'border-s-border text-s-text-4'}`}
                    tabIndex={0} ref={hotkeyRef}
                    onClick={() => { setRecording(true); hotkeyRef.current?.focus(); }}
                    onKeyDown={handleHotkeyCapture}
@@ -417,7 +406,7 @@ export default function TriggerForm({ initial, onSave, onCancel, workspaces }) {
               </div>
               {hotkey && (
                 <button onClick={() => setHotkey('')}
-                        className="text-white/20 hover:text-white/50 transition-colors">
+                        className="text-s-text-4 hover:text-s-text-3 transition-colors">
                   <X size={11} />
                 </button>
               )}
@@ -425,16 +414,16 @@ export default function TriggerForm({ initial, onSave, onCancel, workspaces }) {
 
             {/* Voice */}
             <div className="flex items-center gap-2.5">
-              <Mic size={12} className="text-white/25 flex-shrink-0" />
-              <span className="text-[12px] text-white/30 flex-shrink-0 font-medium">Seven</span>
+              <Mic size={12} className="text-s-text-4 flex-shrink-0" />
+              <span className="text-[12px] text-s-text-4 flex-shrink-0 font-medium">Seven</span>
               <input value={voicePhrase}
                      onChange={e => setVoicePhrase(e.target.value)}
                      placeholder="focus, open chrome, morning setup..."
-                     className="flex-1 bg-white/[0.03] border border-white/8 rounded-lg px-3 py-2
-                                text-[12px] text-white/70 placeholder-white/20 outline-none
-                                focus:border-white/15 transition-colors" />
+                     className="flex-1 bg-s-bg border border-s-border rounded-lg px-3 py-2
+                                text-[12px] text-s-text-2 placeholder:text-s-text-4 outline-none
+                                focus:border-s-border-l transition-colors" />
               {voicePhrase.trim() && (
-                <span className="text-[11px] text-white/20 flex-shrink-0 font-mono whitespace-nowrap">
+                <span className="text-[11px] text-s-text-4 flex-shrink-0 font-mono whitespace-nowrap">
                   = "Seven {voicePhrase.trim()}"
                 </span>
               )}
@@ -443,7 +432,7 @@ export default function TriggerForm({ initial, onSave, onCancel, workspaces }) {
             {/* Audio (snap/clap) */}
             <div>
               <div className="flex items-center gap-2.5 mb-1.5">
-                <Radio size={12} className="text-white/25 flex-shrink-0" />
+                <Radio size={12} className="text-s-text-4 flex-shrink-0" />
                 <div className="flex items-center gap-1.5">
                   {['1_tap', '2_tap', '3_tap'].map(p => {
                     const n = p.split('_')[0];
@@ -454,7 +443,7 @@ export default function TriggerForm({ initial, onSave, onCancel, workspaces }) {
                                           transition-all duration-150
                                 ${audioPattern === p
                                   ? 'bg-s-accent/8 text-s-accent border border-s-accent/15'
-                                  : 'text-white/25 border border-white/6 hover:text-white/50'
+                                  : 'text-s-text-4 border border-s-border hover:text-s-text-3'
                                 }`}>
                         {n} {n === '1' ? 'snap' : 'snaps'}
                       </button>
@@ -466,11 +455,11 @@ export default function TriggerForm({ initial, onSave, onCancel, workspaces }) {
                               bg-amber-500/[0.03] border border-amber-500/15">
                 <Headphones size={11} className="text-amber-400/60 flex-shrink-0 mt-0.5" />
                 <div className="flex-1">
-                  <p className="text-[11.5px] text-white/55 leading-relaxed">
+                  <p className="text-[11.5px] text-s-text-3 leading-relaxed">
                     <span className="text-amber-300/85 font-medium">Requires USB mic or wired headset.</span> Laptop
-                    mics use noise suppression that flattens snap sounds — detection will not work reliably.
+                    mics use noise suppression that flattens snap sounds, so detection will not be reliable.
                   </p>
-                  <p className="text-[11px] text-white/40 mt-1.5">
+                  <p className="text-[11px] text-s-text-3 mt-1.5">
                     Works out of the box with headsets. Only calibrate if snap
                     isn't triggering reliably or misfires on voice:
                   </p>
@@ -494,13 +483,12 @@ export default function TriggerForm({ initial, onSave, onCancel, workspaces }) {
                           setTimeout(() => { btn.textContent = originalText; btn.disabled = false; }, 4500);
                         }
                       } catch (err) {
-                        btn.textContent = 'Error — try again';
+                        btn.textContent = 'Error. Try again';
                         setTimeout(() => { btn.textContent = originalText; btn.disabled = false; }, 4500);
                       }
                     }}
                     className="mt-2 px-3 py-1 rounded-md text-[11.5px] font-medium
-                               bg-amber-500/10 border border-amber-500/25
-                               text-amber-200/85 hover:bg-amber-500/20
+                               bg-s-yellow/10 border border-s-yellow/25 text-s-yellow hover:bg-s-yellow/20
                                transition-all disabled:opacity-50 disabled:cursor-wait">
                     Optional: Calibrate My Snap
                   </button>
@@ -512,25 +500,24 @@ export default function TriggerForm({ initial, onSave, onCancel, workspaces }) {
 
         {/* Error */}
         {error && (
-          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/[0.03] border border-white/8">
-            <AlertCircle size={11} className="text-white/50 flex-shrink-0" />
-            <span className="text-[11.5px] text-white/60">{error}</span>
+          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-s-bg border border-s-border">
+            <AlertCircle size={11} className="text-s-text-3 flex-shrink-0" />
+            <span className="text-[11.5px] text-s-text-2">{error}</span>
           </div>
         )}
 
         {/* Actions */}
-        <div className="flex justify-end gap-2 pt-1">
+        <div className="sticky bottom-0 -mx-5 flex justify-end gap-2 border-t border-s-border bg-s-surface px-5 py-3">
           <button onClick={onCancel}
-                  className="px-4 py-2 text-[12px] text-white/35 hover:text-white/60
+                  className="px-4 py-2 text-[12px] text-s-text-3 hover:text-s-text-2
                              transition-colors rounded-lg">
             Cancel
           </button>
           <button onClick={submit} disabled={saving}
-                  className="flex items-center gap-1.5 px-5 py-2 bg-s-accent/90
-                             text-white rounded-lg text-[12px] font-semibold
-                             hover:bg-s-accent disabled:opacity-25 transition-all">
+                  className="flex h-8 items-center gap-1.5 rounded-md bg-s-accent px-4 text-[12px] font-medium
+                             text-s-on-accent hover:bg-s-accent-h disabled:opacity-40 transition-colors">
             <Save size={11} />
-            {saving ? 'Saving...' : isEdit ? 'Save Changes' : 'Create Trigger'}
+            {saving ? 'Saving' : isEdit ? 'Save changes' : 'Create trigger'}
           </button>
         </div>
       </div>

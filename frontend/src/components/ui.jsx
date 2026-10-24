@@ -6,6 +6,7 @@
  */
 import { forwardRef, useEffect, useId, useRef, useState } from 'react';
 import { Check, AlertCircle, Info, X, Loader2 } from 'lucide-react';
+import { createPortal } from 'react-dom';
 import { cx } from '../lib/cx';
 import { useToasts } from '../lib/toast';
 
@@ -323,4 +324,102 @@ export function Toaster() {
       })}
     </div>
   );
+}
+
+// ── Floating menu ───────────────────────────────────────────────────────────
+
+/**
+ * A small menu that floats above the page, anchored under (or above, when there is no room) the element in
+ * anchorRef. Rendered into <body>, so cards, scroll areas and animations around the anchor can never cover or
+ * clip it. Closes on an outside click, Escape, resize or scroll.
+ */
+export function FloatingMenu({ open, anchorRef, onClose, width = 224, align = 'end', children }) {
+  const ref = useRef(null);
+  const [pos, setPos] = useState(null);
+  useEffect(() => {
+    if (!open) { setPos(null); return undefined; }
+    const r = anchorRef.current?.getBoundingClientRect();
+    if (r) {
+      const h = ref.current?.offsetHeight || 96;
+      const top = r.bottom + 6 + h > window.innerHeight - 8 ? Math.max(8, r.top - h - 6) : r.bottom + 6;
+      const left = align === 'end' ? r.right - width : r.left;
+      setPos({ top, left: Math.max(8, Math.min(left, window.innerWidth - width - 8)) });
+    }
+    const away = e => { if (!ref.current?.contains(e.target) && !anchorRef.current?.contains(e.target)) onClose(); };
+    const key = e => { if (e.key === 'Escape') onClose(); };
+    const t = setTimeout(() => document.addEventListener('mousedown', away), 0);
+    window.addEventListener('keydown', key);
+    window.addEventListener('resize', onClose);
+    window.addEventListener('scroll', onClose, true);
+    return () => {
+      clearTimeout(t);
+      document.removeEventListener('mousedown', away);
+      window.removeEventListener('keydown', key);
+      window.removeEventListener('resize', onClose);
+      window.removeEventListener('scroll', onClose, true);
+    };
+  }, [open, anchorRef, onClose, width, align]);
+  if (!open) return null;
+  return createPortal(
+    <div ref={ref} role="menu" style={{ position: 'fixed', top: pos?.top ?? -9999, left: pos?.left ?? -9999, width }}
+         className="z-[1100] overflow-hidden rounded-lg border border-s-border bg-s-surface py-1 shadow-[var(--s-shadow-raised)]
+                    animate-[dialogReveal_140ms_ease-out]">
+      {children}
+    </div>, document.body);
+}
+
+export function MenuItem({ icon: Icon, children, onClick, tone, disabled }) {
+  return (
+    <button role="menuitem" onClick={onClick} disabled={disabled}
+            className={cx('flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12px] hover:bg-s-card disabled:opacity-50',
+                          tone === 'danger' ? 'text-s-red' : 'text-s-text-2 hover:text-s-text')}>
+      {Icon && <Icon size={14} className="shrink-0" />}{children}
+    </button>
+  );
+}
+
+// ── Side sheet ──────────────────────────────────────────────────────────────
+
+/**
+ * A panel that slides in from the right over a dimmed page, for creating or editing something without losing your
+ * place. Escape or a click on the dimmed page closes it.
+ */
+export function Sheet({ open, title, description, onClose, width = 480, children }) {
+  const [mounted, setMounted] = useState(open);
+  const [shown, setShown] = useState(false);
+  const closeRef = useRef(onClose);
+  useEffect(() => { closeRef.current = onClose; }, [onClose]);
+  useEffect(() => {
+    if (open) {
+      setMounted(true);
+      const id = requestAnimationFrame(() => requestAnimationFrame(() => setShown(true)));
+      const key = e => { if (e.key === 'Escape') closeRef.current?.(); };
+      window.addEventListener('keydown', key);
+      return () => { cancelAnimationFrame(id); window.removeEventListener('keydown', key); };
+    }
+    setShown(false);
+    const t = setTimeout(() => setMounted(false), 280);
+    return () => clearTimeout(t);
+  }, [open]);
+  if (!mounted) return null;
+  return createPortal(
+    <div className="fixed inset-0 z-[1000]">
+      <div onMouseDown={() => closeRef.current?.()}
+           className={cx('absolute inset-0 bg-[var(--s-scrim)] transition-opacity duration-300', shown ? 'opacity-100' : 'opacity-0')} />
+      <aside role="dialog" aria-modal="true" aria-label={title} style={{ width }}
+             className={cx('absolute inset-y-0 right-0 flex max-w-full flex-col border-l border-s-border bg-s-surface shadow-[var(--s-shadow-raised)]',
+                           'transition-transform duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]', shown ? 'translate-x-0' : 'translate-x-full')}>
+        <header className="flex shrink-0 items-start justify-between gap-4 border-b border-s-border px-5 py-4">
+          <div className="min-w-0">
+            <h2 className="text-[15px] font-semibold text-s-text">{title}</h2>
+            {description && <p className="mt-0.5 text-[12px] leading-relaxed text-s-text-3">{description}</p>}
+          </div>
+          <button onClick={() => closeRef.current?.()} aria-label="Close"
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-s-text-3 hover:bg-s-card hover:text-s-text">
+            <X size={15} />
+          </button>
+        </header>
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">{children}</div>
+      </aside>
+    </div>, document.body);
 }
