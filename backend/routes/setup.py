@@ -654,7 +654,9 @@ def set_whisper_model(data: dict):
             # cpu/int8 used deliberately here only to trigger the download —
             # this is a one-time cache warm-up, not how the model runs later.
             # ears/core.py loads the real model with GPU if available.
-            WhisperModel(model_id, device="cpu", compute_type="int8")
+            from seven_utils import hf_offline
+            with hf_offline.allow_downloads():
+                WhisperModel(model_id, device="cpu", compute_type="int8")
             stop_flag["done"] = True
             print(f"[WHISPER] Download completed for {model_id}")
             

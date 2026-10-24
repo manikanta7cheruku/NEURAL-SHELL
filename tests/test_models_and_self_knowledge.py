@@ -63,6 +63,17 @@ class ExplainsItself(BrainTest):
         self.ask("Explain recursion simply")
         self.assertIn("language model", self.ask("Why did you answer that way?"))
 
+    def test_abilities_are_phrased_by_a_capable_model_and_templated_for_the_smallest(self):
+        import config
+        config.update_config({"brain": {"model_name": "qwen2.5:7b"}})
+        self.ask("What can you do?")
+        self.assertIn("<capabilities>", LLM_CALLS[-1]["messages"][-1]["content"])
+        config.update_config({"brain": {"model_name": "llama3.2:1b"}})
+        LLM_CALLS.clear()
+        replies = {self.ask("What can you do?") for _ in range(4)}
+        self.assertEqual(LLM_CALLS, [])
+        self.assertGreaterEqual(len(replies), 3)            # asked again, worded differently each time
+
     def test_can_you_answers_are_grammatical(self):
         from brain_modules import capabilities
         capabilities.set_status_override("reminders", "available")    # CI has no Windows scheduler packages
