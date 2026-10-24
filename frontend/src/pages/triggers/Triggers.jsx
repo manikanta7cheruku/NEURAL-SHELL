@@ -18,7 +18,7 @@ import useTriggers from '../../stores/useTriggers';
 import TriggerCard from './TriggerCard';
 import TriggerForm from './TriggerForm';
 import WorkspaceTab from './WorkspaceTab';
-import { PageShell, Segmented, Button, EmptyState, LoadingRows } from '../../components/ui';
+import { PageShell, Segmented, Button, EmptyState, LoadingRows, Sheet } from '../../components/ui';
 import { cx } from '../../lib/cx';
 import { toast } from '../../lib/toast';
 
@@ -27,15 +27,6 @@ const FILTERS = [
   { key: 'all', label: 'All' }, { key: 'hotkey', label: 'Hotkey' }, { key: 'voice', label: 'Voice' },
   { key: 'audio', label: 'Snap' }, { key: 'workspace', label: 'Workspace' },
 ];
-
-/** Expands smoothly from zero height. */
-function Reveal({ open, children }) {
-  return (
-    <div className={cx('grid transition-[grid-template-rows,opacity] duration-300', EASE, open ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0')}>
-      <div className="overflow-hidden">{children}</div>
-    </div>
-  );
-}
 
 export default function Triggers() {
   const {
@@ -136,9 +127,6 @@ export default function Triggers() {
               </div>
             )}
 
-            <Reveal open={showNew}>
-              {showNew && <div className="grid grid-cols-2 gap-3 pb-1"><TriggerForm initial={null} onSave={save} onCancel={() => setShowNew(false)} workspaces={workspaces} /></div>}
-            </Reveal>
 
             {triggers.length > 0 && (
               <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="Filter triggers">
@@ -165,12 +153,6 @@ export default function Triggers() {
                     <TriggerCard trigger={t} isEditing={t.id === editingId} onFire={fireTrigger} onRefresh={fetchTriggers}
                                  onToggle={toggle} onDelete={remove}
                                  onEdit={x => { setShowNew(false); setEditingId(id => (id === x.id ? null : x.id)); }} />
-                    <Reveal open={t.id === editingId}>
-                      {t.id === editingId && (
-                        <div className="grid grid-cols-2 gap-3 px-1 pb-3 pt-2">
-                          <TriggerForm initial={t} onSave={save} onCancel={() => setEditingId(null)} workspaces={workspaces} />
-                        </div>)}
-                    </Reveal>
                   </li>
                 ))}
               </ul>
@@ -183,6 +165,13 @@ export default function Triggers() {
           </div>
         )}
       </div>
+      <Sheet open={showNew || !!editingId} onClose={() => { setShowNew(false); setEditingId(null); }}
+             title={editingId ? 'Edit trigger' : 'New trigger'}
+             description="Pick what starts it (a hotkey, a phrase you say, or a snap) and what it does.">
+        {(showNew || editingId) && (
+          <TriggerForm key={editingId || 'new'} initial={editingId ? triggers.find(t => t.id === editingId) : null} onSave={save}
+                       onCancel={() => { setShowNew(false); setEditingId(null); }} workspaces={workspaces} />)}
+      </Sheet>
     </PageShell>
   );
 }

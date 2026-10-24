@@ -139,3 +139,36 @@ def enrich_browsers(apps: List[Dict]) -> None:
     apps[:] = [a for a in apps if not (a.get("type") in browser_sessions.BROWSERS and not a.get("tabs"))]
     note = f", {unknown} without an address (install the Seven extension to save those)" if unknown else ""
     print(Fore.GREEN + f"[WORKSPACE] Browsers: {len(entries)} windows, {total} tabs{note}")
+
+
+def browsers_overview() -> List[Dict]:
+    """Every open browser profile with its windows and tabs, and how many tabs have a full address (from the
+    extension) versus a title only. For the Workspaces page."""
+    from hands.workspace_modules.browser_restore import _browser_windows
+    import win32gui
+    pool = _extension_pool()
+    rows: Dict[tuple, Dict] = {}
+    for browser in browser_sessions.BROWSERS:
+        if not browser_sessions.is_running(browser):
+            continue
+        for hwnd in _browser_windows(browser):
+            info = window_tabs(hwnd)
+            if "Incognito" in info.get("buttons", []):
+                continue
+            title = win32gui.GetWindowText(hwnd)
+            if "InPrivate" in title:
+                continue
+            profile = (_profile_from_buttons(browser, info.get("buttons", []))
+                       or _profile_from_title(browser, title) or "Default")
+            row = rows.setdefault((browser, profile), {
+                "browser": browser, "label": browser_sessions.BROWSERS[browser]["label"], "profile_dir": profile,
+                "profile_name": browser_sessions.profile_label(browser, profile), "windows": 0, "tabs": 0,
+                "with_address": 0})
+            row["windows"] += 1
+            row["tabs"] += len(info["titles"])
+            pooled = [t for t in pool if t["profile_dir"] == profile]
+            row["with_address"] += sum(1 for t in info["titles"] if any(p["title"] == t for p in pooled))
+    out = list(rows.values())
+    for r in out:
+        r["extension"] = r["with_address"] > 0 and r["browser"] in ("chrome", "edge", "brave")
+    return sorted(out, key=lambda r: (r["label"], r["profile_name"]))

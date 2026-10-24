@@ -23,7 +23,7 @@ import time
 import json
 from datetime import datetime
 from typing import Optional
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from colorama import Fore
 
@@ -261,6 +261,40 @@ def open_extensions_page():
         return {"success": success, "message": message}
     except Exception as e:
         return {"success": False, "message": str(e)}
+
+
+@router.get("/api/browsers/overview", summary="Open browser profiles, their tabs, and which have the extension")
+def browsers_overview():
+    try:
+        from hands.workspace_modules.browser_capture import browsers_overview as _overview
+        return {"profiles": _overview()}
+    except Exception as e:
+        return {"profiles": [], "error": str(e)}
+
+
+class ConnectRequest(BaseModel):
+    browser: str = "chrome"
+    profile_dir: str = "Default"
+
+
+@router.post("/api/browsers/connect", summary="Prepare the extension and open one profile's extensions page")
+def connect_browser(req: ConnectRequest):
+    """Everything a browser lets an app do: copy the extension into place, put its folder on the clipboard, open
+    that profile's extensions page and the folder. The user then turns on Developer mode and picks the folder
+    (browsers allow silent installs only from their stores)."""
+    import subprocess
+    from hands.chrome_setup import copy_path_to_clipboard, prepare_extension
+    from hands.workspace_modules import browser_sessions
+    ok, path, message = prepare_extension()
+    if not ok:
+        raise HTTPException(status_code=500, detail=message)
+    copy_path_to_clipboard(path)
+    exe = browser_sessions.find_exe(req.browser)
+    if not exe:
+        raise HTTPException(status_code=404, detail=f"{req.browser.title()} isn't installed")
+    page = {"edge": "edge://extensions/", "brave": "brave://extensions/"}.get(req.browser, "chrome://extensions/")
+    subprocess.Popen([exe, f"--profile-directory={req.profile_dir}", page])
+    return {"success": True, "path": path}
 
 
 @router.post("/api/chrome/setup/uninstall")
