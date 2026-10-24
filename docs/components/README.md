@@ -11,7 +11,7 @@ is for, how it works, the data it keeps, how it fails and how it is tested.
 | [Mouth](mouth.md) | Speaks replies, stops when interrupted | `mouth/` | Outline |
 | [Hands](hands.md) | Apps, windows, system settings, files, workspaces | `hands/` | Outline |
 | [Memory](memory.md) | Facts, conversations, learning and command log stores | `memory/` | Outline (model in the brain doc) |
-| [Knowledge](knowledge.md) | The user's documents, indexed locally | `knowledge/` | Outline |
+| [Knowledge](knowledge.md) | The user's documents, read locally and answered with page citations | `knowledge/` | Complete |
 | [Backend API](backend-api.md) | Local HTTP API for the app and helper processes | `backend/` | Outline |
 | [Frontend](frontend.md) | The desktop UI | `frontend/` | Outline |
 | [Desktop shell](desktop-shell.md) | Electron, windows, hotkeys, process supervision, installer | `electron/`, `installer/` | Outline |

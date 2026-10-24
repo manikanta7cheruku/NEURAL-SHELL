@@ -279,6 +279,20 @@ def _load_offline_embedder_standalone(model_name: str):
     return _FallbackEmbedder(model)
 
 
+_shared_embedder = None
+import threading as _emb_threading
+_embedder_lock = _emb_threading.Lock()
+
+
+def get_embedder():
+    """The one sentence embedder in the process, shared by memory and the document library."""
+    global _shared_embedder
+    with _embedder_lock:
+        if _shared_embedder is None:
+            _shared_embedder = _load_offline_embedder_standalone(EMBEDDING_MODEL)
+        return _shared_embedder
+
+
 # =============================================================================
 # MEMORY SYSTEM
 # =============================================================================
@@ -290,7 +304,7 @@ class SevenMemory:
         os.makedirs(MEMORY_DIR, exist_ok=True)
 
         print(Fore.CYAN + "[MEMORY] Loading embedding model (offline)...")
-        self.embedding_function = _load_offline_embedder_standalone(EMBEDDING_MODEL)
+        self.embedding_function = get_embedder()
 
         # Skip verification - it was tested separately and works
         # _verify_embedder creates a temp collection which can hang on slow systems

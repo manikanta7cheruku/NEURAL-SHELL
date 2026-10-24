@@ -19,6 +19,8 @@ _provider = web_provider.DefaultWebProvider()
 def process(ctx, deps):
     if (ctx.is_command or ctx.is_greeting or ctx.is_action_cmd or "VISUAL_REPORT:" in ctx.prompt_text):
         return LayerResult.pass_through()
+    if ctx.knowledge_context:                  # answering from the user's documents, not the internet
+        return LayerResult.pass_through()
     provider = deps.get("web") or _provider
     try:
         outcome = provider.lookup(ctx.resolved_text or ctx.prompt_text, deps.get("config"))

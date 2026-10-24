@@ -41,6 +41,7 @@ class ChatRequest(BaseModel):
     speaker_id: Optional[str] = "default"
     stream: Optional[bool] = False
     conversation_id: Optional[str] = None
+    documents: Optional[List[str]] = None      # library ids attached to this message
 
 
 class ChatResponse(BaseModel):
@@ -327,7 +328,7 @@ def chat(req: ChatRequest):
         speaker = req.speaker_id or "default"
         conv_id = brain.resolve_conversation(speaker, req.conversation_id)
         response = brain.think(text, speaker_id=speaker, stream_mode="token" if req.stream else "text",
-                               conversation_id=conv_id)
+                               conversation_id=conv_id, documents=req.documents)
         if isinstance(response, tuple) and len(response) == 2 and response[0] == "__STREAM__":
             _, gen = response
             if req.stream:

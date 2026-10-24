@@ -320,7 +320,14 @@ def _join(items: List[str]) -> str:
     return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1]
 
 
-def overview(brief: bool = False, rng=None) -> str:
+_BRIEF = (
+    "Same list as a moment ago: {abilities}. The Guide in the sidebar has examples you can click and run.",
+    "Short version: {abilities}. Pick one and I'll show you.",
+    "Still the same few things: {abilities}. Or just tell me what you're trying to get done and I'll say if I can.",
+)
+
+
+def overview(brief: bool = False, rng=None, variant: int = 0) -> str:
     """
     What Seven can do, said like a person and built from the registry and live status, so it stays true:
     an ability that is switched off, needs a plan or needs the internet is said as such.
@@ -338,8 +345,7 @@ def overview(brief: bool = False, rng=None) -> str:
 
     if brief:
         short = [c.title.lower() for c, _ in ok if c.id not in ("voice", "speaker_id")][:7]
-        return (f"Same as a moment ago: {_join(short)}. The Guide in the sidebar has examples you can "
-                "click and run, if you'd rather see it than read it.")
+        return _BRIEF[max(0, variant - 2) % len(_BRIEF)].format(abilities=_join(short))
 
     parts = [rng.choice(_OPENERS), f"I can {_join(doing[:8])}."]
     if any(c.id == "web" for c, _ in later):

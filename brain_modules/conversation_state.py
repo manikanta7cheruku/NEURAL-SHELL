@@ -86,6 +86,7 @@ class State:
     ignored: int = 0
     last_question_turn: int = -100
     last_overview_turn: Optional[int] = None     # when Seven last listed its abilities in this chat
+    overview_count: int = 0                     # how many times it was asked, so repeats are worded differently
     trace: Dict[str, Any] = field(default_factory=dict)
     last_used: float = 0.0
 

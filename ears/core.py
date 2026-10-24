@@ -136,6 +136,16 @@ def _is_voice_id_enabled() -> bool:
 # =============================================================================
 
 def _load_whisper(model_size: str) -> WhisperModel:
+    try:
+        return _load_whisper_cached(model_size)
+    except Exception:
+        # Offline mode blocks fetching a voice model that was never downloaded; allow it once.
+        from seven_utils import hf_offline
+        with hf_offline.allow_downloads():
+            return _load_whisper_cached(model_size)
+
+
+def _load_whisper_cached(model_size: str) -> WhisperModel:
     if _gpu_available():
         try:
             model = WhisperModel(

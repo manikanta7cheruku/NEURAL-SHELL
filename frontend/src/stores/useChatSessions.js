@@ -36,14 +36,17 @@ const useChatSessions = create((set, get) => ({
   profile: null,
   abortController: null,
   requestedId: null,         // set by other pages (Memory) to open a specific chat when the Console mounts
+  requestedPrompt: null,     // {text, name}: sent once that chat opens (Knowledge page study shortcuts)
 
   // ---------------------------------------------------------------- sessions
   init: async () => {
     const wanted = get().requestedId;
     if (wanted) {
-      set({ requestedId: null });
+      const prompt = get().requestedPrompt;
+      set({ requestedId: null, requestedPrompt: null });
       await get().openChat(wanted);
       await get().refreshList();
+      if (prompt) await get().send(prompt.text, prompt.name);
       return;
     }
     try {
@@ -109,7 +112,8 @@ const useChatSessions = create((set, get) => ({
     set({ abortController: null, sending: false, phase: 'idle' });
   },
 
-  send: async (text, attachedFile = null) => {
+  // attachedFile: names shown on the message; documents: library ids the answer should read from.
+  send: async (text, attachedFile = null, documents = null) => {
     const body = text.trim();
     if (!body || get().sending) return;
 
@@ -131,7 +135,7 @@ const useChatSessions = create((set, get) => ({
       const res = await fetch(CHAT_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream, application/json' },
-        body: JSON.stringify({ text: body, stream: true, conversation_id: convId }),
+        body: JSON.stringify({ text: body, stream: true, conversation_id: convId, documents }),
         signal: controller.signal,
       });
       if (!res.ok) throw new Error(`Server returned status ${res.status}`);
