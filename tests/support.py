@@ -118,6 +118,8 @@ class BrainTest(unittest.TestCase):
         for r in (conversation_state.reset, social_engine.reset, chat_history.clear, learning.clear_cache):
             r()
         ConversationThread._threads.clear()
+        from brain_modules import dialogue_manager
+        dialogue_manager.clear_memory()          # no file list or pending question leaks from one test into the next
         ConversationThread._metadata.clear()
         capabilities._overrides.clear()
         web_provider.set_online_override(True)

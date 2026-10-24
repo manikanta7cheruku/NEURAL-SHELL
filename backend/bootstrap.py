@@ -42,6 +42,12 @@ _bootstrap_state = {
         "current": "",
         "error": None
     },
+    "search_model": {
+        "status": "pending",
+        "progress": 0,
+        "current": "",
+        "error": None
+    },
     "model_pull": {
         "status": "pending",
         "model": "",
@@ -1180,6 +1186,51 @@ def pull_model(model_name: str):
 # ORCHESTRATORS
 # ============================================================================
 
+SEARCH_MODEL_REPO = "sentence-transformers/all-MiniLM-L6-v2"
+SEARCH_MODEL_MB = 90
+
+
+def ensure_search_model():
+    """Download the small model that finds memories and document passages by meaning, during setup with progress,
+    instead of silently at first launch (slow, and impossible offline). Never fatal: Seven retries on first use."""
+    from seven_utils import hf_offline
+    if hf_offline.local_model_path():
+        _set('search_model', status='done', progress=100, current='Already on this PC')
+        return True
+    _set('search_model', status='running', progress=1, current='Downloading the search model', error=None)
+    cache = os.path.join(os.path.expanduser("~"), ".cache", "huggingface", "hub",
+                         "models--sentence-transformers--all-MiniLM-L6-v2")
+    done = threading.Event()
+
+    def _watch():
+        while not done.is_set():
+            size = 0
+            for root, _dirs, files in os.walk(cache):
+                for f in files:
+                    try:
+                        size += os.path.getsize(os.path.join(root, f))
+                    except OSError:
+                        pass
+            pct = min(97, int(size / (SEARCH_MODEL_MB * 1024 * 1024) * 100))
+            _set('search_model', progress=max(1, pct))
+            done.wait(0.5)
+    threading.Thread(target=_watch, daemon=True).start()
+    try:
+        from huggingface_hub import snapshot_download
+        with hf_offline.allow_downloads():
+            snapshot_download(SEARCH_MODEL_REPO, allow_patterns=["*.json", "*.txt", "*.safetensors", "1_Pooling/*",
+                                                                 "tokenizer*", "vocab.txt", "modules.json"])
+        _set('search_model', status='done', progress=100, current='Ready')
+        hf_offline.enable()
+        return True
+    except Exception as e:
+        _set('search_model', status='error', progress=0,
+             error=f'Search model download failed ({str(e)[:120]}). Seven will try again later.')
+        return False
+    finally:
+        done.set()
+
+
 def run_environment_setup(on_complete=None):
     """
     Run full environment setup in background thread.
@@ -1231,6 +1282,9 @@ def run_environment_setup(on_complete=None):
                         on_complete(False)
                     return
                 _save_bootstrap_checkpoint()
+
+            # ── Step 1b: the search model (memory and documents find things by meaning with it) ──
+            ensure_search_model()
 
             # ── Step 2: Ollama install ──
             if is_ollama_installed():

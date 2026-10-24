@@ -51,9 +51,9 @@ except Exception:
 os.makedirs(_SEVEN_DATA, exist_ok=True)
 FILE_INDEX_DB = os.path.join(_SEVEN_DATA, "file_index.db")
 
-MAX_DEPTH = 6
-MAX_FILES = 50000
-STALE_AFTER = timedelta(minutes=30)
+MAX_DEPTH = 10
+MAX_FILES = 400000
+STALE_AFTER = timedelta(hours=6)
 _build_lock = threading.Lock()
 
 # -- Search Roots --
@@ -483,6 +483,8 @@ def build_file_index(force: bool = False):
                         all_files.append((
                             dname, stem, full, "folder", 0, 0, dirpath, 1
                         ))
+                    if scanned and scanned % 4000 < len(filenames):
+                        time.sleep(0.03)            # let the rest of the PC breathe during a big scan
                     for fname in filenames:
                         scanned += 1
                         ext = os.path.splitext(fname)[1].lower()
@@ -602,6 +604,9 @@ def search_files(query: str, max_results: int = None, user_name: str = "") -> li
                    or (looking_for_folder and r["ext"] == "folder")]
     _personal_boost(results)
     results.sort(key=lambda x: x["score"], reverse=True)
+    if results:                         # "tnf" should not list NotNFKC.pl next to TNF.mp4
+        top = results[0]["score"]
+        results = [r for r in results if r["score"] >= top * 0.35]
     return results[:max_results]
 
 
@@ -872,14 +877,61 @@ def _search_walk(keywords, target_extensions, looking_for_folder,
 
 
 # -- Open File / Folder --
+def _visible_windows() -> set:
+    try:
+        import win32gui
+        out = set()
+        win32gui.EnumWindows(lambda h, _: (out.add(h) if win32gui.IsWindowVisible(h) and win32gui.GetWindowText(h)
+                                           else None) or True, None)
+        return out
+    except Exception:
+        return set()
+
+
+def _bring_forward(path: str, before: set = frozenset(), timeout: float = 6.0) -> None:
+    """Players and viewers can take a few seconds to show a window, and Windows may open it behind Seven. Wait for
+    the window that names the file (or the first new window, since some players title themselves only by app name),
+    then bring it to the front."""
+    try:
+        import win32gui
+        from hands.windows import _is_seven_window, _safe_foreground
+    except Exception:
+        return
+    name = os.path.basename(path.rstrip("\\/")).lower()
+    stem = os.path.splitext(name)[0]
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        found = []
+
+        def _cb(hwnd, _):
+            if win32gui.IsWindowVisible(hwnd):
+                title = win32gui.GetWindowText(hwnd).lower()
+                if title and not _is_seven_window(hwnd):
+                    if name in title or (len(stem) > 2 and stem in title):
+                        found.insert(0, hwnd)
+                    elif before and hwnd not in before:
+                        found.append(hwnd)
+            return True
+        win32gui.EnumWindows(_cb, None)
+        if found:
+            try:
+                _safe_foreground(found[0])
+            except Exception:
+                pass
+            return
+        time.sleep(0.25)
+
+
 def open_file(path: str) -> bool:
     if os.environ.get("SEVEN_TEST") == "1":          # tests never open the user's files
         return os.path.exists(path)
     try:
+        before = _visible_windows()
         if os.path.isdir(path):
             subprocess.Popen(f'explorer "{path}"', shell=True)
         else:
             os.startfile(path)
+        threading.Thread(target=_bring_forward, args=(path, before), daemon=True).start()
         print(Fore.GREEN + f"[FILES] Opened: {path}")
         return True
     except Exception as e:

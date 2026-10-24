@@ -12,6 +12,7 @@ Uses existing brain_modules/command_router.py _build_window_tag().
 """
 
 import random
+import re
 from brain_modules.layer_result import LayerResult
 from brain_modules.command_router import _build_window_tag
 
@@ -49,8 +50,31 @@ _SWITCH_VERBS = [
 ]
 
 
+_SHOW_APP = re.compile(r"^(?:show|bring up|bring back|switch to|go to|take me to)(?: me)?(?: my| the)? "
+                       r"(?P<app>[a-z0-9][a-z0-9 .+]{1,40}?)(?: window| app)?$")
+
+
+def _show_app(ctx):
+    """"show chrome", "bring up whatsapp": bring its window forward, or open it when it isn't running."""
+    m = _SHOW_APP.match(ctx.clean_in.strip(" .!?"))
+    if not m:
+        return None
+    app = m.group("app").strip()
+    try:
+        from brain_modules.layers.layer_43_file_search import _is_likely_app
+        if not _is_likely_app(app):
+            return None
+    except Exception:
+        return None
+    return f"{app.title() if len(app) > 3 else app.upper()}. ###WINDOW: action=focus target={app.replace(' ', '|||')} fallback=open"
+
+
 def process(ctx, deps):
     clean_in = ctx.clean_in
+    shown = _show_app(ctx)
+    if shown:
+        ctx.is_command = True
+        return LayerResult.stop(shown)
 
     put_pattern = "put " in clean_in and any(
         p in clean_in for p in [

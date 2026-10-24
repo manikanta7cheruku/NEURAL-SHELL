@@ -366,6 +366,7 @@ function ConversationsView({ onChanged }) {
   const [list, setList] = useState(null);
   const [selected, setSelected] = useState(null);
   const [query, setQuery] = useState('');
+  const [source, setSource] = useState('all');          // all | voice | typed
   const [found, setFound] = useState({ q: '', items: [] });
   const q = query.trim();
   const results = q.length >= 2 ? (found.q === q ? found.items : []) : null;
@@ -388,15 +389,17 @@ function ConversationsView({ onChanged }) {
     return () => clearTimeout(t);
   }, [q]);
 
+  const voiceCount = (list || []).filter(c => c.voice_count > 0).length;
   const groups = useMemo(() => {
     const out = [];
-    for (const c of list || []) {
+    const keep = c => source === 'all' || (source === 'voice' ? c.voice_count > 0 : c.voice_count < c.message_count);
+    for (const c of (list || []).filter(keep)) {
       const label = dayLabel(c.updated_at);
       if (!out.length || out[out.length - 1].label !== label) out.push({ label, items: [] });
       out[out.length - 1].items.push(c);
     }
     return out;
-  }, [list]);
+  }, [list, source]);
 
   if (list === null) return <LoadingRows rows={6} />;
   if (list.length === 0) {
@@ -413,6 +416,12 @@ function ConversationsView({ onChanged }) {
             <Input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search every message" className="w-full pl-8 pr-8" aria-label="Search conversations" />
             {query && <button aria-label="Clear search" onClick={() => setQuery('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-s-text-4 hover:text-s-text-2"><X size={14} /></button>}
           </div>
+          {!results && (
+            <div className="mt-2.5">
+              <Segmented size="sm" value={source} onChange={setSource}
+                         options={[{ value: 'all', label: 'All' }, { value: 'voice', label: `Voice  ${voiceCount}` },
+                                   { value: 'typed', label: 'Typed' }]} />
+            </div>)}
         </div>
         <div className="flex-1 overflow-y-auto p-2">
           {results ? (
@@ -428,6 +437,10 @@ function ConversationsView({ onChanged }) {
                 <p className="mt-0.5 line-clamp-2 text-[12px] text-s-text-3">{r.role === 'user' ? 'You: ' : 'Seven: '}{r.content}</p>
               </button>
             ))
+          ) : groups.length === 0 ? (
+            <p className="px-2 py-6 text-center text-[12px] text-s-text-3">
+              {source === 'voice' ? 'No spoken conversations yet. Say "Hey Seven" and they appear here.' : 'No typed conversations yet.'}
+            </p>
           ) : groups.map(g => (
             <div key={g.label} className="mb-2">
               <div className="px-3 pb-1 pt-2 text-[11px] font-medium text-s-text-4">{g.label}</div>

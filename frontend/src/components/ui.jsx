@@ -6,6 +6,7 @@
  */
 import { forwardRef, useEffect, useId, useRef, useState } from 'react';
 import { Check, AlertCircle, Info, X, Loader2 } from 'lucide-react';
+import { createPortal } from 'react-dom';
 import { cx } from '../lib/cx';
 import { useToasts } from '../lib/toast';
 
@@ -70,16 +71,24 @@ export function Body({ children, className }) {
 
 // ── Controls ────────────────────────────────────────────────────────────────
 
+/**
+ * Switch. A quiet track with a hairline edge; on, it fills with the accent. The thumb glides with a soft ease and
+ * stretches a little while pressed, the way a physical switch gives under a finger.
+ */
 export function Toggle({ checked, onChange, disabled, label }) {
   return (
     <button type="button" role="switch" aria-checked={!!checked} aria-label={label} disabled={disabled}
             onClick={() => onChange(!checked)}
-            className={cx('relative inline-flex h-[18px] w-8 shrink-0 items-center rounded-full transition-colors duration-200',
-                          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-s-accent/60 focus-visible:ring-offset-2 focus-visible:ring-offset-s-bg',
-                          checked ? 'bg-s-accent' : 'bg-s-border-l',
-                          disabled && 'opacity-40 cursor-not-allowed')}>
-      <span className={cx('inline-block h-[14px] w-[14px] rounded-full bg-s-on-accent shadow-sm transition-transform duration-200 ease-out',
-                          checked ? 'translate-x-[16px]' : 'translate-x-[2px]')} />
+            className={cx('group/sw relative inline-flex h-[18px] w-[30px] shrink-0 items-center rounded-full',
+                          'transition-[background-color,box-shadow] duration-200 ease-[cubic-bezier(0.2,0.8,0.2,1)]',
+                          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-s-accent/50 focus-visible:ring-offset-2 focus-visible:ring-offset-s-bg',
+                          checked ? 'bg-s-accent shadow-[inset_0_0_0_1px_rgba(0,0,0,0.08)]'
+                                  : 'bg-s-card-h shadow-[inset_0_0_0_1px_var(--color-s-border-l)] hover:bg-s-border',
+                          disabled ? 'cursor-not-allowed opacity-40' : 'cursor-pointer')}>
+      <span className={cx('absolute top-[3px] h-3 rounded-full transition-all duration-200 ease-[cubic-bezier(0.2,0.8,0.2,1)]',
+                          'w-3 group-active/sw:w-[15px]',
+                          checked ? 'left-[15px] bg-s-on-accent group-active/sw:left-[12px]'
+                                  : 'left-[3px] bg-s-text-3 group-hover/sw:bg-s-text-2')} />
     </button>
   );
 }
@@ -168,10 +177,10 @@ export function Input({ className, ...props }) {
 }
 
 const BUTTON = {
-  primary: 'bg-s-accent text-s-on-accent hover:bg-s-accent-h',
+  primary: 'bg-s-accent text-s-on-accent hover:bg-s-accent-h shadow-[inset_0_1px_0_rgba(255,255,255,0.18)]',
   secondary: 'border border-s-border bg-s-card text-s-text hover:bg-s-card-h hover:border-s-border-l',
   ghost: 'text-s-text-2 hover:text-s-text hover:bg-s-card',
-  danger: 'border border-s-red/30 text-s-red hover:bg-s-red/10',
+  danger: 'border border-s-red/30 text-s-red hover:bg-s-red/10 hover:border-s-red/45',
 };
 
 export const Button = forwardRef(function Button(
@@ -179,7 +188,8 @@ export const Button = forwardRef(function Button(
   return (
     <button ref={ref} type="button" {...props} disabled={props.disabled || loading}
             className={cx('inline-flex items-center justify-center gap-1.5 rounded-md font-medium whitespace-nowrap',
-                          'transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed',
+                          'transition-[background-color,border-color,color,box-shadow,transform] duration-200 ease-[cubic-bezier(0.2,0.8,0.2,1)]',
+                          'active:translate-y-px disabled:opacity-50 disabled:cursor-not-allowed disabled:active:translate-y-0',
                           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-s-accent/60',
                           size === 'sm' ? 'h-6 px-2 text-[11.5px]' : 'h-7 px-3 text-[12px]',
                           BUTTON[variant], className)}>
@@ -247,19 +257,28 @@ export function LoadingRows({ rows = 4 }) {
 export function Dialog({ open, title, description, children, confirmLabel = 'Confirm', tone = 'default',
                          onConfirm, onCancel, busy, confirmDisabled }) {
   const confirmRef = useRef(null);
+  const boxRef = useRef(null);
+  const cancelRef = useRef(onCancel);
   const titleId = useId();
+  useEffect(() => { cancelRef.current = onCancel; }, [onCancel]);
+  // Runs when the dialog opens, not on every render: parents pass a new onCancel each time, and re-running this
+  // used to pull focus back to the button after every keystroke, so forms inside dialogs couldn't be typed into.
   useEffect(() => {
     if (!open) return;
-    const t = setTimeout(() => confirmRef.current?.focus(), 30);
-    const onKey = e => { if (e.key === 'Escape') onCancel(); };
+    const t = setTimeout(() => {
+      const field = boxRef.current?.querySelector('input:not([type=hidden]), textarea, select');
+      if (field) { if (!boxRef.current.contains(document.activeElement)) field.focus(); }
+      else confirmRef.current?.focus();
+    }, 30);
+    const onKey = e => { if (e.key === 'Escape') cancelRef.current?.(); };
     window.addEventListener('keydown', onKey);
     return () => { clearTimeout(t); window.removeEventListener('keydown', onKey); };
-  }, [open, onCancel]);
+  }, [open]);
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-[1000] flex items-center justify-center p-6" onMouseDown={onCancel}>
       <div className="absolute inset-0 bg-[var(--s-scrim)] animate-[fadeIn_120ms_ease-out]" />
-      <div role="dialog" aria-modal="true" aria-labelledby={titleId}
+      <div ref={boxRef} role="dialog" aria-modal="true" aria-labelledby={titleId}
            onMouseDown={e => e.stopPropagation()}
            className="relative w-full max-w-[420px] rounded-xl border border-s-border bg-s-surface shadow-[var(--s-shadow-raised)]
                       animate-[dialogReveal_160ms_ease-out]">
@@ -305,4 +324,102 @@ export function Toaster() {
       })}
     </div>
   );
+}
+
+// ── Floating menu ───────────────────────────────────────────────────────────
+
+/**
+ * A small menu that floats above the page, anchored under (or above, when there is no room) the element in
+ * anchorRef. Rendered into <body>, so cards, scroll areas and animations around the anchor can never cover or
+ * clip it. Closes on an outside click, Escape, resize or scroll.
+ */
+export function FloatingMenu({ open, anchorRef, onClose, width = 224, align = 'end', children }) {
+  const ref = useRef(null);
+  const [pos, setPos] = useState(null);
+  useEffect(() => {
+    if (!open) { setPos(null); return undefined; }
+    const r = anchorRef.current?.getBoundingClientRect();
+    if (r) {
+      const h = ref.current?.offsetHeight || 96;
+      const top = r.bottom + 6 + h > window.innerHeight - 8 ? Math.max(8, r.top - h - 6) : r.bottom + 6;
+      const left = align === 'end' ? r.right - width : r.left;
+      setPos({ top, left: Math.max(8, Math.min(left, window.innerWidth - width - 8)) });
+    }
+    const away = e => { if (!ref.current?.contains(e.target) && !anchorRef.current?.contains(e.target)) onClose(); };
+    const key = e => { if (e.key === 'Escape') onClose(); };
+    const t = setTimeout(() => document.addEventListener('mousedown', away), 0);
+    window.addEventListener('keydown', key);
+    window.addEventListener('resize', onClose);
+    window.addEventListener('scroll', onClose, true);
+    return () => {
+      clearTimeout(t);
+      document.removeEventListener('mousedown', away);
+      window.removeEventListener('keydown', key);
+      window.removeEventListener('resize', onClose);
+      window.removeEventListener('scroll', onClose, true);
+    };
+  }, [open, anchorRef, onClose, width, align]);
+  if (!open) return null;
+  return createPortal(
+    <div ref={ref} role="menu" style={{ position: 'fixed', top: pos?.top ?? -9999, left: pos?.left ?? -9999, width }}
+         className="z-[1100] overflow-hidden rounded-lg border border-s-border bg-s-surface py-1 shadow-[var(--s-shadow-raised)]
+                    animate-[dialogReveal_140ms_ease-out]">
+      {children}
+    </div>, document.body);
+}
+
+export function MenuItem({ icon: Icon, children, onClick, tone, disabled }) {
+  return (
+    <button role="menuitem" onClick={onClick} disabled={disabled}
+            className={cx('flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12px] hover:bg-s-card disabled:opacity-50',
+                          tone === 'danger' ? 'text-s-red' : 'text-s-text-2 hover:text-s-text')}>
+      {Icon && <Icon size={14} className="shrink-0" />}{children}
+    </button>
+  );
+}
+
+// ── Side sheet ──────────────────────────────────────────────────────────────
+
+/**
+ * A panel that slides in from the right over a dimmed page, for creating or editing something without losing your
+ * place. Escape or a click on the dimmed page closes it.
+ */
+export function Sheet({ open, title, description, onClose, width = 480, children }) {
+  const [mounted, setMounted] = useState(open);
+  const [shown, setShown] = useState(false);
+  const closeRef = useRef(onClose);
+  useEffect(() => { closeRef.current = onClose; }, [onClose]);
+  useEffect(() => {
+    if (open) {
+      setMounted(true);
+      const id = requestAnimationFrame(() => requestAnimationFrame(() => setShown(true)));
+      const key = e => { if (e.key === 'Escape') closeRef.current?.(); };
+      window.addEventListener('keydown', key);
+      return () => { cancelAnimationFrame(id); window.removeEventListener('keydown', key); };
+    }
+    setShown(false);
+    const t = setTimeout(() => setMounted(false), 280);
+    return () => clearTimeout(t);
+  }, [open]);
+  if (!mounted) return null;
+  return createPortal(
+    <div className="fixed inset-0 z-[1000]">
+      <div onMouseDown={() => closeRef.current?.()}
+           className={cx('absolute inset-0 bg-[var(--s-scrim)] transition-opacity duration-300', shown ? 'opacity-100' : 'opacity-0')} />
+      <aside role="dialog" aria-modal="true" aria-label={title} style={{ width }}
+             className={cx('absolute inset-y-0 right-0 flex max-w-full flex-col border-l border-s-border bg-s-surface shadow-[var(--s-shadow-raised)]',
+                           'transition-transform duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]', shown ? 'translate-x-0' : 'translate-x-full')}>
+        <header className="flex shrink-0 items-start justify-between gap-4 border-b border-s-border px-5 py-4">
+          <div className="min-w-0">
+            <h2 className="text-[15px] font-semibold text-s-text">{title}</h2>
+            {description && <p className="mt-0.5 text-[12px] leading-relaxed text-s-text-3">{description}</p>}
+          </div>
+          <button onClick={() => closeRef.current?.()} aria-label="Close"
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-s-text-3 hover:bg-s-card hover:text-s-text">
+            <X size={15} />
+          </button>
+        </header>
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">{children}</div>
+      </aside>
+    </div>, document.body);
 }

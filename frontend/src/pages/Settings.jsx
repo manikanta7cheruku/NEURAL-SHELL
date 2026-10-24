@@ -153,7 +153,7 @@ export default function Settings() {
   const copyMessage = () => {
     if (!referralStats?.referral_code) return;
     const msg =
-      `Hey! I use Seven AI — a private voice assistant that runs 100% on your PC. ` +
+      `Hey! I use Seven, a private assistant that runs entirely on my PC. ` +
       `No cloud, no data leaving your device.\n\n` +
       `Download: https://github.com/manikanta7cheruku/seven-releases/releases/latest\n\n` +
       `During setup, enter my referral code: ${referralStats.referral_code}\n\n` +
@@ -166,7 +166,7 @@ export default function Settings() {
   const shareWhatsApp = () => {
     if (!referralStats?.referral_code) return;
     const text =
-      `Hey! I use Seven AI — private voice assistant, 100% local.\n` +
+      `Hey! I use Seven, a private assistant that runs on my PC.\n` +
       `Download: https://github.com/manikanta7cheruku/seven-releases/releases/latest\n` +
       `Use referral code: ${referralStats.referral_code}\n` +
       `7 hours → we both get free premium!`;
@@ -404,7 +404,7 @@ export default function Settings() {
         msg: `Imported ${r.data.imported_facts} facts and ${r.data.imported_conversations} conversations`
       });
     } catch (err) {
-      setImportResult({ success: false, msg: 'Import failed — invalid file' });
+      setImportResult({ success: false, msg: 'Import failed: that file is not a Seven export' });
     }
     setImporting(false);
     e.target.value = '';
@@ -492,7 +492,7 @@ export default function Settings() {
                 />
               ) : (
                 <span className="text-[11px] text-s-text font-medium">
-                  {local.identity?.user_name || '—'}
+                  {local.identity?.user_name || 'Not set'}
                 </span>
               )}
             </div>
@@ -510,7 +510,7 @@ export default function Settings() {
                 />
               ) : (
                 <span className="text-[11px] text-s-text font-mono truncate max-w-[200px]">
-                  {local.email || '—'}
+                  {local.email || 'Not set'}
                 </span>
               )}
             </div>
@@ -903,7 +903,7 @@ export default function Settings() {
               <div className="grid grid-cols-2 gap-2">
                 {(speed?.count > 0
                   ? [['Avg', `${speed.avg}ms`], ['Min', `${speed.min}ms`], ['Max', `${speed.max}ms`], ['Samples', speed.count]]
-                  : [['Avg', '—'], ['Min', '—'], ['Max', '—'], ['Samples', '0']]
+                  : [['Avg', 'None yet'], ['Min', 'None yet'], ['Max', 'None yet'], ['Samples', '0']]
                 ).map(([k, v]) => (
                   <div key={k} className="bg-s-bg rounded px-2 py-1 text-center">
                     <div className="text-[11px] font-mono font-medium text-s-text">{v}</div>

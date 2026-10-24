@@ -23,7 +23,11 @@ def process(ctx, deps):
     norm = ctx.norm_in
     recall = memory_gate.parse_recall_query(norm)
     label = getattr(ctx.intent, "label", None)
-    if recall is None and label in _INTENT_TO_KIND:
+    # The intent router alone is not enough: "do you know alphabets" resembles "how do you know that", but it is
+    # a general question, not one about something Seven said about the user. Require a pointer to the user or to
+    # what was just said.
+    refers_back = bool({"that", "this", "it", "me", "my", "i", "those", "these"} & set(norm.split()))
+    if recall is None and label in _INTENT_TO_KIND and refers_back:
         kind = _INTENT_TO_KIND[label]
         recall = memory_gate.RecallQuery(kind, "", "")
     if recall is None and not memory_gate.should_search_memory(norm, ctx.resolved_text or ctx.prompt_text):

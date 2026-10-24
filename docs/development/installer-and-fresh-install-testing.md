@@ -92,11 +92,21 @@ from Windows, see Part 4). Ollama models are stored per user, so the model downl
 
 ### Option D: reset your own Seven (only if you must)
 
-1. Quit Seven and the panel host (tray icons).
-2. **Back up** your data: rename `%APPDATA%\SEVEN` to `%APPDATA%\SEVEN.backup`.
-3. Uninstall Seven from Settings, Apps.
-4. Install the new `SEVEN-Setup-<version>.exe` and test.
-5. To get your real data back: quit Seven, delete the new `%APPDATA%\SEVEN`, rename `SEVEN.backup` back to `SEVEN`.
+One script does it: it stops Seven and every helper, zips `%APPDATA%\SEVEN` to your Desktop, uninstalls, and removes
+the data folder and the login entries. It asks you to type RESET first.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\reset-seven.ps1
+```
+
+Add `-RemoveModels` to also delete the search and voice models, and `-RemoveOllamaModels` to delete Ollama's models,
+so setup downloads them again like it would for a new user. Ollama itself stays installed.
+
+1. Optional: in Settings, export your data too, as a second copy.
+2. Run the script.
+3. Install the new `SEVEN-Setup-<version>.exe` and go through Part 3.
+4. To get your real data back: quit Seven, delete the new `%APPDATA%\SEVEN`, and unzip the Desktop backup into a new
+   `%APPDATA%\SEVEN` folder.
 
 ### Testing only the setup screens during development
 
@@ -113,7 +123,7 @@ Write down the time each step takes; that is what a new user experiences.
 | 1 | Download and run the installer | Windows shows the publisher (once code signing is set up); installs without admin rights |
 | 2 | First launch | The SEVEN splash appears within a few seconds |
 | 3 | Welcome to "Choose Seven's brain" | Every step reads clearly; Back works; nothing overlaps on a small screen |
-| 4 | Getting this PC ready | Installs what is missing, shows progress, recovers if the internet drops |
+| 4 | Getting this PC ready | Each piece shows its size, what it is and its own progress; the search model downloads here, not after setup; recovers if the internet drops |
 | 5 | Choose Seven's brain | The model marked Recommended matches the PC (see Part 5); the download shows progress |
 | 6 | You're all set | The app opens on the home screen |
 | 7 | Say "Hey Seven" | The orb turns green and the words appear in the session log |
@@ -122,7 +132,7 @@ Write down the time each step takes; that is what a new user experiences.
 | 10 | Alt+Shift+T | The task panel opens every time, also after quitting Seven |
 | 11 | Restart the PC | The panel hotkey works before Seven is opened; reminders still fire |
 | 12 | Feedback page | A test report reaches the Google Form |
-| 13 | Uninstall | Seven is removed; `%APPDATA%\SEVEN` stays (expected) |
+| 13 | Uninstall | Seven is removed; `%APPDATA%\SEVEN` stays (expected); after a restart no Seven process starts |
 
 Collect for any problem: the steps, a screenshot, and `%APPDATA%\SEVEN\logs\` (zip the folder).
 

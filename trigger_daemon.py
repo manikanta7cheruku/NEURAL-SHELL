@@ -18,6 +18,15 @@ RESPONSIBILITIES (delegated to modules):
   trigger_modules.reload_poller    → DB change watcher
 =============================================================================
 """
+import os as _os
+import sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+try:
+    from seven_utils import gentle as _gentle
+    _gentle.cap_threads(2)
+    _gentle.background()          # a helper that waits for hotkeys and reminders never competes with the user
+except Exception:
+    pass
 import sys
 import os
 import time
@@ -40,6 +49,7 @@ from trigger_modules.hotkey_listener import HotkeyListener
 from trigger_modules.audio_listener import AudioListener
 from trigger_modules.voice_listener import VoiceListener
 from trigger_modules.reload_poller import ReloadPoller
+from trigger_modules.companions import ensure_companions
 
 _tab_listener_proc = None
 
@@ -158,6 +168,17 @@ def main():
 
     print("[TRIGGER DAEMON] Starting...")
 
+    def _prewarm():
+        """Load the workspace code and the UI Automation client now, not on the first hotkey press."""
+        try:
+            from hands.workspace_modules import restore, scanner  # noqa: F401
+            from hands.workspace_modules.browser_tabs import _uia
+            _uia()
+            print("[TRIGGER DAEMON] Workspace restore ready")
+        except Exception as e:
+            print(f"[TRIGGER DAEMON] Prewarm skipped: {e}")
+    threading.Thread(target=_prewarm, daemon=True, name="WorkspacePrewarm").start()
+
     # Load initial triggers
     triggers = load_triggers()
     print(f"[TRIGGER DAEMON] Loaded {len(triggers)} active triggers")
@@ -204,6 +225,12 @@ def main():
         target=_offline_tab_listener_supervisor, daemon=True
     ).start()
 
+    # Reminders and the task panel must work after a reboot even if the Seven window is never opened
+    def _companions_soon():
+        time.sleep(20)
+        ensure_companions()
+    threading.Thread(target=_companions_soon, daemon=True, name="Companions").start()
+
     # Start all listeners
     hotkey_listener.start()
     audio_listener.start()
@@ -215,10 +242,14 @@ def main():
     # Health check loop
     _hotkey_fail_streak = 0
     _last_health_log    = time.time()
+    _ticks              = 0
 
     try:
         while True:
             time.sleep(30)
+            _ticks += 1
+            if _ticks % 10 == 0:
+                threading.Thread(target=ensure_companions, daemon=True).start()
 
             # Overlay health check
             if not is_overlay_alive():

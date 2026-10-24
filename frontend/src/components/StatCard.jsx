@@ -2,7 +2,7 @@ export default function StatCard({ icon: Icon, label, value, subtext, color = 'b
   const colorMap = {
     blue: 'border-blue-500/20 bg-blue-500/5',
     green: 'border-green-500/20 bg-green-500/5',
-    purple: 'border-purple-500/20 bg-purple-500/5',
+    purple: 'border-s-yellow/20 bg-s-yellow/5',
     yellow: 'border-yellow-500/20 bg-yellow-500/5',
     red: 'border-red-500/20 bg-red-500/5',
     cyan: 'border-cyan-500/20 bg-cyan-500/5',
@@ -11,7 +11,7 @@ export default function StatCard({ icon: Icon, label, value, subtext, color = 'b
   const iconColorMap = {
     blue: 'text-blue-400',
     green: 'text-green-400',
-    purple: 'text-purple-400',
+    purple: 'text-s-yellow',
     yellow: 'text-yellow-400',
     red: 'text-red-400',
     cyan: 'text-cyan-400',

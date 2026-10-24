@@ -2,9 +2,9 @@
  * One saved workspace: what it holds at a glance, Restore always visible, and a menu to bring it up to date with
  * the current desktop or delete it. Expanding shows every saved item.
  */
-import { useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { ChevronDown, MoreHorizontal, RefreshCw, RotateCcw, Trash2 } from 'lucide-react';
-import { Button, Dialog } from '../../components/ui';
+import { Button, Dialog, FloatingMenu, MenuItem } from '../../components/ui';
 import { cx } from '../../lib/cx';
 import { timeAgo } from './helpers';
 import { KINDS, ORDER, describe, summarize, summaryLine } from './workspaceKinds';
@@ -15,6 +15,8 @@ export default function WorkspaceCard({ workspace, onRestore, onUpdate, onDelete
   const [open, setOpen] = useState(false);
   const [menu, setMenu] = useState(false);
   const [confirm, setConfirm] = useState(false);
+  const menuButton = useRef(null);
+  const closeMenu = useCallback(() => setMenu(false), []);
   const apps = workspace.apps || [];
   const { groups } = summarize(apps);
 
@@ -57,24 +59,14 @@ export default function WorkspaceCard({ workspace, onRestore, onUpdate, onDelete
 
         <div className="relative flex shrink-0 items-center gap-1">
           <Button size="sm" variant="secondary" icon={RotateCcw} loading={restoring} onClick={restore}>Restore</Button>
-          <button onClick={() => setMenu(!menu)} aria-label="More" aria-expanded={menu}
+          <button ref={menuButton} onClick={() => setMenu(!menu)} aria-label="More" aria-expanded={menu}
                   className="flex h-6 w-6 items-center justify-center rounded-md text-s-text-3 transition-colors hover:bg-s-card hover:text-s-text">
             <MoreHorizontal size={14} />
           </button>
-          {menu && (
-            <>
-              <div className="fixed inset-0 z-10" onClick={() => setMenu(false)} />
-              <div className="absolute right-0 top-8 z-20 w-56 overflow-hidden rounded-lg border border-s-border bg-s-surface py-1 shadow-[var(--s-shadow-raised)]">
-                <button onClick={update} disabled={updating}
-                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-s-text-2 hover:bg-s-card">
-                  <RefreshCw size={13} className={updating ? 'animate-spin' : ''} />Replace with current desktop
-                </button>
-                <button onClick={() => { setMenu(false); setConfirm(true); }}
-                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-s-red hover:bg-s-card">
-                  <Trash2 size={13} />Delete
-                </button>
-              </div>
-            </>)}
+          <FloatingMenu open={menu} anchorRef={menuButton} onClose={closeMenu}>
+            <MenuItem icon={RefreshCw} onClick={update} disabled={updating}>Replace with current desktop</MenuItem>
+            <MenuItem icon={Trash2} tone="danger" onClick={() => { setMenu(false); setConfirm(true); }}>Delete</MenuItem>
+          </FloatingMenu>
         </div>
       </div>
 

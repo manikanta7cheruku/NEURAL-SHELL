@@ -12,6 +12,7 @@ router = APIRouter()
 
 class OpenFileRequest(BaseModel):
     path: str
+    reveal: bool = False        # show it selected in File Explorer instead of opening it
 
 
 @router.post("/api/files/open",
@@ -26,6 +27,10 @@ def open_file_endpoint(req: OpenFileRequest):
         raise HTTPException(status_code=404, detail="File not found")
 
     try:
+        if req.reveal:
+            import subprocess
+            subprocess.Popen(["explorer", "/select,", os.path.normpath(req.path)])
+            return {"ok": True, "revealed": req.path}
         from hands.files import open_file
         open_file(req.path)
         return {"ok": True, "opened": req.path}

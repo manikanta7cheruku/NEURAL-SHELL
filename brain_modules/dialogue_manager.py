@@ -291,6 +291,12 @@ def looks_like_reference(user_text: str) -> bool:
     words = re.findall(r"[a-z0-9]+", clean)
     word_set = set(words)
 
+    # "How can you open these files?" asks about Seven; it is not "open them again".
+    if words and (words[0] in {"how", "why", "what", "when", "where", "who", "which", "does", "do", "is", "are"}
+                  or clean.endswith("?") and words[0] in {"can", "could"} and "you" in words[1:2]
+                  and not re.search(r"\b(?:first|second|third|last|\d+)\b", clean)):
+        return False
+
     # "the last pdf I downloaded" is about the PC, not about the list Seven just showed.
     if word_set & {"downloaded", "downloads", "saved", "recorded", "took", "latest", "newest", "recent"}:
         return False
@@ -299,8 +305,12 @@ def looks_like_reference(user_text: str) -> bool:
     if word_set & set(_REFERENCE_ORDINALS.keys()):
         return True
 
-    # Signal 2: last/first/final
-    if word_set & _REFERENCE_LAST or word_set & _REFERENCE_FIRST:
+    # Signal 2: last/first/final. "top" and "bottom" also describe places on screen ("pin notepad on top"),
+    # so they count only as "the top one", "top result" and the like.
+    position_words = {"top", "bottom"}
+    if (word_set & (_REFERENCE_LAST - position_words)) or (word_set & (_REFERENCE_FIRST - position_words)):
+        return True
+    if word_set & position_words and re.search(r"\b(?:the )?(?:top|bottom)(?: one| result| match| file| item)\b", clean):
         return True
 
     # Signal 3: numeric reference like "open 2" or "the 3rd"

@@ -14,7 +14,7 @@ export default function KnowledgePanel({ onClose }) {
   const p = profile || { facts: [], goals: [], open_questions: [], style: {} };
 
   return (
-    <div className="w-[300px] shrink-0 border-l border-white/[0.06] bg-white/[0.015] h-full overflow-y-auto">
+    <div className="h-full w-[300px] overflow-y-auto">
       <div className="flex items-center justify-between px-4 py-3 border-b border-white/[0.06]">
         <div>
           <div className="text-[12px] font-semibold text-white/85">What I know about you</div>

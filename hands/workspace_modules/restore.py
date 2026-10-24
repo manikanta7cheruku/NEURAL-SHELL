@@ -70,7 +70,7 @@ def smart_restore(apps_config):
             _per_prof_future = _pool.submit(get_open_chrome_tabs_per_profile)
 
             try:
-                current = scan_current(keep_handles=True)
+                current = scan_current(keep_handles=True, read_tabs=False)
             except Exception:
                 current = []
 
@@ -176,6 +176,7 @@ def smart_restore(apps_config):
         missing      = []
         already_open = 0
         browsers_opened = 0
+        browser_cfgs = []
 
         for cfg in filtered_apps:
           try:
@@ -189,13 +190,9 @@ def smart_restore(apps_config):
             tabs = cfg.get("tabs", [])
 
             if t in ("chrome", "edge", "brave") and tabs:
-                # browser_restore.py compares tab by tab against what is open in that profile right now,
-                # so a window only counts as opened when a tab really had to be opened.
-                from hands.workspace_modules.browser_restore import restore_browser
-                if restore_browser(cfg)["opened"]:
-                    browsers_opened += 1
-                else:
-                    already_open += 1
+                # browser_restore.py compares tab by tab against what is open in that profile right now; it runs
+                # alongside the other apps below, and a window only counts as opened when a tab had to be opened.
+                browser_cfgs.append(cfg)
             elif t in ("chrome", "edge", "brave", "firefox"):
                 if tabs:
                     missing.append(cfg)
@@ -312,12 +309,18 @@ def smart_restore(apps_config):
                   f"{cfg.get('name','?')}: {_cfg_err}")
             missing.append(cfg)  # attempt restore anyway
 
-        if missing:
-            print(Fore.CYAN + f"[WORKSPACE] Opening {len(missing)} apps "
-                  f"({already_open} already running)")
-            _do_restore(missing)
-        else:
-            print(Fore.GREEN + "[WORKSPACE] All apps already open")
+        print(Fore.CYAN + f"[WORKSPACE] Opening {len(missing)} apps and checking {len(browser_cfgs)} browser "
+                          f"windows ({already_open} already running)")
+        from hands.workspace_modules.browser_restore import restore_browser
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+            apps_done = pool.submit(_do_restore, missing) if missing else None
+            for result in pool.map(restore_browser, browser_cfgs):
+                if result.get("opened"):
+                    browsers_opened += 1
+                else:
+                    already_open += 1
+            if apps_done:
+                apps_done.result()
 
         return len(missing) + browsers_opened, already_open
 
@@ -351,8 +354,11 @@ def _do_restore(apps_config):
         th.start()
         threads.append(th)
 
+    # Launching is quick; moving windows into place can take a few more seconds and carries on in the background,
+    # so the "done" card doesn't wait for it.
+    deadline = time.time() + 6
     for th in threads:
-        th.join(timeout=20)
+        th.join(timeout=max(0.1, deadline - time.time()))
     elapsed = int((time.time() - t0) * 1000)
     print(Fore.GREEN + f"[WORKSPACE] Done in {elapsed}ms")
 

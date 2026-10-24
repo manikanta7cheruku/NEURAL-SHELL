@@ -129,6 +129,8 @@ def capability_list_answer(norm: str, state=None, ctx=None) -> str:
         cap = capabilities.get("apps")
         base = capabilities.describe(cap)
         return base + " I don't keep a list of every app. If it's installed, say \"open\" and its name and I'll find it."
+    if re.search(r"\b(?:list|bullet|bullets|points|one by one|step by step|everything)\b", norm):
+        return capabilities.overview_list()
     # Asked again in the same chat: a short reply, not the same paragraph word for word.
     turn = getattr(state, "turn", None)
     last = getattr(state, "last_overview_turn", None)
@@ -155,6 +157,14 @@ def value_answer() -> str:
             "brings back your workspace and keeps your reminders, in milliseconds. It runs entirely on this computer, "
             "works offline, remembers what you tell it and shows you everything it knows. "
             "And it never says something worked unless it did.")
+
+
+def share_answer() -> str:
+    """Something the user can send a friend, written in their voice, not Seven's."""
+    return ("Here's something you can send them:\n\n\"Try Seven. It's an assistant that runs on your own PC, not in "
+            "the cloud. You say or type what you want and it does it: opens apps, finds your files, arranges windows, "
+            "brings back your whole study or work setup in one sentence, and answers from your own notes and PDFs with "
+            "page numbers. It works offline and keeps everything on your computer.\"")
 
 
 def symbol_answer() -> str:
@@ -264,6 +274,9 @@ def reasoning_answer(ctx) -> str:
         if trace.get("uncertainty"):
             extra += " Part of it was uncertain, and I was told to say so rather than guess."
         return f"That reply was written by the language model, {who}, running on this computer{used}.{extra}"
+    if trace.get("detail") == "pc":
+        return ("I read it live from Windows. The graphics driver, processor and memory report those numbers "
+                "directly, so nothing was guessed, and none of it left this computer.")
     if by.startswith(("layer_45", "layer_43", "layer_036", "layer_38", "layer_59")):
         return ("That was a direct command. I handled it instantly in code, without the AI model, and then checked "
                 "whether the action actually worked before telling you.")
@@ -297,6 +310,8 @@ def answer(label: str, ctx, config) -> Optional[str]:
         return learning_answer()
     if label == "self_reasoning":
         return reasoning_answer(ctx)
+    if label == "self_share":
+        return share_answer()
     if label == "self_symbol":
         return symbol_answer()
     return None
