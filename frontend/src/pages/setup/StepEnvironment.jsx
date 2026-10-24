@@ -1,431 +1,181 @@
-import { useEffect, useState, useRef } from 'react';
+/**
+ * Setup, step 4: getting this PC ready.
+ *
+ * A plain checklist of what Seven puts on the computer, what each piece is for and how big it is, with live
+ * progress. Seven's own engine ships inside the installer, so only two things download here: the local AI runtime
+ * (Ollama) and the small search model. The AI model itself is chosen on the next step.
+ */
+import { useEffect, useRef, useState } from 'react';
 import useSetup from '../../stores/useSetup';
 
 const API = 'http://127.0.0.1:7777';
 
-const WHAT_HAPPENS = [
-  { num: '01', title: 'Python AI Libraries', desc: 'Installs Faster-Whisper, ChromaDB, and backend dependencies.', size: '2-4 GB' },
-  { num: '02', title: 'Ollama Runtime', desc: 'The core engine required to run Large Language Models locally.', size: '~200 MB' },
-  { num: '03', title: 'System Services', desc: 'Registers background daemons for triggers and schedules.', size: 'Instant' },
+const ITEMS = [
+  {
+    key: 'packages', name: "Seven's engine", size: 'Included',
+    what: 'Speech recognition, memory, document reading and everything that acts on your PC.',
+    why: 'It came with the installer, so nothing downloads. Seven only checks it is complete.',
+  },
+  {
+    key: 'search_model', name: 'Search model', size: '90 MB',
+    what: 'A small model that understands meaning, so "the rule about currents" finds Kirchhoff\'s law in your notes.',
+    why: 'It lets Seven find your memories and document passages by what they mean, not only by exact words.',
+  },
+  {
+    key: 'ollama_install', name: 'Local AI runtime (Ollama)', size: 'About 700 MB',
+    what: 'The engine that runs the language model on this computer.',
+    why: 'This is why nothing you say or type is sent to a server. Windows asks you once to allow the install.',
+  },
+  {
+    key: 'ollama_start', name: 'Background helpers', size: 'Instant',
+    what: 'Small services for hotkeys, reminders and the task panel.',
+    why: 'They keep working when the Seven window is closed, using very little memory.',
+  },
 ];
 
-const CAPABILITIES = [
-  { title: 'Voice Commands', desc: 'Control your PC and type hands-free.' },
-  { title: 'Persistent Memory', desc: 'Recalls facts across sessions.' },
-  { title: 'Smart Triggers', desc: 'Automate workflows with custom hotkeys.' },
-  { title: '100% Offline', desc: 'Absolute privacy for your data.' },
-];
+function stateOf(key, b) {
+  const s = b[key] || {};
+  if (s.status === 'done' || s.status === 'skipped') return { word: key === 'packages' ? 'Ready' : key === 'ollama_start' ? 'Running' : 'Installed', tone: 'done' };
+  if (s.status === 'error') return { word: 'Needs attention', tone: 'error' };
+  if (key === 'ollama_install' && s.current === 'UAC_PROMPT_ACTIVE') return { word: 'Waiting for your OK', tone: 'ask' };
+  if (s.status === 'running') {
+    const pct = s.progress ? `${Math.round(s.progress)}%` : '';
+    const word = key === 'packages' ? 'Checking' : key === 'ollama_start' ? 'Starting' : 'Downloading';
+    return { word: pct ? `${word} ${pct}` : word, tone: 'busy', pct: s.progress || 0 };
+  }
+  return { word: 'Waiting', tone: 'idle' };
+}
 
-const PHASE_INFO = {
-  idle: {
-    title: 'One-Time Setup',
-    desc: 'Seven prepares your local AI environment. Everything runs privately on your machine.',
-  },
-  packages: {
-    title: 'Installing Python Libraries',
-    desc: 'These libraries power the speech recognition, memory search, and voice synthesis. Seven uses Faster-Whisper for hearing you, ChromaDB for remembering context, and pyttsx3 for speaking back, all running fully offline for your privacy.',
-  },
-  ollama: {
-    title: 'Downloading Ollama Runtime',
-    desc: 'Ollama is the local AI engine that runs language models on your computer. Unlike ChatGPT or Gemini which send your words to the cloud, Ollama keeps every conversation on your device. It powers Seven\'s reasoning and understanding.',
-  },
-  uac: {
-    title: 'Windows Permission',
-    desc: 'Windows requires administrator approval to install Ollama into Program Files. This is a standard Windows security check. Click Yes on the shield prompt to continue. Seven never asks for permissions it does not need.',
-  },
-  daemons: {
-    title: 'Starting Background Services',
-    desc: 'Seven runs lightweight daemons in the background for hotkey triggers, scheduled reminders, and voice overlays. These use less than 50MB of RAM and shut down cleanly when Seven exits.',
-  },
-  done: {
-    title: 'Environment Ready',
-    desc: 'All components verified and running. Seven is ready to serve you privately and offline.',
-  },
-};
+function Row({ item, b, open }) {
+  const st = stateOf(item.key, b);
+  return (
+    <li className="py-3.5">
+      <div className="flex items-center gap-3">
+        <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-[10px]
+                          ${st.tone === 'done' ? 'border-[#3cc8b4] bg-[#3cc8b4] text-[#04201c]'
+                            : st.tone === 'busy' ? 'border-[#3cc8b4]/60 text-[#3cc8b4]'
+                            : st.tone === 'error' ? 'border-[#ef6b62] text-[#ef6b62]'
+                            : st.tone === 'ask' ? 'border-[#e2b25b] text-[#e2b25b]' : 'border-white/15 text-white/30'}`}>
+          {st.tone === 'done' ? '✓' : st.tone === 'error' ? '!' : st.tone === 'busy'
+            ? <span className="h-2 w-2 animate-pulse rounded-full bg-[#3cc8b4]" /> : ''}
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-baseline justify-between gap-3">
+            <span className="text-[13px] font-medium text-white/90">{item.name}</span>
+            <span className={`shrink-0 text-[11.5px] tabular-nums ${st.tone === 'done' ? 'text-white/60' : st.tone === 'ask' ? 'text-[#e2b25b]'
+                              : st.tone === 'error' ? 'text-[#ef6b62]' : 'text-white/45'}`}>{st.word}</span>
+          </div>
+          <div className="mt-0.5 text-[11.5px] text-white/45">{item.what}</div>
+        </div>
+        <span className="hidden w-24 shrink-0 text-right text-[11px] text-white/30 sm:block">{item.size}</span>
+      </div>
+      {st.tone === 'busy' && st.pct > 0 && (
+        <div className="ml-8 mt-2 h-[3px] overflow-hidden rounded-full bg-white/[0.06]">
+          <div className="h-full rounded-full bg-[#3cc8b4] transition-[width] duration-500 ease-out" style={{ width: `${st.pct}%` }} />
+        </div>)}
+      {open && <p className="ml-8 mt-1.5 text-[11px] leading-relaxed text-white/35">{item.why}</p>}
+    </li>
+  );
+}
 
 export default function StepEnvironment() {
   const { next, back } = useSetup();
-  const [checked, setChecked] = useState(false);
+  const [b, setB] = useState({});
   const [started, setStarted] = useState(false);
-  const [allDone, setAllDone] = useState(false);
-  const [logs, setLogs] = useState([]);
-  const [bState, setBState] = useState({});
-  const pollRef = useRef(null);
-  const logsEndRef = useRef(null);
-  const lastLogRef = useRef('');
-  const maxProgRef = useRef(0);
-  const startingRef = useRef(false);
+  const [done, setDone] = useState(false);
+  const [checking, setChecking] = useState(true);
+  const [why, setWhy] = useState(false);
+  const poll = useRef(null);
 
-  useEffect(() => { if (logsEndRef.current) logsEndRef.current.scrollIntoView({ behavior: 'smooth' }); }, [logs]);
-
-  const startPolling = () => {
-    if (pollRef.current) return;
-    let consecutiveErrors = 0;
-    pollRef.current = setInterval(async () => {
+  const watch = () => {
+    if (poll.current) return;
+    poll.current = setInterval(async () => {
       try {
-        const r = await fetch(`${API}/api/bootstrap/status`);
-        if (!r.ok) return;
-        const data = await r.json();
-        consecutiveErrors = 0;
-        setBState(data);
-
-        let currentText = '';
-        if (data.ollama_start?.status === 'running') {
-          currentText = data.ollama_start?.current || 'Starting Ollama service...';
-        } else if (data.ollama_install?.status === 'running') {
-          currentText = data.ollama_install?.current === 'UAC_PROMPT_ACTIVE'
-            ? 'Waiting for Windows Administrator confirmation...'
-            : (data.ollama_install?.current || 'Preparing Ollama runtime...');
-        } else if (data.packages?.status === 'running') {
-          currentText = data.packages?.current || 'Installing Python packages...';
-        } else {
-          currentText = data.ollama_start?.current || data.ollama_install?.current || data.packages?.current || '';
+        const d = await (await fetch(`${API}/api/bootstrap/status`)).json();
+        setB(d);
+        const ok = k => ['done', 'skipped'].includes(d[k]?.status);
+        if (ok('packages') && ok('ollama_install') && ok('ollama_start')) {
+          clearInterval(poll.current); poll.current = null; setDone(true);
         }
-
-        if (currentText && currentText !== lastLogRef.current) {
-          lastLogRef.current = currentText;
-          setLogs(p => [...p.slice(-50), { time: new Date().toLocaleTimeString([], { hour12: false }), text: currentText }]);
-        }
-
-        const pkgDone = data.packages?.status === 'done' || data.packages?.status === 'skipped';
-        const ollamaDone = data.ollama_install?.status === 'done' || data.ollama_install?.status === 'skipped';
-        const startDone = data.ollama_start?.status === 'done';
-
-        if (pkgDone && ollamaDone && startDone) {
-          clearInterval(pollRef.current);
-          pollRef.current = null;
-          setAllDone(true);
-        }
-      } catch (e) {
-        consecutiveErrors++;
-        if (consecutiveErrors === 5) {
-          setLogs(p => [...p, { time: new Date().toLocaleTimeString([], { hour12: false }), text: 'Waiting for backend to start...' }]);
-        }
-        if (consecutiveErrors > 30) {
-          consecutiveErrors = 0;
-          fetch(`${API}/api/bootstrap/start`, { method: 'POST' }).catch(() => {});
-        }
-      }
-    }, 400);
+      } catch { /* the backend may still be starting; the next tick tries again */ }
+    }, 500);
   };
 
   useEffect(() => {
-    const safetyTimer = setTimeout(() => setChecked(true), 3000);
-    let retries = 0;
-    const maxRetries = 10;
-
-    const checkBackend = () => {
-      fetch(`${API}/api/bootstrap/check`, { signal: AbortSignal.timeout(3000) })
-        .then(r => r.json())
-        .then(d => {
-          clearTimeout(safetyTimer);
-          if (d.packages_installed && d.ollama_installed) {
-            setAllDone(true);
-            setStarted(true);
-          }
-          setChecked(true);
-        })
-        .catch(() => {
-          retries++;
-          if (retries < maxRetries) {
-            setTimeout(checkBackend, 2000);
-          } else {
-            clearTimeout(safetyTimer);
-            setChecked(true);
-          }
-        });
-    };
-
-    checkBackend();
-    return () => { clearTimeout(safetyTimer); clearInterval(pollRef.current); };
+    let tries = 0;
+    const check = () => fetch(`${API}/api/bootstrap/check`, { signal: AbortSignal.timeout(3000) })
+      .then(r => r.json())
+      .then(d => {
+        setChecking(false);
+        if (d.packages_installed && d.ollama_installed) { setStarted(true); setDone(true); }
+      })
+      .catch(() => { if (++tries < 10) setTimeout(check, 2000); else setChecking(false); });
+    check();
+    return () => clearInterval(poll.current);
   }, []);
 
-  const handleStart = async () => {
-    if (startingRef.current) return;
-    startingRef.current = true;
-
-    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+  const start = async () => {
     setStarted(true);
-    setAllDone(false);
-    lastLogRef.current = '';
-    setLogs([{ time: new Date().toLocaleTimeString([], { hour12: false }), text: 'Initializing deployment sequence...' }]);
-    try {
-      await fetch(`${API}/api/bootstrap/start`, { method: 'POST' });
-      startPolling();
-    } catch (e) {
-      setLogs(p => [...p, { time: new Date().toLocaleTimeString([], { hour12: false }), text: 'Could not reach backend. Retrying in 3s...' }]);
-      setTimeout(() => { startingRef.current = false; handleStart(); }, 3000);
-      return;
-    }
-    startingRef.current = false;
+    try { await fetch(`${API}/api/bootstrap/start`, { method: 'POST' }); } catch { /* polling recovers */ }
+    watch();
   };
+  const allowAgain = () => fetch(`${API}/api/bootstrap/retry-uac`, { method: 'POST' }).then(watch).catch(() => {});
 
-  const handleGrantPermission = async () => {
-    setLogs(p => [...p, { time: new Date().toLocaleTimeString([], { hour12: false }), text: 'Re-requesting Windows administrator permission...' }]);
-    try {
-      await fetch(`${API}/api/bootstrap/retry-uac`, { method: 'POST' });
-      startPolling();
-    } catch (e) {
-      setLogs(p => [...p, { time: new Date().toLocaleTimeString([], { hour12: false }), text: 'Backend unreachable. Retrying...' }]);
-    }
-  };
-
-  const pkgStatus = bState.packages?.status;
-  const pkgProg = bState.packages?.progress || 0;
-  const ollamaStatus = bState.ollama_install?.status;
-  const ollamaProg = bState.ollama_install?.progress || 0;
-  const startStatus = bState.ollama_start?.status;
-
-  let computed = 0;
-  if (allDone || startStatus === 'done') computed = 100;
-  else if (ollamaStatus === 'done') computed = 92;
-  else if (ollamaStatus === 'running') computed = 50 + Math.round((ollamaProg * 40) / 100);
-  else if (pkgStatus === 'done' || pkgStatus === 'skipped') computed = 50;
-  else if (pkgStatus === 'running') computed = Math.round((pkgProg * 48) / 100);
-
-  if (computed > maxProgRef.current) maxProgRef.current = computed;
-  const progress = maxProgRef.current;
-
-  const rawError = bState.packages?.error || bState.ollama_install?.error || bState.ollama_start?.error;
-  const isUacDenied = rawError === 'PERMISSION_DENIED';
-  const isCorrupted = rawError && rawError.includes('CORRUPTED');
-  const errorMsg = isUacDenied
-    ? 'Windows administrator permission was declined. Seven needs this one-time approval to install the local AI engine on your machine.'
-    : isCorrupted
-    ? 'The installer file was corrupted during download. A fresh copy will be downloaded when you retry.'
-    : rawError;
-
-  let currentPhase = 'idle';
-  if (allDone) currentPhase = 'done';
-  else if (isUacDenied || bState.ollama_install?.current === 'UAC_PROMPT_ACTIVE') currentPhase = 'uac';
-  else if (startStatus === 'running') currentPhase = 'daemons';
-  else if (ollamaStatus === 'running' || (pkgStatus === 'done' && ollamaStatus !== 'done')) currentPhase = 'ollama';
-  else if (pkgStatus === 'running') currentPhase = 'packages';
-
-  const phaseInfo = PHASE_INFO[currentPhase];
-  const showUacBanner = bState.ollama_install?.current === 'UAC_PROMPT_ACTIVE' && !rawError;
-  const showPrepBanner = started && !allDone && !rawError && !showUacBanner;
+  const error = b.packages?.error || b.ollama_install?.error || b.ollama_start?.error;
+  const denied = error === 'PERMISSION_DENIED';
+  const asking = b.ollama_install?.current === 'UAC_PROMPT_ACTIVE';
 
   return (
-    <div className="max-w-4xl grid grid-cols-5 gap-8">
-      <div className="col-span-2 space-y-5">
-        <div className="space-y-3">
-          <div className="text-[10px] text-white/40 tracking-[0.3em] font-medium uppercase">Step 4 of 6</div>
-          <h2 className="text-[24px] font-semibold text-white tracking-tight leading-tight">Getting this PC ready</h2>
-          <p className="text-[12px] text-white/40 font-light">One-time setup of local AI binaries.</p>
-          <div className="p-3 rounded-lg bg-white/[0.02] border border-white/[0.06] space-y-1.5">
-            <div className="flex justify-between text-[10px]">
-              <span className="text-white/50 font-medium">Python Libraries</span>
-              <span className="text-white/60 font-mono">2-5 min</span>
-            </div>
-            <div className="flex justify-between text-[10px]">
-              <span className="text-white/50 font-medium">Ollama Runtime</span>
-              <span className="text-white/60 font-mono">1-3 min</span>
-            </div>
-            <div className="flex justify-between text-[10px]">
-              <span className="text-white/50 font-medium">Services Startup</span>
-              <span className="text-white/60 font-mono">~10 sec</span>
-            </div>
-            <div className="flex justify-between text-[10px] pt-1.5 mt-1 border-t border-white/[0.05]">
-              <span className="text-white/80 font-semibold">Total Estimated</span>
-              <span className="text-white font-mono font-semibold">3-8 min</span>
-            </div>
-          </div>
-        </div>
-
-        {started && !allDone && (
-          <div className="p-4 rounded-xl bg-white/[0.03] border border-white/10 space-y-2 transition-all">
-            <div className="text-[9px] text-white/40 tracking-[0.2em] font-semibold uppercase">Currently</div>
-            <div className="text-[14px] font-semibold text-white">{phaseInfo.title}</div>
-            <div className="text-[11px] text-white/50 leading-relaxed font-light">{phaseInfo.desc}</div>
-          </div>
-        )}
-
-        {!started && !allDone && (
-          <>
-            <div className="space-y-2">
-              <div className="text-[9px] text-white/30 tracking-[0.25em] font-semibold uppercase mb-2">COMPONENTS</div>
-              {WHAT_HAPPENS.map(item => (
-                <div key={item.num} className="p-3.5 rounded-xl bg-white/[0.02] border border-white/[0.06]">
-                  <div className="flex justify-between items-center mb-1">
-                    <div className="text-[12px] font-semibold text-white">{item.title}</div>
-                    <div className="text-[9px] text-white/40 font-mono">{item.size}</div>
-                  </div>
-                  <div className="text-[10px] text-white/40 leading-relaxed font-light">{item.desc}</div>
-                </div>
-              ))}
-            </div>
-
-            <div className="space-y-2">
-              <div className="text-[9px] text-white/30 tracking-[0.25em] font-semibold uppercase mb-2">CAPABILITIES</div>
-              <div className="grid grid-cols-2 gap-2">
-                {CAPABILITIES.map(cap => (
-                  <div key={cap.title} className="p-3 rounded-lg bg-white/[0.01] border border-white/[0.04]">
-                    <div className="text-[11px] font-semibold text-white mb-0.5">{cap.title}</div>
-                    <div className="text-[9px] text-white/30 font-light">{cap.desc}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </>
-        )}
-
-        {allDone && (
-          <div className="p-4 rounded-xl bg-white/[0.05] border border-white/15">
-            <div className="text-[14px] font-semibold text-white mb-1">All Systems Ready</div>
-            <div className="text-[11px] text-white/50 leading-relaxed font-light">
-              Python libraries installed. Ollama AI engine active. Background services running. Seven is ready to serve you privately.
-            </div>
-          </div>
-        )}
+    <div className="max-w-2xl space-y-7">
+      <div className="space-y-2">
+        <div className="text-[10px] font-medium uppercase tracking-[0.3em] text-white/40">Step 4 of 6</div>
+        <h2 className="text-[24px] font-semibold leading-tight tracking-tight text-white">Getting this PC ready</h2>
+        <p className="max-w-xl text-[13px] leading-relaxed text-white/50">
+          Seven runs entirely on your computer, so it needs a few pieces here instead of in the cloud. This happens once
+          and takes a few minutes on a normal connection. After that, Seven works without the internet.
+        </p>
       </div>
 
-      <div className="col-span-3 space-y-4">
-        {started && !allDone && (
-          <>
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-medium text-white/60">Deployment Progress</span>
-                <span className="text-[11px] font-mono text-white/80">{progress}%</span>
-              </div>
-              <div className="h-1.5 bg-white/[0.05] rounded-full overflow-hidden">
-                <div className="h-full bg-white transition-all duration-700 ease-out" style={{ width: `${progress}%` }} />
-              </div>
-            </div>
+      <div className="rounded-xl border border-white/[0.08] bg-white/[0.02] px-5">
+        <ul className="divide-y divide-white/[0.06]">
+          {ITEMS.map(item => <Row key={item.key} item={item} b={b} open={why} />)}
+        </ul>
+      </div>
+      <button onClick={() => setWhy(w => !w)} className="text-[12px] text-white/45 underline decoration-white/15 underline-offset-4 hover:text-white/75">
+        {why ? 'Hide why each piece is needed' : 'Why does Seven need each piece?'}
+      </button>
 
-            <div className="grid grid-cols-3 gap-2">
-              <div className={`p-2.5 rounded-lg border text-center transition-all ${
-                pkgStatus === 'done' ? 'bg-white/[0.08] border-white/25 text-white' :
-                pkgStatus === 'running' ? 'bg-white/10 border-white/30 text-white' : 'bg-white/[0.02] border-white/5 text-white/30'
-              }`}>
-                <div className="text-[10px] font-mono uppercase font-semibold">1. Python Libs</div>
-                <div className="text-[9px] mt-0.5">{pkgStatus === 'done' ? 'Ready' : pkgStatus === 'running' ? 'Installing' : 'Pending'}</div>
-              </div>
+      {asking && !error && (
+        <div className="rounded-xl border border-[#e2b25b]/35 bg-[#e2b25b]/[0.07] px-4 py-3 text-[12px] leading-relaxed text-white/80">
+          <span className="font-medium text-[#e2b25b]">Windows is asking for permission.</span> Look for the shield in your
+          taskbar and choose Yes. It lets Ollama install for all apps on this PC; Seven never asks for more than that.
+        </div>)}
 
-              <div className={`p-2.5 rounded-lg border text-center transition-all ${
-                ollamaStatus === 'done' ? 'bg-white/[0.08] border-white/25 text-white' :
-                showUacBanner ? 'bg-amber-500/10 border-amber-400/40 text-amber-200' :
-                ollamaStatus === 'running' ? 'bg-white/10 border-white/30 text-white' : 'bg-white/[0.02] border-white/5 text-white/30'
-              }`}>
-                <div className="text-[10px] font-mono uppercase font-semibold">2. AI Engine</div>
-                <div className="text-[9px] mt-0.5">{
-                  ollamaStatus === 'done' ? 'Installed' :
-                  showUacBanner ? 'Awaiting Permission' :
-                  ollamaStatus === 'running' ? 'Downloading' : 'Pending'
-                }</div>
-              </div>
-
-              <div className={`p-2.5 rounded-lg border text-center transition-all ${
-                startStatus === 'done' ? 'bg-white/[0.08] border-white/25 text-white' :
-                startStatus === 'running' ? 'bg-white/10 border-white/30 text-white' : 'bg-white/[0.02] border-white/5 text-white/30'
-              }`}>
-                <div className="text-[10px] font-mono uppercase font-semibold">3. Services</div>
-                <div className="text-[9px] mt-0.5">{startStatus === 'done' ? 'Active' : startStatus === 'running' ? 'Starting' : 'Pending'}</div>
-              </div>
-            </div>
-          </>
-        )}
-
-        {showPrepBanner && (
-          <div className="p-4 rounded-xl bg-amber-500/[0.05] border border-amber-500/20 flex items-start gap-3">
-            <div className="w-1 h-full bg-amber-400/60 rounded-full flex-shrink-0" style={{ minHeight: '40px' }} />
-            <div>
-              <div className="text-[12px] font-semibold text-amber-200/90 mb-0.5">Heads Up: Windows Permission Required</div>
-              <div className="text-[11px] text-amber-200/60 leading-relaxed">
-                Windows will ask for administrator permission to install the local AI engine.
-                <strong className="text-amber-100/80 font-medium"> Please click Yes on the shield prompt</strong> when it appears in your taskbar.
-              </div>
-            </div>
-          </div>
-        )}
-
-        {showUacBanner && (
-          <div className="p-4 rounded-xl bg-amber-500/15 border-2 border-amber-400/60 flex items-start gap-3 shadow-2xl animate-pulse">
-            <div className="w-1 h-full bg-amber-300 rounded-full flex-shrink-0" style={{ minHeight: '40px' }} />
-            <div>
-              <div className="text-[13px] font-bold text-amber-200 mb-0.5">Action Required: Click Yes on Windows Prompt</div>
-              <div className="text-[11px] text-amber-100/90 leading-relaxed font-medium">
-                Windows is asking for permission. <span className="underline font-bold">Look at your taskbar for the flashing shield icon</span> and click Yes to continue.
-              </div>
-            </div>
-          </div>
-        )}
-
-        <div className="bg-[#050505] border border-white/[0.08] rounded-xl overflow-hidden flex flex-col h-[280px]">
-          <div className="px-4 py-3 border-b border-white/[0.06] flex items-center justify-between bg-white/[0.02]">
-            <div className="text-[10px] font-mono text-white/30 uppercase">deployment.log</div>
-            <div className="text-[10px] font-mono text-white/30">{logs.length} events</div>
-          </div>
-          <div className="flex-1 overflow-y-auto p-4 font-mono text-[11px] bg-black/40 scrollbar-thin">
-            {!started && !allDone && <div className="text-white/20 italic">Awaiting initialization...</div>}
-            {logs.map((l, i) => (
-              <div key={i} className="flex gap-3 py-1">
-                <span className="text-white/30 flex-shrink-0">{l.time}</span>
-                <span className="text-white/70">{l.text}</span>
-              </div>
-            ))}
-            <div ref={logsEndRef} />
-          </div>
-        </div>
-
-        {errorMsg && (
-          <div className="p-4 bg-red-500/[0.06] border border-red-500/20 rounded-xl space-y-3">
-            <div className="flex items-center gap-2">
-              <span className="text-[12px] font-semibold text-red-300">
-                {isUacDenied ? 'Permission Required' : isCorrupted ? 'Installer Damaged' : 'Deployment Notice'}
-              </span>
-            </div>
-            <div className="text-[11px] text-red-300/70 leading-relaxed">{errorMsg}</div>
-
-            {isUacDenied ? (
-              <div className="space-y-2">
-                <button
-                  onClick={handleGrantPermission}
-                  className="w-full py-2.5 bg-amber-500 hover:bg-amber-400 text-black text-[12px] font-bold rounded-lg transition-all shadow-lg"
-                >
-                  Grant Administrator Permission
-                </button>
-                <div className="text-[10px] text-white/40 text-center leading-relaxed">
-                  Re-opens the Windows security prompt instantly. No re-download needed.
-                </div>
-              </div>
-            ) : (
-              <button
-                onClick={handleStart}
-                className="w-full py-2.5 bg-white text-black hover:bg-white/90 text-[12px] font-semibold rounded-lg transition-all"
-              >
-                {isCorrupted ? 'Download Fresh Copy and Retry' : 'Retry Installation'}
-              </button>
-            )}
-          </div>
-        )}
-
-        {allDone && (
-          <div className="p-4 bg-white/[0.05] border border-white/10 rounded-xl text-[12px] font-medium text-white text-center">
-            Environment configuration successful. All components verified.
-          </div>
-        )}
-
-        <div className="flex gap-3 pt-2">
-          <button onClick={back} className="px-6 py-3.5 text-[12px] font-medium text-white/40 border border-white/[0.1] rounded-lg hover:bg-white/[0.05]">
-            Back
+      {error && (
+        <div className="space-y-3 rounded-xl border border-[#ef6b62]/30 bg-[#ef6b62]/[0.06] px-4 py-3">
+          <p className="text-[12px] leading-relaxed text-white/80">
+            {denied ? 'Windows permission was declined. Seven needs it once to install the local AI runtime.'
+              : String(error).includes('CORRUPTED') ? 'The download was damaged. Seven will fetch a fresh copy.' : error}
+          </p>
+          <button onClick={denied ? allowAgain : start}
+                  className="rounded-lg bg-white px-4 py-2 text-[12px] font-semibold text-black hover:bg-white/90">
+            {denied ? 'Ask Windows again' : 'Try again'}
           </button>
-          {!started && !allDone && !errorMsg && (
-            <button onClick={handleStart} disabled={!checked} className="flex-1 py-3.5 bg-white text-black text-[12px] font-semibold rounded-lg hover:bg-white/90 transition-all disabled:opacity-40">
-              {checked ? 'Initialize Deployment' : 'Verifying system...'}
-            </button>
-          )}
-          {started && !allDone && !errorMsg && (
-            <button disabled className="flex-1 py-3.5 bg-white/10 text-white/50 text-[12px] font-semibold rounded-lg cursor-not-allowed">
-              Deploying...
-            </button>
-          )}
-          {allDone && (
-            <button onClick={next} className="flex-1 py-3.5 bg-white text-black text-[12px] font-semibold rounded-lg hover:bg-white/90 transition-all">
-              Continue
-            </button>
-          )}
-        </div>
+        </div>)}
+
+      <div className="flex gap-3 border-t border-white/[0.06] pt-5">
+        <button onClick={back} className="rounded-lg border border-white/[0.1] px-6 py-3 text-[12px] font-medium text-white/50 hover:bg-white/[0.05]">
+          Back
+        </button>
+        {done ? (
+          <button onClick={next} className="flex-1 rounded-lg bg-white py-3 text-[12px] font-semibold text-black hover:bg-white/90">Continue</button>
+        ) : started ? (
+          <button disabled className="flex-1 cursor-default rounded-lg bg-white/10 py-3 text-[12px] font-semibold text-white/50">Setting up</button>
+        ) : (
+          <button onClick={start} disabled={checking} className="flex-1 rounded-lg bg-white py-3 text-[12px] font-semibold text-black hover:bg-white/90 disabled:opacity-40">
+            {checking ? 'Checking this PC' : 'Set up this PC'}
+          </button>
+        )}
       </div>
     </div>
   );
