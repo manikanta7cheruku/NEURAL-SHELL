@@ -102,6 +102,10 @@ extraResources:
       - "!**/tests/**"
       - "!**/test/**"
       - "!**/testing/**"
+      # Windows paths stop at 260 characters. torch's nested third-party licence folders and its C++
+      # headers (only used to compile extensions) went past that and broke the installer.
+      - "!**/*.dist-info/licenses/third_party/**"
+      - "!Lib/site-packages/torch/include/**"
 
 # ── Windows — x64 only ──
 win:
