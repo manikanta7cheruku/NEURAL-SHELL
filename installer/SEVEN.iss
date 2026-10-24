@@ -112,8 +112,33 @@ begin
   Result := '';
 end;
 
+// Seven registers its helpers to start at login (scheduled tasks, a Run key entry, a Startup-folder fallback).
+// Uninstalling must remove them, or the daemons would keep starting from a folder that no longer exists.
+procedure RemoveAutostart();
+var
+  ResultCode: Integer;
+  Name: String;
+  Names: array[0..1] of String;
+  I: Integer;
+begin
+  Names[0] := 'SevenTriggerDaemon';
+  Names[1] := 'SevenOverlayDaemon';
+  for I := 0 to 1 do
+  begin
+    Name := Names[I];
+    Exec(ExpandConstant('{sys}\schtasks.exe'), '/Delete /F /TN ' + Name, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Log('schtasks delete ' + Name + ' exit code ' + IntToStr(ResultCode));
+    RegDeleteValue(HKEY_CURRENT_USER, 'Software\Microsoft\Windows\CurrentVersion\Run', Name);
+    DeleteFile(ExpandConstant('{userstartup}\') + Name + '.bat');
+    DeleteFile(ExpandConstant('{userstartup}\') + Name + '.lnk');
+  end;
+end;
+
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
   if CurUninstallStep = usUninstall then
+  begin
     StopSevenProcesses();
+    RemoveAutostart();
+  end;
 end;
