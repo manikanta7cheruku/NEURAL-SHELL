@@ -58,6 +58,9 @@ class BrainContext:
         self.memory_future = None
         self.recall_query = None
         self.knowledge_context = ""
+        self.knowledge_hits = []       # [{"name", "label"}] cited passages, shown under the reply
+        self.knowledge_whole = False   # passages spread across a whole document (summary, outline)
+        self.documents = []            # document ids sent with this message
         self.web_context = ""
         self.web_searched = False
 

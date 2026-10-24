@@ -1,12 +1,10 @@
 """
-=============================================================================
-PROJECT SEVEN - knowledge/__init__.py (Bridge)
-Version: 1.10 (Offline Knowledge Base)
+knowledge: the user's document library.
 
-Re-exports knowledge functions:
-    from knowledge import search_knowledge, index_file, get_knowledge_stats
-=============================================================================
+    store.py     documents, passages, reading in the background, hybrid search
+    extract.py   PDF, Word, PowerPoint, Excel and text readers with page labels
+    core.py      the context block the model reads, and its formatting rules
 """
 
-from knowledge.core import search_knowledge, get_knowledge_stats, clear_knowledge
-from knowledge.indexer import index_file, index_directory, get_index_manifest
+from knowledge.core import search_knowledge, get_knowledge_stats, clear_knowledge  # noqa: F401
+from knowledge.indexer import index_file, index_directory, get_index_manifest  # noqa: F401

@@ -1,249 +1,107 @@
 """
-=============================================================================
-PROJECT SEVEN - knowledge/core.py (Knowledge Store)
-Version: 1.10
+knowledge/core.py
 
-PURPOSE:
-    ChromaDB collection for offline knowledge.
-    Separate from user memory — stores general facts, articles, documents.
-    Uses same embedding model as memory (all-MiniLM-L6-v2) — zero extra VRAM.
-
-ARCHITECTURE:
-    knowledge/indexer.py chunks documents → stores here
-    brain.py Layer 5.3 searches here for factual questions
-    Results injected into LLM context (same pattern as web search)
-=============================================================================
+Turns passages from the document library (knowledge/store.py) into the <knowledge_context> block the model reads,
+with the formatting rules for document answers: lead with the answer, tables for comparisons, lists for steps,
+a page citation after each fact, and a plain "the document doesn't say" when it doesn't.
 """
 
-import os
-os.environ["HF_HUB_OFFLINE"] = "1"
-os.environ["TRANSFORMERS_OFFLINE"] = "1"
-os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
-import chromadb
-from chromadb.utils import embedding_functions
-from colorama import Fore
-import config
+from typing import List, Optional
 
-# =========================================================================
-# INITIALIZATION
-# =========================================================================
+from knowledge import store
 
-KNOWLEDGE_DIR = os.path.join("seven_data", "knowledge")
-CHROMA_DIR = os.path.join(KNOWLEDGE_DIR, "chroma_knowledge")
-
-os.makedirs(KNOWLEDGE_DIR, exist_ok=True)
-os.makedirs(CHROMA_DIR, exist_ok=True)
-
-# Use same embedding model as memory — already loaded, zero extra cost
-_embedding_fn = None
-try:
-    _embedding_fn = embedding_functions.SentenceTransformerEmbeddingFunction(
-        model_name="all-MiniLM-L6-v2"
-    )
-    print(Fore.GREEN + "[KNOWLEDGE] Using ChromaDB native SentenceTransformer embedder")
-except Exception as _emb_err:
-    print(Fore.YELLOW + f"[KNOWLEDGE] Native embedder failed ({_emb_err}) — trying manual fallback")
-    try:
-        from sentence_transformers import SentenceTransformer as _ST
-        import torch as _torch
-
-        _model_name = "all-MiniLM-L6-v2"
-        _st_model   = _ST(_model_name, device="cpu", local_files_only=True)
-
-        # Resolve meta tensors if present
-        for _p in _st_model.parameters():
-            if _p.is_meta:
-                _p.data = _torch.empty_like(_p, device="cpu")
-
-        class _FallbackEmbedder:
-            def __call__(self, input):
-                texts = [input] if isinstance(input, str) else list(input)
-                return _st_model.encode(texts, show_progress_bar=False).tolist()
-
-        _embedding_fn = _FallbackEmbedder()
-        print(Fore.GREEN + "[KNOWLEDGE] Manual fallback embedder ready")
-    except Exception as _fallback_err:
-        print(f"[KNOWLEDGE] Failed to load SentenceTransformer: {_fallback_err}")
-        # Final fallback: dummy embedder returning zeros
-        class _DummyEmbedder:
-            def __call__(self, input):
-                texts = [input] if isinstance(input, str) else list(input)
-                # all-MiniLM-L6-v2 produces 384-dim embeddings
-                return [[0.0] * 384 for _ in texts]
-            def name(self):
-                return "dummy_embedder"
-        _embedding_fn = _DummyEmbedder()
-        print(Fore.GREEN + "[KNOWLEDGE] Dummy embedder active (knowledge search disabled)")
-
-_client = chromadb.PersistentClient(path=CHROMA_DIR)
-
-knowledge_collection = _client.get_or_create_collection(
-    name="seven_knowledge",
-    embedding_function=_embedding_fn,
-    metadata={"hnsw:space": "cosine"}
-)
-
-print(Fore.GREEN + f"[KNOWLEDGE] Loaded: {knowledge_collection.count()} chunks indexed.")
+_RULES = (
+    "Answer from these passages of the user's documents. They may be a student's notes or textbook, so be accurate "
+    "and clear.\n"
+    "- Lead with the direct answer, then the detail.\n"
+    "- Use a markdown table when comparing things or listing items with attributes (definitions, formulas, dates, "
+    "differences, pros and cons). Use a numbered list for steps and a bulleted list for several points.\n"
+    "- Use **bold** for key terms. Never use # headings.\n"
+    "- After a fact, cite where it is, like (p. 4) or (slide 3); with several documents add the name: "
+    "(notes.pdf, p. 4).\n"
+    "- If the passages don't contain the answer, say the document doesn't cover it. Do not fill gaps from memory "
+    "unless you say that part is general knowledge.\n"
+    "- Quote formulas, numbers and definitions exactly as written.")
 
 
-# =========================================================================
-# SEARCH
-# =========================================================================
+def _cite(hit: dict, many: bool) -> str:
+    where = hit.get("label") or hit.get("section") or ""
+    if many:
+        return f"{hit['name']}, {where}" if where else hit["name"]
+    return where or hit["name"]
+
+
+def build_context(hits: List[dict], whole: bool = False) -> str:
+    """The text placed inside <knowledge_context>, or "" when there is nothing to show."""
+    if not hits:
+        return ""
+    names = list(dict.fromkeys(h["name"] for h in hits))
+    many = len(names) > 1
+    head = []
+    for doc_id in dict.fromkeys(h["doc_id"] for h in hits):
+        doc = store.get(doc_id) or {}
+        line = f"Document: {doc.get('name', '')} ({doc.get('unit') or doc.get('pages', '')})"
+        if whole and doc.get("headings"):
+            line += "\nIts sections: " + "; ".join(
+                h["title"] + (f" ({h['label']})" if h.get("label") else "") for h in doc["headings"][:30])
+        head.append(line)
+    hits = sorted(hits, key=lambda h: (names.index(h["name"]), h["index"])) if whole else hits
+    body = []
+    for h in hits:
+        section = f" | {h['section']}" if h.get("section") and h.get("label") else ""
+        body.append(f"[{_cite(h, many)}{section}]\n{h['text']}")
+    note = ("These passages are spread across the whole document, so cover it from start to end."
+            if whole else "These are the passages that best match the question.")
+    return f"{_RULES}\n\n" + "\n".join(head) + f"\n{note}\n\n" + "\n\n".join(body)
+
+
+def budget_chars(context_tokens: int) -> int:
+    """Room for passages: the context window minus the system prompt, history and the answer."""
+    return max(3000, min(22000, (context_tokens - 2000) * 3))
+
+
+def fit(hits: List[dict], limit: int) -> List[dict]:
+    out, used = [], 0
+    for h in hits:
+        if used + len(h["text"]) > limit and out:
+            break
+        out.append(h)
+        used += len(h["text"])
+    return out
+
+
+def context_for(query: str, doc_ids: Optional[List[str]] = None, context_tokens: int = 4096,
+                scoped: bool = False) -> dict:
+    """Retrieve and format. scoped=True means the user attached or named these documents, so every question
+    in that chat is about them and no relevance gate applies. Returns {"text", "hits", "whole"}."""
+    limit = budget_chars(context_tokens)
+    ids = doc_ids or store.ready_ids()
+    whole = scoped and store.wants_whole_document(query)
+    if whole:
+        hits = store.spread(ids, limit)
+    else:
+        hits = store.search(query, ids, k=10)
+        if scoped:                                 # keep the top few, then only passages that match at all
+            hits = hits[:3] + [h for h in hits[3:] if h["keyword"] > 0 or h["score"] >= 0.25]
+        else:
+            hits = store.relevant(hits)
+    hits = fit(hits, limit)
+    return {"text": build_context(hits, whole), "hits": hits, "whole": whole}
+
+
+# ── Kept for older callers (slash commands, the old routes) ───────────────
 
 def search_knowledge(query, top_k=None):
-    """
-    Search the knowledge base for relevant information.
-    
-    Args:
-        query: The question or search text
-        top_k: Number of results to return (default from config)
-    
-    Returns:
-        str: Formatted knowledge context for LLM injection, or empty string
-    """
-    if knowledge_collection.count() == 0:
-        return ""
-    
-    if top_k is None:
-        top_k = config.KEY.get("knowledge", {}).get("top_k", 3)
-    
-    try:
-        results = knowledge_collection.query(
-            query_texts=[query],
-            n_results=min(top_k, knowledge_collection.count())
-        )
-        
-        if not results or not results['documents'] or not results['documents'][0]:
-            return ""
-        
-        docs = results['documents'][0]
-        distances = results['distances'][0] if results.get('distances') else [0] * len(docs)
-        metadatas = results['metadatas'][0] if results.get('metadatas') else [{}] * len(docs)
-        
-        # Cosine distance threshold.
-        # 0.0 = identical. 1.0 = orthogonal. 2.0 = opposite.
-        # 0.55 means the chunk must share at least meaningful semantic overlap
-        # with the query. Chunks above this are unrelated — injecting them
-        # causes the LLM to confabulate connections that do not exist.
-        # For explicit doc-reference queries ("summarize the PDF") this is
-        # loosened to 0.85 since the user is explicitly asking about content.
-        _threshold = 0.85 if any(
-            t in query.lower() for t in [
-                "summarize", "summary", "in the document", "in the file",
-                "in the pdf", "from the file", "uploaded", "indexed",
-                "what does it say", "what's in", "contents of",
-            ]
-        ) else 0.55
+    return context_for(query)["text"]
 
-        relevant = []
-        for doc, dist, meta in zip(docs, distances, metadatas):
-            if dist < _threshold:
-                source = meta.get("source", "unknown")
-                relevant.append((doc, dist, source))
-        
-        if not relevant:
-            return ""
-        
-        # Format for LLM context injection
-        context = (
-            "=== DOCUMENT KNOWLEDGE ===\n"
-            "The following is extracted from documents the user has uploaded. "
-            "Use this information to answer their question accurately, thoroughly, "
-            "and intelligently. Summarize key points, highlight what matters for "
-            "their specific question, and structure your answer clearly.\n\n"
-        )
-        for doc, dist, source in relevant:
-            context += f"[From: {source}]\n{doc}\n\n"
-        context += (
-            "=== END DOCUMENT KNOWLEDGE ===\n"
-            "Answer based on the above document content. Be specific, thorough, "
-            "and helpful. If the document contains data or findings, reference them directly."
-        )
-        
-        print(Fore.GREEN + f"[KNOWLEDGE] Found {len(relevant)} relevant chunks (best distance: {relevant[0][1]:.3f})")
-        
-        return context
-    
-    except Exception as e:
-        print(Fore.RED + f"[KNOWLEDGE] Search error: {e}")
-        return ""
-
-
-# =========================================================================
-# STORAGE
-# =========================================================================
-
-def store_chunk(text, chunk_id, source="unknown", category="general"):
-    """
-    Store a single text chunk in the knowledge base.
-    
-    Args:
-        text: The text content
-        chunk_id: Unique identifier
-        source: Where it came from (filename, URL, etc)
-        category: Type of content
-    """
-    try:
-        knowledge_collection.add(
-            documents=[text],
-            ids=[chunk_id],
-            metadatas=[{
-                "source": source,
-                "category": category
-            }]
-        )
-    except Exception as e:
-        # Duplicate ID — skip silently
-        if "already exists" in str(e).lower() or "duplicate" in str(e).lower():
-            pass
-        else:
-            print(Fore.RED + f"[KNOWLEDGE] Store error: {e}")
-
-
-# =========================================================================
-# MANAGEMENT
-# =========================================================================
 
 def get_knowledge_stats():
-    """Get knowledge base statistics."""
-    count = knowledge_collection.count()
-    
-    # Get unique sources
-    sources = set()
-    if count > 0:
-        try:
-            all_meta = knowledge_collection.get()
-            if all_meta and all_meta['metadatas']:
-                for meta in all_meta['metadatas']:
-                    sources.add(meta.get("source", "unknown"))
-        except:
-            pass
-    
-    storage_size = 0
-    for root, dirs, files in os.walk(CHROMA_DIR):
-        for f in files:
-            storage_size += os.path.getsize(os.path.join(root, f))
-    
-    return {
-        "total_chunks": count,
-        "sources": list(sources),
-        "source_count": len(sources),
-        "storage_mb": round(storage_size / (1024 * 1024), 2)
-    }
+    s = store.stats()
+    docs = store.documents()
+    return {"total_chunks": s["passages"], "sources": [d["name"] for d in docs],
+            "source_count": len(docs), "storage_mb": s["size_mb"]}
 
 
 def clear_knowledge():
-    """Clear all knowledge base data."""
-    global knowledge_collection
-    try:
-        _client.delete_collection("seven_knowledge")
-        knowledge_collection = _client.get_or_create_collection(
-            name="seven_knowledge",
-            embedding_function=_embedding_fn,
-            metadata={"hnsw:space": "cosine"}
-        )
-        print(Fore.GREEN + "[KNOWLEDGE] Knowledge base cleared.")
-        return True
-    except Exception as e:
-        print(Fore.RED + f"[KNOWLEDGE] Clear error: {e}")
-        return False
+    store.clear()
+    return True
