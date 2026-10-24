@@ -61,6 +61,9 @@ def has_taskbar_presence(hwnd: int) -> bool:
             "movies & tv", "task view", "program manager", "photos", "camera",
             "xbox game bar", "game bar", "windows security",
             "cortana", "search", "action center", "notification center",
+            # passing system dialogs, not part of anyone's work
+            "pick an app", "open with", "how do you want to open this file?", "task manager", "run",
+            "user account control", "snipping tool",
         }
         if title_lower in ignore_titles:
             return False

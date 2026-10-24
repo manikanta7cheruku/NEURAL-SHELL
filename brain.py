@@ -247,7 +247,7 @@ def needs_confirmation(kind: str, arg: str) -> bool:
     if not config.KEY.get("agent", {}).get("confirm_risky", True):
         return False
     return (kind == "CLOSE" and arg.strip().upper().startswith("ALL_")) or (
-        kind == "SYS" and "airplane_on" in arg)
+        kind == "SYS" and ("airplane_on" in arg or "empty_recycle_bin" in arg))
 
 
 def request_confirmation(speaker_id: str, conversation_id: str, tags: str, description: str) -> str:

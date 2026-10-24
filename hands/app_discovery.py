@@ -485,11 +485,38 @@ def _last_scan_time():
     return None
 
 
+def _shortcut_roots():
+    return [
+        os.path.join(os.environ.get("ProgramData", r"C:\ProgramData"), "Microsoft", "Windows", "Start Menu", "Programs"),
+        os.path.join(os.environ.get("APPDATA", ""), "Microsoft", "Windows", "Start Menu", "Programs"),
+        os.path.join(os.environ.get("PUBLIC", r"C:\Users\Public"), "Desktop"),
+        os.path.join(os.path.expanduser("~"), "Desktop"),
+    ]
+
+
+def _installs_changed_since(ts: datetime) -> bool:
+    """True when an installer added or removed a shortcut after the last scan. Installers write to the Start Menu
+    or the Desktop, which changes that folder's (or its subfolder's) modified time. Checking a hundred or so folder
+    times takes milliseconds, so a new app or game is found the first time it is asked for."""
+    stamp = ts.timestamp()
+    for root in _shortcut_roots():
+        try:
+            if os.path.getmtime(root) > stamp:
+                return True
+            with os.scandir(root) as entries:
+                for e in entries:
+                    if e.is_dir(follow_symlinks=False) and e.stat().st_mtime > stamp:
+                        return True
+        except OSError:
+            continue
+    return False
+
+
 def _is_stale():
     ts = _last_scan_time()
     if ts is None:
         return True
-    return datetime.now() - ts > STALE_AFTER
+    return datetime.now() - ts > STALE_AFTER or _installs_changed_since(ts)
 
 
 def _write_index(all_apps):

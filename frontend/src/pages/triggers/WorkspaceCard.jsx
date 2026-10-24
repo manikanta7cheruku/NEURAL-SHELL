@@ -1,82 +1,103 @@
+/**
+ * One saved workspace: what it holds at a glance, Restore always visible, and a menu to bring it up to date with
+ * the current desktop or delete it. Expanding shows every saved item.
+ */
 import { useState } from 'react';
-import { RotateCcw, Trash2, Layout } from 'lucide-react';
-import ConfirmDialog from '../../components/ConfirmDialog';
+import { ChevronDown, MoreHorizontal, RefreshCw, RotateCcw, Trash2 } from 'lucide-react';
+import { Button, Dialog } from '../../components/ui';
+import { cx } from '../../lib/cx';
+import { timeAgo } from './helpers';
+import { KINDS, ORDER, describe, summarize, summaryLine } from './workspaceKinds';
 
-export default function WorkspaceCard({ workspace, onRestore, onDelete }) {
+export default function WorkspaceCard({ workspace, onRestore, onUpdate, onDelete }) {
   const [restoring, setRestoring] = useState(false);
-  const [hovered,   setHovered]   = useState(false);
-  const [confirm,   setConfirm]   = useState(false);
+  const [updating, setUpdating] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [menu, setMenu] = useState(false);
+  const [confirm, setConfirm] = useState(false);
   const apps = workspace.apps || [];
+  const { groups } = summarize(apps);
 
-  const handleRestore = async () => {
+  const restore = async () => {
     setRestoring(true);
     await onRestore(workspace.id);
-    setTimeout(() => setRestoring(false), 3000);
+    setTimeout(() => setRestoring(false), 2500);
+  };
+  const update = async () => {
+    setMenu(false);
+    setUpdating(true);
+    await onUpdate(workspace);
+    setUpdating(false);
   };
 
   return (
-    <div className={`rounded-xl border overflow-hidden transition-all duration-300
-                     bg-white/[0.025] border-white/[0.12] hover:border-white/[0.2]
-                     backdrop-blur-sm shadow-[0_2px_12px_rgba(0,0,0,0.3)]
-                     ${restoring ? 'scale-[0.98]' : ''}`}
-         onMouseEnter={() => setHovered(true)}
-         onMouseLeave={() => setHovered(false)}>
-      <div className="p-4">
-        <div className="flex items-start justify-between gap-3 mb-3">
-          <div>
-            <h3 className="text-[13px] font-semibold text-white/90 leading-tight">
-              {workspace.name}
-            </h3>
-            {workspace.description && (
-              <p className="text-[11.5px] text-white/35 mt-0.5">{workspace.description}</p>
-            )}
+    <div className="rounded-lg border border-s-border bg-s-surface transition-colors duration-150 hover:border-s-border-l">
+      <div className="flex items-center gap-4 px-4 py-3">
+        <button onClick={() => setOpen(!open)} className="min-w-0 flex-1 text-left" aria-expanded={open}>
+          <div className="flex items-center gap-2">
+            <h3 className="truncate text-[13px] font-semibold text-s-text">{workspace.name}</h3>
+            <ChevronDown size={13} className={cx('shrink-0 text-s-text-4 transition-transform duration-200', open && 'rotate-180')} />
           </div>
-          <span className="text-[11.5px] text-white/40 bg-white/[0.03] border border-white/6
-                           px-2 py-0.5 rounded-md font-mono flex items-center gap-1 flex-shrink-0">
-            <Layout size={8} /> {apps.length}
-          </span>
+          <p className="mt-0.5 truncate text-[11.5px] text-s-text-3">{summaryLine(apps) || 'Empty'}</p>
+        </button>
+
+        <div className="hidden shrink-0 items-center gap-2.5 md:flex" aria-hidden>
+          {ORDER.filter(k => groups[k]).map(k => {
+            const Icon = KINDS[k].icon;
+            return (
+              <span key={k} title={KINDS[k].label} className="flex items-center gap-1 text-[11px] tabular-nums text-s-text-3">
+                <Icon size={13} className="text-s-text-4" />{groups[k].length}
+              </span>);
+          })}
         </div>
 
-        <div className="flex flex-wrap gap-1 mb-3 max-h-[80px] overflow-y-auto
-                        scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
-          {apps.map((app, i) => (
-            <span key={i} className="text-[11px] text-white/35 bg-[#0a0a0c]
-                                      border border-white/5 px-1.5 py-0.5 rounded">
-              {app.name || app.type}
-            </span>
-          ))}
-        </div>
+        <span className="hidden w-20 shrink-0 text-right text-[11px] text-s-text-4 lg:block">
+          {workspace.last_used ? timeAgo(workspace.last_used) : 'Not used yet'}
+        </span>
 
-        <div className="flex items-center justify-between pt-2.5 border-t border-white/5">
-          <span className="text-[11px] text-white/25 flex items-center gap-0.5">
-            <RotateCcw size={7} /> {workspace.use_count || 0} restores
-          </span>
-          <div className={`flex items-center gap-1 transition-opacity duration-200
-                           ${hovered ? 'opacity-100' : 'opacity-0'}`}>
-            <button onClick={handleRestore} disabled={restoring}
-                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg
-                               bg-s-accent/8 border border-s-accent/15
-                               text-[11px] text-s-accent font-medium
-                               hover:bg-s-accent/15 transition-all disabled:opacity-30">
-              <RotateCcw size={9} />
-              {restoring ? 'Opening...' : 'Restore'}
-            </button>
-            <button onClick={() => setConfirm(true)}
-                    className="p-1.5 rounded-lg text-white/25 hover:text-white/60
-                               hover:bg-white/[0.04] transition-all">
-              <Trash2 size={10} />
-            </button>
-          </div>
+        <div className="relative flex shrink-0 items-center gap-1">
+          <Button size="sm" variant="secondary" icon={RotateCcw} loading={restoring} onClick={restore}>Restore</Button>
+          <button onClick={() => setMenu(!menu)} aria-label="More" aria-expanded={menu}
+                  className="flex h-6 w-6 items-center justify-center rounded-md text-s-text-3 transition-colors hover:bg-s-card hover:text-s-text">
+            <MoreHorizontal size={14} />
+          </button>
+          {menu && (
+            <>
+              <div className="fixed inset-0 z-10" onClick={() => setMenu(false)} />
+              <div className="absolute right-0 top-8 z-20 w-56 overflow-hidden rounded-lg border border-s-border bg-s-surface py-1 shadow-[var(--s-shadow-raised)]">
+                <button onClick={update} disabled={updating}
+                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-s-text-2 hover:bg-s-card">
+                  <RefreshCw size={13} className={updating ? 'animate-spin' : ''} />Replace with current desktop
+                </button>
+                <button onClick={() => { setMenu(false); setConfirm(true); }}
+                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-s-red hover:bg-s-card">
+                  <Trash2 size={13} />Delete
+                </button>
+              </div>
+            </>)}
         </div>
       </div>
-      <ConfirmDialog
-        open={confirm}
-        title="Delete Workspace"
-        message={`"${workspace.name}" and all its saved app configurations will be permanently removed.`}
-        confirmLabel="Delete"
-        onConfirm={() => { setConfirm(false); onDelete(workspace.id); }}
-        onCancel={() => setConfirm(false)}
-      />
+
+      {open && (
+        <div className="grid gap-x-6 gap-y-3 border-t border-s-border px-4 py-3 sm:grid-cols-2">
+          {ORDER.filter(k => groups[k]).map(k => {
+            const Icon = KINDS[k].icon;
+            return (
+              <div key={k} className="min-w-0">
+                <div className="mb-1 flex items-center gap-1.5 text-[11px] font-medium text-s-text-3">
+                  <Icon size={12} />{KINDS[k].label}
+                </div>
+                <ul className="space-y-0.5">
+                  {groups[k].map((a, i) => (
+                    <li key={i} className="truncate text-[12px] text-s-text-2" title={describe(a)}>{describe(a)}</li>))}
+                </ul>
+              </div>);
+          })}
+        </div>)}
+
+      <Dialog open={confirm} tone="danger" title={`Delete ${workspace.name}?`} confirmLabel="Delete"
+              description="The saved apps, tabs and documents in this workspace are removed. Nothing open on your PC is touched."
+              onConfirm={() => { setConfirm(false); onDelete(workspace.id); }} onCancel={() => setConfirm(false)} />
     </div>
   );
 }

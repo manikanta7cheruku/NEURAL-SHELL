@@ -151,20 +151,25 @@ def show_notification(
     subtitle: str = "",
     detail: str = "",
     hold_ms: int = 3500,
+    state: str = "info",
+    replace: bool = False,
 ):
     """
-    Show notification card (Stage 1 only).
-    Non-blocking — sends TCP message and returns immediately.
+    Show the card at the top centre of the screen. Non-blocking.
+    state: "working" (spinner, stays until replaced), "done" (check and chime), "error", "info".
+    replace=True updates the card already showing instead of sliding a new one in.
     """
     threading.Thread(
         target=_do_show_notif,
-        args=(title, subtitle, detail, hold_ms),
+        args=(title, subtitle, detail, hold_ms, state, replace),
         daemon=True,
     ).start()
 
 
-def _do_show_notif(title, subtitle, detail, hold_ms):
+def _do_show_notif(title, subtitle, detail, hold_ms, state="info", replace=False):
     """Internal: send notif to daemon."""
+    if os.environ.get("SEVEN_TEST") == "1":
+        return
     if not _ensure_daemon_running():
         print(Fore.YELLOW + "[OVERLAY] Daemon unavailable")
         return
@@ -176,9 +181,43 @@ def _do_show_notif(title, subtitle, detail, hold_ms):
             "subtitle": subtitle,
             "detail":   detail,
             "holdMs":   hold_ms,
+            "state":    state,
+            "replace":  replace,
         },
     }
     _send_ipc(msg)
+
+
+class progress:
+    """A card that says what Seven is doing, then what happened:
+
+        with progress("Scanning your workspace", "Windows, tabs and documents") as card:
+            ...
+            card.done("Saved Study", "9 apps", "37 tabs")
+    Leaving the block with an exception shows the error instead.
+    """
+
+    def __init__(self, title: str, subtitle: str = ""):
+        self.finished = False
+        show_notification(title, subtitle, state="working", hold_ms=20000)
+
+    def done(self, title: str, subtitle: str = "", detail: str = ""):
+        self.finished = True
+        time.sleep(0.15)                      # keep the update behind the first message on the socket
+        show_notification(title, subtitle, detail, hold_ms=3800, state="done", replace=True)
+
+    def fail(self, title: str, subtitle: str = ""):
+        self.finished = True
+        time.sleep(0.15)
+        show_notification(title, subtitle, hold_ms=4500, state="error", replace=True)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, kind, exc, tb):
+        if kind and not self.finished:
+            self.fail("That didn't work", str(exc)[:80])
+        return False
 
 
 def show_trigger_notification(
@@ -234,6 +273,7 @@ def _do_two_stage(title, subtitle, detail, hold_ms, show_arrangement, app_names)
             "subtitle": subtitle,
             "detail":   detail,
             "holdMs":   hold_ms,
+            "state":    "done",
         },
     })
 

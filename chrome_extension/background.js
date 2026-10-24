@@ -26,7 +26,7 @@ async function syncTabs() {
     
     const payload = {
       timestamp: new Date().toISOString(),
-      browser: 'chrome',
+      browser: detectBrowser(),
       profile: await getProfileName(),
       windows: windows.map(win => ({
         id: win.id,
@@ -70,6 +70,14 @@ async function syncTabs() {
     // Will retry next interval
     chrome.action.setBadgeText({ text: '' });
   }
+}
+
+/** Which Chromium browser this is, so Seven files the tabs under Chrome, Edge or Brave. */
+function detectBrowser() {
+  const ua = navigator.userAgent || '';
+  if (ua.includes('Edg/')) return 'edge';
+  if (navigator.brave) return 'brave';
+  return 'chrome';
 }
 
 /**
@@ -151,32 +159,4 @@ chrome.action.onClicked.addListener(async () => {
   await syncTabs();
 });
 
-// Initial sync
-syncTabs();
-
-console.log('[Seven Tab Sync] Extension loaded. Syncing every 3 seconds + on events.');
-
-// Also sync on tab events for faster updates
-chrome.tabs.onCreated.addListener(() => syncTabs());
-chrome.tabs.onRemoved.addListener(() => syncTabs());
-chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-  // Only sync on URL or title change (not loading status)
-  if (changeInfo.url || changeInfo.title) {
-    syncTabs();
-  }
-});
-chrome.windows.onCreated.addListener(() => syncTabs());
-chrome.windows.onRemoved.addListener(() => syncTabs());
-
-// Extension icon click — manual sync + show status
-chrome.action.onClicked.addListener(async () => {
-  await syncTabs();
-  
-  const elapsed = Date.now() - lastSyncTime;
-  if (elapsed < 5000) {
-    chrome.action.setBadgeText({ text: '✓' });
-    chrome.action.setBadgeBackgroundColor({ color: '#4CAF50' });
-  }
-});
-
-console.log('[Seven Tab Sync] Extension loaded. Syncing every 3 seconds.');
+console.log('[Seven Tab Sync] Loaded. Syncing every 3 seconds and on every tab change.');

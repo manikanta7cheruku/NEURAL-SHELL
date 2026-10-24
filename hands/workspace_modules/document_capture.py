@@ -33,12 +33,70 @@ _SYSTEM_EXES = {
 }
 
 
+_OFFICE_COM = {"winword.exe": ("Word.Application", "Documents"),
+               "excel.exe": ("Excel.Application", "Workbooks"),
+               "powerpnt.exe": ("PowerPoint.Application", "Presentations")}
+
+
+def _office_open_documents(exe_name: str) -> dict:
+    """{document name without extension (lower): full path} from the running Office app itself. Every Word window
+    shares one process, so the command line only names the first file; Office's own list names them all."""
+    prog, collection = _OFFICE_COM[exe_name]
+    out = {}
+    try:
+        import pythoncom
+        import win32com.client
+        pythoncom.CoInitialize()
+        office = win32com.client.GetActiveObject(prog)
+        names = []
+        docs = getattr(office, collection)
+        names += [docs.Item(i).FullName for i in range(1, docs.Count + 1)]
+        try:                                     # files opened from the internet or email open in Protected View
+            pv = office.ProtectedViewWindows
+            names += [pv.Item(i).Document.FullName if exe_name == "winword.exe" else pv.Item(i).Workbook.FullName
+                      if exe_name == "excel.exe" else pv.Item(i).Presentation.FullName for i in range(1, pv.Count + 1)]
+        except Exception:
+            pass
+        for full in names:
+            full = _local_path(full or "")
+            if full and os.path.isfile(full):
+                out[os.path.splitext(os.path.basename(full))[0].lower()] = full
+    except Exception:
+        pass
+    return out
+
+
+def _local_path(full: str) -> str:
+    """OneDrive files report a web address (https://d.docs.live.net/<id>/Folder/File.docx); map it to the synced
+    copy under the OneDrive folder."""
+    if not full.lower().startswith("https://"):
+        return full
+    from urllib.parse import unquote
+    parts = unquote(full).split("/")
+    for root in (os.environ.get("OneDrive"), os.environ.get("OneDriveConsumer"), os.environ.get("OneDriveCommercial")):
+        if root and "d.docs.live.net" in full and len(parts) > 4:
+            candidate = os.path.join(root, *parts[4:])
+            if os.path.isfile(candidate):
+                return candidate
+    return ""
+
+
+def _office_document_for_window(title: str, exe_name: str, cache: dict):
+    if exe_name not in cache:
+        cache[exe_name] = _office_open_documents(exe_name)
+    name = re.split(r"\s+[-–—]\s+", title.strip())[0].strip().lower()
+    name = re.sub(r"\s*\[(?:compatibility mode|read-only|autosaved)\]\s*$", "", name)
+    name = os.path.splitext(name)[0] if name.endswith((".docx", ".doc", ".xlsx", ".xls", ".csv", ".pptx", ".ppt")) else name
+    return cache[exe_name].get(name)
+
+
 def capture_open_documents(apps: list) -> list:
     """
     Universal Dynamic Inspector: Enriches any app config in-place with its
     live file, project, directory, and document metadata.
     Guarded to NEVER block or hang the Python main thread.
     """
+    office_docs = {}
     for app in apps:
         exe_path = (app.get("exe_path") or "").lower()
         exe_name = os.path.basename(exe_path).lower() if exe_path else ""
@@ -50,6 +108,13 @@ def capture_open_documents(apps: list) -> list:
 
         detected_files = set()
         detected_cwd   = None
+
+        if exe_name in _OFFICE_COM:
+            doc = _office_document_for_window(title, exe_name, office_docs) or _resolve_office_document(title, exe_name)
+            if doc:
+                app["open_files"] = [doc]
+                app["name"] = f"{title.split(' - ')[-1].strip() or 'Office'}: {os.path.basename(doc)}"
+            continue
 
         # ── LAYER 1: Dynamic Process Command-Line Inspection ──
         if pid:

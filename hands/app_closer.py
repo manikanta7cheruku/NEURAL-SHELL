@@ -146,13 +146,16 @@ def close_app(app_name: str) -> bool:
 
     # Strategy 3: Special case handlers
     if clean_name in ["current", "this", "it", "active window"]:
+        # The window the user means, never Seven itself (Seven has focus while they type to it).
         try:
             import ctypes
-            hwnd = ctypes.windll.user32.GetForegroundWindow()
-            if hwnd:
-                ctypes.windll.user32.PostMessageW(hwnd, 0x0010, 0, 0)
+            from hands.windows import _get_focused_window
+            hwnd, _title = _get_focused_window()
+            if not hwnd:
+                return False
+            ctypes.windll.user32.PostMessageW(hwnd, 0x0010, 0, 0)
         except Exception:
-            pyautogui.hotkey('alt', 'f4')
+            return False
         command_log.log_command("CLOSE", clean_name, True, "Active window")
         mood_engine.on_command_result(True)
         return True

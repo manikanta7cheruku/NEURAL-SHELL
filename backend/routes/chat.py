@@ -156,6 +156,33 @@ def _task_action(params: dict) -> None:
                                    "task_id": params.get("id")})
 
 
+def _save_workspace(name: str) -> str:
+    from hands.workspace_modules import actions
+    r = actions.save_current(name or None)
+    if not r["ok"]:
+        raise RuntimeError("nothing is open to save")
+    tabs = f" and {r['tabs']} tab{'s' if r['tabs'] != 1 else ''}" if r["tabs"] else ""
+    note = (f" {r['tabs_without_url']} tab{'s' if r['tabs_without_url'] != 1 else ''} have no address, so they can't "
+            "be reopened. The Seven browser extension fixes that.") if r.get("tabs_without_url") else ""
+    verb = "Updated" if r.get("replaced") else "Saved"
+    return f"{verb} {r['name']}: {r['apps']} app{'s' if r['apps'] != 1 else ''}{tabs}.{note}"
+
+
+def _restore_workspace(ws_id: str, name: str) -> str:
+    from backend.routes.workspaces import db_get_workspace_by_id, db_get_workspace_by_name, _get_conn
+    from hands.workspace_modules import actions
+    from datetime import datetime as _dt
+    ws = db_get_workspace_by_id(int(ws_id)) if ws_id.isdigit() else db_get_workspace_by_name(name)
+    if not ws:
+        raise RuntimeError(f"there's no workspace called {name}")
+    with _get_conn() as conn:
+        conn.execute("UPDATE workspaces SET use_count = use_count + 1, last_used = ? WHERE id = ?",
+                     (_dt.now().isoformat(), ws["id"]))
+        conn.commit()
+    actions.restore(ws)
+    return f"Restoring {ws['name']}. I'll open only what isn't already open."
+
+
 def _execute_actions(action_list, full_response, speaker_id) -> List[action_receipts.ActionReceipt]:
     """Run every action tag and return one receipt per action. Never raises."""
     receipts: List[action_receipts.ActionReceipt] = []
@@ -210,11 +237,11 @@ def _execute_actions(action_list, full_response, speaker_id) -> List[action_rece
             _run("TRIGGER", params.get("phrase", "").replace("|||", " "), _fire)
     for chunk in re.findall(r"###WORKSPACE:\s*(.*?)(?=###|$)", full_response, re.DOTALL):
         params = _params(chunk)
-        if params.get("action") == "restore" and params.get("id", "").isdigit():
-            def _restore(p=params):
-                from backend.routes.workspaces import restore_workspace
-                return restore_workspace(int(p["id"]))
-            _run("WORKSPACE", params.get("name", "").replace("|||", " "), _restore)
+        name = params.get("name", "").replace("|||", " ").strip()
+        if params.get("action") == "save":
+            _run("WORKSPACE", name or "workspace", lambda n=name: _save_workspace(n))
+        elif params.get("action") == "restore" and (params.get("id", "").isdigit() or name):
+            _run("WORKSPACE", name, lambda p=params, n=name: _restore_workspace(p.get("id", ""), n))
     for cmd_type, arg in re.findall(r"###(OPEN|CLOSE):\s*(.*?)(?=###|$)", full_response, re.DOTALL):
         target = arg.replace('"', "").replace("'", "").replace(",", "").replace(".", "").strip()
         if not target:
@@ -235,8 +262,14 @@ def _gate_risky(full_response: str, speaker_id: str, conv_id: str):
     if not risky:
         return None, None
     tags = " ".join(f"###{k}: {a.strip()}" for k, a in risky)
-    names = ", ".join(a.strip().replace("ALL_", "all ") for _k, a in risky)
-    return tags, brain.request_confirmation(speaker_id, conv_id, tags, f"That would affect {names}, and unsaved work could be lost.")
+    if any("empty_recycle_bin" in a for _k, a in risky):
+        why = "That permanently deletes everything in the Recycle Bin."
+    elif any("airplane_on" in a for _k, a in risky):
+        why = "That turns off Wi-Fi and Bluetooth, so you'll go offline."
+    else:
+        names = ", ".join(a.strip().replace("ALL_", "all ") for _k, a in risky)
+        why = f"That would close {names}, and unsaved work could be lost."
+    return tags, brain.request_confirmation(speaker_id, conv_id, tags, why)
 
 
 def _finish_string(response, req, conv_id):
@@ -256,6 +289,9 @@ def _finish_string(response, req, conv_id):
         else:
             receipts = _execute_actions(action_list, full, speaker)
             clean = action_receipts.reconcile_reply(clean or _build_clean_response(full, speaker), receipts)
+            told = [r.detail for r in receipts if r.kind == "WORKSPACE" and r.status == "success" and r.detail]
+            if told:                       # the workspace action said what it did; that beats the up-front reply
+                clean = " ".join(told)
             follow = brain.note_receipts(speaker, conv_id, receipts)
             if follow:
                 clean = f"{clean} {follow}".strip()

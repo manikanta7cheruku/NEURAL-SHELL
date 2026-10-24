@@ -279,7 +279,30 @@ _FAST_LAUNCH = {
     "outlook":      ("exe", "outlook"),
     "file manager": ("exe", "explorer"),
     "files":        ("exe", "explorer"),
+    # Windows tools people ask for by their everyday names
+    "control panel":      ("exe", "control"),
+    "device manager":     ("exe", "devmgmt.msc"),
+    "disk management":    ("exe", "diskmgmt.msc"),
+    "services":           ("exe", "services.msc"),
+    "event viewer":       ("exe", "eventvwr.msc"),
+    "registry editor":    ("exe", "regedit"),
+    "snipping tool":      ("exe", "snippingtool"),
+    "character map":      ("exe", "charmap"),
+    "recycle bin":        ("uri", "shell:RecycleBinFolder"),
+    "microsoft store":    ("uri", "ms-windows-store:"),
+    "windows update":     ("uri", "ms-settings:windowsupdate"),
+    "sound settings":     ("uri", "ms-settings:sound"),
+    "display settings":   ("uri", "ms-settings:display"),
+    "bluetooth settings": ("uri", "ms-settings:bluetooth"),
+    "wifi settings":      ("uri", "ms-settings:network-wifi"),
+    "apps settings":      ("uri", "ms-settings:appsfeatures"),
+    "visual studio code": ("exe", "code"),
 }
+
+
+def is_known_app(name: str) -> bool:
+    """A name the fast-launch table opens directly, so it should never be treated as a file search."""
+    return (name or "").lower().strip() in _FAST_LAUNCH
 
 # -- Special Windows folder shortcuts --
 _SPECIAL_FOLDERS = {}
@@ -484,8 +507,12 @@ def _fast_launch(app_name: str) -> bool:
 def _launch_via_discovery(app_name: str) -> bool:
     """Query app_discovery index and launch the best match."""
     try:
-        from hands.app_discovery import search_apps
+        from hands.app_discovery import discover_apps, search_apps
         hits = search_apps(app_name, limit=3)
+        if not hits or hits[0].get("score", 0) < 200:
+            # Maybe it was installed since the last scan: rescan now (does nothing unless shortcuts changed).
+            if discover_apps(force=False):
+                hits = search_apps(app_name, limit=3)
         if not hits:
             return False
 

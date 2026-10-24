@@ -52,6 +52,17 @@ If the build fails:
 | `Inno Setup 6 not found` | Install it (above), then open a new PowerShell window |
 | `electron-builder failed` or a file is locked | Quit Seven and the task panel (tray, Quit Panel Host) and run again |
 | The installed app says packages are missing | Run `npm run prepare-python` again, then rebuild |
+| `N packaged paths are longer than 150 characters` | A Python package added very deep folders. Exclude them under the `python-dist/python` filter in `electron-builder.yml` (see the torch entries there) |
+
+### "Error 206: The filename or extension is too long" during install
+
+Windows stops at 260 characters per path. Seven installs to `C:\Users\<name>\AppData\Local\Programs\SEVEN\`, and torch
+shipped licence folders nested about 20 levels deep plus C++ headers, which went past the limit. Since 1.4 both are
+excluded (62 MB smaller) and the build refuses any path longer than 150 characters, so it cannot happen again.
+
+If you saw this error with an older installer: press Cancel, build a fresh installer (Every release, step 3) and run
+it. There is no need to uninstall first or delete anything; the half-finished install is replaced. Your data in
+`%APPDATA%\SEVEN` is never touched by the installer.
 
 ## Part 2: Test it as a new user on your computer
 
@@ -114,6 +125,19 @@ Write down the time each step takes; that is what a new user experiences.
 | 13 | Uninstall | Seven is removed; `%APPDATA%\SEVEN` stays (expected) |
 
 Collect for any problem: the steps, a screenshot, and `%APPDATA%\SEVEN\logs\` (zip the folder).
+
+### One account per PC: continue or start fresh
+
+Seven allows one account per Windows installation. When setup starts on a PC that was used before, the welcome screen
+shows **This PC already has a Seven account** with the name, plan and what is still stored (conversations, facts,
+documents, tasks), and two choices:
+
+- **Continue as <name>**: keeps everything and skips the questions Seven already knows the answers to.
+- **Start fresh as someone new**: copies everything to `%APPDATA%\SEVEN\backups\before-fresh-start_<date>`, clears it,
+  and runs setup from the start. The plan stays, because a licence belongs to the PC.
+
+Seven finds an earlier account from data left in `%APPDATA%\SEVEN` (uninstalling keeps it) or, when online, from the
+device registration on the Seven server. To see this screen during development, open `#/setup-preview`.
 
 ## Part 4: How Seven identifies a device
 
