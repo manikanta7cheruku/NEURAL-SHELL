@@ -65,7 +65,7 @@ if ($uninstaller) {
   Write-Host "Uninstalling..." -ForegroundColor Cyan
   Start-Process -FilePath $uninstaller.FullName -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait
 }
-foreach ($name in 'SevenTriggerDaemon', 'SevenOverlayDaemon') {
+foreach ($name in 'SevenTriggerDaemon', 'SevenOverlayDaemon', 'SevenScheduleDaemon') {
   schtasks /Delete /F /TN $name 2>$null | Out-Null
   Remove-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name $name -ErrorAction SilentlyContinue
   Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path ([Environment]::GetFolderPath('Startup')) "$name.bat"), (Join-Path ([Environment]::GetFolderPath('Startup')) "$name.lnk")
