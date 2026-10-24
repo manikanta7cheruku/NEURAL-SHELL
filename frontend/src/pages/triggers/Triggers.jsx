@@ -41,6 +41,7 @@ export default function Triggers() {
   const {
     triggers, workspaces, stats, loading, fetchTriggers, fetchWorkspaces, fetchStats,
     addTrigger, updateTrigger, removeTrigger, fireTrigger, scanWorkspace, saveWorkspace, restoreWorkspace, removeWorkspace,
+    updateWorkspaceFromDesktop,
   } = useTriggers();
   const [tab, setTab] = useState('triggers');
   const [filter, setFilter] = useState('all');
@@ -178,7 +179,7 @@ export default function Triggers() {
         ) : (
           <div key="w" className="page-in">
             <WorkspaceTab workspaces={workspaces} onScan={scanWorkspace} onSave={saveWorkspace}
-                          onRestore={restoreWorkspace} onDelete={removeWorkspace} reveal />
+                          onUpdate={updateWorkspaceFromDesktop} onRestore={restoreWorkspace} onDelete={removeWorkspace} reveal />
           </div>
         )}
       </div>

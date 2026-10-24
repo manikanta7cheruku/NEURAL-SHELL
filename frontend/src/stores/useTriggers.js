@@ -147,6 +147,19 @@ const useTriggers = create((set, get) => ({
     }
   },
 
+  // Replace a workspace's contents with what is open now (keeps its name, triggers and history).
+  updateWorkspaceFromDesktop: async (workspace) => {
+    try {
+      const scan = await api.post('/workspaces/scan', {}, { timeout: 60000 });
+      if (!scan.data.success) return { ok: false };
+      await api.put(`/workspaces/${workspace.id}`, { apps: scan.data.apps });
+      await get().fetchWorkspaces();
+      return { ok: true, count: scan.data.app_count };
+    } catch {
+      return { ok: false };
+    }
+  },
+
   removeWorkspace: async (id) => {
     try {
       set(s => ({ workspaces: s.workspaces.filter(w => w.id !== id) }));
