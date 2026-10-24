@@ -15,6 +15,7 @@ NEW in v4:
 =============================================================================
 """
 
+import os
 import re
 import traceback
 from colorama import Fore
@@ -58,6 +59,13 @@ def _is_likely_app(target: str) -> bool:
 
     if clean in _EXPLORER_WORDS:
         return True
+
+    try:
+        from hands.app_launcher import is_known_app
+        if is_known_app(clean):
+            return True
+    except Exception:
+        pass
 
     try:
         from brain_modules.layers.layer_45_app import _ALWAYS_CLOSEABLE
@@ -108,6 +116,21 @@ def _open_attached(ctx):
     return f"Opened {doc['name']}." if store.open_original(doc["id"]) else f"I couldn't open {doc['name']}."
 
 
+def _open_latest(ctx):
+    """"open the last pdf I downloaded", "show my latest screenshot": the newest matching file, by date."""
+    try:
+        from hands.files import latest_file, open_file
+        hit = latest_file(ctx.clean_in)
+    except Exception:
+        return None
+    if not hit:
+        return None
+    where = os.path.basename(os.path.dirname(hit["path"]))
+    if not open_file(hit["path"]):
+        return f"I found {hit['name']} in {where} but Windows couldn't open it."
+    return f"Opened {hit['name']} from {where}, saved {hit['modified']}."
+
+
 def process(ctx, deps):
     if ctx.first_word not in ["open", "show", "find", "display",
                                "launch", "view", "pull", "bring"]:
@@ -115,6 +138,9 @@ def process(ctx, deps):
     attached = _open_attached(ctx)
     if attached:
         return LayerResult.stop(attached)
+    newest = _open_latest(ctx)
+    if newest:
+        return LayerResult.stop(newest)
 
     config = deps.get("config")
 
@@ -198,7 +224,12 @@ def process(ctx, deps):
             return LayerResult.stop(speech)
 
         # Decide if we will auto-open the top result
-        _will_open = _has_open_intent or _has_file_intent
+        # "my photos from goa" asks for several files: show the list instead of opening one of them.
+        _plural = bool(re.search(r"\b(?:photos|pictures|images|videos|files|documents|pdfs|screenshots|songs|"
+                                 r"recordings|notes)\b", remaining))
+        from hands.files import CONFIDENT_SCORE
+        _will_open = ((_has_open_intent or _has_file_intent) and not _plural
+                      and results[0].get("score", 0) >= CONFIDENT_SCORE)
         _opened_idx = 0 if _will_open else None
 
         # Remember this search in working memory for reference resolution
