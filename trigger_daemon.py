@@ -49,6 +49,7 @@ from trigger_modules.hotkey_listener import HotkeyListener
 from trigger_modules.audio_listener import AudioListener
 from trigger_modules.voice_listener import VoiceListener
 from trigger_modules.reload_poller import ReloadPoller
+from trigger_modules.companions import ensure_companions
 
 _tab_listener_proc = None
 
@@ -224,6 +225,12 @@ def main():
         target=_offline_tab_listener_supervisor, daemon=True
     ).start()
 
+    # Reminders and the task panel must work after a reboot even if the Seven window is never opened
+    def _companions_soon():
+        time.sleep(20)
+        ensure_companions()
+    threading.Thread(target=_companions_soon, daemon=True, name="Companions").start()
+
     # Start all listeners
     hotkey_listener.start()
     audio_listener.start()
@@ -235,10 +242,14 @@ def main():
     # Health check loop
     _hotkey_fail_streak = 0
     _last_health_log    = time.time()
+    _ticks              = 0
 
     try:
         while True:
             time.sleep(30)
+            _ticks += 1
+            if _ticks % 10 == 0:
+                threading.Thread(target=ensure_companions, daemon=True).start()
 
             # Overlay health check
             if not is_overlay_alive():
