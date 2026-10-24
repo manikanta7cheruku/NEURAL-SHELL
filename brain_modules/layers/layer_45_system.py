@@ -56,6 +56,14 @@ _DIRECT = (
 
 def process(ctx, deps):
     clean_in = ctx.clean_in
+    try:
+        from brain_modules import followups
+        follow = followups.resolve(ctx.state, clean_in)
+    except Exception:
+        follow = None
+    if follow:                         # "make it 0" right after "set brightness to 60"
+        ctx.is_command = True
+        return LayerResult.stop(follow)
     for pattern, tag, speech in _DIRECT:
         if pattern.match(clean_in.strip(" .!?")):
             ctx.is_command = True
@@ -126,7 +134,7 @@ def _speech_map(value):
     return {
         "volume_up":         lambda: random.choice(["Turning it up.", "Louder.", "Volume up."]),
         "volume_down":       lambda: random.choice(["Turning it down.", "Quieter.", "Volume down."]),
-        "volume_set":        lambda: f"{value}%.",
+        "volume_set":        lambda: f"Volume to {value}%.",
         "volume_mute":       lambda: random.choice(["Muted.", "Going silent.", "Sound off."]),
         "volume_unmute":     lambda: random.choice(["Unmuted.", "Sound on.", "You are live."]),
         "volume_get":        lambda: "",
