@@ -71,8 +71,17 @@ def restore_one(cfg):
     prot = cfg.get("protocol", "")
 
     try:
-        if tabs and t in ("chrome", "edge", "brave", "firefox"):
+        if tabs and t in ("chrome", "edge", "brave"):
+            from hands.workspace_modules.browser_restore import restore_browser
+            restore_browser(cfg)
+        elif tabs and t == "firefox":
             _restore_browser(cfg)
+        elif cfg.get("open_files") and t in ("word", "excel", "powerpoint", "notepad", "notepad++", "sublime"):
+            # Open the documents themselves: each lands in its app exactly as saved, with no blank window first.
+            from hands.workspace_modules.document_capture import restore_open_files
+            restore_open_files(cfg["open_files"])
+            _restore_window_geometry(cfg, name)
+            return
         elif ws and t == "vscode":
             _restore_vscode(cfg)
         elif t == "explorer":
