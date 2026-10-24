@@ -272,7 +272,7 @@ async def scan_current_workspace():
             # Remove internal fields before sending to frontend
             clean_apps = []
             for app in apps:
-                clean = {k: v for k, v in app.items() if k != "pid"}
+                clean = {k: v for k, v in app.items() if k not in ("pid", "hwnd")}
                 clean_apps.append(clean)
 
             return {

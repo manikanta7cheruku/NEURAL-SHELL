@@ -1,9 +1,11 @@
 """
 hands/workspace_modules/enrichment.py
-Post-scan enrichment — Chrome tabs, VS Code workspace, Explorer paths.
+Post-scan enrichment: VS Code projects and Explorer folders per window.
+Browser tabs live in browser_capture.py; enrich_chrome is the older extension-only path, kept for reference.
 """
-import os
 import json
+import os
+import re
 from colorama import Fore
 
 
@@ -146,91 +148,84 @@ def enrich_chrome(apps):
 
 
 def enrich_vscode(apps):
-    """Read VS Code workspace path from state.vscdb."""
+    """Each VS Code window's project, matched by the folder name VS Code puts in its title
+    ("main.py - SEVEN - Visual Studio Code"), from VS Code's own list of recently opened folders."""
     vscode_entries = [a for a in apps if a.get("type") == "vscode"]
     if not vscode_entries:
         return
-
-    appdata = os.environ.get("APPDATA", "")
-    db_path = os.path.join(appdata, "Code", "User", "globalStorage",
-                           "state.vscdb")
+    db_path = os.path.join(os.environ.get("APPDATA", ""), "Code", "User", "globalStorage", "state.vscdb")
     if not os.path.exists(db_path):
         return
-
     try:
         import sqlite3
         from urllib.parse import unquote
-        conn = sqlite3.connect(db_path, timeout=2)
-        row  = conn.execute(
-            "SELECT value FROM ItemTable "
-            "WHERE key = 'history.recentlyOpenedPathsList'"
-        ).fetchone()
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=2)
+        row = conn.execute("SELECT value FROM ItemTable WHERE key = 'history.recentlyOpenedPathsList'").fetchone()
         conn.close()
-
-        if row:
-            entries = json.loads(row[0]).get("entries", [])
-            if entries:
-                ws = entries[0].get("folderUri", "")
-                ws = ws.replace("file:///", "").replace("/", "\\")
-                ws = unquote(ws)
-                if len(ws) >= 2 and ws[1] == ":":
-                    ws = ws[0].upper() + ws[1:]
-                for v in vscode_entries:
-                    v["workspace_path"] = ws
-                    v["name"] = "Visual Studio Code"
-                print(Fore.CYAN + f"[WORKSPACE] VS Code: {ws}")
+        recent = []
+        for e in json.loads(row[0]).get("entries", []) if row else []:
+            uri = e.get("folderUri") or (e.get("workspace") or {}).get("configPath") or ""
+            if not uri.startswith("file:///"):
+                continue
+            path = unquote(uri[len("file:///"):]).replace("/", "\\")
+            if len(path) >= 2 and path[1] == ":":
+                path = path[0].upper() + path[1:]
+            recent.append(path)
     except Exception as e:
         print(Fore.YELLOW + f"[WORKSPACE] VS Code state: {e}")
+        return
+
+    for v in vscode_entries:
+        title = (v.get("window") or {}).get("title") or v.get("name") or ""
+        title = re.sub(r"\s*-\s*Visual Studio Code\s*$", "", title)
+        parts = [p.strip(" ●•") for p in re.split(r"\s+-\s+", title) if p.strip(" ●•")]
+        folder = next((p for p in recent
+                       if os.path.basename(p.rstrip("\\")).lower().replace(".code-workspace", "")
+                       in (x.lower() for x in parts)), "")
+        if folder:
+            v["workspace_path"] = folder
+        v["name"] = f"VS Code: {os.path.basename(folder)}" if folder else "Visual Studio Code"
+        print(Fore.CYAN + f"[WORKSPACE] VS Code: {folder or 'no folder'} ({title[:40]})")
 
 
 def enrich_explorer(apps):
-    """Get Explorer window paths via Shell COM."""
+    """Each Explorer window's folders, paired by window handle (Windows 11 tabs share one window, so a window can
+    hold several folders; the extra tabs become their own entries so restore reopens them all)."""
     explorers = [a for a in apps if a.get("type") == "explorer"]
     if not explorers:
         return
-
     try:
         import win32com.client
         from urllib.parse import unquote
-
-        shell   = win32com.client.Dispatch("Shell.Application")
+        by_hwnd = {}
+        shell = win32com.client.Dispatch("Shell.Application")
         windows = shell.Windows()
-        folders = []
-
         for i in range(windows.Count):
             try:
                 w = windows.Item(i)
                 if not w:
                     continue
-                url  = w.LocationURL or ""
-                loc  = w.LocationName or ""
-                path = ""
-
-                if url:
-                    path = unquote(
-                        url.replace("file:///", "").replace("/", "\\")
-                    )
-                    if len(path) >= 2 and path[1] == ":":
-                        path = path[0].upper() + path[1:]
-
-                if path or loc:
-                    folders.append({"path": path, "name": loc})
-
+                url = w.LocationURL or ""
+                path = unquote(url.replace("file:///", "").replace("/", "\\")) if url.startswith("file:///") else ""
+                if len(path) >= 2 and path[1] == ":":
+                    path = path[0].upper() + path[1:]
+                by_hwnd.setdefault(int(w.HWND), []).append({"path": path, "name": w.LocationName or ""})
             except Exception:
                 continue
-
-        for i, exp in enumerate(explorers):
-            if i < len(folders):
-                f = folders[i]
-                if f["path"]:
-                    exp["folder_path"] = f["path"]
-                if f["name"]:
-                    exp["name"] = f"File Explorer: {f['name']}"
-                print(Fore.CYAN + f"[WORKSPACE] Explorer: "
-                      f"{f['path']} ({f['name']})")
-            else:
-                print(Fore.YELLOW + "[WORKSPACE] Explorer: "
-                      "could not get path from Shell COM")
-
     except Exception as e:
         print(Fore.YELLOW + f"[WORKSPACE] Explorer enrichment failed: {e}")
+        return
+
+    for exp in explorers:
+        folders = by_hwnd.get(int(exp.get("hwnd") or 0), [])
+        if not folders:
+            continue
+        first, extra = folders[0], folders[1:]
+        if first["path"]:
+            exp["folder_path"] = first["path"]
+        exp["name"] = f"File Explorer: {first['name'] or os.path.basename(first['path'])}"
+        for f in extra:
+            if f["path"]:
+                apps.append({"type": "explorer", "name": f"File Explorer: {f['name']}", "folder_path": f["path"],
+                             "window": dict(exp.get("window") or {})})
+        print(Fore.CYAN + f"[WORKSPACE] Explorer: {', '.join(f['path'] or f['name'] for f in folders)}")
