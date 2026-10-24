@@ -18,6 +18,7 @@ import MessageContent from '../components/MessageContent';
 import ConversationSidebar from '../components/ConversationSidebar';
 import KnowledgePanel from '../components/KnowledgePanel';
 import { Button } from '../components/ui';
+import Mark from '../components/Mark';
 import { cx } from '../lib/cx';
 
 const COMMANDS = [
@@ -43,21 +44,32 @@ function readOpen() {
   try { return localStorage.getItem(OPEN_KEY) !== '0'; } catch { return true; }
 }
 
-function Thinking({ since }) {
+// What Seven is doing while the reply is on its way, from what was asked: opening, looking, scanning or thinking.
+const ACTIVITY = [
+  [/^(?:please )?(?:find|search|look for|locate|where(?:'s| is)|open (?:my|the|a|that)\b)/i, 'Looking for it'],
+  [/^(?:please )?(?:open|launch|start|show|bring up|switch to)\b/i, 'Opening'],
+  [/\b(?:scan|capture|snapshot|save)\b.*\b(?:workspace|desktop|setup)\b|\b(?:restore|open)\b.*\bworkspace\b/i, 'Working on your workspace'],
+  [/^(?:please )?(?:set|turn|make|mute|unmute|lock|close|minimize|maximize|snap|put|move)\b/i, 'On it'],
+  [/\b(?:summari[sz]e|explain|compare|notes|quiz)\b/i, 'Reading'],
+];
+
+function activityFor(text = '') {
+  return (ACTIVITY.find(([re]) => re.test(text.trim())) || [null, 'Thinking'])[1];
+}
+
+function Thinking({ since, prompt }) {
   const [secs, setSecs] = useState(0);
   useEffect(() => {
     const t = setInterval(() => setSecs(Math.floor((Date.now() - since) / 1000)), 500);
     return () => clearInterval(t);
   }, [since]);
+  const doing = activityFor(prompt);
   return (
     <div className="flex items-center gap-2.5 text-[12.5px] text-s-text-3" aria-live="polite">
-      <span className="flex items-center gap-1">
-        {[0, 1, 2].map(i => (
-          <span key={i} className="h-1.5 w-1.5 rounded-full bg-s-text-3"
-                style={{ animation: `sevenDot 1.3s ease-in-out ${i * 0.16}s infinite` }} />
-        ))}
+      <span className="relative h-[3px] w-10 overflow-hidden rounded-full bg-s-card-h">
+        <span className="absolute inset-y-0 w-1/2 rounded-full bg-s-accent/70" style={{ animation: 'sevenScan 1.2s cubic-bezier(0.45,0,0.55,1) infinite' }} />
       </span>
-      <span>{secs < 2 ? 'Thinking' : secs < 8 ? `Thinking for ${secs}s` : `Still working, ${secs}s. The model may be loading.`}</span>
+      <span>{secs < 3 ? doing : secs < 10 ? `${doing}, ${secs}s` : `${doing}, ${secs}s. The model may still be loading.`}</span>
     </div>
   );
 }
@@ -118,20 +130,23 @@ function SourceChips({ meta }) {
   );
 }
 
+// What Seven did, as a quiet line under the reply: the action, its target, and a plain word for the outcome.
+const RECEIPT_VERB = { OPEN: 'Opened', CLOSE: 'Closed', WINDOW: 'Window', SYS: 'System', WORKSPACE: 'Workspace',
+                       TASK: 'Task', SCHED: 'Reminder', TRIGGER: 'Trigger' };
+
 function Receipts({ receipts }) {
   if (!receipts?.length) return null;
-  const tone = { success: 'text-s-green', failed: 'text-s-red', unconfirmed: 'text-s-yellow' };
-  const label = { success: 'Done', failed: 'Failed', unconfirmed: 'Not confirmed' };
+  const outcome = { success: 'done', failed: "didn't work", unconfirmed: 'sent, not confirmed' };
   return (
-    <div className="mt-2.5 space-y-1">
-      {receipts.map((r, i) => (
-        <div key={i} className="flex items-center gap-2 text-[11.5px] text-s-text-3">
-          <span className={cx('h-1.5 w-1.5 rounded-full bg-current', tone[r.status] || 'text-s-text-4')} />
-          <span className="capitalize">{r.kind.toLowerCase()}</span>
-          <span className="text-s-text-2">{r.target}</span>
-          <span className={tone[r.status]}>{label[r.status] || r.status}</span>
-          {r.detail && <span className="truncate text-s-text-4">{r.detail}</span>}
-        </div>))}
+    <div className="mt-2.5 flex flex-wrap gap-1.5">
+      {receipts.filter(r => r.kind !== 'WORKSPACE' || r.status !== 'success').map((r, i) => (
+        <span key={i} title={r.detail || undefined}
+              className="inline-flex h-6 max-w-full items-center gap-1.5 rounded-md border border-s-border px-2 text-[11px] text-s-text-3">
+          <span className="text-s-text-2">{RECEIPT_VERB[r.kind] || r.kind.toLowerCase()}</span>
+          {r.target && <span className="truncate">{r.target.replaceAll('_', ' ')}</span>}
+          <span className="text-s-text-4">·</span>
+          <span className={r.status === 'failed' ? 'text-s-text' : 'text-s-text-4'}>{outcome[r.status] || r.status}</span>
+        </span>))}
     </div>
   );
 }
@@ -146,13 +161,14 @@ function IconAction({ label, onClick, active, children }) {
   );
 }
 
-function Message({ msg, canRetry, onRetry, onRate, since }) {
+function Message({ msg, canRetry, onRetry, onRate, since, prompt }) {
   const [copied, setCopied] = useState(false);
   const time = msg.time?.toLocaleTimeString?.([], { hour: 'numeric', minute: '2-digit' });
+  const copy = () => { navigator.clipboard.writeText(msg.text); setCopied(true); setTimeout(() => setCopied(false), 1200); };
 
   if (msg.role === 'user') {
     return (
-      <div className="flex flex-col items-end">
+      <div className="group/msg flex flex-col items-end">
         {msg.attachedFile && (
           <div className="mb-1.5 flex items-center gap-1.5 rounded-md border border-s-border bg-s-surface px-2 h-6 text-[11.5px] text-s-text-2">
             <FileText size={12} className="text-s-text-3" />{msg.attachedFile}
@@ -160,7 +176,12 @@ function Message({ msg, canRetry, onRetry, onRate, since }) {
         <div className="max-w-[78%] rounded-2xl rounded-br-md bg-s-card-h px-3.5 py-2 text-[13px] leading-[1.6] text-s-text whitespace-pre-wrap">
           {msg.text}
         </div>
-        <span className="mt-1 pr-1 text-[11px] text-s-text-4">{time}</span>
+        <div className="mt-1 flex h-6 items-center gap-1 pr-1">
+          <span className="opacity-0 transition-opacity duration-200 group-hover/msg:opacity-100 focus-within:opacity-100">
+            <IconAction label={copied ? 'Copied' : 'Copy'} onClick={copy}>{copied ? <Check size={13} /> : <Copy size={13} />}</IconAction>
+          </span>
+          <span className="text-[11px] text-s-text-4">{time}</span>
+        </div>
       </div>
     );
   }
@@ -169,13 +190,13 @@ function Message({ msg, canRetry, onRetry, onRate, since }) {
   const waiting = streaming && !msg.text;
   return (
     <div className="group/msg flex gap-3">
-      <div className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-s-accent text-[11px] font-semibold text-s-on-accent">7</div>
+      <Mark size={24} className="mt-0.5" />
       <div className="min-w-0 flex-1">
         <div className="mb-1 flex items-center gap-2 text-[12px]">
           <span className="font-medium text-s-text">Seven</span>
           {!waiting && <span className="text-s-text-4">{time}</span>}
         </div>
-        {waiting ? <Thinking since={since || Date.now()} /> : msg.isCommand ? (
+        {waiting ? <Thinking since={since || Date.now()} prompt={prompt} /> : msg.isCommand ? (
           <pre className="overflow-x-auto whitespace-pre-wrap rounded-lg border border-s-border bg-s-surface p-3 font-mono text-[12px] leading-relaxed text-s-text-2">{msg.text}</pre>
         ) : msg.status === 'error' ? (
           <div className="flex items-start gap-2 rounded-lg border border-s-red/25 bg-s-red/5 px-3 py-2 text-[12.5px] text-s-red">
@@ -214,7 +235,7 @@ function Message({ msg, canRetry, onRetry, onRate, since }) {
 function Empty({ onPick }) {
   return (
     <div className="mx-auto flex max-w-[640px] flex-col items-center pt-[12vh]" style={{ animation: 'sevenRise .4s cubic-bezier(0.32,0.72,0,1)' }}>
-      <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-s-accent text-[15px] font-semibold text-s-on-accent">7</div>
+      <Mark size={36} />
       <h2 className="mt-4 text-[18px] font-semibold tracking-[-0.01em] text-s-text">What can I help with?</h2>
       <p className="mt-1 text-[12.5px] text-s-text-3">Ask anything, type / for commands, or attach notes or a PDF and ask about them.</p>
       <div className="mt-6 grid w-full grid-cols-2 gap-2">
@@ -236,6 +257,7 @@ export default function Console() {
   const [draft, setDraft] = useState('');
   const [panel, setPanel] = useState(readOpen);
   const [showKnowledge, setShowKnowledge] = useState(false);
+  const [knowledgeSeen, setKnowledgeSeen] = useState(false);     // mount once opened, then keep it for a smooth close
   const [allFiles, setFiles] = useState([]);        // documents being added to a message, tagged with their chat
   const [attached, setAttached] = useState([]);     // documents this chat already answers from
   const [uploadErr, setUploadErr] = useState('');
@@ -373,7 +395,7 @@ export default function Console() {
          onDragOver={e => { e.preventDefault(); setDragOver(true); }}
          onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget)) setDragOver(false); }} onDrop={onDrop}>
       <style>{`
-        @keyframes sevenDot { 0%,80%,100% { opacity: .25; transform: translateY(0);} 40% { opacity: 1; transform: translateY(-2px);} }
+        @keyframes sevenScan { from { transform: translateX(-110%);} to { transform: translateX(220%);} }
         @keyframes sevenCaret { 0%,100% { opacity: 1;} 50% { opacity: .15;} }
         @keyframes sevenRise { from { opacity: 0; transform: translateY(6px);} to { opacity: 1; transform: none;} }
       `}</style>
@@ -397,7 +419,7 @@ export default function Console() {
             <h1 className="truncate text-[13px] font-medium text-s-text">{title}</h1>
           </div>
           <div className="flex items-center gap-1.5">
-            <Button size="sm" variant={showKnowledge ? 'secondary' : 'ghost'} icon={Brain} onClick={() => setShowKnowledge(!showKnowledge)}>What I know about you</Button>
+            <Button size="sm" variant={showKnowledge ? 'secondary' : 'ghost'} icon={Brain} onClick={() => { setKnowledgeSeen(true); setShowKnowledge(!showKnowledge); }}>What I know about you</Button>
             <Button size="sm" variant="ghost" icon={Plus} onClick={newChat} title="New chat (Ctrl+N)">New chat</Button>
           </div>
         </header>
@@ -424,7 +446,7 @@ export default function Console() {
               <div className="space-y-6">
                 {messages.map((m, i) => (
                   <div key={m.id} style={{ animation: `sevenRise .28s cubic-bezier(0.32,0.72,0,1)` }}>
-                    <Message msg={m} since={sentAt} canRetry={i === lastBotIndex && !sending} onRetry={retry} onRate={rate} />
+                    <Message msg={m} since={sentAt} prompt={messages[i - 1]?.text} canRetry={i === lastBotIndex && !sending} onRetry={retry} onRate={rate} />
                   </div>))}
               </div>
             )}
@@ -491,7 +513,13 @@ export default function Console() {
         </div>
       </div>
 
-      {showKnowledge && <KnowledgePanel onClose={() => setShowKnowledge(false)} />}
+      <div aria-hidden={!showKnowledge}
+           className={cx('h-full shrink-0 overflow-hidden border-l bg-s-surface transition-[width,border-color] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]',
+                         showKnowledge ? 'w-[300px] border-s-border' : 'w-0 border-transparent')}>
+        <div className={cx('h-full w-[300px] transition-opacity duration-200', showKnowledge ? 'opacity-100' : 'opacity-0')}>
+          {knowledgeSeen && <KnowledgePanel onClose={() => setShowKnowledge(false)} />}
+        </div>
+      </div>
     </div>
   );
 }
