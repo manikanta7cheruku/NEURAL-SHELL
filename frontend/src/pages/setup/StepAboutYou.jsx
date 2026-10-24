@@ -51,7 +51,7 @@ export default function StepAboutYou() {
       <div className="col-span-3 space-y-7">
         <div className="space-y-3">
           <div className="text-[10px] text-white/40 tracking-[0.3em] font-semibold uppercase">Step 2 of 6</div>
-          <h2 className="text-[32px] font-bold text-white tracking-tight leading-tight">Establish Identity</h2>
+          <h2 className="text-[24px] font-semibold text-white tracking-tight leading-tight">What should Seven call you?</h2>
           <p className="text-[13px] text-white/40 font-light leading-relaxed max-w-md">
             Seven personalizes every interaction using your name. Your email secures license activation and referral rewards.
           </p>

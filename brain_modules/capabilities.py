@@ -78,15 +78,15 @@ def _builtin() -> None:
                    ("window", "windows", "snap", "minimize", "maximize", "layout", "arrange", "monitor"),
                    "low", (("module", "hands.windows"),)),
         Capability("system", "System controls",
-                   "volume, brightness, Wi-Fi, Bluetooth, dark mode, night light, do not disturb, airplane mode, media keys, battery",
+                   "control volume, brightness, Wi-Fi, Bluetooth, dark mode, night light, do not disturb, airplane mode, media and battery",
                    ("set volume to 40", "turn on dark mode"), "Console",
                    ("volume", "brightness", "wifi", "bluetooth", "dark", "mute", "battery", "media", "music"),
                    "medium", (("module", "hands.system"),)),
-        Capability("reminders", "Reminders, alarms and timers", "one-off or recurring",
+        Capability("reminders", "Reminders, alarms and timers", "set one-off or repeating reminders, alarms and timers",
                    ("remind me to stretch in 20 minutes", "set a timer for 10 minutes"), "Schedules",
                    ("remind", "reminder", "reminders", "alarm", "alarms", "timer", "timers", "schedule"),
                    "low", (("module", "hands.scheduler"),)),
-        Capability("tasks", "Tasks", "a to-do list you can add to, list and complete",
+        Capability("tasks", "Tasks", "keep a to-do list you can add to, check and complete",
                    ("add a task to finish the report", "what are my tasks"), "Tasks",
                    ("task", "tasks", "todo", "to-do", "list"), "low", (("module", "backend.routes.tasks"),)),
         Capability("files", "Find and open files", "search your folders by name or by what is inside documents",
@@ -97,7 +97,7 @@ def _builtin() -> None:
                    ("summarize the report I uploaded",), "Knowledge",
                    ("knowledge", "document", "documents", "upload", "pdf", "notes"),
                    "low", (("module", "knowledge.core"), ("config", "knowledge.enabled"))),
-        Capability("web", "Live lookups", "weather, news and prices when you are online",
+        Capability("web", "Live lookups", "look up weather, news and prices when you are online",
                    ("what's the weather in Rio",), "Console",
                    ("web", "internet", "online", "weather", "news", "search", "price", "prices", "lookup"),
                    "low", (("network", ""), ("config", "web.enabled"))),
@@ -109,7 +109,7 @@ def _builtin() -> None:
                    ("remember that my favorite framework is React",), "Memory",
                    ("remember", "memory", "memories", "learn", "forget", "facts"),
                    "low", (("module", "memory.fact_service"),)),
-        Capability("voice", "Hands-free voice", "wake word and push to talk", (), "Settings",
+        Capability("voice", "Hands-free voice", "listen for my wake word, or while you hold Shift", (), "Settings",
                    ("voice", "speak", "microphone", "wake", "talk"), "low", ()),
         Capability("speaker_id", "Speaker recognition", "tell household members apart by voice", (), "Settings",
                    ("speaker", "recognition", "voiceprint", "enroll"), "low", (("tier", "voice_recognition"),)),
@@ -293,19 +293,64 @@ def describe_for_prompt() -> str:
     return "\n".join(lines)
 
 
-def overview() -> str:
-    """Deterministic natural-language summary built from the registry and current status."""
+# How each ability is said in conversation. Abilities without an entry use their registry summary.
+_SPOKEN = {
+    "apps": "open and close any app", "windows": "arrange your windows",
+    "system": "change volume, brightness, Wi-Fi and dark mode",
+    "files": "find files by name or by what's inside them",
+    "tasks": "keep your to-do list", "reminders": "set reminders, alarms and timers",
+    "workspaces": "save your whole desktop and bring it back with one sentence",
+    "memory": "remember what you tell me", "knowledge": "answer from your own documents",
+    "web": "look things up online",
+}
+_ORDER = ("apps", "windows", "system", "files", "workspaces", "tasks", "reminders", "memory", "knowledge", "web")
+_OPENERS = (
+    "I'm the layer between you and this computer, so mostly I do things for you on it.",
+    "Mostly I get things done on this PC, so you don't have to click around.",
+    "Think of me as the quickest way to anything on this computer.",
+)
+_TRIES = (
+    'Try "put Chrome and File Explorer side by side", or "remind me to stretch in 20 minutes".',
+    'Something like "set brightness to 60" or "save this workspace as Work" works.',
+    'Say "open downloads", or "what GPU do I have", and see.',
+)
+
+
+def _join(items: List[str]) -> str:
+    return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1]
+
+
+def overview(brief: bool = False, rng=None) -> str:
+    """
+    What Seven can do, said like a person and built from the registry and live status, so it stays true:
+    an ability that is switched off, needs a plan or needs the internet is said as such.
+    brief=True is the short reply for asking again in the same chat.
+    """
+    import random as _random
+    rng = rng or _random
     ok, later, off = [], [], []
     for cap in all_capabilities():
         state, reason = status(cap.id)
         (ok if state == "available" else later if state == "needs_internet" else off).append((cap, reason))
-    parts = ["Right now these work: " + ", ".join(c.title.lower() for c, _ in ok[:9]) + "."]
-    if later:
-        parts.append("These need the internet, which you don't have at the moment: "
-                     + ", ".join(c.title.lower() for c, _ in later) + ".")
-    if off:
-        parts.append("Not working right now: " + "; ".join(f"{c.title.lower()} ({r})" for c, r in off[:4]) + ".")
-    parts.append("Not available yet: " + ", ".join(n[0] for n in NOT_YET[:3]) + ".")
+    rank = {cid: i for i, cid in enumerate(_ORDER)}
+    ok.sort(key=lambda cr: rank.get(cr[0].id, len(_ORDER)))
+    doing = [_SPOKEN.get(c.id, c.summary) for c, _ in ok if c.id not in ("voice", "speaker_id")]
+
+    if brief:
+        short = [c.title.lower() for c, _ in ok if c.id not in ("voice", "speaker_id")][:7]
+        return (f"Same as a moment ago: {_join(short)}. The Guide in the sidebar has examples you can "
+                "click and run, if you'd rather see it than read it.")
+
+    parts = [rng.choice(_OPENERS), f"I can {_join(doing[:8])}."]
+    if any(c.id == "web" for c, _ in later):
+        parts.append("Live lookups need the internet, which you don't have right now.")
+    for c, reason in off[:2]:
+        if c.id == "speaker_id" and "plan" in (reason or ""):
+            parts.append("Telling voices apart is on the Ultimate plan.")
+        elif c.id != "speaker_id":
+            parts.append(f"{c.title} isn't available at the moment ({reason}).")
+    parts.append(rng.choice(_TRIES))
+    parts.append("I can't see your screen or click inside other apps yet. That's what's coming next.")
     return " ".join(parts)
 
 

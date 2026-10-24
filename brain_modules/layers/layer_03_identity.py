@@ -90,6 +90,14 @@ _ACTIVITY_WORDS = {"doing", "up", "thinking", "working", "going", "saying", "tal
                    "listening", "building", "reading", "watching"}
 
 
+def _about_myself(norm: str) -> bool:
+    try:
+        from brain_modules import intent_router
+        return intent_router.route(norm).label in ("self_model", "self_context", "self_learning", "self_reasoning")
+    except Exception:
+        return False
+
+
 def _fullmatch_any(patterns, norm: str) -> bool:
     return any(re.fullmatch(p, norm) for p in patterns)
 
@@ -161,6 +169,11 @@ def process(ctx, deps=None) -> LayerResult:
         return LayerResult.stop(f"I'm Seven version {state['version']}.")
     if _fullmatch_any(_MODEL, norm):
         state = self_model.get_runtime_state()
+        from brain_modules import model_catalog
+        entry = model_catalog.get(state["model_name"])
+        if entry:
+            return LayerResult.stop(f"I'm running {entry['name']}, a {entry['params']} parameter model, locally "
+                                    "through Ollama. Ask what it's good at if you want the details.")
         return LayerResult.stop(f"I'm running {state['model_name']} locally through Ollama.")
     # Questions about the user's own machine: live readings, never a model's guess.
     try:
@@ -176,6 +189,8 @@ def process(ctx, deps=None) -> LayerResult:
         return LayerResult.stop(f"You have {self_model.describe_hardware()}")
 
     can_you = capabilities.answer_can_you(norm)
+    if can_you and _about_myself(norm):
+        can_you = None               # "do you learn", "do you remember all our chats": explained by the router layer
     if can_you:
         return LayerResult.stop(can_you)
     if _fullmatch_any(_CAPABILITY, norm):

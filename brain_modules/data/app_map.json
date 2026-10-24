@@ -1,6 +1,6 @@
 {
   "app_map_version": 1,
-  "source_hash": "ab839c0d3753d6b5",
+  "source_hash": "fd8ff181cbee360c",
   "pages": [
     {
       "id": "home",
@@ -551,13 +551,7 @@
         },
         {
           "label": "Model",
-          "description": "The local language model that writes Seven's replies. Runs on this computer through Ollama.",
-          "file": "BrainSection.jsx",
-          "section": "Brain"
-        },
-        {
-          "label": "Reply model",
-          "description": "",
+          "description": "The language model that writes Seven's replies, running on this computer through Ollama. Bigger models are smarter and need more memory.",
           "file": "BrainSection.jsx",
           "section": "Brain"
         },
@@ -656,6 +650,11 @@
           "description": "If an app isn't installed, try its website instead.",
           "file": "BrainSection.jsx",
           "section": "Brain"
+        },
+        {
+          "label": "Choose automatically",
+          "description": "",
+          "file": "ModelPicker.jsx"
         },
         {
           "label": "Online features",
@@ -877,6 +876,7 @@
       "sections": [
         "AccountSection",
         "BrainSection",
+        "ModelPicker",
         "PrivacySection",
         "SystemSection",
         "VoiceSection"
