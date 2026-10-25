@@ -212,3 +212,7 @@ input:focus, select:focus, textarea:focus {
     transform: translateY(0);
   }
 }
+/* Shared motion: a hairline that travels (busy), a text caret, and the rise new content enters with. */
+@keyframes sevenScan { from { transform: translateX(-110%); } to { transform: translateX(220%); } }
+@keyframes sevenCaret { 0%, 100% { opacity: 1; } 50% { opacity: .15; } }
+@keyframes sevenRise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
