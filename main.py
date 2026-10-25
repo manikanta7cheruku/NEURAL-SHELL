@@ -28,6 +28,12 @@ try:
 except Exception:
     pass
 
+# Electron passes PYTHONPATH to find Seven's packages; sys.path has it now. Left in the environment, every app Seven
+# opens (a terminal, VS Code, the user's own Python) would inherit Seven's private package folder. Seven's own
+# helpers set the paths they need explicitly, and its bundled Python ignores PYTHONPATH anyway.
+for _var in ("PYTHONPATH", "PYTHONHOME"):
+    os.environ.pop(_var, None)
+
 if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 if sys.stderr and hasattr(sys.stderr, 'reconfigure'):

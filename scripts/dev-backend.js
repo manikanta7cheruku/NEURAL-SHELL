@@ -40,7 +40,9 @@ function start() {
   child = spawn(python, ['main.py'], {
     cwd: root,
     stdio: 'inherit',
-    env: { ...process.env, SEVEN_BACKEND_EXTERNALLY_STARTED: '1', SEVEN_ELECTRON_MODE: '1' },
+    // SEVEN_APP_PATH is this checkout: a terminal opened by an installed Seven inherits the installed path, and the
+    // backend would then start the installed copy's daemons instead of the code being worked on.
+    env: { ...process.env, SEVEN_APP_PATH: root, SEVEN_BACKEND_EXTERNALLY_STARTED: '1', SEVEN_ELECTRON_MODE: '1' },
   });
   child.on('exit', code => {
     if (stopping || code === 0) process.exit(code ?? 0);

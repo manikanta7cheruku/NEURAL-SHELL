@@ -38,8 +38,9 @@ def _get_app_python(app_root: str) -> str:
             print(Fore.GREEN + f"[DAEMON] Using root Python: {c}")
             return c
 
-    # Priority 3: Dev venv
+    # Priority 3: development: the bundled runtime the installer ships, then the venv
     for c in [
+        os.path.join(app_root, "python-dist", "python", "pythonw.exe"),
         os.path.join(app_root, "venv", "Scripts", "pythonw.exe"),
         os.path.join(app_root, "venv", "Scripts", "python.exe"),
     ]:
