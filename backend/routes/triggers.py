@@ -753,6 +753,7 @@ def fire_trigger(trigger_id: int):
                     app_count=app_count,
                     tab_count=tab_count,
                     app_names=app_names,
+                    arrange=False,          # execute_trigger_action below brings up the arrangement card itself
                 )
                 print(Fore.GREEN + f"[TRIGGERS] Notification fired instantly for '{name}'")
 
