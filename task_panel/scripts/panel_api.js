@@ -114,26 +114,6 @@ async function editHotkeyInline(triggerId, newHotkey) {
   }
 }
 
-async function toggleTriggerEnabled(triggerId, enabled) {
-  // Try Seven backend first
-  try {
-    const r = await sevenAPI(`/triggers/${triggerId}`, 'PUT', { enabled });
-    if (r && r.success) return true;
-  } catch (e) {
-    // Seven backend unavailable, try panel server fallback
-    console.log('[PANEL] Seven backend unavailable for toggle, trying panel server fallback');
-  }
-
-  // Fallback to panel server
-  try {
-    const r = await panelAPI(`/panel/triggers/${triggerId}`, 'PUT', { enabled });
-    return r && r.success;
-  } catch (e) {
-    console.error('[PANEL] Panel server fallback also failed for toggle:', e);
-    return false;
-  }
-}
-
 async function deleteTriggerAPI(triggerId) {
   // Try Seven backend first
   try {

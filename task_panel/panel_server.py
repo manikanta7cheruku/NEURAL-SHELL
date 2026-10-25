@@ -112,6 +112,45 @@ def _get_seven_data():
         return os.path.join(_appdata, "SEVEN", "seven_data")
 
 SEVEN_DATA_DIR = _get_seven_data()
+
+
+# ── Plan limits ──────────────────────────────────────────────────────────────
+# With Seven closed this server turns triggers on and off itself, so it applies the same limit Seven does
+# (backend/routes/triggers.py): the panel must never allow more active triggers than the plan.
+
+def _plan_tier() -> str:
+    try:
+        from seven_paths import paths
+        cfg_path = paths.config
+    except Exception:
+        cfg_path = os.path.join(os.path.dirname(SEVEN_DATA_DIR), "config.json")
+    try:
+        with open(cfg_path, encoding="utf-8") as f:
+            tier = (json.load(f).get("license") or {}).get("tier", "free")
+        return tier if tier in ("free", "pro", "ultimate") else "free"
+    except Exception:
+        return "free"
+
+
+def _enforce_trigger_limit(trigger_id: int, triggers_db: str) -> None:
+    tier = _plan_tier()
+    try:
+        import license as license_module
+        limit = license_module.TIER_FEATURES.get(tier, license_module.TIER_FEATURES["free"]).get("triggers", 7)
+    except Exception:
+        limit = {"free": 7, "pro": 77}.get(tier, -1)
+    if limit == -1:
+        return
+    with sqlite3.connect(triggers_db, timeout=10) as c:
+        active = c.execute("SELECT COUNT(*) FROM triggers WHERE enabled = 1 AND id != ?", (trigger_id,)).fetchone()[0]
+    if active >= limit:
+        upgrade = "pro" if tier == "free" else "ultimate"
+        raise HTTPException(status_code=403, detail={
+            "error": "plan_limit_reached",
+            "message": (f"You have reached the {tier.upper()} plan limit of {limit} active triggers. "
+                        f"Turn another trigger off or upgrade to {upgrade.upper()} to turn this one on."),
+            "current": active + 1, "limit": limit, "tier": tier, "upgrade_to": upgrade,
+        })
 RELOAD_SIGNAL = os.path.join(SEVEN_DATA_DIR, "trigger_reload.signal")
 
 def _get_tasks_db():
@@ -421,6 +460,8 @@ def update_trigger_direct(trigger_id: int, body: dict):
         params.append(body['audio_pattern'] if body['audio_pattern'] else None)
 
     if 'enabled' in body and body['enabled'] is not None:
+        if body['enabled'] and not existing['enabled']:
+            _enforce_trigger_limit(trigger_id, triggers_db)
         updates.append("enabled = ?")
         params.append(1 if body['enabled'] else 0)
 
