@@ -5,97 +5,92 @@
 <meta name="color-scheme" content="dark">
 <!--
   seven_overlay/notification.html
-  The status card at the top centre of the screen. It lives in a 360x56 window of Windows glass (acrylic, see
-  electron/overlay_daemon.js), so the desktop blurs through it; this page only tints the glass and draws the content.
-  The daemon fades the window in and out and calls window.__applyNotifData({title, subtitle, detail, holdMs, state,
-  replace}).
+  The status card at the top centre of the screen. The window is Windows' own glass (see electron/overlay_daemon.js),
+  so this page draws no background, border or shadow: only the content. The daemon calls
+  window.__applyNotifData({title, subtitle, detail, holdMs, state, replace}); it returns the size the card needs, and
+  the daemon sizes the window to fit, then slides and fades it in.
 
-  state:    "working" (a spinner and a travelling hairline, no sound), "done" (a drawn check, soft chime),
-            "error", "info" (a short accent line)
+  state:    "working" (a turning ring and a travelling hairline, no sound), "done" (a drawn check, soft chime),
+            "error", "info"
   replace:  true updates the card that is showing, in place ("Scanning" becomes "Saved")
 -->
 <style>
   *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
   :root {
-    --lagoon: #3cc8b4; --bone: #edeae4; --muted: rgba(237, 234, 228, 0.58);
-    --ok: #4cc38a; --err: #ef6b62;
+    --text: #f3f1ec; --muted: rgba(243, 241, 236, 0.66); --faint: rgba(243, 241, 236, 0.1);
+    --lagoon: #4fd6c2; --ok: #5fd39a; --err: #ff7a70; --brass: #e9bd6a;
   }
-  html, body { width: 360px; height: 56px; overflow: hidden; background: transparent;
-               font-family: 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+  html, body { background: transparent; overflow: hidden; font-family: 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
+               -webkit-font-smoothing: antialiased; user-select: none; cursor: default; }
 
-  .card {
-    position: absolute; inset: 0; display: flex; align-items: center; gap: 12px; padding: 0 16px 0 14px;
-    background: rgba(20, 21, 24, 0.52);                 /* a tint over the real glass, light enough to read through */
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 8px;                                   /* matches Windows 11 window corners */
-    overflow: hidden; user-select: none; cursor: default;
-  }
-  .card::before {                                         /* a faint top highlight, like light on a pane of glass */
-    content: ''; position: absolute; left: 0; right: 0; top: 0; height: 1px;
-    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.14), transparent);
-  }
+  .card { position: fixed; inset: 0; display: flex; align-items: center; gap: 13px; padding: 12px 20px 12px 14px; }
+  .card.measure { position: absolute; inset: auto; left: 0; top: 0; width: max-content; }
 
-  .mark { position: relative; width: 22px; height: 22px; flex-shrink: 0; display: grid; place-items: center; }
-  .mark svg { position: absolute; inset: 0; width: 22px; height: 22px; overflow: visible; }
-  .line  { width: 3px; height: 18px; border-radius: 2px; background: var(--lagoon); opacity: 0; transition: opacity 180ms ease; }
-  .ring  { fill: none; stroke: var(--lagoon); stroke-width: 1.8; stroke-linecap: round; stroke-dasharray: 34 100;
-           transform-origin: 50% 50%; animation: spin 0.9s linear infinite; opacity: 0; transition: opacity 180ms ease; }
+  .mark { position: relative; width: 30px; height: 30px; flex-shrink: 0; border-radius: 50%; background: var(--faint);
+          display: grid; place-items: center; transition: background 220ms ease; }
+  .card[data-state="done"]  .mark { background: rgba(95, 211, 154, 0.16); }
+  .card[data-state="error"] .mark { background: rgba(255, 122, 112, 0.16); }
+  .mark svg { width: 16px; height: 16px; overflow: visible; }
+  .glyph { opacity: 0; transition: opacity 180ms ease; }
+  .ring  { fill: none; stroke: var(--lagoon); stroke-width: 1.8; stroke-linecap: round; stroke-dasharray: 26 100;
+           transform-origin: 8px 8px; animation: spin 0.85s linear infinite; }
   .check { fill: none; stroke: var(--ok); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
-           stroke-dasharray: 20; stroke-dashoffset: 20; opacity: 0; }
-  .bang  { fill: var(--err); opacity: 0; transition: opacity 180ms ease; }
+           stroke-dasharray: 16; stroke-dashoffset: 16; }
+  .bang  { fill: var(--err); }
+  .dot   { fill: var(--lagoon); }
   @keyframes spin { to { transform: rotate(360deg); } }
   @keyframes draw { to { stroke-dashoffset: 0; } }
+  .card[data-state="working"] .ring, .card[data-state="error"] .bang, .card[data-state="info"] .dot { opacity: 1; }
+  .card[data-state="done"] .check { opacity: 1; animation: draw 360ms 80ms cubic-bezier(0.65, 0, 0.35, 1) forwards; }
 
-  .card[data-state="info"]    .line  { opacity: 1; }
-  .card[data-state="working"] .ring  { opacity: 1; }
-  .card[data-state="done"]    .check { opacity: 1; animation: draw 340ms 60ms cubic-bezier(0.65, 0, 0.35, 1) forwards; }
-  .card[data-state="error"]   .bang  { opacity: 1; }
-
-  .text { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
-  .title { font-size: 13px; font-weight: 600; color: var(--bone); letter-spacing: -0.005em;
+  .text { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 3px; }
+  .title { font-size: 13.5px; font-weight: 600; line-height: 1.3; color: var(--text); letter-spacing: -0.005em;
            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .sub { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; }
-  .sub span { overflow: hidden; text-overflow: ellipsis; }
-  .detail { flex-shrink: 0; font: 500 10.5px/1.6 'Cascadia Mono', Consolas, monospace; color: rgba(237, 234, 228, 0.78);
-            padding: 0 6px; border-radius: 4px; background: rgba(255, 255, 255, 0.07); }
+  .sub { font-size: 12px; line-height: 1.35; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sub:empty { display: none; }
+  .detail { flex-shrink: 0; margin-left: 4px; font: 500 11px/20px 'Segoe UI Variable Text', 'Segoe UI', sans-serif;
+            color: var(--muted); padding: 0 9px; border-radius: 10px; background: var(--faint); }
+  .detail:empty { display: none; }
 
-  .trail { position: absolute; left: 0; right: 0; bottom: 0; height: 1.5px; overflow: hidden; opacity: 0; transition: opacity 180ms ease; }
-  .trail::before { content: ''; position: absolute; top: 0; bottom: 0; width: 34%;
+  .trail { position: absolute; left: 18%; right: 18%; bottom: 0; height: 1.5px; overflow: hidden; opacity: 0;
+           transition: opacity 200ms ease; border-radius: 1px; }
+  .trail::before { content: ''; position: absolute; top: 0; bottom: 0; width: 40%;
                    background: linear-gradient(90deg, transparent, var(--lagoon), transparent);
-                   animation: travel 1.3s cubic-bezier(0.45, 0, 0.55, 1) infinite; }
-  .card[data-state="working"] .trail { opacity: 0.85; }
-  @keyframes travel { from { transform: translateX(-110%); } to { transform: translateX(300%); } }
+                   animation: travel 1.4s cubic-bezier(0.45, 0, 0.55, 1) infinite; }
+  .card[data-state="working"] .trail { opacity: 0.9; }
+  @keyframes travel { from { transform: translateX(-110%); } to { transform: translateX(260%); } }
 
-  .text.enter { animation: enter 260ms cubic-bezier(0.22, 1, 0.36, 1); }
-  @keyframes enter { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+  .text.enter { animation: enter 300ms cubic-bezier(0.22, 1, 0.36, 1); }
+  @keyframes enter { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 </style>
 </head>
 <body>
 <div class="card" id="card" data-state="info">
   <div class="mark" aria-hidden="true">
-    <span class="line"></span>
-    <svg viewBox="0 0 22 22">
-      <circle class="ring" cx="11" cy="11" r="8"></circle>
-      <path class="check" d="M6.6 11.4l2.9 2.8 5.9-6.1"></path>
-      <rect class="bang" x="10.1" y="5.6" width="1.8" height="7.4" rx="0.9"></rect>
-      <rect class="bang" x="10.1" y="14.6" width="1.8" height="1.9" rx="0.9"></rect>
+    <svg viewBox="0 0 16 16">
+      <circle class="glyph ring" cx="8" cy="8" r="6.2"></circle>
+      <path class="glyph check" d="M4.2 8.3l2.5 2.4 5.1-5.3"></path>
+      <g class="glyph bang"><rect x="7.1" y="3.2" width="1.8" height="6.4" rx="0.9"></rect><rect x="7.1" y="11" width="1.8" height="1.8" rx="0.9"></rect></g>
+      <circle class="glyph dot" cx="8" cy="8" r="3"></circle>
     </svg>
   </div>
   <div class="text" id="text">
     <div class="title" id="titleEl">Seven</div>
-    <div class="sub"><span id="subtitleEl"></span><span class="detail" id="detailEl" style="display:none"></span></div>
+    <div class="sub" id="subtitleEl"></div>
   </div>
+  <span class="detail" id="detailEl"></span>
   <div class="trail"></div>
 </div>
 
 <script>
+  const MIN_W = 240, MAX_W = 400;
   let _timer = null;
 
   function chime() {
     try {
       const ctx = new (window.AudioContext || window.webkitAudioContext)();
       const t = ctx.currentTime;
-      [[659.25, 0, 0.16, 0.05], [987.77, 0.08, 0.24, 0.035]].forEach(([f, s, d, v]) => {
+      [[659.25, 0, 0.16, 0.04], [987.77, 0.08, 0.26, 0.03]].forEach(([f, s, d, v]) => {
         const o = ctx.createOscillator(), g = ctx.createGain();
         o.type = 'sine'; o.frequency.value = f;
         g.gain.setValueAtTime(0.0001, t + s);
@@ -106,6 +101,15 @@
     } catch (e) {}
   }
 
+  // The size the content needs, within MIN_W..MAX_W (longer text is cut with an ellipsis).
+  function measure() {
+    const card = document.getElementById('card');
+    card.classList.add('measure');
+    const r = card.getBoundingClientRect();
+    card.classList.remove('measure');
+    return { w: Math.min(MAX_W, Math.max(MIN_W, r.width)), h: Math.max(58, r.height) };
+  }
+
   function applyData(data) {
     const { title = 'Seven', subtitle = '', detail = '', holdMs = 4000, state = 'info' } = data;
     const card = document.getElementById('card');
@@ -113,9 +117,7 @@
 
     document.getElementById('titleEl').textContent = title;
     document.getElementById('subtitleEl').textContent = subtitle;
-    const det = document.getElementById('detailEl');
-    det.textContent = detail;
-    det.style.display = detail ? '' : 'none';
+    document.getElementById('detailEl').textContent = detail;
     card.dataset.state = ['working', 'done', 'error', 'info'].includes(state) ? state : 'info';
 
     const text = document.getElementById('text');
@@ -123,12 +125,13 @@
 
     if (state === 'done') chime();
     _timer = setTimeout(retract, state === 'working' ? Math.max(holdMs, 20000) : holdMs);
+    return measure();
   }
   window.__applyNotifData = applyData;
 
   function retract() {
     if (_timer) { clearTimeout(_timer); _timer = null; }
-    if (window.electronAPI && window.electronAPI.close) window.electronAPI.close();   // the daemon fades the glass out
+    if (window.electronAPI && window.electronAPI.close) window.electronAPI.close();   // the daemon glides the glass out
   }
 </script>
 </body>

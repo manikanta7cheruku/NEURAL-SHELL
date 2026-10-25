@@ -3,933 +3,335 @@
 <head>
 <meta charset="UTF-8">
 <meta name="color-scheme" content="dark">
+<!--
+  seven_overlay/arrangement.html
+  The arrangement card, shown at the top centre after a workspace opens. The window is Windows' own glass (see
+  electron/overlay_daemon.js), so this page draws only the content, and reports its size so the window always fits it.
+
+  1. Pick a layout (click, or press 1-6).
+  2. Seven fills the zones with the workspace's windows in order. Click a window to put it in the next free zone, drag
+     it onto a zone, or click a zone to empty it. Apply (or Enter) arranges them.
+  It closes on Esc, the close button, or a click anywhere else on the screen.
+  The daemon calls window.__applyArrangementData({windows: [{hwnd, title, exe}], allWindows: [...]}).
+-->
 <style>
-  *, *::before, *::after {
-    margin: 0;
-    padding: 0;
-    box-sizing: border-box;
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    --text: #f3f1ec; --muted: rgba(243, 241, 236, 0.62); --dim: rgba(243, 241, 236, 0.42);
+    --faint: rgba(243, 241, 236, 0.07); --line: rgba(243, 241, 236, 0.12);
+    --lagoon: #4fd6c2; --lagoon-soft: rgba(79, 214, 194, 0.16); --lagoon-line: rgba(79, 214, 194, 0.55);
   }
+  html, body { background: transparent; overflow: hidden; font-family: 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
+               -webkit-font-smoothing: antialiased; user-select: none; cursor: default; }
 
-  html, body {
-    width: 380px;
-    height: 310px;
-    background: transparent;
-    overflow: hidden;
-    font-family: -apple-system, 'SF Pro Display', 'Segoe UI Variable Display',
-                 'Segoe UI', system-ui, sans-serif;
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
-    text-rendering: optimizeLegibility;
-    user-select: none;
-    cursor: default;
-  }
+  #card { width: 392px; padding: 14px 16px 16px; }
+  #card.leaving { opacity: 0; transform: translateY(-4px); transition: opacity 140ms ease, transform 140ms ease; }
 
-  .card {
-    position: relative;
-    width: 380px;
-    height: 310px;
-    background: rgba(10, 10, 16, 0.82);
-    backdrop-filter: blur(60px) saturate(200%);
-    -webkit-backdrop-filter: blur(60px) saturate(200%);
-    /* Sharp glass: crisp hairline border, tight radius */
-    border: 1px solid rgba(255, 255, 255, 0.18);
-    border-radius: 10px;
-    display: flex;
-    flex-direction: column;
-    transform: translateY(-105%);
-    opacity: 0;
-    will-change: transform, opacity;
-    box-shadow:
-      0 24px 60px rgba(0, 0, 0, 0.65),
-      0 0 0 0.5px rgba(255, 255, 255, 0.08),
-      inset 0 0.5px 0 rgba(255, 255, 255, 0.12);
-    overflow: hidden;
-  }
+  .head { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 12px; }
+  .head-text { flex: 1; min-width: 0; }
+  .title { font-size: 13.5px; font-weight: 600; color: var(--text); line-height: 1.3; }
+  .hint { margin-top: 2px; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .icon-btn { width: 26px; height: 26px; border-radius: 7px; border: 0; background: transparent; color: var(--dim);
+              display: grid; place-items: center; cursor: pointer; flex-shrink: 0; transition: background 150ms, color 150ms; }
+  .icon-btn:hover { background: var(--faint); color: var(--text); }
+  .icon-btn svg { width: 12px; height: 12px; stroke: currentColor; stroke-width: 1.8; fill: none; stroke-linecap: round; stroke-linejoin: round; }
 
-  .card::before {
-    content: '';
-    position: absolute;
-    top: 0; left: 0; right: 0;
-    height: 50%;
-    background: linear-gradient(180deg,
-      rgba(255, 255, 255, 0.035) 0%,
-      transparent 100%);
-    pointer-events: none;
-    border-radius: 10px 10px 0 0;
-  }
+  .phase { display: none; }
+  .phase.active { display: block; animation: phase-in 220ms cubic-bezier(0.22, 1, 0.36, 1); }
+  @keyframes phase-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 
-  .card::after {
-    content: '';
-    position: absolute;
-    left: 20%; right: 20%;
-    bottom: 0;
-    height: 0.5px;
-    background: linear-gradient(90deg,
-      transparent,
-      rgba(60, 200, 180, 0.35),
-      transparent);
-    pointer-events: none;
-  }
+  /* Layout picker */
+  .layouts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .layout { position: relative; height: 78px; border-radius: 10px; background: var(--faint); border: 1px solid transparent;
+            display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px; cursor: pointer;
+            transition: background 160ms ease, border-color 160ms ease, transform 160ms cubic-bezier(0.22, 1, 0.36, 1); }
+  .layout:hover { background: var(--lagoon-soft); border-color: var(--lagoon-line); transform: translateY(-1px); }
+  .layout:active { transform: scale(0.97); }
+  .layout svg { width: 52px; height: 32px; }
+  .zone-shape { fill: rgba(243, 241, 236, 0.2); transition: fill 160ms ease; }
+  .layout:hover .zone-shape { fill: rgba(79, 214, 194, 0.75); }
+  .layout-name { font-size: 11.5px; font-weight: 500; color: var(--muted); transition: color 160ms; }
+  .layout:hover .layout-name { color: var(--text); }
+  .key { position: absolute; top: 6px; right: 8px; font-size: 10px; color: var(--dim); font-variant-numeric: tabular-nums; }
 
-  .card.show {
-    animation: slideDown 0.45s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-  }
+  /* Assignment */
+  .bar { display: flex; align-items: center; gap: 6px; margin-bottom: 10px; }
+  .back { display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 8px 0 6px; border: 0; border-radius: 7px;
+          background: transparent; color: var(--muted); font: 500 12px 'Segoe UI Variable Text', 'Segoe UI', sans-serif; cursor: pointer;
+          transition: background 150ms, color 150ms; }
+  .back:hover { background: var(--faint); color: var(--text); }
+  .back svg { width: 12px; height: 12px; stroke: currentColor; stroke-width: 1.8; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  .bar-note { margin-left: auto; font-size: 11.5px; color: var(--dim); }
 
-  .card.hiding {
-    animation: slideUp 0.28s cubic-bezier(0.55, 0, 0.85, 0.35) forwards;
-  }
+  .preview { display: grid; gap: 6px; height: 118px; padding: 6px; border-radius: 10px; background: rgba(0, 0, 0, 0.18); }
+  .zone { min-width: 0; border-radius: 7px; border: 1px dashed var(--line); display: flex; align-items: center; justify-content: center;
+          gap: 6px; padding: 0 8px; font-size: 11.5px; color: var(--dim); cursor: pointer; overflow: hidden;
+          transition: background 160ms ease, border-color 160ms ease, color 160ms ease; }
+  .zone .n { flex-shrink: 0; width: 16px; height: 16px; border-radius: 50%; display: grid; place-items: center;
+             font-size: 10px; font-weight: 600; background: var(--faint); color: var(--muted); }
+  .zone .label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .zone.filled { border: 1px solid var(--lagoon-line); background: var(--lagoon-soft); color: var(--text); }
+  .zone.filled .n { background: var(--lagoon); color: #062420; }
+  .zone.over { border-color: var(--lagoon); background: rgba(79, 214, 194, 0.24); }
+  .zone.filled:hover .label::after { content: '  ·  clear'; color: var(--muted); }
 
-  @keyframes slideDown {
-    0%   { transform: translateY(-105%); opacity: 0; }
-    100% { transform: translateY(0);     opacity: 1; }
-  }
+  .pool-label { margin: 12px 2px 6px; font-size: 11px; font-weight: 600; color: var(--dim); letter-spacing: 0.02em; }
+  .pool { display: flex; flex-wrap: wrap; gap: 6px; max-height: 64px; overflow-y: auto; }
+  .pool::-webkit-scrollbar { width: 3px; }
+  .pool::-webkit-scrollbar-thumb { background: var(--line); border-radius: 2px; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; max-width: 170px; height: 26px; padding: 0 10px; border-radius: 13px;
+          background: var(--faint); font-size: 11.5px; color: var(--text); cursor: grab; white-space: nowrap;
+          transition: background 150ms ease, opacity 150ms ease; }
+  .chip span { overflow: hidden; text-overflow: ellipsis; }
+  .chip:hover { background: rgba(243, 241, 236, 0.13); }
+  .chip.used { opacity: 0.45; }
+  .chip.dragging { opacity: 0.3; }
+  .chip i { width: 6px; height: 6px; border-radius: 50%; background: var(--dim); flex-shrink: 0; }
+  .chip.used i { background: var(--lagoon); }
 
-  @keyframes slideUp {
-    0%   { transform: translateY(0);     opacity: 1; }
-    100% { transform: translateY(-105%); opacity: 0; }
-  }
-
-  /* ═══════════════════════ HEADER ═══════════════════════ */
-  .header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 10px 14px 7px;
-    position: relative;
-    z-index: 2;
-  }
-
-  .header-left {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-  }
-
-  .brand-dot {
-    width: 5px;
-    height: 5px;
-    border-radius: 50%;
-    background: rgba(60, 200, 180, 0.9);
-    box-shadow: 0 0 6px rgba(60, 200, 180, 0.5);
-    animation: pulse 2.4s ease-in-out infinite;
-  }
-
-  @keyframes pulse {
-    0%, 100% { opacity: 0.55; transform: scale(0.9); }
-    50%      { opacity: 1;    transform: scale(1.15); }
-  }
-
-  .header-title {
-    font-size: 10px;
-    font-weight: 600;
-    color: rgba(255, 255, 255, 0.85);
-    letter-spacing: 0.02em;
-  }
-
-  .header-title .sub {
-    color: rgba(255, 255, 255, 0.35);
-    font-weight: 400;
-    margin-left: 4px;
-  }
-
-  .btn-close {
-    width: 17px;
-    height: 17px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: rgba(255, 255, 255, 0.04);
-    border: 0.5px solid rgba(255, 255, 255, 0.08);
-    border-radius: 50%;
-    color: rgba(255, 255, 255, 0.4);
-    font-size: 9px;
-    line-height: 1;
-    cursor: pointer;
-    transition: all 0.18s ease;
-    padding: 0;
-  }
-
-  .btn-close:hover {
-    background: rgba(255, 100, 100, 0.15);
-    border-color: rgba(255, 120, 120, 0.35);
-    color: rgba(255, 200, 200, 0.9);
-  }
-
-  /* ═══════════════════════ PHASES ═══════════════════════ */
-  .phase {
-    flex: 1;
-    display: none;
-    flex-direction: column;
-    padding: 0 14px 12px;
-    position: relative;
-    z-index: 2;
-    min-height: 0;
-  }
-
-  .phase.active {
-    display: flex;
-    animation: fadeIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-  }
-
-  @keyframes fadeIn {
-    0%   { opacity: 0; transform: translateY(3px); }
-    100% { opacity: 1; transform: translateY(0); }
-  }
-
-  /* ═══════════════════════ PHASE 1: LAYOUT PICKER ═══════════════════════ */
-  .layout-hint {
-    margin: 2px 2px 10px;
-    font-size: 11.5px;
-    color: rgba(237, 234, 228, 0.55);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .layout-grid {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 6px;
-    align-content: start;
-  }
-
-  .layout-card {
-    background: rgba(255, 255, 255, 0.025);
-    border: 0.5px solid rgba(255, 255, 255, 0.07);
-    border-radius: 7px;
-    padding: 7px 5px 5px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 4px;
-    cursor: pointer;
-    transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
-    position: relative;
-    overflow: hidden;
-    height: 64px;
-  }
-
-  .layout-card:hover {
-    background: rgba(60, 200, 180, 0.12);
-    border-color: rgba(60, 200, 180, 0.35);
-    transform: translateY(-1px);
-    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
-  }
-
-  .layout-card:active {
-    transform: scale(0.96);
-    transition-duration: 0.08s;
-  }
-
-  .layout-preview {
-    width: 100%;
-    height: 28px;
-  }
-
-  .zone {
-    fill: rgba(255, 255, 255, 0.14);
-    stroke: rgba(255, 255, 255, 0.06);
-    stroke-width: 0.5;
-    transition: all 0.2s ease;
-  }
-
-  .zone-accent { fill: rgba(60, 200, 180, 0.48); }
-
-  .layout-card:hover .zone {
-    fill: rgba(60, 200, 180, 0.48);
-  }
-
-  .layout-card:hover .zone-accent {
-    fill: rgba(200, 170, 255, 0.85);
-  }
-
-  .layout-name {
-    font-size: 8.5px;
-    font-weight: 500;
-    color: rgba(255, 255, 255, 0.55);
-    letter-spacing: 0.01em;
-    transition: color 0.2s ease;
-    white-space: nowrap;
-  }
-
-  .layout-card:hover .layout-name {
-    color: rgba(230, 215, 255, 0.98);
-  }
-
-  /* ═══════════════════════ PHASE 2: DRAG ASSIGNMENT ═══════════════════════ */
-  .assign-topbar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 6px;
-  }
-
-  .back-btn {
-    display: flex;
-    align-items: center;
-    gap: 3px;
-    background: none;
-    border: none;
-    color: rgba(255, 255, 255, 0.5);
-    font-size: 9.5px;
-    font-weight: 500;
-    cursor: pointer;
-    padding: 2px 4px;
-    border-radius: 4px;
-    transition: all 0.18s ease;
-    font-family: inherit;
-  }
-
-  .back-btn:hover {
-    background: rgba(255, 255, 255, 0.05);
-    color: rgba(255, 255, 255, 0.85);
-  }
-
-  .assign-hint {
-    font-size: 8px;
-    color: rgba(60, 200, 180, 0.65);
-    font-weight: 500;
-    letter-spacing: 0.03em;
-    text-transform: uppercase;
-  }
-
-  /* ── Maximize mode banner ── */
-  .maximize-banner {
-    display: none;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    padding: 6px 10px;
-    margin-bottom: 6px;
-    background: rgba(60, 200, 180, 0.08);
-    border: 0.5px solid rgba(60, 200, 180, 0.2);
-    border-radius: 6px;
-    font-size: 9px;
-    color: rgba(230, 215, 255, 0.85);
-    font-weight: 500;
-  }
-
-  .maximize-banner.visible {
-    display: flex;
-  }
-
-  .maximize-banner .mode-icon {
-    width: 12px;
-    height: 12px;
-    border-radius: 3px;
-    border: 1px solid rgba(60, 200, 180, 0.5);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 7px;
-    flex-shrink: 0;
-  }
-
-  /* ── Layout Preview with drop zones ── */
-  .preview-container {
-    background: rgba(0, 0, 0, 0.25);
-    border: 0.5px solid rgba(255, 255, 255, 0.07);
-    border-radius: 6px;
-    padding: 7px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    height: 85px;
-    margin-bottom: 6px;
-  }
-
-  .preview-grid {
-    display: grid;
-    gap: 3px;
-    width: 100%;
-    height: 100%;
-  }
-
-  .drop-zone {
-    background: rgba(255, 255, 255, 0.035);
-    border: 1px dashed rgba(255, 255, 255, 0.15);
-    border-radius: 5px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 3px 5px;
-    font-size: 8.5px;
-    font-weight: 600;
-    color: rgba(255, 255, 255, 0.3);
-    transition: all 0.2s ease;
-    text-align: center;
-    line-height: 1.15;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    min-width: 0;
-  }
-
-  .drop-zone.assigned {
-    background: linear-gradient(135deg,
-      rgba(60, 200, 180, 0.2) 0%,
-      rgba(34, 151, 138, 0.12) 100%);
-    border: 1px solid rgba(60, 200, 180, 0.4);
-    color: rgba(230, 215, 255, 0.95);
-    font-weight: 500;
-  }
-
-  .drop-zone.drag-over {
-    background: rgba(60, 200, 180, 0.28);
-    border: 1px solid rgba(200, 170, 255, 0.7);
-    color: rgba(255, 255, 255, 1);
-    transform: scale(1.02);
-  }
-
-  .drop-zone .zone-num {
-    display: inline-block;
-    background: rgba(60, 200, 180, 0.4);
-    color: #fff;
-    width: 13px;
-    height: 13px;
-    border-radius: 50%;
-    font-size: 8px;
-    font-weight: 700;
-    line-height: 13px;
-    margin-right: 3px;
-    flex-shrink: 0;
-  }
-
-  .drop-zone.assigned .zone-num {
-    background: rgba(60, 200, 180, 0.85);
-  }
-
-  /* ── Draggable window pills ── */
-  .apps-scroll {
-    display: flex;
-    gap: 4px;
-    flex-wrap: wrap;
-    align-content: flex-start;
-    max-height: 55px;
-    overflow-y: auto;
-    padding: 2px;
-    scrollbar-width: thin;
-    scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
-  }
-
-  .apps-scroll::-webkit-scrollbar {
-    width: 3px;
-  }
-
-  .apps-scroll::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.1);
-    border-radius: 2px;
-  }
-
-  .app-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    background: rgba(255, 255, 255, 0.04);
-    border: 0.5px solid rgba(255, 255, 255, 0.08);
-    border-radius: 10px;
-    padding: 3px 8px;
-    font-size: 9.5px;
-    font-weight: 500;
-    color: rgba(255, 255, 255, 0.7);
-    cursor: grab;
-    transition: all 0.16s ease;
-    white-space: nowrap;
-    max-width: 125px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .app-pill:hover {
-    background: rgba(60, 200, 180, 0.14);
-    border-color: rgba(60, 200, 180, 0.3);
-    color: rgba(230, 215, 255, 0.98);
-    transform: translateY(-1px);
-  }
-
-  .app-pill:active {
-    cursor: grabbing;
-    transform: scale(0.96);
-  }
-
-  .app-pill.dragging {
-    opacity: 0.4;
-    cursor: grabbing;
-  }
-
-  .app-pill.assigned {
-    background: rgba(60, 200, 180, 0.18);
-    border-color: rgba(60, 200, 180, 0.4);
-    color: rgba(230, 215, 255, 1);
-  }
-
-  .app-pill .dot-indicator {
-    width: 4px;
-    height: 4px;
-    border-radius: 50%;
-    background: rgba(60, 200, 180, 0.8);
-    flex-shrink: 0;
-  }
-
-  /* ── Action bar ── */
-  .action-bar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-top: 8px;
-    padding-top: 7px;
-    border-top: 0.5px solid rgba(255, 255, 255, 0.06);
-  }
-
-  .action-status {
-    font-size: 8.5px;
-    color: rgba(255, 255, 255, 0.35);
-    letter-spacing: 0.02em;
-  }
-
-  .btn-apply {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: 5px 12px;
-    background: linear-gradient(135deg,
-      rgba(60, 200, 180, 0.3) 0%,
-      rgba(34, 151, 138, 0.22) 100%);
-    border: 0.5px solid rgba(60, 200, 180, 0.35);
-    border-radius: 6px;
-    color: rgba(240, 230, 255, 0.95);
-    font-family: inherit;
-    font-size: 9.5px;
-    font-weight: 600;
-    letter-spacing: 0.01em;
-    cursor: pointer;
-    transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
-    box-shadow:
-      0 2px 8px rgba(34, 151, 138, 0.2),
-      inset 0 0.5px 0 rgba(255, 255, 255, 0.1);
-  }
-
-  .btn-apply:hover:not(:disabled) {
-    background: linear-gradient(135deg,
-      rgba(60, 200, 180, 0.45) 0%,
-      rgba(60, 200, 180, 0.38) 100%);
-    border-color: rgba(200, 170, 255, 0.55);
-    transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(60, 200, 180, 0.3);
-  }
-
-  .btn-apply:active:not(:disabled) {
-    transform: translateY(0) scale(0.97);
-    transition-duration: 0.08s;
-  }
-
-  .btn-apply:disabled {
-    opacity: 0.35;
-    cursor: not-allowed;
-  }
-
-  .btn-apply svg {
-    width: 9px;
-    height: 9px;
-  }
+  .foot { display: flex; align-items: center; justify-content: space-between; margin-top: 14px; }
+  .status { font-size: 11.5px; color: var(--muted); }
+  .apply { height: 30px; padding: 0 16px; border-radius: 8px; border: 0; background: var(--lagoon); color: #062420;
+           font: 600 12px 'Segoe UI Variable Text', 'Segoe UI', sans-serif; cursor: pointer; transition: background 150ms, opacity 150ms, transform 120ms; }
+  .apply:hover:not(:disabled) { background: #6ae0ce; }
+  .apply:active:not(:disabled) { transform: scale(0.97); }
+  .apply:disabled { opacity: 0.35; cursor: default; }
 </style>
 </head>
 <body>
 
-<div class="card" id="card">
-
-  <div class="header">
-    <div class="header-left">
-      <span class="brand-dot"></span>
-      <span class="header-title">
-        Arrange
-        <span class="sub" id="phaseSubtitle">Pick a layout</span>
-      </span>
+<div id="card">
+  <div class="head">
+    <div class="head-text">
+      <div class="title" id="title">Arrange windows</div>
+      <div class="hint" id="hint">Pick a layout for the windows you just opened</div>
     </div>
-    <button class="btn-close" onclick="retract()" title="Close (Esc)">✕</button>
+    <button class="icon-btn" onclick="retract()" title="Close (Esc)">
+      <svg viewBox="0 0 12 12"><path d="M2.5 2.5l7 7M9.5 2.5l-7 7"/></svg>
+    </button>
   </div>
 
-  <!-- ═══════════ PHASE 1: LAYOUT PICKER ═══════════ -->
   <div class="phase active" id="phase1">
-    <div class="layout-hint" id="layoutHint">Choose how to place your open windows</div>
-    <div class="layout-grid">
-      <div class="layout-card" onclick="selectLayout('maximize', 1)">
-        <svg class="layout-preview" viewBox="0 0 60 30">
-          <rect class="zone zone-accent" x="1" y="1" width="58" height="28" rx="2"/>
-        </svg>
-        <div class="layout-name">Maximize</div>
-      </div>
-
-      <div class="layout-card" onclick="selectLayout('split_vertical', 2)">
-        <svg class="layout-preview" viewBox="0 0 60 30">
-          <rect class="zone" x="1"  y="1" width="28" height="28" rx="2"/>
-          <rect class="zone" x="31" y="1" width="28" height="28" rx="2"/>
-        </svg>
-        <div class="layout-name">Split ↔</div>
-      </div>
-
-      <div class="layout-card" onclick="selectLayout('split_horizontal', 2)">
-        <svg class="layout-preview" viewBox="0 0 60 30">
-          <rect class="zone" x="1" y="1"  width="58" height="13" rx="2"/>
-          <rect class="zone" x="1" y="16" width="58" height="13" rx="2"/>
-        </svg>
-        <div class="layout-name">Stack ↕</div>
-      </div>
-
-      <div class="layout-card" onclick="selectLayout('grid', 4)">
-        <svg class="layout-preview" viewBox="0 0 60 30">
-          <rect class="zone" x="1"  y="1"  width="28" height="13" rx="1.5"/>
-          <rect class="zone" x="31" y="1"  width="28" height="13" rx="1.5"/>
-          <rect class="zone" x="1"  y="16" width="28" height="13" rx="1.5"/>
-          <rect class="zone" x="31" y="16" width="28" height="13" rx="1.5"/>
-        </svg>
-        <div class="layout-name">2×2 Grid</div>
-      </div>
-
-      <div class="layout-card" onclick="selectLayout('stack', 3)">
-        <svg class="layout-preview" viewBox="0 0 60 30">
-          <rect class="zone zone-accent" x="1" y="1" width="28" height="28" rx="2"/>
-          <rect class="zone" x="31" y="1"  width="28" height="13" rx="1.5"/>
-          <rect class="zone" x="31" y="16" width="28" height="13" rx="1.5"/>
-        </svg>
-        <div class="layout-name">Focus + 2</div>
-      </div>
-
-      <div class="layout-card" onclick="selectLayout('minimize_others', 1)">
-        <svg class="layout-preview" viewBox="0 0 60 30">
-          <rect class="zone zone-accent" x="1" y="1" width="58" height="28" rx="2"/>
-        </svg>
-        <div class="layout-name">Solo Focus</div>
-      </div>
-    </div>
+    <div class="layouts" id="layouts"></div>
   </div>
 
-  <!-- ═══════════ PHASE 2: DRAG ASSIGNMENT ═══════════ -->
   <div class="phase" id="phase2">
-    <div class="assign-topbar">
-      <button class="back-btn" onclick="backToPhase1()">
-        <svg width="8" height="8" viewBox="0 0 10 10" fill="none">
-          <path d="M6.5 2L3.5 5l3 3" stroke="currentColor" stroke-width="1.5"
-                stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
-        Back
+    <div class="bar">
+      <button class="back" onclick="toPicker()">
+        <svg viewBox="0 0 12 12"><path d="M7.5 2.5L4 6l3.5 3.5"/></svg>Layouts
       </button>
-      <div class="assign-hint" id="assignHint">Drag apps into zones</div>
+      <span class="bar-note" id="barNote"></span>
     </div>
-
-    <!-- Maximize mode banner (shown only for maximize layout) -->
-    <div class="maximize-banner" id="maximizeBanner">
-      <span class="mode-icon" id="maximizeIcon">⬜</span>
-      <span id="maximizeText">No app selected → will maximize ALL windows</span>
-    </div>
-
-    <div class="preview-container">
-      <div class="preview-grid" id="previewGrid"></div>
-    </div>
-
-    <div class="apps-scroll" id="appsScroll"></div>
-
-    <div class="action-bar">
-      <span class="action-status" id="actionStatus">0 of 0 assigned</span>
-      <button class="btn-apply" id="applyBtn" onclick="applyArrangement()" disabled>
-        <svg viewBox="0 0 12 12" fill="none">
-          <path d="M2 6l3 3 5-6" stroke="currentColor" stroke-width="1.8"
-                stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
-        Apply
-      </button>
+    <div class="preview" id="preview"></div>
+    <div class="pool-label">Windows</div>
+    <div class="pool" id="pool"></div>
+    <div class="foot">
+      <span class="status" id="status"></span>
+      <button class="apply" id="applyBtn" onclick="apply()" disabled>Apply</button>
     </div>
   </div>
-
 </div>
 
 <script>
-  let _windows        = [];
-  let _allWindows     = [];
-  let _selectedLayout = null;
-  let _slotCount      = 0;
-  let _assignments    = {};
-  let _isRetracting   = false;
+  // grid: rows of zone numbers; a number repeated across cells spans them. shapes: the picker thumbnail (52x32).
+  const LAYOUTS = [
+    { id: 'maximize',         name: 'Full screen',    grid: [[1]],           labels: ['Full screen'],
+      note: 'Maximizes every window, or only the one you place', shapes: [[1, 1, 50, 30]] },
+    { id: 'split_vertical',   name: 'Side by side',   grid: [[1, 2]],        labels: ['Left', 'Right'],
+      shapes: [[1, 1, 24, 30], [27, 1, 24, 30]] },
+    { id: 'split_horizontal', name: 'Top and bottom', grid: [[1], [2]],      labels: ['Top', 'Bottom'],
+      shapes: [[1, 1, 50, 14], [1, 17, 50, 14]] },
+    { id: 'grid',             name: 'Four corners',   grid: [[1, 2], [3, 4]], labels: ['Top left', 'Top right', 'Bottom left', 'Bottom right'],
+      shapes: [[1, 1, 24, 14], [27, 1, 24, 14], [1, 17, 24, 14], [27, 17, 24, 14]] },
+    { id: 'main_two',         name: 'Main and two',   grid: [[1, 2], [1, 3]], labels: ['Main', 'Top right', 'Bottom right'],
+      shapes: [[1, 1, 30, 30], [33, 1, 18, 14], [33, 17, 18, 14]] },
+    { id: 'minimize_others',  name: 'Focus one',      grid: [[1]],           labels: ['Keep open'],
+      note: 'Keeps one window open and minimizes the rest', shapes: [[10, 4, 32, 24]] },
+  ];
 
-  const LAYOUT_META = {
-    maximize:         { name: 'Maximize',    grid: [[1]],                              labels: ['One app'] },
-    split_vertical:   { name: 'Split ↔',     grid: [[1, 2]],                          labels: ['Left', 'Right'] },
-    split_horizontal: { name: 'Split ↕',     grid: [[1], [2]],                        labels: ['Top', 'Bottom'] },
-    grid:             { name: '2×2 Grid',    grid: [[1, 2], [3, 4]],                  labels: ['↖', '↗', '↙', '↘'] },
-    stack:            { name: 'Focus + 2',   grid: [[1, 2], [1, 3]],                  labels: ['Main', 'Top-R', 'Bot-R'] },
-    minimize_others:  { name: 'Solo Focus',  grid: [[1]],                              labels: ['Keep Open'] },
-  };
+  let _windows = [], _all = [], _layout = null, _assign = {}, _leaving = false;
 
-  function applyData(data) {
-    _windows      = data.windows    || [];
-    _allWindows   = data.allWindows || [];
-    _isRetracting = false;
-    resetToPhase1();
-    const names = [...new Set(_windows.map(w => cleanTitle(w.title || w.exe)))];
-    document.getElementById('layoutHint').textContent = names.length
-      ? `${names.length} window${names.length === 1 ? '' : 's'}: ${names.slice(0, 3).join(', ')}${names.length > 3 ? '…' : ''}`
-      : 'Choose how to place your open windows';
-    const card = document.getElementById('card');
-    card.classList.remove('show', 'hiding');
-    void card.offsetWidth;
-    card.classList.add('show');
-  }
-
-  window.__applyArrangementData = applyData;
-
-  function resetToPhase1() {
-    _selectedLayout = null;
-    _slotCount = 0;
-    _assignments = {};
-    document.getElementById('phase1').classList.add('active');
-    document.getElementById('phase2').classList.remove('active');
-    document.getElementById('phaseSubtitle').textContent = 'Pick a layout';
-  }
-
-  function selectLayout(layout, slotCount) {
-    _selectedLayout = layout;
-    _slotCount      = slotCount;
-    _assignments    = {};
-
-    const meta = LAYOUT_META[layout];
-    document.getElementById('phase1').classList.remove('active');
-    document.getElementById('phase2').classList.add('active');
-    document.getElementById('phaseSubtitle').textContent = meta.name;
-
-    // Maximize banner
-    const banner = document.getElementById('maximizeBanner');
-    if (layout === 'maximize') {
-      banner.classList.add('visible');
-      updateMaximizeBanner();
-      document.getElementById('assignHint').textContent = 'Optional: drag one app to maximize only it';
-    } else {
-      banner.classList.remove('visible');
-      document.getElementById('assignHint').textContent = 'Drag apps into zones';
-    }
-
-    buildPreviewGrid(meta);
-    buildAppsPool();
-    autoAssignDefault();
-    updateActionStatus();
-  }
-
-  function backToPhase1() { resetToPhase1(); }
-
-  function updateMaximizeBanner() {
-    const icon = document.getElementById('maximizeIcon');
-    const text = document.getElementById('maximizeText');
-    const count = Object.keys(_assignments).length;
-    if (count > 0) {
-      icon.textContent = '🎯';
-      text.textContent = 'Will maximize ONLY the selected app';
-    } else {
-      icon.textContent = '⬜';
-      const total = [...new Set([..._windows, ..._allWindows].map(w => w.hwnd))].length;
-      text.textContent = `No app selected → will maximize ALL ${total} windows`;
-    }
+  function fit() {
+    const r = document.getElementById('card').getBoundingClientRect();
+    window.electronAPI && window.electronAPI.fit && window.electronAPI.fit(392, r.height);
+    return { w: 392, h: r.height };
   }
 
   function cleanTitle(t) {
     if (!t) return 'Window';
-    let title = t.trim();
-    const parts = title.split(/\s+[-–—|]\s+/);
-    if (parts.length > 1) {
-      title = [...parts].sort((a, b) => b.length - a.length)[0];
-    }
-    return title.length > 20 ? title.substring(0, 18) + '…' : title;
+    const parts = t.trim().split(/\s+[-–—|]\s+/);
+    const title = parts.length > 1 ? parts[parts.length - 1] : parts[0];   // "Report - Word" reads as "Word"
+    return title.length > 28 ? title.slice(0, 26) + '…' : title;
   }
 
-  function buildPreviewGrid(meta) {
-    const container = document.getElementById('previewGrid');
-    container.innerHTML = '';
-    const grid = meta.grid;
-    const rows = grid.length;
-    const cols = Math.max(...grid.map(r => r.length));
-    container.style.gridTemplateRows    = `repeat(${rows}, 1fr)`;
-    container.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
-    const placedZones = new Set();
-
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
-        const zoneNum = grid[r][c];
-        if (!zoneNum || placedZones.has(zoneNum)) continue;
-        const zoneIdx = zoneNum - 1;
-        let rowSpan = 1, colSpan = 1;
-        for (let rr = r + 1; rr < rows; rr++) {
-          if (grid[rr] && grid[rr][c] === zoneNum) rowSpan++; else break;
-        }
-        for (let cc = c + 1; cc < cols; cc++) {
-          if (grid[r][cc] === zoneNum) colSpan++; else break;
-        }
-        const zone = document.createElement('div');
-        zone.className = 'drop-zone';
-        zone.dataset.slotIndex = zoneIdx;
-        zone.style.gridRow    = `${r + 1} / span ${rowSpan}`;
-        zone.style.gridColumn = `${c + 1} / span ${colSpan}`;
-        zone.innerHTML = `<span class="zone-num">${zoneNum}</span><span class="zone-label">${meta.labels[zoneIdx] || ''}</span>`;
-
-        zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.classList.add('drag-over'); });
-        zone.addEventListener('dragleave', () => { zone.classList.remove('drag-over'); });
-        zone.addEventListener('drop', (e) => {
-          e.preventDefault();
-          zone.classList.remove('drag-over');
-          const hwnd = e.dataTransfer.getData('text/plain');
-          if (hwnd) assignToSlot(zoneIdx, parseInt(hwnd, 10));
-        });
-        zone.addEventListener('click', () => { if (_assignments[zoneIdx]) unassignSlot(zoneIdx); });
-        container.appendChild(zone);
-        placedZones.add(zoneNum);
-      }
-    }
-  }
-
-  function buildAppsPool() {
-    const scroll = document.getElementById('appsScroll');
-    scroll.innerHTML = '';
+  function pool() {
     const seen = new Set();
-    const pool = [];
-    [..._windows, ..._allWindows].forEach(w => {
-      if (!seen.has(w.hwnd)) { seen.add(w.hwnd); pool.push(w); }
+    return [..._windows, ..._all].filter(w => !seen.has(w.hwnd) && seen.add(w.hwnd));
+  }
+
+  function buildPicker() {
+    const box = document.getElementById('layouts');
+    box.innerHTML = '';
+    LAYOUTS.forEach((l, i) => {
+      const el = document.createElement('div');
+      el.className = 'layout';
+      el.innerHTML = `<span class="key">${i + 1}</span><svg viewBox="0 0 52 32">${
+        l.shapes.map(([x, y, w, h]) => `<rect class="zone-shape" x="${x}" y="${y}" width="${w}" height="${h}" rx="2.5"/>`).join('')
+      }</svg><span class="layout-name">${l.name}</span>`;
+      el.onclick = () => pick(l.id);
+      box.appendChild(el);
     });
-    pool.forEach(w => {
-      const pill = document.createElement('div');
-      pill.className = 'app-pill';
-      pill.draggable = true;
-      pill.dataset.hwnd = w.hwnd;
-      pill.innerHTML = `<span class="dot-indicator"></span><span>${cleanTitle(w.title || w.exe)}</span>`;
-      pill.addEventListener('dragstart', (e) => {
-        e.dataTransfer.setData('text/plain', String(w.hwnd));
-        e.dataTransfer.effectAllowed = 'move';
-        pill.classList.add('dragging');
+  }
+
+  function applyData(data) {
+    _windows = data.windows || [];
+    _all     = data.allWindows || [];
+    _leaving = false;
+    document.getElementById('card').classList.remove('leaving');
+    const names = [...new Set(_windows.map(w => cleanTitle(w.title || w.exe)))];
+    document.getElementById('hint').textContent = names.length
+      ? `${names.slice(0, 3).join(', ')}${names.length > 3 ? ` and ${names.length - 3} more` : ''}`
+      : 'Pick a layout for your open windows';
+    toPicker(true);
+    return fit();
+  }
+  window.__applyArrangementData = applyData;
+
+  function toPicker(silent) {
+    _layout = null; _assign = {};
+    document.getElementById('title').textContent = 'Arrange windows';
+    document.getElementById('phase2').classList.remove('active');
+    document.getElementById('phase1').classList.add('active');
+    if (!silent) fit();
+  }
+
+  function pick(id) {
+    _layout = LAYOUTS.find(l => l.id === id);
+    _assign = {};
+    document.getElementById('title').textContent = _layout.name;
+    document.getElementById('barNote').textContent = _layout.note || 'Click a window to place it';
+    document.getElementById('phase1').classList.remove('active');
+    document.getElementById('phase2').classList.add('active');
+    buildZones();
+    buildPool();
+    if (id !== 'maximize') _windows.slice(0, zoneCount()).forEach((w, i) => place(i, w.hwnd));
+    update();
+    fit();
+  }
+
+  function zoneCount() { return Math.max(..._layout.grid.flat()); }
+
+  function buildZones() {
+    const box = document.getElementById('preview');
+    box.innerHTML = '';
+    const g = _layout.grid, rows = g.length, cols = Math.max(...g.map(r => r.length));
+    box.style.gridTemplateRows = `repeat(${rows}, 1fr)`;
+    box.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+    const done = new Set();
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+      const n = g[r][c];
+      if (done.has(n)) continue;
+      done.add(n);
+      let rs = 1, cs = 1;
+      while (g[r + rs] && g[r + rs][c] === n) rs++;
+      while (g[r][c + cs] === n) cs++;
+      const z = document.createElement('div');
+      z.className = 'zone';
+      z.dataset.i = n - 1;
+      z.style.gridRow = `${r + 1} / span ${rs}`;
+      z.style.gridColumn = `${c + 1} / span ${cs}`;
+      z.addEventListener('dragover', e => { e.preventDefault(); z.classList.add('over'); });
+      z.addEventListener('dragleave', () => z.classList.remove('over'));
+      z.addEventListener('drop', e => {
+        e.preventDefault(); z.classList.remove('over');
+        const h = parseInt(e.dataTransfer.getData('text/plain'), 10);
+        if (h) { place(n - 1, h); update(); }
       });
-      pill.addEventListener('dragend', () => { pill.classList.remove('dragging'); });
-      scroll.appendChild(pill);
+      z.addEventListener('click', () => { if (_assign[n - 1] != null) { delete _assign[n - 1]; update(); } });
+      box.appendChild(z);
+    }
+  }
+
+  function buildPool() {
+    const box = document.getElementById('pool');
+    box.innerHTML = '';
+    pool().forEach(w => {
+      const c = document.createElement('div');
+      c.className = 'chip';
+      c.draggable = true;
+      c.dataset.h = w.hwnd;
+      c.title = w.title || w.exe || '';
+      c.innerHTML = `<i></i><span>${cleanTitle(w.title || w.exe).replace(/</g, '&lt;')}</span>`;
+      c.addEventListener('dragstart', e => { e.dataTransfer.setData('text/plain', String(w.hwnd)); c.classList.add('dragging'); });
+      c.addEventListener('dragend', () => c.classList.remove('dragging'));
+      c.addEventListener('click', () => {
+        const at = Object.keys(_assign).find(k => _assign[k] === w.hwnd);
+        if (at != null) { delete _assign[at]; update(); return; }          // a placed window: take it out again
+        for (let i = 0; i < zoneCount(); i++) if (_assign[i] == null) { place(i, w.hwnd); break; }
+        update();
+      });
+      box.appendChild(c);
     });
   }
 
-  function autoAssignDefault() {
-    if (_selectedLayout === 'maximize') return;
-    const zones = document.querySelectorAll('.drop-zone');
-    zones.forEach((zone, i) => {
-      if (i < _windows.length) assignToSlot(i, _windows[i].hwnd);
+  function place(i, hwnd) {
+    for (const k of Object.keys(_assign)) if (_assign[k] === hwnd) delete _assign[k];    // one window, one zone
+    _assign[i] = hwnd;
+  }
+
+  function update() {
+    const byH = Object.fromEntries(pool().map(w => [w.hwnd, w]));
+    document.querySelectorAll('.zone').forEach(z => {
+      const i = Number(z.dataset.i), h = _assign[i];
+      z.classList.toggle('filled', h != null);
+      const text = h != null ? cleanTitle(byH[h] ? (byH[h].title || byH[h].exe) : 'Window') : _layout.labels[i];
+      z.innerHTML = `<span class="n">${i + 1}</span><span class="label">${String(text).replace(/</g, '&lt;')}</span>`;
     });
-  }
-
-  function assignToSlot(slotIdx, hwnd) {
-    for (const [sIdx, h] of Object.entries(_assignments)) {
-      if (h === hwnd && parseInt(sIdx, 10) !== slotIdx) unassignSlot(parseInt(sIdx, 10));
-    }
-    _assignments[slotIdx] = hwnd;
-    const zone = document.querySelector(`.drop-zone[data-slot-index="${slotIdx}"]`);
-    if (zone) {
-      const win = [..._windows, ..._allWindows].find(w => w.hwnd === hwnd);
-      const label = win ? cleanTitle(win.title || win.exe) : 'Assigned';
-      zone.classList.add('assigned');
-      zone.innerHTML = `<span class="zone-num">${slotIdx + 1}</span><span class="zone-label">${label}</span>`;
-    }
-    updatePillStates();
-    updateActionStatus();
-    if (_selectedLayout === 'maximize') updateMaximizeBanner();
-  }
-
-  function unassignSlot(slotIdx) {
-    delete _assignments[slotIdx];
-    const zone = document.querySelector(`.drop-zone[data-slot-index="${slotIdx}"]`);
-    if (zone) {
-      const meta = LAYOUT_META[_selectedLayout];
-      zone.classList.remove('assigned');
-      zone.innerHTML = `<span class="zone-num">${slotIdx + 1}</span><span class="zone-label">${meta.labels[slotIdx] || ''}</span>`;
-    }
-    updatePillStates();
-    updateActionStatus();
-    if (_selectedLayout === 'maximize') updateMaximizeBanner();
-  }
-
-  function updatePillStates() {
-    const assignedHwnds = new Set(Object.values(_assignments));
-    document.querySelectorAll('.app-pill').forEach(pill => {
-      const h = parseInt(pill.dataset.hwnd, 10);
-      pill.classList.toggle('assigned', assignedHwnds.has(h));
-    });
-  }
-
-  function updateActionStatus() {
-    const count = Object.keys(_assignments).length;
-    const total = _slotCount;
-    const status = document.getElementById('actionStatus');
+    const used = new Set(Object.values(_assign));
+    document.querySelectorAll('.chip').forEach(c => c.classList.toggle('used', used.has(Number(c.dataset.h))));
+    const n = Object.keys(_assign).length, total = zoneCount();
     const btn = document.getElementById('applyBtn');
-
-    if (_selectedLayout === 'maximize') {
-      status.textContent = count === 0 ? 'Apply = Maximize All' : 'Apply = Maximize selected';
+    const status = document.getElementById('status');
+    if (_layout.id === 'maximize') {
+      status.textContent = n ? 'Only this window goes full screen' : `All ${pool().length} windows go full screen`;
       btn.disabled = false;
-      return;
+    } else {
+      status.textContent = `${n} of ${total} placed`;
+      btn.disabled = n === 0;
     }
-    status.textContent = `${count} of ${total} assigned`;
-    btn.disabled = (count === 0);
   }
 
-  function applyArrangement() {
-    const all = [..._windows, ..._allWindows];
-    let hwnd_list = [];
-
-    if (_selectedLayout === 'maximize') {
-      if (Object.keys(_assignments).length > 0) {
-        for (let i = 0; i < _slotCount; i++) {
-          if (_assignments[i]) hwnd_list.push(_assignments[i]);
-        }
-      } else {
-        hwnd_list = [...new Set(all.map(w => w.hwnd))];
-      }
-    } else {
-      for (let i = 0; i < _slotCount; i++) {
-        if (_assignments[i]) hwnd_list.push(_assignments[i]);
-      }
-    }
-
-    if (hwnd_list.length === 0) return;
-
-    const selectedSet = new Set(hwnd_list.map(Number));
-    const minimize_hwnds = (_selectedLayout === 'minimize_others')
-      ? [...new Set(all.map(w => w.hwnd).filter(h => !selectedSet.has(Number(h))))]
-      : [];
-
-    const payload = { layout: _selectedLayout, hwnd_list, minimize_hwnds };
-
-    try {
-      if (window.electronAPI && window.electronAPI.applyLayout) {
-        window.electronAPI.applyLayout(payload);
-      }
-    } catch (e) {
-      console.error('applyLayout failed:', e);
-    }
+  function apply() {
+    if (!_layout) return;
+    const all = pool().map(w => w.hwnd);
+    let list = [];
+    for (let i = 0; i < zoneCount(); i++) if (_assign[i] != null) list.push(_assign[i]);
+    if (_layout.id === 'maximize' && !list.length) list = all;
+    if (!list.length) return;
+    const keep = new Set(list.map(Number));
+    const payload = {
+      layout: _layout.id, hwnd_list: list,
+      minimize_hwnds: _layout.id === 'minimize_others' ? all.filter(h => !keep.has(Number(h))) : [],
+    };
+    try { window.electronAPI && window.electronAPI.applyLayout(payload); } catch (e) {}
     retract();
   }
 
   function retract() {
-    if (_isRetracting) return;
-    _isRetracting = true;
-    const card = document.getElementById('card');
-    card.classList.remove('show');
-    card.classList.add('hiding');
-    setTimeout(() => {
-      if (window.electronAPI && window.electronAPI.close) window.electronAPI.close();
-    }, 300);
+    if (_leaving) return;
+    _leaving = true;
+    document.getElementById('card').classList.add('leaving');
+    window.electronAPI && window.electronAPI.close();            // the daemon glides the glass out
   }
 
-  document.body.addEventListener('mousedown', (e) => {
-    if (!document.getElementById('card').contains(e.target)) retract();
-  });
-  
-  // Escape key dismisses
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') retract();
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') return retract();
+    if (!_layout && /^[1-6]$/.test(e.key)) return pick(LAYOUTS[Number(e.key) - 1].id);
+    if (_layout && e.key === 'Enter' && !document.getElementById('applyBtn').disabled) return apply();
+    if (_layout && e.key === 'Backspace') return toPicker();
   });
 
-  // Window blur (clicking outside anywhere on screen) dismisses smoothly
-  window.addEventListener('blur', () => {
-    retract();
-  });
+  buildPicker();
 </script>
 </body>
 </html>
