@@ -189,6 +189,7 @@ def run_voice_loop(ctx, config, app_ui, api_set_state, safe_mode_file):
         print(Fore.CYAN + "[SYSTEM] All daemons launched")
         # File and app indexes: after the PC has settled, so starting Seven never makes Windows sluggish.
         time.sleep(45)
+        print(Fore.CYAN + "[SYSTEM] Starting the file and app indexers")
         from main_modules.startup.daemon_launcher import launch_indexers
         launch_indexers()
 
