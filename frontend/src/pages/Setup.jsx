@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import useSetup from '../stores/useSetup';
+import { Wordmark } from '../components/Mark';
 import StepWelcome     from './setup/StepWelcome';
 import StepAboutYou    from './setup/StepAboutYou';
 import StepPersonalize from './setup/StepPersonalize';
@@ -56,9 +57,7 @@ export default function Setup({ onComplete }) {
                    border-b border-white/[0.04]"
         style={{ WebkitAppRegion: 'drag' }}
       >
-        <span className="font-display text-[11px] tracking-[0.38em] text-white/40">
-          SEVEN
-        </span>
+        <Wordmark size={13} className="text-white/60" />
         <WindowControls />
       </div>
 
