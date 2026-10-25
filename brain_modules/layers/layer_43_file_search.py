@@ -131,6 +131,16 @@ def _open_latest(ctx):
     return f"Opened {hit['name']} from {where}, saved {hit['modified']}."
 
 
+def _ask(ctx, kind, data):
+    """Wait for the answer to a question about a file (layer 015 reads it as the next message)."""
+    try:
+        from brain_modules import conversation_state as cs
+        if ctx.thread_key:
+            cs.set_pending(cs.get(ctx.thread_key), kind, data, ttl=2)
+    except Exception:
+        pass
+
+
 def process(ctx, deps):
     if ctx.first_word not in ["open", "show", "find", "display",
                                "launch", "view", "pull", "bring"]:
@@ -210,10 +220,18 @@ def process(ctx, deps):
         _uname = config.KEY.get("identity", {}).get("user_name", "")
         results = search_files(_search_query, user_name=_uname)
 
+        # Decide now whether the top result opens, so the chat card says exactly what happened.
+        # "my photos from goa" asks for several files: show the list instead of opening one of them.
+        _plural = bool(re.search(r"\b(?:photos|pictures|images|videos|files|documents|pdfs|screenshots|songs|"
+                                 r"recordings|notes)\b", remaining))
+        from hands.files import CONFIDENT_SCORE
+        _will_open = bool(results and (_has_open_intent or _has_file_intent) and not _plural
+                          and results[0].get("score", 0) >= CONFIDENT_SCORE)
+
         # Push results to frontend chat
         try:
             from backend.api_server import set_state as _api_set_file
-            chat_data = format_results_for_chat(results, _search_query)
+            chat_data = format_results_for_chat(results, _search_query, opened=_will_open)
             _api_set_file("file_search_results", chat_data)
         except Exception:
             pass
@@ -222,16 +240,26 @@ def process(ctx, deps):
             # No files found. If it looked like an app, pass through to layer 4.5
             if _is_likely_app(remaining):
                 return LayerResult.pass_through()
-            speech = format_results_for_speech([], _search_query)
-            return LayerResult.stop(speech)
+            _ask(ctx, "file_where", {"query": _search_query})
+            return LayerResult.stop(f"I couldn't find anything called \"{_search_query}\" on this PC. "
+                                    "If you remember part of the file name, or the folder it's in, tell me and I'll look again.")
 
-        # Decide if we will auto-open the top result
-        # "my photos from goa" asks for several files: show the list instead of opening one of them.
-        _plural = bool(re.search(r"\b(?:photos|pictures|images|videos|files|documents|pdfs|screenshots|songs|"
-                                 r"recordings|notes)\b", remaining))
-        from hands.files import CONFIDENT_SCORE
-        _will_open = ((_has_open_intent or _has_file_intent) and not _plural
-                      and results[0].get("score", 0) >= CONFIDENT_SCORE)
+        # Nothing matched the words as typed; these are names one or two letters away ("gookarna" -> GOKARNA.mp4).
+        # Never open a guess: say what was close and ask.
+        if results[0].get("similar_to"):
+            top = results[0]
+            try:
+                from brain_modules.dialogue_manager import remember_action
+                remember_action("file_search", _search_query, results, opened_index=None)
+            except Exception:
+                pass
+            _ask(ctx, "open_file_suggestion", {"path": top["path"], "name": top["name"]})
+            where = os.path.basename(os.path.dirname(top["path"])) or "your PC"
+            others = len(results) - 1
+            more = f" There {'are' if others > 1 else 'is'} {others} other close match{'es' if others > 1 else ''} in the chat." if others else ""
+            return LayerResult.stop(f"Nothing matched \"{_search_query}\" exactly. The closest is {top['name']} in {where}. "
+                                    f"Is that the one? I'll open it if you say yes.{more}")
+
         _opened_idx = 0 if _will_open else None
 
         # Remember this search in working memory for reference resolution
