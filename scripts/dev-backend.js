@@ -30,10 +30,28 @@ if (!python) {
 }
 console.log(`[dev] Backend Python: ${python}`);
 
-const child = spawn(python, ['main.py'], {
-  cwd: root,
-  stdio: 'inherit',
-  env: { ...process.env, SEVEN_BACKEND_EXTERNALLY_STARTED: '1', SEVEN_ELECTRON_MODE: '1' },
-});
-child.on('exit', code => process.exit(code ?? 0));
-for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => child.kill());
+// A crash (any exit other than a clean one or Ctrl+C) restarts the backend, like the installed app does, so the UI is
+// never left talking to nothing. The cause is in %APPDATA%\SEVEN\logs\native_crash.log when it was native code.
+let child = null;
+let stopping = false;
+let crashes = [];
+
+function start() {
+  child = spawn(python, ['main.py'], {
+    cwd: root,
+    stdio: 'inherit',
+    env: { ...process.env, SEVEN_BACKEND_EXTERNALLY_STARTED: '1', SEVEN_ELECTRON_MODE: '1' },
+  });
+  child.on('exit', code => {
+    if (stopping || code === 0) process.exit(code ?? 0);
+    crashes = crashes.filter(t => Date.now() - t < 120000).concat(Date.now());
+    if (crashes.length > 3) {
+      console.error('[dev] Backend crashed 4 times in 2 minutes; not restarting. See %APPDATA%\\SEVEN\\logs\\native_crash.log');
+      process.exit(code ?? 1);
+    }
+    console.error(`[dev] Backend exited with code ${code}; restarting in 2 seconds`);
+    setTimeout(start, 2000);
+  });
+}
+start();
+for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { stopping = true; child && child.kill(); });
