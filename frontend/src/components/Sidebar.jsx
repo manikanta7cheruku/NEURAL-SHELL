@@ -13,7 +13,7 @@ import {
   Compass, CreditCard, GearSix, House, Lightning, SidebarSimple,
 } from '@phosphor-icons/react';
 import api from '../api';
-import Mark from './Mark';
+import Mark, { Wordmark } from './Mark';
 import useStatus from '../stores/useStatus';
 import useUpdate from '../stores/useUpdate';
 import useTasks from '../stores/useTasks';
@@ -149,7 +149,7 @@ export default function Sidebar() {
             <Mark size={26} />
           </NavLink>
           <div className={cx('min-w-0 flex-1 transition-opacity duration-200', open ? 'opacity-100' : 'opacity-0')}>
-            <div className="text-[13px] font-semibold leading-tight text-s-text">Seven</div>
+            <Wordmark size={14} className="block leading-tight" />
             <div className="mt-0.5 flex items-center gap-1.5 text-[11px] leading-tight text-s-text-3">
               <span className={cx('h-1.5 w-1.5 rounded-full', stateDot, state === 'Listening' && 'animate-pulse')} />
               <span className="truncate">{state}</span>
