@@ -10,7 +10,7 @@ import { useEffect, useState } from 'react';
 import { Bug, Lightbulb, Palette, Gauge, MessageCircle, Check, CloudOff, Send } from 'lucide-react';
 import api from '../api';
 import useConfig from '../stores/useConfig';
-import { PageShell, Section, Row, Body, Button, Input, Segmented } from '../components/ui';
+import { PageShell, Section, Row, Body, Button, Input, Segmented, Toggle } from '../components/ui';
 import { cx } from '../lib/cx';
 import { toast } from '../lib/toast';
 import { sendDirect } from '../lib/feedbackForm';
@@ -134,8 +134,7 @@ export default function Feedback() {
                 <Input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@example.com" className="w-64" aria-label="Email" />
               </Row>
               <Row label="Include app details" description="Adds your Seven version and Windows version so bugs are easier to reproduce. Nothing else is sent.">
-                <input type="checkbox" checked={appInfo} onChange={e => setAppInfo(e.target.checked)} aria-label="Include app details"
-                       className="h-4 w-4 accent-[var(--color-s-accent)]" />
+                <Toggle checked={appInfo} onChange={setAppInfo} label="Include app details" />
               </Row>
             </Section>
 
