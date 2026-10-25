@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Seven Tasks</title>
+<title>Seven</title>
 <link rel="stylesheet" href="styles/panel.css" />
 <style>
   html, body {
@@ -22,45 +22,43 @@
 <div id="panel">
   <div class="panel-header">
     <div class="header-left">
-      <div class="eyebrow"><span class="wordmark">SEVEN</span><span class="status-pulse" id="brand-dot" aria-hidden="true"></span><span class="header-sub" id="header-sub">connecting</span></div>
-      <div class="header-brand"><span class="header-title">Tasks, triggers and schedules</span></div>
+      <span class="monogram" aria-hidden="true">S</span>
+      <div class="header-text">
+        <span class="wordmark">Seven</span>
+        <span class="eyebrow"><span class="status-pulse" id="brand-dot" aria-hidden="true"></span><span class="header-sub" id="header-sub">Connecting</span></span>
+      </div>
     </div>
     <div class="header-actions">
-      <button class="icon-btn" onclick="toggleSearch()" title="Search (Ctrl+F)">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
+      <button class="icon-btn" onclick="toggleSearch()" title="Search (Ctrl+F)" aria-label="Search">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
       </button>
-      <button class="icon-btn" onclick="closePanel()" title="Close (Esc)">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      <button class="icon-btn" onclick="closePanel()" title="Close (Esc)" aria-label="Close">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M17 7L7 17M7 7l10 10"/></svg>
       </button>
     </div>
   </div>
 
   <div class="summary-card" id="summary-card">
-    <div class="summary-item">
-      <span class="summary-val" id="sum-completed">0</span>
-      <span class="summary-label">done</span>
+    <div class="summary-line">
+      <span><b class="summary-val" id="sum-pending">0</b> to do</span>
+      <span class="summary-dot" aria-hidden="true"></span>
+      <span><b class="summary-val warn" id="sum-overdue">0</b> overdue</span>
+      <span class="summary-dot" aria-hidden="true"></span>
+      <span><b class="summary-val" id="sum-completed">0</b> done today</span>
     </div>
-    <div class="summary-sep"></div>
-    <div class="summary-item">
-      <span class="summary-val accent" id="sum-pending">0</span>
-      <span class="summary-label">pending</span>
-    </div>
-    <div class="summary-sep"></div>
-    <div class="summary-item">
-      <span class="summary-val warn" id="sum-overdue">0</span>
-      <span class="summary-label">overdue</span>
-    </div>
+    <div class="summary-progress" aria-hidden="true"><span id="sum-progress"></span></div>
   </div>
 
-  <div class="tab-bar">
-    <button class="tab active" data-tab="tasks" onclick="switchTab('tasks')">
+  <div class="tab-bar" role="tablist">
+    <span class="tab-ink" id="tab-ink" aria-hidden="true"></span>
+    <button class="tab active" data-tab="tasks" role="tab" aria-selected="true" onclick="switchTab('tasks')">
       Tasks <span class="tab-count" id="tab-cnt-tasks">0</span>
     </button>
-    <button class="tab" data-tab="triggers" onclick="switchTab('triggers')">
+    <button class="tab" data-tab="triggers" role="tab" aria-selected="false" onclick="switchTab('triggers')">
       Triggers <span class="tab-count" id="tab-cnt-triggers">0</span>
     </button>
-    <button class="tab" data-tab="schedules" onclick="switchTab('schedules')">
-      Schedules <span class="tab-count" id="tab-cnt-schedules">0</span>
+    <button class="tab" data-tab="schedules" role="tab" aria-selected="false" onclick="switchTab('schedules')">
+      Reminders <span class="tab-count" id="tab-cnt-schedules">0</span>
     </button>
   </div>
 
@@ -69,7 +67,9 @@
   </div>
 
   <div class="quick-add" id="quick-add">
-    <input class="quick-input" id="quick-input" placeholder="Add a task and press Enter" autocomplete="off" spellcheck="false">
+    <svg class="quick-plus" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+    <input class="quick-input" id="quick-input" placeholder="Add a task" autocomplete="off" spellcheck="false">
+    <kbd class="quick-kbd">Enter</kbd>
   </div>
 
   <div class="tab-content active" id="tab-tasks">
@@ -82,28 +82,28 @@
     <div class="scroll-area" id="task-list"></div>
     <div class="empty-state" id="task-empty" style="display:none">
       <div class="empty-icon">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M9 12l2 2 4-4"/></svg>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M8.5 12.2l2.3 2.3 4.7-4.9"/></svg>
       </div>
-      <div class="empty-title">All clear</div>
-      <div class="empty-sub">No pending tasks matching this filter.</div>
+      <div class="empty-title">Nothing left here</div>
+      <div class="empty-sub">Add a task above, or tell Seven “remind me to…”.</div>
     </div>
   </div>
 
   <div class="tab-content hidden" id="tab-triggers">
     <div class="filter-bar" id="trigger-filters">
       <button class="filter-chip active" data-filter="all" onclick="setTriggerFilter('all')">All</button>
-      <button class="filter-chip" data-filter="hotkey" onclick="setTriggerFilter('hotkey')">Hotkey</button>
+      <button class="filter-chip" data-filter="hotkey" onclick="setTriggerFilter('hotkey')">Keys</button>
       <button class="filter-chip" data-filter="voice" onclick="setTriggerFilter('voice')">Voice</button>
       <button class="filter-chip" data-filter="snap" onclick="setTriggerFilter('snap')">Snap</button>
-      <button class="filter-chip" data-filter="workspace" onclick="setTriggerFilter('workspace')">Workspace</button>
+      <button class="filter-chip" data-filter="workspace" onclick="setTriggerFilter('workspace')">Workspaces</button>
     </div>
     <div class="scroll-area" id="trigger-list"></div>
     <div class="empty-state" id="trigger-empty" style="display:none">
       <div class="empty-icon">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M13 2L4 14h8l-1 8 9-12h-8l1-8z"/></svg>
       </div>
-      <div class="empty-title">No triggers found</div>
-      <div class="empty-sub">Create triggers in the main dashboard.</div>
+      <div class="empty-title">No triggers here</div>
+      <div class="empty-sub">Make one in Seven, under Triggers.</div>
     </div>
   </div>
 
@@ -111,40 +111,39 @@
     <div class="scroll-area" id="schedule-list"></div>
     <div class="empty-state" id="schedule-empty" style="display:none">
       <div class="empty-icon">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
       </div>
-      <div class="empty-title">No active schedules</div>
-      <div class="empty-sub">Ask Seven to set a reminder or alarm.</div>
+      <div class="empty-title">No reminders coming up</div>
+      <div class="empty-sub">Say “Seven, remind me at 5 to call mom”.</div>
     </div>
   </div>
 
   <div class="modal-overlay" id="closeall-modal" style="display:none">
     <div class="modal-card">
-      <h3 class="modal-title">Close everything?</h3>
-      <p class="modal-desc" id="closeall-desc">Seven saves your open apps as a workspace first, so you can bring them all back.</p>
+      <h3 class="modal-title">Close every app?</h3>
+      <p class="modal-desc" id="closeall-desc">Seven saves what's open as a workspace first, so one click brings it all back.</p>
       <div class="modal-actions">
         <button class="modal-btn secondary" onclick="dismissCloseAll()">Cancel</button>
-        <button class="modal-btn primary" onclick="executeCloseAll()">Close All</button>
+        <button class="modal-btn primary" onclick="executeCloseAll()">Close all</button>
       </div>
     </div>
   </div>
 
   <div class="restore-banner" id="restore-banner" style="display:none">
     <span class="restore-text" id="restore-text">Workspace closed</span>
-    <button class="restore-btn" onclick="restoreLastWorkspace()">Undo Close</button>
+    <button class="restore-btn" onclick="restoreLastWorkspace()">Bring back</button>
     <span class="restore-timer" id="restore-timer">60s</span>
   </div>
 
+  <div class="panel-notice" id="panel-notice" role="status" aria-live="polite"></div>
+
   <div class="panel-footer">
     <button class="footer-btn accent" onclick="openSevenTasks()">
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><path d="M15 3h6v6"/><path d="M10 14L21 3"/></svg>
       Open Seven
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M7 17L17 7M8 7h9v9"/></svg>
     </button>
-    <button class="footer-btn danger" onclick="showCloseAllModal()">
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
-      Close All
-    </button>
-    <span class="footer-hint" id="footer-hk">Alt+Shift+T</span>
+    <button class="footer-btn danger" onclick="showCloseAllModal()">Close all apps</button>
+    <kbd class="footer-hint" id="footer-hk">Alt+Shift+T</kbd>
   </div>
 
 </div>
