@@ -48,10 +48,17 @@ function ScanPreview({ apps, saving, onSave, onDismiss }) {
       </div>
 
       {noAddress > 0 && (
-        <p className="mx-4 mb-3 rounded-md bg-s-card px-3 py-2 text-[11.5px] leading-relaxed text-s-text-3">
-          {noAddress} tab{noAddress === 1 ? ' has' : 's have'} no saved address, so {noAddress === 1 ? 'it' : 'they'} can't be reopened.
-          Connect the Seven extension below and every tab is saved.
-        </p>)}
+        <div className="mx-4 mb-3 flex items-start gap-3 rounded-md bg-s-card px-3 py-2.5 text-[11.5px] leading-relaxed text-s-text-3">
+          <p className="flex-1">
+            Seven could read {noAddress === 1 ? 'one browser tab' : `${noAddress} browser tabs`} by title only, not by web address,
+            so {noAddress === 1 ? "that tab won't" : "those tabs won't"} come back when you open this workspace. Everything else will.
+            The Seven browser extension reports every tab's address.
+          </p>
+          <button onClick={() => document.getElementById('browser-tabs')?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
+                  className="shrink-0 rounded-md px-2 py-1 text-[11.5px] font-medium text-s-accent-h transition-colors hover:bg-s-accent/10">
+            Set it up
+          </button>
+        </div>)}
 
       <div className="flex items-center gap-2 border-t border-s-border px-4 py-3">
         <input ref={input} value={name} onChange={e => setName(e.target.value)} onKeyDown={e => e.key === 'Enter' && save()}
@@ -113,7 +120,7 @@ export default function WorkspaceTab({ workspaces, onScan, onSave, onUpdate, onR
         </div>
       )}
 
-      <div className="mt-6"><ChromeTabSyncCard /></div>
+      <div id="browser-tabs" className="mt-6"><ChromeTabSyncCard /></div>
     </>
   );
 }
