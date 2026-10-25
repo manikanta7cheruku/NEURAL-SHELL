@@ -8,8 +8,22 @@ pump messages continuously. A keepalive thread handles this.
 import time
 import threading
 
+import json
+import os
+
 from trigger_modules.normalization import normalize_hotkey
 from trigger_modules.executor import execute_trigger
+
+_CAPTURE_FLAG = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "SEVEN", "cache", "hotkey_capture.json")
+
+
+def _capturing() -> bool:
+    """True while the trigger form records a shortcut (backend/routes/triggers.py, /api/triggers/capture)."""
+    try:
+        with open(_CAPTURE_FLAG, encoding="utf-8") as f:
+            return time.time() < json.load(f).get("until", 0)
+    except Exception:
+        return False
 
 
 class HotkeyListener:
@@ -179,6 +193,11 @@ class HotkeyListener:
 
         combo = normalize_hotkey(raw_combo)
         trigger = self._hotkey_map.get(combo)
+
+        if trigger and _capturing():
+            # The trigger form is recording a shortcut: this press is an answer to "which keys?", not a command.
+            self._pressed_keys.clear()
+            return
 
         if trigger:
             self._last_fire = now

@@ -165,12 +165,18 @@ export default function Triggers() {
           </div>
         )}
       </div>
-      <Sheet open={showNew || !!editingId} onClose={() => { setShowNew(false); setEditingId(null); }}
+      <Sheet open={showNew || !!editingId} onClose={() => { setShowNew(false); setEditingId(null); }} width={560}
              title={editingId ? 'Edit trigger' : 'New trigger'}
-             description="Pick what starts it (a hotkey, a phrase you say, or a snap) and what it does.">
+             description="One step to run anything: an app, a site, a workspace or a command.">
         {(showNew || editingId) && (
           <TriggerForm key={editingId || 'new'} initial={editingId ? triggers.find(t => t.id === editingId) : null} onSave={save}
-                       onCancel={() => { setShowNew(false); setEditingId(null); }} workspaces={workspaces} />)}
+                       onCancel={() => { setShowNew(false); setEditingId(null); }} workspaces={workspaces}
+                       onDisableOther={async id => {
+                         const r = await updateTrigger(id, { enabled: false });
+                         if (r.ok) { toast.success('Turned off', triggers.find(t => t.id === id)?.name); fetchStats(); }
+                         else toast.error("Couldn't turn it off", r.msg);
+                         return r.ok;
+                       }} />)}
       </Sheet>
     </PageShell>
   );

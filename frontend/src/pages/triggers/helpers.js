@@ -1,11 +1,11 @@
 export const ACTION_CONFIG = {
-  open_app:       { icon: 'Zap',        label: 'Open App' },
-  open_url:       { icon: 'Globe',      label: 'Open URL' },
-  open_file:      { icon: 'FileText',   label: 'Open File' },
-  open_folder:    { icon: 'FolderOpen', label: 'Open Folder' },
-  open_workspace: { icon: 'Layout',     label: 'Open Workspace' },
-  run_command:    { icon: 'Terminal',   label: 'Run Command' },
-  seven_action:   { icon: 'Settings2',  label: 'Seven Action' },
+  open_app:       { icon: 'Zap',        label: 'Open app' },
+  open_url:       { icon: 'Globe',      label: 'Open site' },
+  open_file:      { icon: 'FileText',   label: 'Open file' },
+  open_folder:    { icon: 'FolderOpen', label: 'Open folder' },
+  open_workspace: { icon: 'Layout',     label: 'Open workspace' },
+  run_command:    { icon: 'Terminal',   label: 'Run command' },
+  seven_action:   { icon: 'Settings2',  label: 'Seven command' },
 };
 
 export function formatHotkey(hk) {
