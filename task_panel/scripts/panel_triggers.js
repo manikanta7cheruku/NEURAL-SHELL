@@ -64,29 +64,23 @@ async function safeFireTrigger(id) {
   }
 }
 
+// { ok: true } | { ok: false, refused: detail } (a plan limit, said by the server) | null (no server answered).
+// A refusal is final: retrying through the other server would get around the plan limit, which is how the panel used
+// to turn on more triggers than the plan allows.
 async function safeToggleTriggerEnabled(id, enabled) {
-  const online = await isSevenOnline();
+  const put = async url => {
+    const resp = await fetch(url, { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ enabled }), signal: AbortSignal.timeout(4000) });
+    const body = await resp.json().catch(() => ({}));
+    if (resp.ok) return { ok: true };
+    return { ok: false, refused: body.detail || body };
+  };
 
-  if (online) {
-    try {
-      if (typeof sevenAPI === 'function') {
-        const r = await sevenAPI(`/triggers/${id}`, 'PUT', { enabled });
-        if (r && r.success) return r;
-      }
-    } catch (err) {}
+  if (await isSevenOnline()) {
+    try { return await put(`http://127.0.0.1:7777/api/triggers/${id}`); } catch (err) { /* Seven went away: use the panel server */ }
   }
-
   try {
-    if (typeof panelAPI === 'function') {
-      return await panelAPI(`/panel/triggers/${id}`, 'PUT', { enabled });
-    } else {
-      const resp = await fetch(`http://127.0.0.1:7778/panel/triggers/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled })
-      });
-      return await resp.json();
-    }
+    return await put(`http://127.0.0.1:7778/panel/triggers/${id}`);
   } catch (err) {
     console.error('[PANEL] Toggle trigger failed:', err);
     return null;
@@ -233,13 +227,15 @@ function renderTriggerCard(t, index) {
     if (category === 'hotkey') {
       badgeVal = (typeof formatHotkey === 'function' ? formatHotkey(t.hotkey) : t.hotkey) || 'hotkey';
     } else if (category === 'voice') {
-      badgeVal = t.voice_phrase ? `"${t.voice_phrase}"` : 'voice';
+      badgeVal = t.voice_phrase ? `Say “Seven, ${t.voice_phrase}”` : 'By voice';
     } else if (category === 'snap') {
-      badgeVal = t.audio_pattern ? t.audio_pattern.replace(/_/g, ' ') : 'snap';
+      const n = parseInt(t.audio_pattern, 10) || 1;
+      badgeVal = `${n} snap${n === 1 ? '' : 's'}`;
     } else if (category === 'workspace') {
-      badgeVal = 'workspace';
+      badgeVal = 'Opens a workspace';
     } else {
-      badgeVal = t.action_type || t.type || 'trigger';
+      badgeVal = ({ open_app: 'Opens an app', open_url: 'Opens a site', open_file: 'Opens a file', open_folder: 'Opens a folder',
+                    run_command: 'Runs a command', seven_action: 'A Seven command' })[t.action_type] || 'Trigger';
     }
 
     card.innerHTML = `
@@ -249,11 +245,11 @@ function renderTriggerCard(t, index) {
           <div class="trigger-name">${escHtml(t.name || 'Unnamed Trigger')}</div>
           <div class="trigger-meta">
             <span class="trigger-badge ${isHotkey ? 'hotkey' : ''}">${escHtml(badgeVal)}</span>
-            ${t.fire_count ? `<span class="trigger-fire-count">${t.fire_count} fires</span>` : ''}
+            ${t.fire_count ? `<span class="trigger-fire-count">used ${t.fire_count}×</span>` : ''}
           </div>
         </div>
         <div class="trigger-actions">
-          <button class="trigger-action-btn fire" onclick="testFireTrigger(${id}, event)" title="Fire Trigger">
+          <button class="trigger-action-btn fire" onclick="testFireTrigger(${id}, event)" title="Run it now">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
               <polygon points="5 3 19 12 5 21 5 3"/>
             </svg>
@@ -263,10 +259,10 @@ function renderTriggerCard(t, index) {
               <path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/>
             </svg>
           </button>
-          <button class="mini-toggle ${enabled ? 'on' : ''}" id="trig-toggle-${id}" onclick="handleToggleTrigger(${id}, event)" title="${enabled ? 'Disable trigger' : 'Enable trigger'}" aria-pressed="${enabled}">
-            <span class="mini-toggle-knob"></span>
-          </button>
         </div>
+        <button class="mini-toggle ${enabled ? 'on' : ''}" id="trig-toggle-${id}" onclick="handleToggleTrigger(${id}, event)" title="${enabled ? 'Turn off' : 'Turn on'}" aria-pressed="${enabled}">
+          <span class="mini-toggle-knob"><svg viewBox="0 0 10 10" aria-hidden="true"><path d="M2.2 5.3l1.9 1.8 3.7-4" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" pathLength="1"/></svg></span>
+        </button>
       </div>
     `;
   } catch (err) {
@@ -333,7 +329,21 @@ async function handleToggleTrigger(id, event) {
   t.enabled = next;
   t.status = next ? 'active' : 'disabled';
 
-  const ok = await safeToggleTriggerEnabled(id, next);
+  const result = await safeToggleTriggerEnabled(id, next);
+  if (result && result.refused) {
+    // Put the switch back and say why, in plain words.
+    if (btn) { btn.classList.toggle('on', !next); btn.setAttribute('aria-pressed', String(!next)); }
+    if (card) card.classList.toggle('disabled', next);
+    t.enabled = !next;
+    t.status = !next ? 'active' : 'disabled';
+    const d = result.refused;
+    const msg = d && d.limit
+      ? `Your ${String(d.tier || 'free').replace(/^\w/, c => c.toUpperCase())} plan allows <b>${d.limit} active triggers</b>. Turn one off first, or upgrade in Seven.`
+      : escHtml((d && d.message) || "That trigger couldn't be turned on.");
+    if (typeof showNotice === 'function') showNotice(msg, 'warn');
+    return;
+  }
+  const ok = !!(result && result.ok);
   if (!ok) {
     // Queue the toggle action as last resort if both Seven and panel server are unavailable
     queueOfflineAction({ type: 'toggle', triggerId: id, payload: { enabled: next } });

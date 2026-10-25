@@ -172,8 +172,20 @@ function updateBrand(alive) {
   const dot = document.getElementById('brand-dot');
   const sub = document.getElementById('header-sub');
   if (dot) dot.classList.toggle('alive', alive);
-  if (sub) sub.textContent = alive ? 'connected' : 'offline';
+  if (sub) sub.textContent = alive ? 'Running' : 'Closed, your lists still work';
 }
+
+// The underline under the active tab glides to it.
+function moveTabInk() {
+  const ink = document.getElementById('tab-ink');
+  const active = document.querySelector('.tab.active');
+  if (!ink || !active) return;
+  ink.style.width = `${active.offsetWidth}px`;
+  ink.style.transform = `translateX(${active.offsetLeft}px)`;
+}
+window.addEventListener('resize', moveTabInk);
+document.addEventListener('DOMContentLoaded', () => requestAnimationFrame(moveTabInk));
+if (document.fonts) document.fonts.ready.then(moveTabInk);
 
 function updateTabCounts() {
   const t = document.getElementById('tab-cnt-tasks');
@@ -192,6 +204,7 @@ function switchTab(tab) {
     el.classList.toggle('active', isActive);
     el.setAttribute('aria-selected', isActive ? 'true' : 'false');
   });
+  moveTabInk();
 
   document.querySelectorAll('.tab-content').forEach((el) => {
     el.classList.add('hidden');
@@ -205,7 +218,7 @@ function switchTab(tab) {
   }
 
   const quickAdd = document.getElementById('quick-add');
-  if (quickAdd) quickAdd.style.display = tab === 'tasks' ? 'block' : 'none';
+  if (quickAdd) quickAdd.style.display = tab === 'tasks' ? '' : 'none';
 
   if (tab === 'tasks') {
     if (typeof stopSchedulesTimer === 'function') stopSchedulesTimer();
