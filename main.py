@@ -15,6 +15,19 @@ import time
 import threading
 import subprocess
 
+# A crash inside native code (an audio or AI library) kills the process with no Python traceback. faulthandler writes
+# every thread's stack to logs\native_crash.log when that happens, so the library at fault can be found.
+try:
+    import faulthandler
+    _crash_dir = os.path.join(os.environ.get('APPDATA', os.path.expanduser('~')), 'SEVEN', 'logs')
+    os.makedirs(_crash_dir, exist_ok=True)
+    _crash_log = open(os.path.join(_crash_dir, 'native_crash.log'), 'a', encoding='utf-8')
+    _crash_log.write(f"\n--- Seven started {time.strftime('%Y-%m-%d %H:%M:%S')} (pid {os.getpid()}) ---\n")
+    _crash_log.flush()
+    faulthandler.enable(file=_crash_log, all_threads=True)
+except Exception:
+    pass
+
 if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 if sys.stderr and hasattr(sys.stderr, 'reconfigure'):
