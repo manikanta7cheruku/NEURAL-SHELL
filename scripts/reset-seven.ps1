@@ -43,7 +43,7 @@ if (-not $Yes) {
 Write-Host "`nStopping Seven..." -ForegroundColor Cyan
 Get-Process -Name SEVEN -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 Get-CimInstance Win32_Process | Where-Object {
-  $_.CommandLine -and ($_.CommandLine -match 'trigger_daemon\.py|schedule_daemon\.py|panel_server\.py|offline_tab_listener\.py|overlay_daemon')
+  $_.CommandLine -and ($_.CommandLine -match 'trigger_daemon\.py|schedule_daemon\.py|panel_server\.py|offline_tab_listener\.py|overlay_daemon|panel[-_]host')
 } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 Start-Sleep -Seconds 2
 
@@ -65,7 +65,7 @@ if ($uninstaller) {
   Write-Host "Uninstalling..." -ForegroundColor Cyan
   Start-Process -FilePath $uninstaller.FullName -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait
 }
-foreach ($name in 'SevenTriggerDaemon', 'SevenOverlayDaemon', 'SevenScheduleDaemon') {
+foreach ($name in 'SevenTriggerDaemon', 'SevenOverlayDaemon', 'SevenScheduleDaemon', 'SevenPanelServer', 'com.sevenlabs.seven.panel') {
   schtasks /Delete /F /TN $name 2>$null | Out-Null
   Remove-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name $name -ErrorAction SilentlyContinue
   Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path ([Environment]::GetFolderPath('Startup')) "$name.bat"), (Join-Path ([Environment]::GetFolderPath('Startup')) "$name.lnk")
