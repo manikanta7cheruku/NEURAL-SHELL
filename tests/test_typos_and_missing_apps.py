@@ -8,9 +8,18 @@ import unittest
 
 import support  # noqa: F401  (sets up paths and test mode)
 from brain_modules import action_receipts
-from hands import app_launcher, files
+
+try:                                    # hands needs the desktop packages (pyautogui, pywin32), which CI doesn't install
+    from hands import app_launcher, files
+except ImportError:
+    app_launcher = files = None
 
 
+class NotInstalled(Exception):
+    """Stands in for app_launcher.AppNotInstalled where hands can't be imported."""
+
+
+@unittest.skipIf(files is None, "hands needs the full Windows install")
 class Typos(unittest.TestCase):
     VOCAB = sorted({"gokarna", "dandiya", "resume", "budget", "trip", "goa", "invoice", "report"})
 
@@ -46,6 +55,7 @@ class Typos(unittest.TestCase):
         self.assertTrue(files.format_results_for_chat(hit[:1], "a", opened=True)["opened"])
 
 
+@unittest.skipIf(app_launcher is None, "hands needs the full Windows install")
 class MissingApps(unittest.TestCase):
     def test_missing_program_is_detected(self):
         gone = r"M:\nowhere-seven-test\App\App.exe"
@@ -61,9 +71,11 @@ class MissingApps(unittest.TestCase):
             os.unlink(here)
         self.assertIsNone(app_launcher._missing_target({"launch": "explorer.exe shell:AppsFolder\\Microsoft.Photos"}))
 
+
+class HonestReply(unittest.TestCase):
     def test_reply_explains_instead_of_claiming_success(self):
         def gone():
-            raise app_launcher.AppNotInstalled("Adobe Premiere Pro 2025 isn't where Windows thinks it is (M:\\adobe2). "
+            raise (app_launcher.AppNotInstalled if app_launcher else NotInstalled)("Adobe Premiere Pro 2025 isn't where Windows thinks it is (M:\\adobe2). "
                                                "It may have been moved or uninstalled")
         r = action_receipts.run_action("OPEN", "premiere pro", gone)
         self.assertEqual(r.status, "failed")
