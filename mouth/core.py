@@ -43,6 +43,44 @@ _current_process = None
 _lock = threading.Lock()
 _interrupted = threading.Event()
 
+# ── In-app natural voice (mouth/engine.py) ────────────────────────────────
+# The Seven app turns this on at startup (main_modules/startup/module_loader.py): the voice stays loaded and speech
+# streams sentence by sentence. Helper processes (reminders with Seven closed) leave it off and use the one-shot
+# subprocess below, which speaks with the same natural voice but doesn't keep it in memory.
+_inprocess = False
+
+
+def enable_inprocess() -> bool:
+    global _inprocess
+    from mouth.engine import ENGINE
+    if not ENGINE.available():
+        print("[MOUTH] Natural voice not installed yet; using the basic voice")
+        return False
+    _inprocess = True
+    ENGINE.warm()
+    return True
+
+
+def _voice_choice():
+    """(voice_id, speed factor) from config, read each time so a change in Settings applies to the next sentence."""
+    from mouth import voices
+    try:
+        import json as _json
+        p = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "SEVEN", "config.json")
+        with open(p, encoding="utf-8") as f:
+            v = _json.load(f).get("voice", {})
+    except Exception:
+        v = {}
+    vid = v.get("voice_id") if voices.is_natural(v.get("voice_id", "")) else voices.DEFAULT_VOICE
+    return vid, voices.speed_factor(v.get("speed", 1.0))
+
+
+def _engine():
+    if not _inprocess:
+        return None
+    from mouth.engine import ENGINE
+    return ENGINE
+
 
 def _build_run_cmd():
     """Build the Python command and env for speaker subprocess."""
@@ -130,6 +168,11 @@ def speak(text):
     if "###" in text:
         return True
 
+    eng = _engine()
+    if eng:
+        voice, speed = _voice_choice()
+        return eng.say([text], voice=voice, speed=speed)
+
     _interrupted.clear()
 
     try:
@@ -168,10 +211,22 @@ def speak_streamed(sentence_generator):
         tuple: (completed: bool, full_text: str)
     """
     global _current_process
-    
+
     full_text = []
     completed = True
-    
+
+    eng = _engine()
+    if eng:
+        # Synthesis runs one sentence ahead of playback while the reply is still being written.
+        def spoken():
+            for sentence in sentence_generator:
+                full_text.append(sentence)
+                if sentence.strip() and "###" not in sentence:
+                    yield sentence
+        voice, speed = _voice_choice()
+        completed = eng.say(spoken(), voice=voice, speed=speed)
+        return completed, " ".join(full_text)
+
     for sentence in sentence_generator:
         sentence = sentence.strip()
         if not sentence:
@@ -226,6 +281,10 @@ def interrupt():
     global _current_process
 
     _interrupted.set()
+    eng = _engine()
+    if eng and eng.stop():
+        print("[MOUTH] Speech interrupted")
+        return True
 
     with _lock:
         if _current_process and _current_process.poll() is None:
@@ -256,6 +315,9 @@ def interrupt():
 
 def is_speaking():
     """Check if Seven is currently speaking."""
+    eng = _engine()
+    if eng and eng.is_speaking():
+        return True
     with _lock:
         if _current_process and _current_process.poll() is None:
             return True

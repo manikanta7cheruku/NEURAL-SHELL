@@ -63,6 +63,8 @@ def _get_voice_setting():
     engine   = voice.get("engine", "sapi")
     voice_id = voice.get("voice_id", "en_US-ryan-high")
     sapi_idx = voice.get("voice_index", 0)
+    if engine == "kokoro":
+        return engine, voice_id, sapi_idx
 
     # Validate piper setup — if engine=piper but piper not found, fall back to SAPI
     if engine == "piper":
@@ -291,6 +293,15 @@ def _speak_sapi(text, voice_index=0, speed=165):
 
 # ── Main entry ────────────────────────────────────────────────────────────
 
+def _speak_natural_default(engine):
+    """Installs from before the natural voice (engine piper or sapi) move to it once it is downloaded."""
+    try:
+        from mouth import voices
+        return engine in ("piper", "sapi") and voices.kokoro_ready() and not _get_config().get("voice", {}).get("keep_basic")
+    except Exception:
+        return False
+
+
 # Module-level cache — config read once per process, not once per word
 _VOICE_CACHE = None
 
@@ -309,11 +320,30 @@ def _get_voice_cached():
     return _VOICE_CACHE
 
 
+def _speak_natural(text, voice_id, speed):
+    """The natural (Kokoro) voice, loaded for this one message. Used by helpers that run with Seven closed."""
+    try:
+        from mouth import voices
+        if not voices.kokoro_ready():
+            return False
+        from mouth.engine import Engine
+        return Engine().say([text], voice=voice_id, speed=voices.speed_factor(speed)) is not None
+    except Exception as e:
+        print(f"[SPEAKER] Natural voice failed: {e}", file=sys.stderr)
+        return False
+
+
 def speak_text(text):
     """
-    Speak text. Uses Piper if available, falls back to pyttsx3.
+    Speak text with the natural voice when it is installed, else Piper, else Windows' built-in voice.
     """
     engine, voice_id, sapi_idx, speed = _get_voice_cached()
+
+    if engine == "kokoro" or _speak_natural_default(engine):
+        if _speak_natural(text, voice_id, speed):
+            return
+        engine = "piper"
+        voice_id = "en_US-amy-medium"
 
     if engine == "piper":
         success = _speak_piper(text, voice_id, speed=speed)

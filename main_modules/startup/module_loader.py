@@ -101,7 +101,11 @@ def load_all_modules(ctx):
         ctx.mouth           = _mouth_mod
         ctx.mouth_interrupt = mouth_interrupt
         ctx.is_speaking     = is_speaking
-        print(Fore.GREEN + "[SYSTEM] Mouth loaded")
+        from mouth.core import enable_inprocess
+        if enable_inprocess():                      # natural voice, kept warm, streamed sentence by sentence
+            print(Fore.GREEN + "[SYSTEM] Mouth loaded (natural voice)")
+        else:
+            print(Fore.GREEN + "[SYSTEM] Mouth loaded (basic voice)")
     except Exception as e:
         print(Fore.RED + f"[SYSTEM] Mouth failed: {e}")
         import traceback; traceback.print_exc()
