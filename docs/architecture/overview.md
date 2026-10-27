@@ -25,7 +25,7 @@ If the Python process exits, Electron restarts it. The UI shows "Connecting" and
 ## One request, end to end
 
 ```
-voice:  microphone -> ears (VAD, noise gates, AEC, wake word, speech-to-text, voice ID)
+voice:  microphone -> ears (Silero speech detector, Whisper, wake word or push to talk, own-voice rejection)
                                                    |
 text:   Console -> POST /api/chat ------------------+
                                                    v
@@ -39,7 +39,7 @@ text:   Console -> POST /api/chat ------------------+
                          action tags run in hands/* and produce receipts
                          the reply is reconciled with the receipts (a failure is never reported as done)
                                                    |
-                         reply streamed to the UI and spoken by mouth (Piper TTS)
+                         reply streamed to the UI and spoken by mouth (Kokoro, in-process)
                          transcript, facts and outcomes saved; learning runs on a background worker
 ```
 
@@ -51,8 +51,8 @@ The brain is documented in depth in [components/brain.md](../components/brain.md
 |---|---|
 | `main.py` | Python entry point: checks the environment, starts the API, voice loop and daemons |
 | `brain.py`, `brain_modules/` | The brain: pipeline, layers, memory gate, policy, prompts, learning |
-| `ears/` | Audio input: voice activity, noise handling, wake word, speech-to-text, voice identity |
-| `mouth/` | Speech output (Piper neural TTS, fallback engine) |
+| `ears/` | Audio input: speech detector, speech-to-text, wake word, push to talk, snap and clap detection |
+| `mouth/` | Speech output: Kokoro natural voices kept warm in the app, Piper and SAPI as fallbacks |
 | `hands/` | Actions on Windows: apps, windows, system settings, files, workspaces, notifications |
 | `memory/` | Stores: facts, conversations, learning, command log, limits |
 | `knowledge/` | Document indexing and retrieval for the Knowledge page |
@@ -95,8 +95,8 @@ See [privacy and data](privacy-and-data.md) for what goes online.
 | Concern | Choice | Why (details in [decisions](decisions/README.md)) |
 |---|---|---|
 | Language model | Ollama with a hardware-matched model | Local, simple model management, GPU and CPU support |
-| Speech-to-text | faster-whisper with noise gates and a hallucination filter | Offline and private, good accuracy on GPU and CPU |
-| Text-to-speech | Piper | Natural voice, fast on CPU, offline |
+| Speech-to-text | Silero VAD, then faster-whisper (two-stage on CPU) and a hallucination filter | Offline and private; text about 0.6 s after you stop talking |
+| Text-to-speech | Kokoro v1.0 (fp16, ONNX Runtime) | Natural voice, first words in about 0.4 s on CPU, offline |
 | Facts and transcripts | SQLite (FTS5 for search) | Reliable, zero setup, inspectable |
 | Semantic recall | ChromaDB with sentence-transformers | Local vector search; derived from SQLite, rebuildable |
 | API | FastAPI on localhost | Typed, fast, easy for the UI and helper processes to share |
