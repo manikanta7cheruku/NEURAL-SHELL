@@ -1,107 +1,244 @@
 /**
- * Voice settings: speaking voice and speed, control words, speech recognition
- * model, and the three voice security gates (push to talk, wake word, speaker
- * verification with enrollment). Everything saves on change.
+ * Voice settings, in the order people care about:
+ *   Seven's voice      eight natural voices (offline), each with a play button, and the speaking speed
+ *   How Seven listens  wake word, always, or push to talk; sensitivity; the follow-up window; "stop" to interrupt;
+ *                      the microphone with a live level and a hearing test that shows exactly what Seven heard
+ *   Snaps and claps    how strict the snap detector is
+ *   Control words, Speech recognition, Only respond to my voice (voiceprints)
+ * Everything saves on change.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Play, Square, Plus, X, Mic, Check, AlertTriangle } from 'lucide-react';
+import { Play, Square, Plus, X, Mic, Check, AlertTriangle, Download } from 'lucide-react';
 import api from '../../api';
 import useLicense from '../../stores/useLicense';
-import { Section, Row, Body, Toggle, Segmented, Button, Badge, Input, LoadingRows } from '../../components/ui';
+import useStatus from '../../stores/useStatus';
+import { Section, Row, Body, Toggle, Segmented, Button, Badge, Input, LoadingRows, Select } from '../../components/ui';
 import { cx } from '../../lib/cx';
 import { toast } from '../../lib/toast';
 import { saveWith } from './save';
 
-const SPEEDS = [{ value: 130, label: 'Slow' }, { value: 165, label: 'Normal' }, { value: 190, label: 'Fast' }, { value: 220, label: 'Fastest' }];
+const SPEEDS = [{ value: 0.9, label: 'Slower' }, { value: 1.0, label: 'Natural' }, { value: 1.1, label: 'Faster' }, { value: 1.22, label: 'Fastest' }];
 const nearestSpeed = s => SPEEDS.reduce((a, b) => (Math.abs(b.value - s) < Math.abs(a.value - s) ? b : a)).value;
 
-// ── Speaking voice ──────────────────────────────────────────────────────────
+// Merge into the saved voice settings, so two quick changes never overwrite each other.
+async function saveVoice(patch) {
+  return saveWith(async () => {
+    const fresh = (await api.get('/config')).data?.voice || {};
+    return api.put('/config', { updates: { voice: { ...fresh, ...patch } } });
+  });
+}
 
-function SpeakingVoice() {
-  const [voices, setVoices] = useState(null);
+// ── Seven's voice ───────────────────────────────────────────────────────────
+
+function NaturalVoice() {
+  const [data, setData] = useState(null);
   const [selected, setSelected] = useState(null);
-  const [speed, setSpeed] = useState(165);
-  const [previewing, setPreviewing] = useState(null);
+  const [speed, setSpeed] = useState(1.0);
+  const [playing, setPlaying] = useState(null);
+  const [install, setInstall] = useState(null);           // { status, progress }
+  const poll = useRef(null);
+  const stopTimer = useRef(null);
 
-  useEffect(() => {
-    api.get('/config').then(r => {
-      const v = r.data?.voice || {};
-      setSelected(v.voice_id || null);
-      setSpeed(v.speed || 165);
-    }).catch(() => {});
-    api.get('/setup/voices').then(r => setVoices(r.data.voices || [])).catch(() => setVoices([]));
-  }, []);
+  const load = useCallback(() => api.get('/voice/voices').then(r => {
+    setData(r.data);
+    setSelected(r.data.current.voice_id);
+    setSpeed(r.data.current.speed);
+  }).catch(() => setData({ ready: false, voices: [] })), []);
+  useEffect(() => { load(); return () => { clearInterval(poll.current); clearTimeout(stopTimer.current); }; }, [load]);
 
   const choose = async v => {
-    if (v.engine === 'piper' && !v.installed) return;
     const previous = selected;
-    setSelected(v.voice_id);
-    const voice = { engine: v.engine, voice_id: v.voice_id ?? String(v.index),
-                    voice_index: v.engine === 'sapi' ? parseInt(v.voice_id) : 0, speed };
-    const ok = await saveWith(() => api.put('/config', { updates: { voice } }));
-    if (!ok) setSelected(previous);
+    setSelected(v.id);
+    if (!(await saveVoice({ engine: 'kokoro', voice_id: v.id, speed }))) setSelected(previous);
   };
 
-  const changeSpeed = async value => {
-    setSpeed(value);
-    await saveWith(async () => {
-      const fresh = (await api.get('/config')).data?.voice || {};
-      return api.put('/config', { updates: { voice: { ...fresh, speed: value } } });
-    });
+  const changeSpeed = async value => { setSpeed(value); await saveVoice({ speed: value }); };
+
+  const play = async (v, e) => {
+    e?.stopPropagation();
+    clearTimeout(stopTimer.current);
+    if (playing === v.id) { setPlaying(null); api.post('/voice/stop').catch(() => {}); return; }
+    setPlaying(v.id);
+    try { await api.post('/voice/preview', { voice_id: v.id, speed }); }
+    catch { toast.error("Couldn't play this voice"); setPlaying(null); return; }
+    stopTimer.current = setTimeout(() => setPlaying(p => (p === v.id ? null : p)), 4500);
   };
 
-  const preview = async v => {
-    setPreviewing(v.voice_id);
-    try { await api.post('/setup/preview-voice', { engine: v.engine, voice_id: v.voice_id ?? String(v.index) }); }
-    catch { toast.error('Preview failed', 'Seven could not play this voice.'); }
-    setTimeout(() => setPreviewing(p => (p === v.voice_id ? null : p)), 6000);
+  const download = async () => {
+    try { setInstall((await api.post('/voice/install')).data); } catch { toast.error('Download failed to start'); return; }
+    poll.current = setInterval(async () => {
+      try {
+        const s = (await api.get('/voice/install')).data;
+        setInstall(s);
+        if (s.status === 'done' || s.status === 'error') {
+          clearInterval(poll.current);
+          if (s.status === 'done') { toast.success('Natural voice installed'); load(); }
+          else toast.error('Download failed', s.error);
+        }
+      } catch { /* the next tick retries */ }
+    }, 700);
   };
 
-  const neural = (voices || []).filter(v => v.engine === 'piper');
-  const builtIn = (voices || []).filter(v => v.engine === 'sapi');
-
-  const VoiceRow = ({ v }) => {
-    const active = selected === v.voice_id;
-    const disabled = v.engine === 'piper' && !v.installed;
-    return (
-      <div role="radio" aria-checked={active} tabIndex={disabled ? -1 : 0}
-           onClick={() => choose(v)} onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), choose(v))}
-           className={cx('flex items-center gap-3 px-5 py-3 transition-colors',
-                         disabled ? 'opacity-45 cursor-not-allowed' : 'cursor-pointer hover:bg-s-card',
-                         'focus-visible:outline-none focus-visible:bg-s-card')}>
-        <span className={cx('flex h-4 w-4 shrink-0 items-center justify-center rounded-full border',
-                            active ? 'border-s-accent bg-s-accent' : 'border-s-border-l')}>
-          {active && <span className="h-1.5 w-1.5 rounded-full bg-s-on-accent" />}
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <span className="text-[13px] font-medium text-s-text">{v.name}</span>
-            {v.gender && <span className="text-[12px] text-s-text-4">{v.gender}</span>}
-          </div>
-          <div className="text-[12px] text-s-text-3">{v.language}{disabled ? ' · not installed' : ''}</div>
-        </div>
-        <Button size="sm" variant="ghost" icon={previewing === v.voice_id ? Square : Play} disabled={disabled}
-                onClick={e => { e.stopPropagation(); preview(v); }}>
-          {previewing === v.voice_id ? 'Playing' : 'Preview'}
-        </Button>
-      </div>
-    );
-  };
+  if (!data) return <Section title="Seven's voice"><Body><LoadingRows rows={3} /></Body></Section>;
 
   return (
-    <Section title="Speaking voice" description="Runs offline. Neural voices sound more natural; Windows voices use less memory."
-             actions={<Segmented size="sm" value={nearestSpeed(speed)} options={SPEEDS} onChange={changeSpeed} />}>
-      {voices === null ? <Body><LoadingRows rows={3} /></Body> : voices.length === 0 ? (
-        <Body className="text-[13px] text-s-text-3">No voices found. Reinstall voices from System, Repair installation.</Body>
+    <Section title="Seven's voice" description="Natural voices that run on this PC, so Seven can talk with no internet."
+             actions={data.ready && <Segmented size="sm" value={nearestSpeed(speed)} options={SPEEDS} onChange={changeSpeed} />}>
+      {!data.ready ? (
+        <Body className="flex items-center gap-4">
+          <div className="min-w-0 flex-1">
+            <p className="text-[13px] font-medium text-s-text">Natural voice isn't installed yet</p>
+            <p className="mt-0.5 text-[12px] text-s-text-3">Seven is using its basic voice. The natural one is a {data.size_mb} MB download.</p>
+            {install && install.status !== 'done' && (
+              <div className="mt-2.5 h-1.5 overflow-hidden rounded-full bg-s-card-h">
+                <div className="h-full rounded-full bg-s-accent transition-[width] duration-500" style={{ width: `${install.progress || 2}%` }} />
+              </div>)}
+          </div>
+          <Button variant="primary" icon={Download} onClick={download} loading={install?.status === 'running'}>
+            {install?.status === 'running' ? `${install.progress || 0}%` : 'Download'}
+          </Button>
+        </Body>
       ) : (
-        <>
-          {neural.length > 0 && <div className="px-5 pt-3 pb-1 text-[12px] font-medium text-s-text-3">Neural voices</div>}
-          {neural.map(v => <VoiceRow key={v.voice_id} v={v} />)}
-          {builtIn.length > 0 && <div className="px-5 pt-3 pb-1 text-[12px] font-medium text-s-text-3">Windows voices</div>}
-          {builtIn.map(v => <VoiceRow key={v.voice_id} v={v} />)}
-        </>
+        <div className="grid grid-cols-1 gap-2 p-4 sm:grid-cols-2">
+          {data.voices.map(v => {
+            const on = selected === v.id;
+            return (
+              <div key={v.id} role="radio" aria-checked={on} tabIndex={0}
+                   onClick={() => choose(v)} onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), choose(v))}
+                   className={cx('group flex cursor-pointer items-center gap-3 rounded-xl border px-3.5 py-3 transition-[border-color,background-color] duration-200',
+                                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-s-accent/40',
+                                 on ? 'border-s-accent/50 bg-s-accent/[0.06]' : 'border-s-border hover:border-s-border-l hover:bg-s-card/60')}>
+                <button type="button" onClick={e => play(v, e)} aria-label={playing === v.id ? `Stop ${v.name}` : `Hear ${v.name}`}
+                        className={cx('flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors',
+                                      playing === v.id ? 'bg-s-accent text-s-on-accent' : 'bg-s-card text-s-text-2 hover:bg-s-card-h hover:text-s-text')}>
+                  {playing === v.id ? <Square size={11} fill="currentColor" /> : <Play size={12} fill="currentColor" className="ml-0.5" />}
+                </button>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[13px] font-medium text-s-text">{v.name}</span>
+                    {v.id === 'af_heart' && <Badge tone="accent">Default</Badge>}
+                  </div>
+                  <div className="truncate text-[12px] text-s-text-3">{v.accent} · {v.note}</div>
+                </div>
+                {on && <Check size={15} className="shrink-0 text-s-accent-h" />}
+              </div>);
+          })}
+        </div>
       )}
+    </Section>
+  );
+}
+
+// ── How Seven listens ───────────────────────────────────────────────────────
+
+const MODES = [
+  { value: 'wake', label: 'Wake word', hint: 'Say "Hey Seven" first. Background talk is ignored. Recommended.' },
+  { value: 'always', label: 'Always', hint: 'Seven acts on everything it hears. Best in a quiet room, alone.' },
+  { value: 'ptt', label: 'Push to talk', hint: 'Seven listens only while you hold Shift.' },
+];
+const SENSITIVITY = [{ value: 'relaxed', label: 'Relaxed' }, { value: 'balanced', label: 'Balanced' }, { value: 'strict', label: 'Strict' }];
+const SENS_HINT = {
+  relaxed: 'Hears soft voices and speech from across the room.',
+  balanced: 'Clear speech at a normal distance. Right for most rooms.',
+  strict: 'Only clear, close speech. For noisy rooms.',
+};
+
+function MicMeter() {
+  const level = useStatus(s => s.micLevel);
+  const state = useStatus(s => s.voiceState);
+  return (
+    <span className="mt-1 inline-flex items-center gap-2.5" aria-label="Microphone level">
+      <span className="inline-flex h-4 items-end gap-[3px]">
+        {Array.from({ length: 12 }).map((_, i) => (
+          <span key={i} className={cx('w-[3px] rounded-full transition-[height,background-color] duration-100',
+                                      level * 12 > i ? (state === 'hearing' ? 'bg-s-accent' : 'bg-s-text-3') : 'bg-s-border')}
+                style={{ height: `${30 + i * 6}%` }} />))}
+      </span>
+      <span className={cx('text-[11.5px]', state === 'hearing' ? 'text-s-accent-h' : 'text-s-text-4')}>
+        {state === 'hearing' ? 'Hearing you' : state === 'processing' ? 'Understanding' : 'Quiet'}
+      </span>
+    </span>
+  );
+}
+
+function Listening() {
+  const [v, setV] = useState(null);
+  const [mics, setMics] = useState(null);
+  const [test, setTest] = useState(null);                  // null | 'listening' | { heard, ignored }
+
+  useEffect(() => {
+    api.get('/config').then(r => setV(r.data?.voice || {})).catch(() => setV({}));
+    api.get('/voice/mics').then(r => setMics(r.data)).catch(() => setMics({ mics: [], default: '' }));
+  }, []);
+
+  const set = async patch => { setV(x => ({ ...x, ...patch })); await saveVoice(patch); };
+
+  const runTest = async () => {
+    setTest('listening');
+    try { setTest((await api.post('/voice/test', null, { timeout: 15000 })).data); }
+    catch (e) { setTest({ heard: '', ignored: e.response?.data?.detail || "Couldn't reach Seven's hearing." }); }
+  };
+
+  if (!v) return <Section title="How Seven listens"><Body><LoadingRows rows={4} /></Body></Section>;
+  const mode = MODES.find(m => m.value === (v.listen_mode || 'wake')) || MODES[0];
+  const sens = v.sensitivity || 'balanced';
+  const micOptions = [{ value: '', label: `Windows default${mics?.default ? ` (${mics.default})` : ''}` },
+                      ...((mics?.mics || []).map(n => ({ value: n, label: n })))];
+
+  return (
+    <Section title="How Seven listens" description="Seven listens for speech, not noise: a speech detector ignores fans, typing and music.">
+      <Row label="Listening mode" description={mode.hint} stacked>
+        <Segmented value={mode.value} onChange={value => set({ listen_mode: value })}
+                   options={MODES.map(m => ({ value: m.value, label: m.label }))} />
+      </Row>
+      <Row label="Sensitivity" description={SENS_HINT[sens]}>
+        <Segmented size="sm" value={sens} onChange={value => set({ sensitivity: value })} options={SENSITIVITY} />
+      </Row>
+      {mode.value === 'wake' && (
+        <Row label="Keep listening after a reply" description="For 8 seconds after Seven answers, reply without saying its name.">
+          <Toggle checked={(v.follow_up_seconds ?? 8) > 0} label="Keep listening after a reply"
+                  onChange={on => set({ follow_up_seconds: on ? 8 : 0 })} />
+        </Row>)}
+      <Row label='Say "stop" to interrupt' description="Cuts Seven off mid-sentence. Works best with a headset.">
+        <Toggle checked={v.interrupt ?? true} label='Say "stop" to interrupt' onChange={on => set({ interrupt: on })} />
+      </Row>
+      <Row label="Microphone" description={<MicMeter />}>
+        <Select value={v.mic || ''} onChange={value => set({ mic: value })} options={micOptions} className="h-8 max-w-[260px]" />
+      </Row>
+      <Body className="flex items-start gap-3">
+        <div className="min-w-0 flex-1">
+          <p className="text-[13px] font-medium text-s-text">Test how Seven hears you</p>
+          {test === null && <p className="mt-0.5 text-[12px] text-s-text-3">Say anything. Seven shows exactly what it heard, and doesn't act on it.</p>}
+          {test === 'listening' && (
+            <p className="mt-0.5 flex items-center gap-2 text-[12px] text-s-accent-h">
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-s-accent" />Listening. Say something now.
+            </p>)}
+          {test && test !== 'listening' && (
+            test.heard
+              ? <p className="mt-1 text-[13px] text-s-text">“{test.heard}”</p>
+              : <p className="mt-0.5 text-[12px] text-s-text-3">Nothing acted on: {test.ignored}{test.raw ? ` (“${test.raw}”)` : ''}.</p>)}
+        </div>
+        <Button size="sm" icon={Mic} onClick={runTest} loading={test === 'listening'}>{test === 'listening' ? 'Listening' : 'Test'}</Button>
+      </Body>
+    </Section>
+  );
+}
+
+// ── Snaps and claps ─────────────────────────────────────────────────────────
+
+function Snaps() {
+  const [sens, setSens] = useState(null);
+  useEffect(() => { api.get('/config').then(r => setSens(r.data?.voice?.snap_sensitivity || 'balanced')).catch(() => setSens('balanced')); }, []);
+  if (!sens) return null;
+  return (
+    <Section title="Snaps and claps" description="Triggers you start with a snap. Typing and mouse clicks never count.">
+      <Row label="Snap sensitivity" description={{ relaxed: 'Softer snaps and claps from further away.',
+                                                   balanced: 'A normal snap at arm\'s length.',
+                                                   strict: 'Only crisp snaps close to the mic.' }[sens]}>
+        <Segmented size="sm" value={sens} options={SENSITIVITY}
+                   onChange={async value => { setSens(value); await saveVoice({ snap_sensitivity: value }); }} />
+      </Row>
     </Section>
   );
 }
@@ -279,77 +416,42 @@ function SpeechRecognition() {
   );
 }
 
-// ── Voice security ──────────────────────────────────────────────────────────
 
-function VoiceSecurity() {
-  const [gates, setGates] = useState(null);
+// ── Only respond to my voice ────────────────────────────────────────────────
+
+function OnlyMe() {
+  const [on, setOn] = useState(null);
   const [enrolled, setEnrolled] = useState([]);
   const [enrolling, setEnrolling] = useState(false);
-  const ref = useRef(null);                 // always the latest gates, so quick toggles never save stale state
 
   const load = useCallback(() => {
-    api.get('/voice/gates').then(r => { setGates(r.data); ref.current = r.data; }).catch(() => {
-      const fallback = { push_to_talk: { enabled: false, key: 'shift' }, wake_word: { enabled: false, words: ['hey seven'] },
-                         speaker_verify: { enabled: false } };
-      setGates(fallback); ref.current = fallback;
-    });
+    api.get('/config').then(r => setOn(!!(r.data?.voice?.only_me || r.data?.voice_gates?.speaker_verify?.enabled)))
+       .catch(() => setOn(false));
     api.get('/voice/enrolled').then(r => setEnrolled(r.data.enrolled || [])).catch(() => setEnrolled([]));
   }, []);
   useEffect(() => { load(); }, [load]);
 
-  const save = async next => {
-    ref.current = next;
-    setGates(next);
-    await saveWith(() => api.post('/voice/gates', next));
+  const toggle = async value => {
+    setOn(value);
+    await saveVoice({ only_me: value });
+    api.get('/voice/gates').then(r => api.post('/voice/gates', { ...r.data, speaker_verify: { ...(r.data.speaker_verify || {}), enabled: value } }))
+       .catch(() => {});
   };
-  const edit = fn => {
-    const next = JSON.parse(JSON.stringify(ref.current));
-    fn(next);
-    return next;
-  };
-  const toggle = (gate, value) => save(edit(g => { g[gate] = { ...(g[gate] || {}), enabled: value }; }));
-  const setWord = (i, value) => { const next = edit(g => { g.wake_word.words[i] = value; }); ref.current = next; setGates(next); };
-  const addWord = () => save(edit(g => { g.wake_word = g.wake_word || { enabled: false, words: [] }; g.wake_word.words = [...(g.wake_word.words || []), 'hey seven']; }));
-  const removeWord = i => save(edit(g => { g.wake_word.words.splice(i, 1); }));
   const removeVoice = async name => {
     const ok = await saveWith(() => api.delete(`/voice/enrolled/${name}`));
     if (ok) setEnrolled(e => e.filter(n => n !== name));
   };
 
-  if (!gates) return <Section title="Voice security"><Body><LoadingRows rows={3} /></Body></Section>;
-  const ptt = gates.push_to_talk || {};
-  const ww = gates.wake_word || { words: [] };
-  const sv = gates.speaker_verify || {};
-
+  if (on === null) return null;
   return (
-    <Section title="Voice security" description="Filters that stop Seven reacting to background talk. Use any combination.">
-      <Row label="Push to talk" description="Seven listens only while you hold Shift.">
-        <Toggle checked={!!ptt.enabled} onChange={v => toggle('push_to_talk', v)} label="Push to talk" />
+    <Section title="Only respond to my voice" description="Seven recognises enrolled voices and ignores everyone else. Voiceprints stay on this PC.">
+      <Row label="Respond only to enrolled voices" description="Off by default: it adds a moment to every request.">
+        <Toggle checked={on} onChange={toggle} label="Respond only to enrolled voices" />
       </Row>
-      <Row label="Require a wake word" description={'Seven ignores speech that doesn\'t start with a wake word. "Hey Seven, open Chrome" runs "open Chrome".'}>
-        <Toggle checked={!!ww.enabled} onChange={v => toggle('wake_word', v)} label="Require a wake word" />
-      </Row>
-      <Body className="flex flex-wrap items-center gap-1.5 pt-0">
-        {(ww.words || []).map((word, i) => (
-          <span key={i} className="inline-flex items-center rounded-md border border-s-border bg-s-bg pl-2">
-            <input value={word} aria-label={`Wake word ${i + 1}`} onChange={e => setWord(i, e.target.value)}
-                   onBlur={() => save(ref.current)} className="h-7 w-28 bg-transparent text-[12px] text-s-text outline-none" />
-            {(ww.words || []).length > 1 && (
-              <button aria-label="Remove wake word" onClick={() => removeWord(i)}
-                      className="flex h-7 w-6 items-center justify-center text-s-text-4 hover:text-s-red"><X size={12} /></button>
-            )}
-          </span>
-        ))}
-        <Button size="sm" variant="ghost" icon={Plus} onClick={addWord}>Add wake word</Button>
-      </Body>
-      <Row label="Speaker verification" description="Respond only to enrolled voices.">
-        <Toggle checked={!!sv.enabled} onChange={v => toggle('speaker_verify', v)} label="Speaker verification" />
-      </Row>
-      {sv.enabled && enrolled.length === 0 && (
+      {on && enrolled.length === 0 && (
         <Body className="flex items-center gap-2 pt-0 text-[12px] text-s-yellow">
           <AlertTriangle size={13} /> No voice is enrolled yet, so Seven will ignore everyone. Enroll your voice below.
-        </Body>
-      )}
+        </Body>)}
       <Body className="space-y-2">
         <div className="flex items-center justify-between">
           <span className="text-[13px] font-medium text-s-text">Enrolled voices</span>
@@ -358,13 +460,12 @@ function VoiceSecurity() {
         {enrolled.length === 0 ? (
           <p className="text-[12px] text-s-text-3">None yet. You can also say "enroll my voice".</p>
         ) : enrolled.map(name => (
-          <div key={name} className="flex items-center justify-between rounded-lg border border-s-border bg-s-bg px-3 h-10">
+          <div key={name} className="flex h-10 items-center justify-between rounded-lg border border-s-border bg-s-bg px-3">
             <span className="flex items-center gap-2 text-[13px] capitalize text-s-text">
               <span className="h-1.5 w-1.5 rounded-full bg-s-green" />{name}
             </span>
             <Button size="sm" variant="ghost" onClick={() => removeVoice(name)}>Remove</Button>
-          </div>
-        ))}
+          </div>))}
       </Body>
       {enrolling && <EnrollDialog onClose={() => { setEnrolling(false); load(); }} />}
     </Section>
@@ -484,10 +585,12 @@ function EnrollDialog({ onClose }) {
 export default function VoiceSection() {
   return (
     <>
-      <SpeakingVoice />
+      <NaturalVoice />
+      <Listening />
+      <Snaps />
       <ControlWords />
       <SpeechRecognition />
-      <VoiceSecurity />
+      <OnlyMe />
     </>
   );
 }

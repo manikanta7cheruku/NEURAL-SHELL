@@ -142,13 +142,19 @@ class MicStream:
 
     # ── capture ──────────────────────────────────────────────────────────
     def _device_index(self, pa):
+        """The chosen mic, on Windows' standard audio system (it converts to 16 kHz; WASAPI would refuse). Settings
+        shows WASAPI's full names, the standard list cuts them to 31 characters, so match either way round."""
         if not self.device_name:
             return None
+        want = self.device_name.lower()
+        default_api = pa.get_default_host_api_info().get("index")
+        found = []
         for i in range(pa.get_device_count()):
             info = pa.get_device_info_by_index(i)
-            if info.get("maxInputChannels", 0) > 0 and self.device_name.lower() in info.get("name", "").lower():
-                return i
-        return None
+            name = info.get("name", "").lower().strip()
+            if info.get("maxInputChannels", 0) > 0 and name and (want in name or name in want):
+                found.append((info.get("hostApi") != default_api, i))
+        return min(found)[1] if found else None
 
     def _open(self, pa):
         import pyaudio

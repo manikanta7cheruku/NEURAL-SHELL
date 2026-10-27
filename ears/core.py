@@ -200,6 +200,42 @@ def _ignored(reason: str, text: str = ""):
     print(Fore.YELLOW + f"[EARS] Ignored: {reason}{f' ({text[:50]})' if text else ''}")
     _publish("voice_ignored", {"reason": reason, "text": text[:80], "at": time.time()})
     STREAM._set_state("idle")
+    _deliver_test("", reason, text)
+
+
+# ── Hearing test (Settings, Voice, Test) ─────────────────────────────────────
+# The next utterance goes to the test instead of being acted on, so the user sees exactly what Seven heard.
+_test_box = None
+
+
+def hearing_test(timeout: float = 8.0):
+    """Wait for the next utterance; {'heard': text, 'ignored': reason or '', 'raw': text} or None if nothing came."""
+    global _test_box
+    import queue as _q
+    box = _q.Queue(maxsize=1)
+    _test_box = box
+    try:
+        return box.get(timeout=timeout)
+    except _q.Empty:
+        return None
+    finally:
+        _test_box = None
+
+
+def _deliver_test(heard: str, reason: str = "", raw: str = "") -> bool:
+    box = _test_box
+    if box is None:
+        return False
+    try:
+        box.put_nowait({"heard": heard, "ignored": reason, "raw": raw})
+    except Exception:
+        pass
+    return True
+
+
+def listening() -> bool:
+    """True when the microphone stream is running (the voice loop started it)."""
+    return STREAM._thread is not None and STREAM._thread.is_alive()
 
 
 # =============================================================================
@@ -336,6 +372,8 @@ def listen() -> tuple:
     final = final[:1].upper() + final[1:]
     print(Fore.GREEN + f"[EARS] Heard: '{final}' ({utt.seconds:.1f}s audio, {time.time() - t:.2f}s to text)")
     STREAM._set_state("idle")
+    if _deliver_test(final):                    # a hearing test: show it, don't act on it
+        return None, None
 
     audio_out_path = "__voice__"
     if _is_voice_id_enabled():
