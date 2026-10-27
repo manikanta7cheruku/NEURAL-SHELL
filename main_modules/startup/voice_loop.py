@@ -216,9 +216,10 @@ def run_voice_loop(ctx, config, app_ui, api_set_state, safe_mode_file):
     threading.Thread(target=_launch_daemons_staggered, daemon=True,
                      name="DaemonLauncher").start()
 
-    # ── Morning brief ────────────────────────────────────────────────
-    from main_modules.startup.morning_brief import speak_morning_brief
-    speak_morning_brief(ctx, config)
+    # ── Greeting (once per launch; main_modules/startup/greeting.py) ──
+    from main_modules.startup import greeting
+    ctx.greeting = greeting
+    greeting.greet(ctx, config)
 
     # ── Register handlers ────────────────────────────────────────────
     try:
