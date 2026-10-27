@@ -55,6 +55,11 @@ const useStatus = create((set, get) => ({
     userText:   data.user_text  ?? '',
     sevenText:  data.seven_text ?? '',
     statusText: data.status_text ?? '',
+    micLevel:   data.mic_level ?? 0,
+    voiceState: data.voice_state ?? 'idle',
+    ignored:    data.voice_ignored ?? null,
+    listenMode: data.listen_mode ?? 'wake',
+    followUp:   data.follow_up_open ?? false,
   }),
 
   label: () => {
