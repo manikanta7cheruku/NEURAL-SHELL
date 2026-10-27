@@ -114,7 +114,7 @@ def get_version():
 
 @router.websocket("/ws/status")
 async def status_websocket(websocket: WebSocket):
-    """Real-time status updates via WebSocket — pushes every 300ms."""
+    """Real-time status, 10 times a second: the orb follows the mic level and shows "Hearing you" as it happens."""
     from backend.api_server import _state
 
     await websocket.accept()
@@ -126,7 +126,12 @@ async def status_websocket(websocket: WebSocket):
                 "speaking":   _state.get("speaking",   False),
                 "user_text":  _state.get("user_text",  ""),
                 "seven_text": _state.get("seven_text", ""),
+                "mic_level":  _state.get("mic_level", 0),          # 0..1, from ears/stream.py
+                "voice_state": _state.get("voice_state", "idle"),  # idle | hearing | processing
+                "voice_ignored": _state.get("voice_ignored"),      # {reason, text, at}: the last thing not acted on
+                "listen_mode": _state.get("listen_mode", "wake"),
+                "follow_up_open": _state.get("follow_up_open", False),
             })
-            await asyncio.sleep(0.3)
+            await asyncio.sleep(0.1)
     except Exception as _e:
         _log.debug(f"Status check non-critical: {_e}")

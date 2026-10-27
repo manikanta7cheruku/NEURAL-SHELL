@@ -879,28 +879,37 @@ def _signal_daemon_reload():
 
 # ── Snap Calibration Endpoint ────────────────────────────────────────────
 
-@router.post("/api/triggers/calibrate-snap",
-             summary="Calibrate snap detection",
-             description="User snaps 3 times. Seven measures peaks and saves personal threshold.")
-def calibrate_snap():
-    """
-    Run interactive snap calibration.
-    Blocks for ~10 seconds while user snaps 3 times.
-    Saves calibration to %APPDATA%/SEVEN/audio/snap_calibration.json
-    Signals daemon to reload with new threshold.
-    """
+@router.post("/api/triggers/snap-test",
+             summary="Does this microphone hear snaps?",
+             description="Listens for 6 seconds while the user snaps three times, and answers in plain words: whether "
+                         "the mic hears snaps, and if not, what to change (usually Windows audio enhancements).")
+def snap_test():
     try:
-        from ears.audio_triggers import run_calibration
-        result = run_calibration(seconds=8)
-
-        # Signal daemon to reload so it picks up the new calibration
-        if result.get("success"):
-            _signal_daemon_reload()
-
+        from ears.audio_triggers import _find_best_input_device
+        from ears.snap_detector import snap_test as _test
+        device_idx, mic_name = _find_best_input_device()
+        result = _test(seconds=6.0, device_index=device_idx)
+        result["mic"] = mic_name or "Default microphone"
         return result
-
     except Exception as e:
-        print(Fore.RED + f"[TRIGGERS] Calibration error: {e}")
+        print(Fore.RED + f"[TRIGGERS] Snap test error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/triggers/calibrate-snap", include_in_schema=False)
+def calibrate_snap():
+    """Older clients: the snap test replaces calibration (the detector adapts to the room by itself)."""
+    r = snap_test()
+    return {**r, "success": r.get("ok", False), "message": r.get("verdict", "")}
+
+
+@router.post("/api/system/sound-settings", summary="Open Windows sound settings",
+             description="Where audio enhancements and the microphone's input level are changed.")
+def open_sound_settings():
+    try:
+        os.startfile("ms-settings:sound")
+        return {"ok": True}
+    except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 

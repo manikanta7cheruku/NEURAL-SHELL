@@ -12,6 +12,18 @@ import os
 from trigger_modules.executor import execute_trigger
 
 
+def _snap_sensitivity() -> str:
+    """Settings, Voice, Snap sensitivity: relaxed, balanced (default) or strict."""
+    try:
+        import json
+        p = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "SEVEN", "config.json")
+        with open(p, encoding="utf-8") as f:
+            s = json.load(f).get("voice", {}).get("snap_sensitivity", "balanced")
+        return s if s in ("relaxed", "balanced", "strict") else "balanced"
+    except Exception:
+        return "balanced"
+
+
 class AudioListener:
     def __init__(self):
         self._detector  = None
@@ -77,22 +89,16 @@ class AudioListener:
         self._running = True
 
         try:
-            from ears.audio_triggers import TriggerDetector, _find_best_input_device
+            from ears.audio_triggers import _find_best_input_device
+            from ears.snap_detector import SnapDetector
 
-            # Auto-detect mic type — laptop mics need "high" sensitivity
+            # The detector measures sounds against the room's own level, so one setting suits laptop mics and
+            # headsets alike; the user can make it stricter or more relaxed in Settings.
             device_idx, mic_name = _find_best_input_device()
-            sens = "high"  # default for laptops
-
-            if mic_name:
-                name_lower = mic_name.lower()
-                headset_kw = ["hyperx", "usb", "headset", "airpods",
-                              "buds", "wireless", "razer", "logitech",
-                              "cloud", "stinger"]
-                if any(kw in name_lower for kw in headset_kw):
-                    sens = "medium"  # headset can handle stricter classifier
+            sens = _snap_sensitivity()
 
             self._current_sensitivity = sens
-            self._detector = TriggerDetector(
+            self._detector = SnapDetector(
                 sensitivity=sens,
                 device_index=device_idx
             )

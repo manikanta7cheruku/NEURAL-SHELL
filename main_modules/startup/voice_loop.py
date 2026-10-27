@@ -65,13 +65,23 @@ def run_voice_loop(ctx, config, app_ui, api_set_state, safe_mode_file):
             pass
         return
 
-    # ── Wire speaking guard ──────────────────────────────────────────
+    # ── Wire the ears to the mouth and to the app ────────────────────
+    # The ears need to know when Seven is talking and what it said (to ignore its own voice), and the app shows
+    # the live mic level, "Hearing you", and what was ignored and why.
     try:
         import ears.core as _ears_core
         _ears_core.set_speaking_fn(ctx.mouth.is_speaking)
-        print(Fore.CYAN + "[SYSTEM] Speaking guard wired to ears")
+        _ears_core.set_publisher(api_set_state)
+        try:
+            from mouth.core import _engine as _mouth_engine
+            if _mouth_engine():
+                _ears_core.set_mouth(_mouth_engine())
+        except Exception:
+            pass
+        _ears_core.start()
+        print(Fore.CYAN + "[SYSTEM] Ears listening (speech detector), wired to the mouth")
     except Exception as _sg_err:
-        print(Fore.YELLOW + f"[SYSTEM] Speaking guard not wired: {_sg_err}")
+        print(Fore.YELLOW + f"[SYSTEM] Ears wiring failed: {_sg_err}")
 
     # ── Voice loop config ────────────────────────────────────────────
     is_active = True
@@ -147,6 +157,16 @@ def run_voice_loop(ctx, config, app_ui, api_set_state, safe_mode_file):
 
     ctx.speak_with_interrupt = speak_with_interrupt
 
+    def _chime(kind):
+        """A soft two-note sound the instant Seven hears its name (natural voice only)."""
+        try:
+            from mouth.core import _engine
+            eng = _engine()
+            if eng:
+                eng.chime(kind)
+        except Exception:
+            pass
+
     # ── Silence watcher ──────────────────────────────────────────────
     _silence_watcher = None
     _last_topic_ref  = [None]
@@ -196,9 +216,10 @@ def run_voice_loop(ctx, config, app_ui, api_set_state, safe_mode_file):
     threading.Thread(target=_launch_daemons_staggered, daemon=True,
                      name="DaemonLauncher").start()
 
-    # ── Morning brief ────────────────────────────────────────────────
-    from main_modules.startup.morning_brief import speak_morning_brief
-    speak_morning_brief(ctx, config)
+    # ── Greeting (once per launch; main_modules/startup/greeting.py) ──
+    from main_modules.startup import greeting
+    ctx.greeting = greeting
+    greeting.greet(ctx, config)
 
     # ── Register handlers ────────────────────────────────────────────
     try:
@@ -218,19 +239,36 @@ def run_voice_loop(ctx, config, app_ui, api_set_state, safe_mode_file):
     from main_modules.handlers import execute_all
     import telemetry
 
-    while True:
-        try:
-            from main_modules.startup.enrollment_handler import handle_pending_enrollment
-            if handle_pending_enrollment(ctx, api_set_state):
-                continue
+    # After Seven answers, or after you say just "Hey Seven", the next few seconds need no wake word.
+    follow_up_until = [0.0]
+    _shown_state = [None]
 
-            if is_active:
+    def _show(state):
+        if state != _shown_state[0]:
+            _shown_state[0] = state
+            if state == "listening":
                 app_ui.update_status("LISTENING...", "#00ff00")
                 api_set_state("listening", True)
                 api_set_state("thinking", False)
             else:
                 app_ui.update_status("PAUSED (Say 'Wake Up')", "#555555")
                 api_set_state("listening", False)
+
+    while True:
+        try:
+            from main_modules.startup.enrollment_handler import handle_pending_enrollment
+            if handle_pending_enrollment(ctx, api_set_state):
+                continue
+
+            _show("listening" if is_active else "paused")
+            _vs = _ears_core.voice_settings()
+            if _vs["listen_mode"] == "ptt":
+                _ears_core.STREAM.pause(not _is_ptt_active_fn())
+            else:
+                _ears_core.STREAM.pause(False)
+            _ears_core.STREAM.configure(sensitivity=_vs["sensitivity"], device_name=_vs["mic"])
+            api_set_state("listen_mode", _vs["listen_mode"])
+            api_set_state("follow_up_open", time.time() < follow_up_until[0])
 
             user_input, audio_path = ctx.listen()
             if not user_input:
@@ -247,45 +285,46 @@ def run_voice_loop(ctx, config, app_ui, api_set_state, safe_mode_file):
                 continue
 
             WAKE_WORDS, PAUSE_WORDS, KILL_WORDS = _get_voice_control_words()
-
-            _vg = config.KEY.get("voice_gates", {})
-            _ptt_enabled = _vg.get("push_to_talk", {}).get("enabled", False)
-            _ww_enabled  = _vg.get("wake_word", {}).get("enabled", False)
-            _ww_words    = _vg.get("wake_word", {}).get("words", ["hey seven", "ok seven", "seven"])
-            _sv_enabled  = _vg.get("speaker_verify", {}).get("enabled", False)
+            _sv_enabled = _vs["only_me"] or config.KEY.get("voice_gates", {}).get("speaker_verify", {}).get("enabled", False)
 
             try:
                 from ears.push_to_talk import set_enabled as _ptt_set
-                _ptt_set(_ptt_enabled)
+                _ptt_set(_vs["listen_mode"] == "ptt")
             except Exception:
                 pass
 
-            if _ptt_enabled and not _is_ptt_active_fn():
-                continue
+            # ── Wake word ──────────────────────────────────────────────
+            # In wake mode a request must start with "Hey Seven" (or "Seven"), except in the follow-up window. "Hey
+            # Seven" on its own chimes and opens that window, so you can pause before saying what you want.
+            from brain_modules.dialogue_manager import has_pending as _has_pending
+            in_follow_up = time.time() < follow_up_until[0] or _has_pending()
+            if _vs["listen_mode"] == "wake" and is_active:
+                from ears.wake_word import check_and_strip as _ww_check
+                stripped, found = _ww_check(user_input, _vs["wake_words"])
+                if found:
+                    user_input = stripped
+                    if len(user_input.strip(" ,.!?")) < 2:
+                        _chime("wake")
+                        follow_up_until[0] = time.time() + _vs["follow_up_seconds"]
+                        api_set_state("voice_ignored", {"reason": "wake word: listening for your request",
+                                                        "text": "", "at": time.time()})
+                        continue
+                    _chime("wake")
+                elif not in_follow_up:
+                    api_set_state("voice_ignored", {"reason": "no wake word", "text": user_input[:80], "at": time.time()})
+                    continue
 
             if _silence_watcher:
                 _silence_watcher.on_user_spoke()
             _last_topic_ref[0] = user_input
 
-            if _ww_enabled:
-                try:
-                    from ears.wake_word import check_and_strip as _ww_check
-                    user_input, _ww_found = _ww_check(user_input, _ww_words)
-                    if not _ww_found:
-                        continue
-                    if user_input and len(user_input.strip()) < 2:
-                        continue
-                except Exception:
-                    pass
-
             text_lower = user_input.lower().strip()
             _hallucinations = {
                 "thank you", "thanks", "thank you.", "thanks.",
-                "you", "the", "bye", "bye.", "yes", "no",
+                "you", "the", "bye", "bye.",
                 "thanks for watching", "thank you for watching",
                 ".", "..", "...", " ", ""
             }
-            from brain_modules.dialogue_manager import has_pending as _has_pending
             if (text_lower in _hallucinations and not _has_pending()) or len(text_lower) < 2:
                 continue
 
@@ -423,6 +462,8 @@ def run_voice_loop(ctx, config, app_ui, api_set_state, safe_mode_file):
             api_set_state("thinking", False)
             if _silence_watcher:
                 _silence_watcher.on_seven_speaking(False)
+            # A reply invites an answer: the next few seconds need no wake word.
+            follow_up_until[0] = time.time() + _vs["follow_up_seconds"]
 
             if not isinstance(response, str):
                 continue

@@ -231,7 +231,7 @@ export default function TriggerForm({ initial, onSave, onCancel, workspaces, onD
   const [saving,  setSaving]  = useState(false);
   const [error,   setError]   = useState('');
   const [pendingType, setPendingType] = useState(null);
-  const [calibrating, setCalibrating] = useState('');
+  const [snapTest, setSnapTest] = useState(null);       // null | 'running' | { ok, verdict, advice, mic }
 
   const hasData = () =>
     (actionType === 'open_app' && apps.length) || (actionType === 'open_url' && urls.length) ||
@@ -245,13 +245,15 @@ export default function TriggerForm({ initial, onSave, onCancel, workspaces, onD
     setActionType(key);
   };
 
-  const calibrate = async () => {
-    setCalibrating('Snap three times now');
+  // Six seconds of listening while you snap three times, then a plain answer: does this mic hear snaps?
+  const testMic = async () => {
+    setSnapTest('running');
     try {
-      const { data } = await api.post('/triggers/calibrate-snap');
-      setCalibrating(data.success ? `Tuned to your snap (level ${data.peak_min})` : (data.message || 'No snaps heard. Try again.'));
-    } catch { setCalibrating("Couldn't calibrate. Try again."); }
-    setTimeout(() => setCalibrating(''), 5000);
+      const { data } = await api.post('/triggers/snap-test', null, { timeout: 20000 });
+      setSnapTest(data);
+    } catch {
+      setSnapTest({ ok: false, verdict: "Couldn't open the microphone.", advice: 'Check it is connected and not in use by another app.' });
+    }
   };
 
   const submit = async () => {
@@ -395,17 +397,39 @@ export default function TriggerForm({ initial, onSave, onCancel, workspaces, onD
               {voicePhrase.trim() && <p className="mt-1.5 text-[11.5px] text-s-text-3">Say “Seven, {voicePhrase.trim()}”.</p>}
             </Method>
 
-            <Method icon={Radio} title="Snap your fingers" hint="Best with a headset or USB mic; laptop mics soften snaps"
+            <Method icon={Radio} title="Snap or clap" hint="Snaps and claps count; typing and clicks never do"
                     active={!!audioPattern}>
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <Segmented value={audioPattern} onChange={setAudioPattern}
                            options={[{ value: '', label: 'Off' }, { value: '1_tap', label: '1 snap' },
                                      { value: '2_tap', label: '2 snaps' }, { value: '3_tap', label: '3 snaps' }]} />
-                <button type="button" onClick={calibrate} disabled={!!calibrating}
-                        className="text-[11.5px] text-s-text-3 underline decoration-s-border-l underline-offset-4 hover:text-s-text disabled:no-underline">
-                  {calibrating || 'Tune to my snap'}
-                </button>
+                <Button size="sm" variant="secondary" onClick={testMic} loading={snapTest === 'running'}>
+                  {snapTest === 'running' ? 'Listening' : 'Test my mic'}
+                </Button>
               </div>
+              {audioPattern === '1_tap' && (
+                <p className="mt-2 text-[11.5px] text-s-text-3">A single snap needs a crisp, clear snap. Two snaps are the most reliable.</p>)}
+              {snapTest === 'running' && (
+                <p className="mt-2 flex items-center gap-2 text-[12px] text-s-accent-h" style={{ animation: 'sevenRise .2s ease' }}>
+                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-s-accent" />Snap three times now, at your usual distance
+                </p>)}
+              {snapTest && snapTest !== 'running' && (
+                <div className={cx('mt-2.5 rounded-lg border px-3 py-2.5 text-[12px] leading-relaxed',
+                                   snapTest.ok ? 'border-s-green/25 bg-s-green/[0.06]' : 'border-s-yellow/25 bg-s-yellow/[0.06]')}
+                     style={{ animation: 'sevenRise .22s cubic-bezier(0.32,0.72,0,1)' }}>
+                  <div className="flex items-center gap-1.5 font-medium text-s-text">
+                    {snapTest.ok ? <Check size={13} className="text-s-green" /> : <AlertTriangle size={13} className="text-s-yellow" />}
+                    {snapTest.verdict}
+                  </div>
+                  {snapTest.advice && <p className="mt-1 text-s-text-2">{snapTest.advice}</p>}
+                  {!snapTest.ok && (
+                    <div className="mt-2 flex gap-2">
+                      <Button size="sm" variant="secondary" onClick={() => api.post('/system/sound-settings').catch(() => {})}>
+                        Open sound settings
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={testMic}>Test again</Button>
+                    </div>)}
+                </div>)}
             </Method>
           </div>
         </Part>
