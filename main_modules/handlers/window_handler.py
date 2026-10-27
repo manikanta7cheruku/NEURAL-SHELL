@@ -13,6 +13,13 @@ class WindowHandler(BaseHandler):
     tag_name = "WINDOW"
 
     def execute(self, response, ctx):
+        # Already done before Seven spoke (pre_executor.py); doing it again would undo a toggle like pin.
+        if getattr(ctx, "pre_executed_window", False):
+            ctx.pre_executed_window = False
+            return
+        self.run(response, ctx)
+
+    def run(self, response, ctx):
         for params in self.extract_params(response):
             try:
                 success, msg = ctx.hands_windows.manage_window(params)

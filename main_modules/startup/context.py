@@ -42,6 +42,7 @@ class SevenContext:
         self.pre_executed_sys = False
         self.pre_executed_open = False
         self.pre_executed_close = False
+        self.pre_executed_window = False
         self.interrupt_context = {
             "last_response": None,
             "last_input": None,
