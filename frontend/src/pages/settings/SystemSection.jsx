@@ -200,8 +200,8 @@ function Repair() {
 
 // Preview colours are fixed per tile so each one shows its own theme.
 const THEMES = [
-  { value: 'dark', label: 'Dark', bg: '#0d0e10', side: '#121316', line: '#26272d', text: '#34363d', accent: '#3cc8b4' },
-  { value: 'light', label: 'Light', bg: '#f6f5f2', side: '#ffffff', line: '#e3e0d9', text: '#d2cec5', accent: '#0f8a7b' },
+  { value: 'dark', label: 'Ink', bg: '#0d0e10', side: '#121316', line: '#26272d', text: '#34363d', accent: '#3cc8b4' },
+  { value: 'light', label: 'Paper', bg: '#f3efe7', side: '#faf7f1', line: '#e2dbcd', text: '#d3cab8', accent: '#0f7c6e' },
   { value: 'system', label: 'Match Windows', split: true },
 ];
 
