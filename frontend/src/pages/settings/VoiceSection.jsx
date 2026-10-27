@@ -183,7 +183,7 @@ function Listening() {
   if (!v) return <Section title="How Seven listens"><Body><LoadingRows rows={4} /></Body></Section>;
   const mode = MODES.find(m => m.value === (v.listen_mode || 'wake')) || MODES[0];
   const sens = v.sensitivity || 'balanced';
-  const micOptions = [{ value: '', label: `Windows default${mics?.default ? ` (${mics.default})` : ''}` },
+  const micOptions = [{ value: '', label: 'Windows default' },
                       ...((mics?.mics || []).map(n => ({ value: n, label: n })))];
 
   return (
