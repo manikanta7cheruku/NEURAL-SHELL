@@ -105,8 +105,8 @@ def install_status():
 @router.get("/api/voice/mics", summary="Microphones")
 def mics():
     try:
-        import pyaudio
-        pa = pyaudio.PyAudio()
+        from seven_utils import audio                # the shared PortAudio (seven_utils/audio.py)
+        pa = audio.pa()
         try:
             default = pa.get_default_input_device_info().get("name", "")
         except Exception:
@@ -128,7 +128,6 @@ def mics():
                 continue
             if n not in names:
                 names.append(n)
-        pa.terminate()
         default_full = next((n for n in names if default and n.startswith(default)), default)
         return {"default": default_full, "mics": names, "current": _voice_config().get("mic", "")}
     except Exception as e:

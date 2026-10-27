@@ -33,7 +33,6 @@ class Engine:
         self._say_lock = threading.Lock()
         self._stop = threading.Event()
         self._speaking = threading.Event()
-        self._pa = None
         self._said = []            # (time, text) of recent sentences, for echo rejection
         self._ended_at = 0.0
 
@@ -78,9 +77,8 @@ class Engine:
     # ── playback ─────────────────────────────────────────────────────────
     def _out(self):
         import pyaudio
-        if self._pa is None:
-            self._pa = pyaudio.PyAudio()
-        return self._pa.open(format=pyaudio.paInt16, channels=1, rate=_SR, output=True, frames_per_buffer=_CHUNK)
+        from seven_utils import audio                    # one PortAudio per process (seven_utils/audio.py)
+        return audio.open_stream(format=pyaudio.paInt16, channels=1, rate=_SR, output=True, frames_per_buffer=_CHUNK)
 
     def _play(self, stream, audio: np.ndarray, fade_in: bool = False) -> bool:
         pcm = (audio * 32767).astype(np.int16)
@@ -143,12 +141,8 @@ class Engine:
             except Exception as e:
                 print(f"[MOUTH] Playback error: {e}")
             finally:
-                if stream is not None:
-                    try:
-                        stream.stop_stream()
-                        stream.close()
-                    except Exception:
-                        pass
+                from seven_utils import audio
+                audio.close_stream(stream)
                 if self._stop.is_set():
                     completed = False
                     while not ready.empty():                       # let a waiting producer finish
@@ -188,10 +182,10 @@ class Engine:
                     t = np.arange(int(_SR * d)) / _SR
                     env = np.minimum(1, t / 0.008) * np.exp(-t / (d * 0.45))
                     parts.append(0.18 * np.sin(2 * np.pi * f * t) * env)
+                from seven_utils import audio
                 s = self._out()
                 s.write((np.concatenate(parts) * 32767).astype(np.int16).tobytes())
-                s.stop_stream()
-                s.close()
+                audio.close_stream(s)
             except Exception:
                 pass
         threading.Thread(target=play, daemon=True, name="Chime").start()

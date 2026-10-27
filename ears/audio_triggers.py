@@ -143,7 +143,8 @@ def save_calibration(peak_min, mic_name):
 
 def _find_best_input_device():
     try:
-        pa = pyaudio.PyAudio()
+        from seven_utils import audio                    # the shared PortAudio (seven_utils/audio.py)
+        pa = audio.pa()
         count = pa.get_device_count()
 
         headset_keywords = ["hyperx", "stinger", "cloud", "headset",
@@ -198,7 +199,6 @@ def _find_best_input_device():
             except Exception:
                 continue
 
-        pa.terminate()
 
         if not candidates:
             return None, None

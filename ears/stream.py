@@ -158,21 +158,21 @@ class MicStream:
 
     def _open(self, pa):
         import pyaudio
-        return pa.open(format=pyaudio.paInt16, channels=1, rate=RATE, input=True, frames_per_buffer=FRAME,
-                       input_device_index=self._device_index(pa))
+        from seven_utils import audio
+        return audio.open_stream(format=pyaudio.paInt16, channels=1, rate=RATE, input=True, frames_per_buffer=FRAME,
+                                 input_device_index=self._device_index(pa))
 
     def _run(self):
-        import pyaudio
+        from seven_utils import audio
         vad = _Silero()
-        pa = pyaudio.PyAudio()
+        pa = audio.pa()                                  # shared: PortAudio must not be initialised twice at once
         stream = None
         backoff = 1.0
         self._reopen = False
         while self._running.is_set():
             try:
                 if stream is None or self._reopen:
-                    if stream is not None:
-                        stream.close()
+                    audio.close_stream(stream)
                     stream = self._open(pa)
                     self._reopen = False
                     vad.reset()
@@ -183,25 +183,11 @@ class MicStream:
             except Exception as e:                       # unplugged headset, device busy: wait and reopen
                 self.last_error = str(e)
                 print(f"[EARS] Microphone error: {e}. Retrying in {backoff:.0f}s")
-                try:
-                    if stream is not None:
-                        stream.close()
-                except Exception:
-                    pass
+                audio.close_stream(stream)
                 stream = None
-                try:                                     # a new PyAudio sees devices plugged in since
-                    pa.terminate()
-                except Exception:
-                    pass
                 time.sleep(backoff)
-                pa = pyaudio.PyAudio()
                 backoff = min(backoff * 2, 15.0)
-        try:
-            if stream is not None:
-                stream.close()
-            pa.terminate()
-        except Exception:
-            pass
+        audio.close_stream(stream)
 
     def _listen(self, stream, vad):
         pre_roll = collections.deque(maxlen=10)          # ~320 ms kept from before speech starts
