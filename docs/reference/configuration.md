@@ -11,7 +11,8 @@ Change settings in the app (Settings) or by chat ("set honesty to 75%"). Brain s
 | `identity` | Names and voice phrases | `user_name`, `wake_words`, `pause_words`, `resume_words`, `shutdown_words` |
 | `brain` | Model and personality | `model_name` (or `auto`), `temperature`, `streaming`, `tars_humor`, `tars_honesty`, `max_history`, `history_ttl_seconds`, `model_tiers` |
 | `memory` | Recall | `min_relevance`, `retrieval_timeout_ms` |
-| `voice` | Speech output | `engine`, `voice_id`, `speed` |
+| `voice` | Speaking and listening ([Voice](../components/voice.md)) | `engine`, `voice_id`, `speed`, `listen_mode`, `sensitivity`, `follow_up_seconds`, `interrupt`, `mic`, `wake_words`, `snap_sensitivity` |
+| `voice_bar` | The caption pill at the top of the screen | `show` (`active`, `always`, `off`) |
 | `voice_id` | Speaker recognition | `enabled`, `similarity_threshold`, `default_speaker` |
 | `interrupt` | Talking over Seven | `enabled`, `words`, `listen_during_speech`, `interrupt_cooldown` |
 | `web` | Live lookups | `enabled`, `max_results`, `news_max_results`, `timeout` |

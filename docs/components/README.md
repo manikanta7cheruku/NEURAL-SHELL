@@ -7,8 +7,9 @@ is for, how it works, the data it keeps, how it fails and how it is tested.
 | Component | What it does | Code | Document |
 |---|---|---|---|
 | [Brain](brain.md) | Understands each message and decides: act, answer from evidence, or ask the model | `brain.py`, `brain_modules/` | **Complete** |
-| [Ears](ears.md) | Microphone to clean text: noise handling, wake word, speech-to-text, voice ID | `ears/` | Outline |
-| [Mouth](mouth.md) | Speaks replies, stops when interrupted | `mouth/` | Outline |
+| [Voice](voice.md) | One spoken request end to end: the voice loop, greeting, voice bar, home screen readings, settings | `main_modules/startup/`, `electron/status.html` | **Complete** |
+| [Ears](ears.md) | Microphone to requests: speech detector, Whisper, wake word, push to talk, snaps and claps | `ears/` | **Complete** |
+| [Mouth](mouth.md) | A natural offline voice that starts at once and stops at once | `mouth/` | **Complete** |
 | [Hands](hands.md) | Apps, windows, system settings, files | `hands/` | Complete |
 | [Workspaces](workspaces.md) | Save everything open, restore only what is missing | `hands/workspace_modules/` | Complete |
 | [Memory](memory.md) | Facts, conversations, learning and command log stores | `memory/` | Outline (model in the brain doc) |
