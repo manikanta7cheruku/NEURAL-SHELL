@@ -1096,7 +1096,7 @@ def format_results_for_speech(results: list, query: str,
         label = name if len(name) <= 48 else "the best match"
         others = count - 1
         return (f"Opened {label} from {where}. "
-                f"{others} other match{'es are' if others != 1 else ' is'} in the chat if it's not the one.")
+                f"If it's not the one, the other {others} match{'es are' if others != 1 else ' is'} listed in Seven.")
 
     return random.choice([
         f"I found {count} matches for {query}. Which one did you want?",

@@ -135,7 +135,7 @@ function NaturalVoice() {
 const MODES = [
   { value: 'wake', label: 'Wake word', hint: 'Say "Hey Seven" first. Background talk is ignored. Recommended.' },
   { value: 'always', label: 'Always', hint: 'Seven acts on everything it hears. Best in a quiet room, alone.' },
-  { value: 'ptt', label: 'Push to talk', hint: 'Seven listens only while you hold Shift.' },
+  { value: 'ptt', label: 'Push to talk', hint: 'Hold Shift while you speak and let go when you\'re done. Shift with another key is typing, so capitals never trigger it.' },
 ];
 const SENSITIVITY = [{ value: 'relaxed', label: 'Relaxed' }, { value: 'balanced', label: 'Balanced' }, { value: 'strict', label: 'Strict' }];
 const SENS_HINT = {
@@ -420,165 +420,15 @@ function SpeechRecognition() {
 // ── Only respond to my voice ────────────────────────────────────────────────
 
 function OnlyMe() {
-  const [on, setOn] = useState(null);
-  const [enrolled, setEnrolled] = useState([]);
-  const [enrolling, setEnrolling] = useState(false);
-
-  const load = useCallback(() => {
-    api.get('/config').then(r => setOn(!!(r.data?.voice?.only_me || r.data?.voice_gates?.speaker_verify?.enabled)))
-       .catch(() => setOn(false));
-    api.get('/voice/enrolled').then(r => setEnrolled(r.data.enrolled || [])).catch(() => setEnrolled([]));
-  }, []);
-  useEffect(() => { load(); }, [load]);
-
-  const toggle = async value => {
-    setOn(value);
-    await saveVoice({ only_me: value });
-    api.get('/voice/gates').then(r => api.post('/voice/gates', { ...r.data, speaker_verify: { ...(r.data.speaker_verify || {}), enabled: value } }))
-       .catch(() => {});
-  };
-  const removeVoice = async name => {
-    const ok = await saveWith(() => api.delete(`/voice/enrolled/${name}`));
-    if (ok) setEnrolled(e => e.filter(n => n !== name));
-  };
-
-  if (on === null) return null;
   return (
-    <Section title="Only respond to my voice" description="Seven recognises enrolled voices and ignores everyone else. Voiceprints stay on this PC.">
-      <Row label="Respond only to enrolled voices" description="Off by default: it adds a moment to every request.">
-        <Toggle checked={on} onChange={toggle} label="Respond only to enrolled voices" />
+    <Section title="Only respond to my voice" description="Seven will recognise your voice and ignore everyone else. Voiceprints will stay on this PC.">
+      <Row label="Respond only to my voice" description="Coming in an upcoming version. Until then, the wake word keeps others from triggering Seven.">
+        <span className="flex items-center gap-3">
+          <Badge>Coming soon</Badge>
+          <Toggle checked={false} onChange={() => {}} disabled label="Respond only to my voice" />
+        </span>
       </Row>
-      {on && enrolled.length === 0 && (
-        <Body className="flex items-center gap-2 pt-0 text-[12px] text-s-yellow">
-          <AlertTriangle size={13} /> No voice is enrolled yet, so Seven will ignore everyone. Enroll your voice below.
-        </Body>)}
-      <Body className="space-y-2">
-        <div className="flex items-center justify-between">
-          <span className="text-[13px] font-medium text-s-text">Enrolled voices</span>
-          <Button size="sm" icon={Mic} onClick={() => setEnrolling(true)}>Enroll a voice</Button>
-        </div>
-        {enrolled.length === 0 ? (
-          <p className="text-[12px] text-s-text-3">None yet. You can also say "enroll my voice".</p>
-        ) : enrolled.map(name => (
-          <div key={name} className="flex h-10 items-center justify-between rounded-lg border border-s-border bg-s-bg px-3">
-            <span className="flex items-center gap-2 text-[13px] capitalize text-s-text">
-              <span className="h-1.5 w-1.5 rounded-full bg-s-green" />{name}
-            </span>
-            <Button size="sm" variant="ghost" onClick={() => removeVoice(name)}>Remove</Button>
-          </div>))}
-      </Body>
-      {enrolling && <EnrollDialog onClose={() => { setEnrolling(false); load(); }} />}
     </Section>
-  );
-}
-
-function EnrollDialog({ onClose }) {
-  const [step, setStep] = useState('form');          // form | recording | done | error
-  const [name, setName] = useState('');
-  const [clips, setClips] = useState(0);
-  const [message, setMessage] = useState('');
-  const poll = useRef(null);
-  const timeout = useRef(null);
-  const latest = useRef({ step, onClose });
-  useEffect(() => { latest.current = { step, onClose }; });
-
-  useEffect(() => {
-    api.post('/voice/enrollment-welcome').catch(() => {});
-    const onKey = e => e.key === 'Escape' && latest.current.step !== 'recording' && latest.current.onClose();
-    window.addEventListener('keydown', onKey);
-    return () => { window.removeEventListener('keydown', onKey); clearInterval(poll.current); clearTimeout(timeout.current); };
-  }, []);
-
-  const start = async () => {
-    if (!name.trim()) return;
-    setStep('recording'); setClips(0);
-    try { await api.post('/interrupt'); } catch {}
-    try { await api.post('/voice/enroll', { name: name.trim() }); }
-    catch { setStep('error'); setMessage('Could not reach Seven. Make sure Seven is running.'); return; }
-    poll.current = setInterval(async () => {
-      try {
-        const r = await api.get('/voice/enrollment-status');
-        if (r.data.clips_done !== undefined) setClips(Math.min(5, r.data.clips_done));
-        if (r.data.status === 'done' && r.data.done) {
-          clearInterval(poll.current); clearTimeout(timeout.current);
-          setMessage(r.data.done.message || '');
-          setStep(r.data.done.success ? 'done' : 'error');
-        }
-      } catch {}
-    }, 2000);
-    timeout.current = setTimeout(() => {
-      clearInterval(poll.current);
-      setStep('error');
-      setMessage('Timed out. Check that your microphone works and Seven is running.');
-    }, 120000);
-  };
-
-  return (
-    <div className="fixed inset-0 z-[1000] flex items-center justify-center p-6">
-      <div className="absolute inset-0 bg-[var(--s-scrim)]" onClick={() => step !== 'recording' && onClose()} />
-      <div role="dialog" aria-modal="true" className="relative w-full max-w-[420px] rounded-xl border border-s-border bg-s-surface shadow-[var(--s-shadow-raised)] animate-[dialogReveal_160ms_ease-out]">
-        <div className="px-5 pt-5">
-          <h3 className="text-[15px] font-semibold text-s-text">Enroll a voice</h3>
-          <p className="mt-1 text-[13px] text-s-text-3">Seven records five short clips and builds a voiceprint. It stays on this computer.</p>
-        </div>
-        <div className="px-5 py-5">
-          {step === 'form' && (
-            <div className="space-y-4">
-              <div>
-                <label htmlFor="enroll-name" className="mb-1.5 block text-[12px] font-medium text-s-text-2">Name for this voice</label>
-                <Input id="enroll-name" value={name} onChange={e => setName(e.target.value)} autoFocus className="w-full"
-                       onKeyDown={e => e.key === 'Enter' && start()} placeholder="Your first name" />
-              </div>
-              <ol className="space-y-1.5 text-[12px] text-s-text-3">
-                <li>1. Press Start. Seven tells you when to speak.</li>
-                <li>2. Talk naturally for about ten seconds each time. Any words work.</li>
-                <li>3. After five clips, your voice is enrolled.</li>
-              </ol>
-            </div>
-          )}
-          {step === 'recording' && (
-            <div className="space-y-4">
-              <div className="flex items-center gap-3">
-                <span className="relative flex h-10 w-10 items-center justify-center rounded-full border border-s-accent/30 bg-s-accent/10">
-                  <span className="absolute inset-0 animate-ping rounded-full bg-s-accent/15" />
-                  <Mic size={16} className="relative text-s-accent-h" />
-                </span>
-                <div>
-                  <p className="text-[13px] font-medium text-s-text">Listening for {name}</p>
-                  <p className="text-[12px] text-s-text-3">{clips === 0 ? 'Waiting for Seven to start' : clips < 5 ? `Clip ${clips} of 5 captured` : 'Building your voiceprint'}</p>
-                </div>
-              </div>
-              <div className="h-1.5 overflow-hidden rounded-full bg-s-card-h">
-                <div className="h-full rounded-full bg-s-accent transition-[width] duration-500" style={{ width: `${clips * 19 + (clips === 5 ? 5 : 0)}%` }} />
-              </div>
-            </div>
-          )}
-          {step === 'done' && (
-            <div className="flex items-start gap-3">
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-s-green/15"><Check size={16} className="text-s-green" /></span>
-              <div>
-                <p className="text-[13px] font-medium text-s-text">{name} is enrolled</p>
-                <p className="mt-0.5 text-[12px] text-s-text-3">{message || 'Turn on Speaker verification to use it.'}</p>
-              </div>
-            </div>
-          )}
-          {step === 'error' && (
-            <div className="flex items-start gap-3">
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-s-red/15"><X size={16} className="text-s-red" /></span>
-              <div>
-                <p className="text-[13px] font-medium text-s-text">Enrollment didn't finish</p>
-                <p className="mt-0.5 text-[12px] text-s-text-3">{message || 'Something went wrong.'}</p>
-              </div>
-            </div>
-          )}
-        </div>
-        <div className="flex justify-end gap-2 px-5 pb-5">
-          {step === 'form' && <><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary" onClick={start} disabled={!name.trim()}>Start</Button></>}
-          {step === 'error' && <><Button variant="ghost" onClick={onClose}>Close</Button><Button variant="primary" onClick={() => setStep('form')}>Try again</Button></>}
-          {step === 'done' && <Button variant="primary" onClick={onClose}>Done</Button>}
-        </div>
-      </div>
-    </div>
   );
 }
 

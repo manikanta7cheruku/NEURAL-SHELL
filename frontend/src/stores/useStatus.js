@@ -60,6 +60,8 @@ const useStatus = create((set, get) => ({
     ignored:    data.voice_ignored ?? null,
     listenMode: data.listen_mode ?? 'wake',
     followUp:   data.follow_up_open ?? false,
+    paused:     data.paused ?? false,
+    voiceFiles: data.voice_files ?? null,
   }),
 
   label: () => {
@@ -67,7 +69,8 @@ const useStatus = create((set, get) => ({
     if (s.thinking) return 'Thinking';
     if (s.speaking) return 'Speaking';
     if (s.listening) return 'Listening';
-    return 'Idle';
+    if (s.paused) return 'Paused';
+    return 'Starting';
   },
 
   color: () => {

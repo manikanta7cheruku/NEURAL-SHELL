@@ -6,7 +6,7 @@ The backend listens on `http://127.0.0.1:7777` only (never on the network). The 
 the overlay and the Chrome extension are its only clients. There is no authentication because nothing outside
 this computer can reach it.
 
-192 endpoints in 26 files.
+206 endpoints in 27 files.
 
 ## `backend/admin_server.py`
 
@@ -50,6 +50,8 @@ this computer can reach it.
 
 | Method | Path | What it does |
 |---|---|---|
+| POST | `/api/browsers/connect` | Prepare the extension and open one profile's extensions page |
+| GET | `/api/browsers/overview` | Open browser profiles, their tabs, and which have the extension |
 | POST | `/api/chrome/setup/open` | Open Chrome extensions page. |
 | POST | `/api/chrome/setup/prepare` | Copy extension files and get the path for user to load. |
 | GET | `/api/chrome/setup/status` | Check Chrome extension status. |
@@ -110,6 +112,7 @@ this computer can reach it.
 | GET | `/api/speakers` | Get enrolled speakers. |
 | GET | `/api/speed` | Get latency statistics safely. |
 | GET | `/api/system/info` | Live machine readings |
+| GET | `/api/system/usage` | What Seven uses, and what else is using memory |
 
 ## `backend/routes/health.py`
 
@@ -232,7 +235,7 @@ this computer can reach it.
 | POST | `/api/interrupt` | Interrupt Seven's current speech immediately. |
 | GET | `/api/status` | Get current Seven system status. Guaranteed to never return 500. |
 | GET | `/api/version` | Get version info. |
-| WEBSOCKET | `/ws/status` | Real-time status updates via WebSocket: pushes every 300ms. |
+| WEBSOCKET | `/ws/status` | Real-time status, 10 times a second: the orb follows the mic level and shows "Hearing you" as it happens. |
 
 ## `backend/routes/tasks.py`
 
@@ -250,12 +253,16 @@ this computer can reach it.
 
 | Method | Path | What it does |
 |---|---|---|
+| POST | `/api/system/sound-settings` | Open Windows sound settings |
 | GET | `/api/triggers` | List all triggers with optional filters. |
 | POST | `/api/triggers` | Create a new trigger with conflict checking. |
 | GET | `/api/triggers/active` | Return only enabled triggers (used by daemon for lookup). |
 | POST | `/api/triggers/bulk-toggle` | Enable or disable all triggers at once. Respects plan limits when enabling. |
-| POST | `/api/triggers/calibrate-snap` | Calibrate snap detection |
+| POST | `/api/triggers/calibrate-snap` | Older clients: the snap test replaces calibration (the detector adapts to the room by itself). |
+| POST | `/api/triggers/capture` | Pause hotkeys while one is being recorded |
+| GET | `/api/triggers/hotkey-check` | Is this shortcut free? |
 | POST | `/api/triggers/layout` | Apply window arrangement to selected windows. |
+| POST | `/api/triggers/snap-test` | Does this microphone hear snaps? |
 | GET | `/api/triggers/stats` | Trigger statistics |
 | DELETE | `/api/triggers/{trigger_id}` | Permanently delete a trigger. |
 | PUT | `/api/triggers/{trigger_id}` | Update trigger fields (partial update). |
@@ -278,6 +285,18 @@ this computer can reach it.
 | POST | `/api/email/save` | Save user email for updates. |
 | GET | `/api/usage/history` | Get actual daily usage for last 7 days. |
 | GET | `/api/usage/stats` | Get current user's total usage time. |
+
+## `backend/routes/voice.py`
+
+| Method | Path | What it does |
+|---|---|---|
+| GET | `/api/voice/install` | Natural voice download progress |
+| POST | `/api/voice/install` | Download the natural voice |
+| GET | `/api/voice/mics` | Microphones |
+| POST | `/api/voice/preview` | Hear a voice |
+| POST | `/api/voice/stop` | Stop a preview |
+| POST | `/api/voice/test` | What does Seven hear? |
+| GET | `/api/voice/voices` | Natural voices and the current choice |
 
 ## `backend/routes/voice_gates.py`
 

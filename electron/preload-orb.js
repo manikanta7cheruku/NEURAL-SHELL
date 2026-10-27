@@ -1,29 +1,11 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
+// The voice bar (status.html): open Seven, its menu, and letting clicks through outside the bar.
 contextBridge.exposeInMainWorld('orbAPI', {
-  // Click: toggle dashboard show/hide
   toggleDashboard: () => ipcRenderer.send('toggle-dashboard'),
-
-  // Legacy: always show
   showMainWindow: () => ipcRenderer.send('show-main-window'),
-
-  // Right-click menu
   showMenu: () => ipcRenderer.send('show-orb-menu'),
-
-  // Navigate
   navigateTo: (route) => ipcRenderer.send('navigate-to', route),
-
-  // Quit
   quitApp: () => ipcRenderer.send('quit-app'),
-
-  // Drag
-  dragStart: (x, y) => ipcRenderer.send('orb-drag-start', { x, y }),
-  dragMove: (x, y) => ipcRenderer.send('orb-drag-move', { x, y }),
-  dragEnd: () => ipcRenderer.send('orb-drag-end'),
-
-  // Click-through control
   setIgnoreMouseEvents: (ignore) => ipcRenderer.send('set-ignore-mouse', ignore),
-
-  // Dynamic panel sizing
-  setOrbExpanded: (expanded) => ipcRenderer.send('set-orb-expanded', expanded)
 });

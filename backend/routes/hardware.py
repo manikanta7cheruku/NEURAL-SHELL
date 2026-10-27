@@ -121,6 +121,14 @@ def get_system_info():
     return system_info.snapshot()
 
 
+@router.get("/api/system/usage", summary="What Seven uses, and what else is using memory",
+            description="Seven's share of the processor, memory and graphics memory (its own processes and the "
+                        "local AI model), the PC's totals, and the five apps using the most memory.")
+def get_system_usage():
+    from brain_modules import resource_usage
+    return resource_usage.usage()
+
+
 @router.get("/api/speed")
 def get_speed():
     """Get latency statistics safely."""

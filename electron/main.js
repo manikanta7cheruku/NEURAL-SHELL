@@ -61,25 +61,17 @@ let _lastCrashTime = 0;
 // GLOBAL HOISTED UTILITIES
 // Declared early to guarantee global scope visibility to context menu events
 // ============================================================================
+// The voice bar sits at the top centre of the primary screen (electron/status.html). The window is wider and taller
+// than the bar so the card can grow into it; everywhere outside the bar lets clicks through.
+const BAR_W = 520;
+const BAR_H = 64;
+function barBounds() {
+  const area = screen.getPrimaryDisplay().workArea;
+  return { width: BAR_W, height: BAR_H, x: Math.round(area.x + (area.width - BAR_W) / 2), y: area.y };
+}
 function resetOrbPosition() {
   if (!statusWindow || statusWindow.isDestroyed()) return;
-  const { width, height } = screen.getPrimaryDisplay().workAreaSize;
-  const orbSize = 80;
-  const margin  = 20;
-
-  const x = width  - orbSize - margin;
-  const y = height - orbSize - margin;
-
-  statusWindow.setBounds({
-    width: orbSize,
-    height: orbSize,
-    x: x,
-    y: y
-  });
-  // Clear custom position so default bottom-right is used
-  orbCustomX = -1;
-  orbCustomY = -1;
-  console.log(`[ORB] Position reset to default: x=${x}, y=${y}`);
+  statusWindow.setBounds(barBounds());
 }
 
 // ============================================================================
@@ -482,15 +474,9 @@ function createMainWindow() {
 function createStatusWindow() {
   if (statusWindow) return;
 
-  const { width, height } = screen.getPrimaryDisplay().workAreaSize;
-  const orbSize = 80;
-
   statusWindow = new BrowserWindow({
-    width:       orbSize, 
-    height:      orbSize,
-    x:          width  - orbSize - 20,
-    y:          height - orbSize - 20,
-    frame:      false,
+    ...barBounds(),
+    frame:       false,
     transparent: true,
     alwaysOnTop: true,
     skipTaskbar: true,
@@ -499,7 +485,7 @@ function createStatusWindow() {
     maximizable: false,
     closable:    false,
     hasShadow:   false,
-    focusable:   true,
+    focusable:   false,          // clicking the bar must never take focus from what you're typing in
     movable:     false,
     webPreferences: {
       nodeIntegration:  false,
@@ -509,13 +495,23 @@ function createStatusWindow() {
   });
 
   statusWindow.loadFile(path.join(__dirname, 'status.html'));
-  statusWindow.setIgnoreMouseEvents(false); 
+  statusWindow.setIgnoreMouseEvents(true, { forward: true });
   statusWindow.setAlwaysOnTop(true, 'screen-saver', 1);
   statusWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   if (process.platform === 'win32') {
     statusWindow.setContentProtection(true);
   }
-  statusWindow.on('closed', () => { statusWindow = null; });
+  // Screens added, removed or rearranged: stay at the top centre of the primary one.
+  const recentre = () => resetOrbPosition();
+  screen.on('display-metrics-changed', recentre);
+  screen.on('display-added', recentre);
+  screen.on('display-removed', recentre);
+  statusWindow.on('closed', () => {
+    screen.removeListener('display-metrics-changed', recentre);
+    screen.removeListener('display-added', recentre);
+    screen.removeListener('display-removed', recentre);
+    statusWindow = null;
+  });
 }
 
 function showOrbContextMenu() {
@@ -535,7 +531,7 @@ function showOrbContextMenu() {
     { label: 'Plans',     click: () => navigateTo('/plans') },
     { label: 'Guide',     click: () => navigateTo('/guide') },
     { type: 'separator' },
-    { label: 'Reset Orb Position', click: () => resetOrbPosition() },
+    { label: 'Re-centre voice bar', click: () => resetOrbPosition() },
     { type: 'separator' },
     {
       label: 'Quit SEVEN',
@@ -721,53 +717,6 @@ ipcMain.on('toggle-dashboard', () => {
   mainWindow.isVisible() ? mainWindow.hide() : (mainWindow.show(), mainWindow.focus());
 });
 
-let orbDragOffset = { x: 0, y: 0 };
-let orbIsDragging = false;
-let orbDragWidth  = 80;
-let orbDragHeight = 80;
-
-// Track user's custom orb position so set-orb-expanded doesn't
-// snap it back to bottom-right on every state change.
-let orbCustomX = -1;
-let orbCustomY = -1;
-
-ipcMain.on('orb-drag-start', (event, mousePos) => {
-  if (!statusWindow || statusWindow.isDestroyed()) return;
-  const [winX, winY] = statusWindow.getPosition();
-  const bounds = statusWindow.getBounds();
-  
-  // Cache dimensions once to prevent CPU-blocking queries during movement
-  orbDragWidth  = bounds.width;
-  orbDragHeight = bounds.height;
-  
-  orbDragOffset = { x: mousePos.x - winX, y: mousePos.y - winY };
-  orbIsDragging = true;
-});
-
-ipcMain.on('orb-drag-move', (event, mousePos) => {
-  if (!statusWindow || statusWindow.isDestroyed() || !orbIsDragging) return;
-  const newX = Math.round(mousePos.x - orbDragOffset.x);
-  const newY = Math.round(mousePos.y - orbDragOffset.y);
-  
-  // Use bounds caching and disable OS window animations for buttery-smooth movements
-  statusWindow.setBounds({
-    x: newX,
-    y: newY,
-    width: orbDragWidth,
-    height: orbDragHeight
-  }, false);
-});
-
-ipcMain.on('orb-drag-end', () => {
-  orbIsDragging = false;
-  // Save the user's dragged position
-  if (statusWindow && !statusWindow.isDestroyed()) {
-    const [cx, cy] = statusWindow.getPosition();
-    orbCustomX = cx;
-    orbCustomY = cy;
-  }
-});
-
 ipcMain.on('toggle-listening', () => {
   const req = http.request({
     hostname: '127.0.0.1', port: 7777,
@@ -780,40 +729,6 @@ ipcMain.on('toggle-listening', () => {
 ipcMain.on('set-ignore-mouse', (_, ignore) => {
   if (!statusWindow) return;
   statusWindow.setIgnoreMouseEvents(ignore, ignore ? { forward: true } : undefined);
-});
-
-// Dynamic Orb sizing listener — eliminates desktop click-blocking
-ipcMain.on('set-orb-expanded', (event, expanded) => {
-  if (!statusWindow || statusWindow.isDestroyed()) return;
-  const { width, height } = screen.getPrimaryDisplay().workAreaSize;
-  const orbSize = 80;
-  const panelW  = 340;
-  const margin  = 20;
-  const totalW  = orbSize + panelW;
-
-  // Use user's dragged position if available, else default bottom-right
-  const baseX = orbCustomX >= 0 ? orbCustomX : (width - orbSize - margin);
-  const baseY = orbCustomY >= 0 ? orbCustomY : (height - orbSize - margin);
-
-  if (expanded) {
-    // Expand leftward from the orb's current position
-    const expandX = Math.max(margin, baseX - panelW);
-    statusWindow.setBounds({
-      width: totalW,
-      height: orbSize,
-      x: expandX,
-      y: baseY
-    });
-    statusWindow.setIgnoreMouseEvents(false);
-  } else {
-    statusWindow.setBounds({
-      width: orbSize,
-      height: orbSize,
-      x: baseX,
-      y: baseY
-    });
-    statusWindow.setIgnoreMouseEvents(false);
-  }
 });
 
 // ============================================================================
