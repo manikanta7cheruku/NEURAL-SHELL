@@ -42,6 +42,8 @@ export default function Setup({ onComplete }) {
 
   useEffect(() => {
     const t = setTimeout(() => setVisible(true), 50);
+    // Start downloading the natural voice now, so it's ready to preview by the voice step.
+    fetch('http://127.0.0.1:7777/api/voice/install', { method: 'POST' }).catch(() => {});
     return () => clearTimeout(t);
   }, []);
 
