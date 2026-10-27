@@ -46,35 +46,37 @@
   --s-scrim: rgba(0, 0, 0, 0.6);
 }
 
+/* Light is "Paper", not white: warm paper surfaces, ink text, a deep lagoon that reads on paper, brass highlights.
+   Its own identity rather than the dark theme with the colours flipped. */
 :root[data-theme="light"] {
   color-scheme: light;
-  --color-s-bg: #f6f5f2;
-  --color-s-surface: #ffffff;
-  --color-s-card: #f0eee9;
-  --color-s-card-h: #e8e5df;
-  --color-s-border: #e3e0d9;
-  --color-s-border-l: #d2cec5;
-  --color-s-accent: #0f8a7b;
-  --color-s-accent-h: #0b7064;
-  --color-s-accent-dim: #16a593;
-  --color-s-on-accent: #ffffff;
-  --color-s-text: #18191b;
-  --color-s-text-2: #45454a;
-  --color-s-text-3: #6f6d69;
-  --color-s-text-4: #a4a19b;
-  --color-s-green: #1d7f53;
-  --color-s-red: #c8443b;
-  --color-s-yellow: #a66f12;
-  --color-s-blue: #2b67c4;
-  --color-s-purple: #a8643a;
-  --color-s-cyan: #0f8a7b;
+  --color-s-bg: #f3efe7;
+  --color-s-surface: #faf7f1;
+  --color-s-card: #eee9df;
+  --color-s-card-h: #e7e1d5;
+  --color-s-border: #e2dbcd;
+  --color-s-border-l: #d3cab8;
+  --color-s-accent: #0f7c6e;
+  --color-s-accent-h: #0b6a5e;
+  --color-s-accent-dim: #138e7e;
+  --color-s-on-accent: #fbfaf6;
+  --color-s-text: #1e1c19;
+  --color-s-text-2: #4a463f;
+  --color-s-text-3: #746e64;
+  --color-s-text-4: #a69f92;
+  --color-s-green: #2c7a4b;
+  --color-s-red: #b9473d;
+  --color-s-yellow: #9a6a1a;
+  --color-s-blue: #2f5fa8;
+  --color-s-purple: #9a6a1a;
+  --color-s-cyan: #0f7c6e;
   /* Older pages use white-with-opacity for text and tints, and white/black for inverted
      buttons; swapping the two keeps them readable on a light background. */
-  --color-white: #111114;
-  --color-black: #ffffff;
-  --s-shadow: 0 1px 2px rgba(16, 16, 24, 0.04), 0 1px 1px rgba(16, 16, 24, 0.02);
-  --s-shadow-raised: 0 12px 32px rgba(16, 16, 24, 0.12), 0 2px 6px rgba(16, 16, 24, 0.06);
-  --s-scrim: rgba(17, 17, 20, 0.32);
+  --color-white: #1e1c19;
+  --color-black: #faf7f1;
+  --s-shadow: 0 1px 2px rgba(60, 44, 20, 0.05), 0 1px 1px rgba(60, 44, 20, 0.03);
+  --s-shadow-raised: 0 14px 34px rgba(60, 44, 20, 0.12), 0 2px 6px rgba(60, 44, 20, 0.06);
+  --s-scrim: rgba(40, 32, 18, 0.28);
 }
 
 /* Older pages hardcode a few near-black panels; map them to light surfaces. */

@@ -19,6 +19,8 @@ Example:
     "open chrome"            -> ("open chrome", False)  <- blocked if gate on
 """
 
+import re
+
 from colorama import Fore
 
 try:
@@ -82,14 +84,14 @@ def check_and_strip(text: str, wake_words: list) -> tuple:
 
     # Pass 1: exact match — fastest and most reliable
     for word in sorted_words:
-        if clean.startswith(word):
+        if re.match(re.escape(word) + r"(?![\w-])", clean):          # a whole word: "seventeen" isn't "seven"
             remainder = text[len(word):].strip().lstrip(",.!? ")
             print(Fore.CYAN + f"[WAKE] Exact match: '{word}' — command: '{remainder}'")
             return remainder, True
 
         # Also check if wake word appears anywhere in short clips
         # (user may say "seven" without "hey" prefix)
-        if len(clean_words) <= len(word.split()) + 2 and word in clean:
+        if len(clean_words) <= len(word.split()) + 2 and re.search(r"(?<![\w-])" + re.escape(word) + r"(?![\w-])", clean):
             remainder = clean.replace(word, "").strip().lstrip(",.!? ")
             print(Fore.CYAN + f"[WAKE] Contains match: '{word}' — command: '{remainder}'")
             return remainder or text, True
@@ -117,3 +119,28 @@ def check_and_strip(text: str, wake_words: list) -> tuple:
 def get_defaults() -> list:
     """Default wake words used when none configured."""
     return ["hey seven", "ok seven", "okay seven", "yo seven", "seven"]
+
+
+# Whisper writes Seven's name as a digit, and the wake phrase in many shapes: "Hey 7", "H7", "A7", "Hay 7", "7,".
+_WAKE_SPELLINGS = re.compile(r"^\s*(?:(?:hey|hay|hi|hei|ok|okay|o\.?k\.?)[\s,.\-]*(?:7|seven)|(?:a|h)[\s\-]?7|7|seven)"
+                             r"(?![\w-])[\s,.!?]*", re.I)
+
+
+_VERBS = {"open", "close", "show", "play", "stop", "set", "turn", "what", "what's", "whats", "who", "how", "when", "where",
+          "remind", "start", "find", "search", "tell", "read", "mute", "pause", "resume", "save", "restore", "can",
+          "could", "please", "volume", "brightness", "take", "go", "launch", "add", "list", "do", "is", "are"}
+
+
+def normalize_wake(text: str) -> str:
+    """'Hey 7, open chrome' -> 'Hey seven, open chrome', so the wake-word check sees Seven's name."""
+    m = _WAKE_SPELLINGS.match(text)
+    if not m:
+        return text
+    rest = text[m.end():].strip()
+    bare = re.match(r"^\s*(?:7|seven)", text, re.I) is not None
+    if bare and rest:                                # "7 tasks are due" is a sentence, not Seven's name
+        paused = re.search(r"[,.!?]", text[:m.end()]) is not None
+        first = rest.split()[0].lower().strip(",.!?") if rest.split() else ""
+        if not paused and first not in _VERBS:
+            return text
+    return f"Hey seven, {rest}" if rest else "Hey seven"

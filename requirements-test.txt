@@ -10,3 +10,4 @@ pydantic
 chromadb==1.5.8
 pypdf>=4.0
 ruff==0.17.2
+scipy

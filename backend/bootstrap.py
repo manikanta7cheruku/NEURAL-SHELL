@@ -48,6 +48,18 @@ _bootstrap_state = {
         "current": "",
         "error": None
     },
+    "voice_model": {
+        "status": "pending",
+        "progress": 0,
+        "current": "",
+        "error": None
+    },
+    "speech_model": {
+        "status": "pending",
+        "progress": 0,
+        "current": "",
+        "error": None
+    },
     "model_pull": {
         "status": "pending",
         "model": "",
@@ -1231,6 +1243,88 @@ def ensure_search_model():
         done.set()
 
 
+def ensure_voice_model():
+    """Seven's natural voice (Kokoro, about 205 MB): downloaded here with progress. Without it Seven speaks with the
+    bundled basic voice, so a failure is never fatal."""
+    from mouth import voices
+    if voices.kokoro_ready():
+        _set('voice_model', status='done', progress=100, current='Already on this PC')
+        return True
+    _set('voice_model', status='running', progress=1, current='Downloading the natural voice', error=None)
+    import requests
+    d = voices.models_dir()
+    os.makedirs(d, exist_ok=True)
+    try:
+        sizes = {}
+        got = {}
+        for name, url in voices.KOKORO_FILES.items():
+            path = os.path.join(d, name)
+            with requests.get(url, stream=True, timeout=30) as r:
+                r.raise_for_status()
+                sizes[name] = int(r.headers.get("content-length") or 0)
+                got[name] = 0
+                with open(path + ".part", "wb") as f:
+                    for chunk in r.iter_content(1024 * 256):
+                        f.write(chunk)
+                        got[name] += len(chunk)
+                        total = max(sum(sizes.values()), voices.KOKORO_SIZE_MB * 1024 * 1024)
+                        _set('voice_model', progress=max(1, min(99, int(sum(got.values()) / total * 100))))
+            os.replace(path + ".part", path)
+        _set('voice_model', status='done', progress=100, current='Ready')
+        return True
+    except Exception as e:
+        _set('voice_model', status='error', progress=0,
+             error=f'Natural voice download failed ({str(e)[:120]}). Seven uses its basic voice until it retries.')
+        return False
+
+
+def _speech_models():
+    """The Whisper models the ears load on this PC (ears/core.py): medium.en on a GPU, else base.en + small.en."""
+    try:
+        import ctranslate2
+        if ctranslate2.get_cuda_device_count() > 0:
+            return ["medium.en"], 1500
+    except Exception:
+        pass
+    return ["base.en", "small.en"], 620
+
+
+def ensure_speech_model():
+    """Speech recognition (Whisper), downloaded here with progress instead of silently the first time you speak."""
+    from seven_utils import hf_offline
+    names, total_mb = _speech_models()
+    _set('speech_model', status='running', progress=1, current='Downloading speech recognition', error=None)
+    hub = os.path.join(os.path.expanduser("~"), ".cache", "huggingface", "hub")
+    done = threading.Event()
+
+    def _watch():
+        while not done.is_set():
+            size = 0
+            for n in names:
+                for root, _dirs, files in os.walk(os.path.join(hub, f"models--Systran--faster-whisper-{n}")):
+                    for f in files:
+                        try:
+                            size += os.path.getsize(os.path.join(root, f))
+                        except OSError:
+                            pass
+            _set('speech_model', progress=max(1, min(97, int(size / (total_mb * 1024 * 1024) * 100))))
+            done.wait(0.5)
+    threading.Thread(target=_watch, daemon=True).start()
+    try:
+        from faster_whisper import download_model
+        with hf_offline.allow_downloads():
+            for n in names:
+                download_model(n)
+        _set('speech_model', status='done', progress=100, current='Ready')
+        return True
+    except Exception as e:
+        _set('speech_model', status='error', progress=0,
+             error=f'Speech recognition download failed ({str(e)[:120]}). Seven will fetch it the first time you speak.')
+        return False
+    finally:
+        done.set()
+
+
 def run_environment_setup(on_complete=None):
     """
     Run full environment setup in background thread.
@@ -1285,6 +1379,9 @@ def run_environment_setup(on_complete=None):
 
             # ── Step 1b: the search model (memory and documents find things by meaning with it) ──
             ensure_search_model()
+            # ── Step 1c: the voice and the ears, so the first conversation doesn't wait on a download ──
+            ensure_voice_model()
+            ensure_speech_model()
 
             # ── Step 2: Ollama install ──
             if is_ollama_installed():

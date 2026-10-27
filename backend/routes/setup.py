@@ -52,34 +52,12 @@ def welcome_greeting():
     Trigger Seven's first-time welcome greeting after setup completes.
     Speaks a time-appropriate greeting so the user knows Seven is now live.
     """
+    # The voice loop greets once when Seven starts (main_modules/startup/greeting.py). This only reports the
+    # message for the screen, so a new user hears one welcome, not two.
     try:
         import config
-        import datetime
-        from backend.api_server import set_state
-
-        name = config.KEY.get("identity", {}).get("user_name", "")
-        hour = datetime.datetime.now().hour
-
-        if hour < 5:
-            time_greet = "Good evening"
-        elif hour < 12:
-            time_greet = "Good morning"
-        elif hour < 17:
-            time_greet = "Good afternoon"
-        else:
-            time_greet = "Good evening"
-
-        message = f"{time_greet}, {name}. Seven is now online and ready. Just say my name to begin." if name else f"{time_greet}. Seven is now online and ready. Just say my name to begin."
-
-        # Speak via mouth module (loaded in full mode)
-        try:
-            import mouth
-            import threading
-            threading.Thread(target=lambda: mouth.speak(message), daemon=True).start()
-        except Exception as _me:
-            print(f"[SETUP] Welcome greeting mouth error: {_me}")
-
-        set_state("seven_text", message)
+        from main_modules.startup import greeting
+        kind, message = greeting.message(None, config)
         return {"success": True, "message": message}
     except Exception as e:
         print(f"[SETUP] Welcome greeting error: {e}")
@@ -102,9 +80,9 @@ def complete_setup(req: SetupCompleteRequest):
     wake    = req.wake_word.lower().strip() if req.wake_word else "seven"
     
     # Map the selected onboarding voice configuration parameters cleanly
-    voice_engine = req.voice_engine.strip() if req.voice_engine else "sapi"
-    voice_id_val = req.voice_id.strip() if req.voice_id else str(req.voice_index)
-    
+    voice_engine = req.voice_engine.strip() if req.voice_engine else "kokoro"
+    voice_id_val = req.voice_id.strip() if req.voice_id else ("af_heart" if voice_engine == "kokoro" else str(req.voice_index))
+
     updates = {
         "setup_complete": True,
         "email":          email,
@@ -114,10 +92,12 @@ def complete_setup(req: SetupCompleteRequest):
             "wake_words": [wake, f"hey {wake}"],
         },
         "voice": {
+            **config.KEY.get("voice", {}),
             "engine": voice_engine,
             "voice_id": voice_id_val,
             "voice_index": req.voice_index,
-            "speed": 165
+            "speed": 1.0,
+            "listen_mode": "wake",
         },
     }
 
@@ -786,11 +766,18 @@ def check_environment():
     except ImportError:
         packages_ok = False
 
+    try:
+        from mouth import voices
+        voice_ready = voices.kokoro_ready()
+    except Exception:
+        voice_ready = False
+
     return {
         "packages_installed": packages_ok,
         "ollama_installed":   ollama_installed,
         "ollama_running":     ollama_running,
-        "needs_setup":        not (packages_ok and ollama_installed)
+        "voice_ready":        voice_ready,
+        "needs_setup":        not (packages_ok and ollama_installed and voice_ready)
     }
 
 
