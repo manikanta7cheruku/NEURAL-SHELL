@@ -1,17 +1,17 @@
 <!DOCTYPE html>
 <!--
   electron/status.html
-  Seven's voice bar: a small pill at the top centre of the screen.
+  Seven's voice bar: a one-line caption pill at the top centre of the screen, there only while you talk to Seven.
 
-    resting    a slim bar against the top edge with a status light (green: listening; teal: no need to say
-               "Hey Seven" right now; grey: paused) and, while someone talks, a tiny level meter
-    hover      says how to talk to Seven ("Say Hey Seven" / "Hold Shift and speak")
-    a request  grows down into a card: what you said, then Seven thinking, then Seven's reply as it speaks,
-               and folds back up a few seconds after Seven finishes
-    click      opens Seven; right-click for the menu
+    "Hey Seven"     a pill appears: level bars that move with your voice, "Listening"
+    your request    what you said, with three dots while Seven thinks
+    Seven replies   the sentence Seven is saying right now, like live captions, one line
+    done            the last sentence stays a moment, then the pill fades away
 
-  It follows /ws/status (backend/routes/status.py). Only voice requests open the card; typing in the app doesn't.
-  The window is larger than the bar and lets clicks through everywhere except the bar itself.
+  Settings, System, Voice bar: "While talking" (default, nothing on screen otherwise), "Always" (a small light at
+  the top edge while Seven listens; hover it for how to talk to Seven), or "Off".
+  Only voice requests open it; typing in the app doesn't. The window lets clicks through everywhere but the pill.
+  It follows /ws/status (backend/routes/status.py).
 -->
 <html>
 <head>
@@ -25,183 +25,141 @@
       font-family: 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
       -webkit-font-smoothing: antialiased;
     }
-
     :root {
       --ease: cubic-bezier(0.32, 0.72, 0, 1);
-      --spring: cubic-bezier(0.34, 1.32, 0.64, 1);
-      --ink: rgba(12, 13, 15, 0.94);
-      --edge: rgba(255, 255, 255, 0.07);
+      --ink: rgba(14, 15, 17, 0.92);
       --text: #f1eee8;
-      --text-2: rgba(241, 238, 232, 0.62);
-      --text-3: rgba(241, 238, 232, 0.38);
+      --text-2: rgba(241, 238, 232, 0.6);
       --accent: #3cc8b4;
       --green: #4cc38a;
       --amber: #e2b25b;
     }
 
-    #bar {
-      position: relative;
-      margin-top: 0;
-      width: 120px; height: 26px;
-      border-radius: 0 0 14px 14px;
+    #pill {
+      margin-top: 10px;
+      height: 34px; width: 34px;
+      border-radius: 17px;
       background: var(--ink);
-      border: 1px solid var(--edge); border-top: none;
-      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28), 0 2px 6px rgba(0, 0, 0, 0.2);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22), 0 1px 3px rgba(0, 0, 0, 0.2);
+      display: flex; align-items: center; gap: 10px;
+      padding: 0 14px 0 13px;
       overflow: hidden;
       cursor: pointer;
-      transform: translateY(-32px);
-      opacity: 0;
-      transition:
-        width 0.42s var(--spring), height 0.42s var(--spring), border-radius 0.42s var(--ease),
-        transform 0.4s var(--ease), opacity 0.3s var(--ease);
+      opacity: 0; transform: translateY(-14px) scale(0.96);
+      transition: width 0.38s var(--ease), height 0.3s var(--ease), margin 0.3s var(--ease), padding 0.3s var(--ease),
+                  border-radius 0.3s var(--ease), opacity 0.25s var(--ease), transform 0.35s var(--ease);
     }
-    body.shown #bar { transform: translateY(0); opacity: 1; }
-    body.hover #bar { width: 236px; }
-    body.open #bar { width: 440px; height: var(--h, 92px); border-radius: 0 0 22px 22px; cursor: default; }
+    body.open #pill { opacity: 1; transform: none; }
 
-    /* resting row: light + label + level */
-    #rest {
-      position: absolute; inset: 0;
-      display: flex; align-items: center; justify-content: center; gap: 8px;
-      transition: opacity 0.2s var(--ease);
-    }
-    body.open #rest { opacity: 0; pointer-events: none; }
-    .light {
-      width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
-      background: rgba(255, 255, 255, 0.25);
-      transition: background 0.4s var(--ease), box-shadow 0.4s var(--ease);
-    }
-    body.listening .light { background: var(--green); box-shadow: 0 0 8px rgba(76, 195, 138, 0.55); }
-    body.followup .light { background: var(--accent); box-shadow: 0 0 10px rgba(60, 200, 180, 0.7); animation: glow 1.6s ease-in-out infinite; }
-    body.hearing .light { background: var(--accent); }
-    #hint {
-      font-size: 11.5px; color: var(--text-2); white-space: nowrap;
-      max-width: 0; opacity: 0; overflow: hidden;
-      transition: max-width 0.4s var(--ease), opacity 0.25s var(--ease);
-    }
-    body.hover #hint { max-width: 180px; opacity: 1; }
-    .meter { display: flex; align-items: center; gap: 2px; height: 10px; }
-    .meter i { display: block; width: 2px; height: 3px; border-radius: 1px; background: rgba(255, 255, 255, 0.22); transition: height 0.09s linear, background 0.2s; }
-    body.hearing .meter i { background: var(--accent); }
+    /* "Always": a small light at the top edge while Seven listens */
+    body.rest #pill { opacity: 1; transform: none; margin-top: 4px; height: 12px; width: 40px; border-radius: 6px; padding: 0; justify-content: center; }
+    body.rest.hover #pill { height: 28px; border-radius: 14px; padding: 0 13px; justify-content: flex-start; }
+    body.rest #bars, body.rest #text { display: none; }
+    body.rest.hover #text { display: block; }
+    #light { display: none; width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; background: rgba(255, 255, 255, 0.3); }
+    body.rest #light { display: block; }
+    body.rest.listening #light { background: var(--green); box-shadow: 0 0 6px rgba(76, 195, 138, 0.6); }
+    body.rest.followup #light { background: var(--accent); }
 
-    /* the card */
-    #card {
-      position: absolute; left: 0; right: 0; top: 0;
-      padding: 13px 18px 15px;
-      opacity: 0; transform: translateY(-6px);
-      transition: opacity 0.22s var(--ease), transform 0.3s var(--ease);
-      pointer-events: none;
-    }
-    body.open #card { opacity: 1; transform: none; transition-delay: 0.08s; pointer-events: auto; }
-    #head { display: flex; align-items: center; gap: 9px; height: 18px; }
-    #state { font-size: 12px; font-weight: 600; color: var(--text); letter-spacing: 0.01em; }
-    #sub { margin-left: auto; font-size: 11px; color: var(--text-3); }
-    #anim { display: flex; align-items: center; gap: 2.5px; height: 14px; width: 26px; }
-    #anim i { display: block; width: 2.5px; height: 4px; border-radius: 2px; background: var(--accent); }
-    body.s-thinking #anim i { background: var(--amber); animation: dots 1.1s ease-in-out infinite; height: 4px; }
-    body.s-thinking #anim i:nth-child(2) { animation-delay: 0.15s; }
-    body.s-thinking #anim i:nth-child(3) { animation-delay: 0.3s; }
-    body.s-thinking #anim i:nth-child(n+4) { display: none; }
-    body.s-speaking #anim i { animation: wave 0.9s ease-in-out infinite; }
-    body.s-speaking #anim i:nth-child(2) { animation-delay: 0.12s; }
-    body.s-speaking #anim i:nth-child(3) { animation-delay: 0.24s; }
-    body.s-speaking #anim i:nth-child(4) { animation-delay: 0.36s; }
-    body.s-speaking #anim i:nth-child(5) { animation-delay: 0.48s; }
-    body.s-done #anim i { background: var(--green); height: 4px; }
-    body.s-level #anim i { transition: height 0.09s linear; }
+    #bars { display: flex; align-items: center; gap: 2px; height: 14px; width: 18px; flex-shrink: 0; }
+    #bars i { display: block; width: 2px; height: 4px; border-radius: 1px; background: var(--accent); transition: height 0.09s linear; }
+    body.thinking #bars i { background: var(--amber); height: 4px; animation: dot 1.1s ease-in-out infinite; }
+    body.thinking #bars i:nth-child(2) { animation-delay: 0.15s; }
+    body.thinking #bars i:nth-child(3) { animation-delay: 0.3s; }
+    body.thinking #bars i:nth-child(n+4) { display: none; }
+    body.speaking #bars i { animation: wave 0.9s ease-in-out infinite; }
+    body.speaking #bars i:nth-child(2) { animation-delay: 0.12s; }
+    body.speaking #bars i:nth-child(3) { animation-delay: 0.24s; }
+    body.speaking #bars i:nth-child(4) { animation-delay: 0.36s; }
+    body.speaking #bars i:nth-child(5) { animation-delay: 0.48s; }
+    body.done #bars i { background: var(--green); height: 4px; }
 
-    #you {
-      margin-top: 9px; font-size: 12.5px; line-height: 1.45; color: var(--text-2);
-      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+    #text {
+      font-size: 13px; line-height: 1; white-space: nowrap; color: var(--text);
+      transition: opacity 0.16s var(--ease);
     }
-    #you:empty { display: none; }
-    #seven {
-      margin-top: 6px; font-size: 13.5px; line-height: 1.5; color: var(--text);
-      max-height: 81px; overflow: hidden;
-      -webkit-mask-image: linear-gradient(to bottom, transparent 0, black 14px);
-      mask-image: linear-gradient(to bottom, transparent 0, black 14px);
-      display: flex; flex-direction: column; justify-content: flex-end;
-    }
-    #seven.fits { -webkit-mask-image: none; mask-image: none; }
-    #seven:empty { display: none; }
+    #text.you, #text.quiet { color: var(--text-2); }
+    #text.swap { opacity: 0; }
+    #measure { position: absolute; visibility: hidden; white-space: nowrap; font-size: 13px; left: -9999px; }
 
-    @keyframes glow { 50% { box-shadow: 0 0 2px rgba(60, 200, 180, 0.3); } }
-    @keyframes dots { 0%, 80%, 100% { opacity: 0.25; transform: scale(0.8); } 40% { opacity: 1; transform: scale(1); } }
+    @keyframes dot { 0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); } 40% { opacity: 1; transform: scale(1); } }
     @keyframes wave { 0%, 100% { height: 4px; } 50% { height: 13px; } }
     @media (prefers-reduced-motion: reduce) {
-      #bar, #card, #hint { transition-duration: 0.01s !important; }
-      #anim i, .light { animation: none !important; }
+      #pill, #text { transition-duration: 0.01s !important; }
+      #bars i { animation: none !important; }
     }
   </style>
 </head>
 <body>
-  <div id="bar" role="status" aria-live="polite">
-    <div id="rest">
-      <span class="light"></span>
-      <span id="hint"></span>
-      <span class="meter" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
-    </div>
-    <div id="card">
-      <div id="head">
-        <span id="anim" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
-        <span id="state"></span>
-        <span id="sub"></span>
-      </div>
-      <div id="you"></div>
-      <div id="seven"><span id="seven-text"></span></div>
-    </div>
+  <div id="pill" role="status" aria-live="polite">
+    <span id="light"></span>
+    <span id="bars" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+    <span id="text"></span>
   </div>
+  <span id="measure"></span>
 
   <script>
     const body = document.body;
-    const bar = document.getElementById('bar');
-    const hint = document.getElementById('hint');
-    const stateEl = document.getElementById('state');
-    const subEl = document.getElementById('sub');
-    const youEl = document.getElementById('you');
-    const sevenBox = document.getElementById('seven');
-    const sevenEl = document.getElementById('seven-text');
-    const meter = [...document.querySelectorAll('.meter i')];
-    const wave = [...document.querySelectorAll('#anim i')];
+    const pill = document.getElementById('pill');
+    const textEl = document.getElementById('text');
+    const measure = document.getElementById('measure');
+    const bars = [...document.querySelectorAll('#bars i')];
 
-    const HOLD_MS = 4500;            // how long the reply stays after Seven finishes
-    let show = 'always';             // config voice_bar.show: always | active | off
-    let turn = 0, open = false, closeTimer = null, hovering = false;
-    const last = {};
+    const HOLD_MS = 2600;            // the last sentence stays this long after Seven finishes
+    const MAX_CHARS = 64;            // one line: longer sentences show their end, like captions
+    let show = 'active';             // config voice_bar.show: active (while talking) | always | off
+    let mode = null;                 // null | 'wake' | 'turn' | 'hear'
+    let turn = 0, closeTimer = null, hovering = false, lastIgnored = 0, shown = '';
 
     const cls = (name, on) => body.classList.toggle(name, !!on);
 
-    function setOpen(value) {
-      if (open === value) return;
-      open = value;
-      cls('open', value);
-      fit();
+    function setLook(look) {
+      for (const k of ['thinking', 'speaking', 'done', 'level']) cls(k, k === look);
     }
 
-    // The card grows to fit what it shows: the header, what you said, and up to three lines of the reply.
-    function fit() {
-      if (!open) return;
-      const h = 13 + 18 + (youEl.textContent ? 9 + youEl.scrollHeight : 0)
-              + (sevenEl.textContent ? 6 + Math.min(81, sevenEl.offsetHeight) : 0) + 15;
-      bar.style.setProperty('--h', `${Math.max(46, h)}px`);
-      sevenBox.classList.toggle('fits', sevenEl.offsetHeight <= 81);
+    // The sentence being said now: the last one of the reply so far, trimmed from the front if it's long.
+    function caption(text) {
+      const parts = text.trim().split(/(?<=[.!?])\s+/).filter(Boolean);
+      let s = parts[parts.length - 1] || '';
+      if (s.length > MAX_CHARS) s = `…${s.slice(s.length - MAX_CHARS + 1).replace(/^\S*\s/, '')}`;
+      return s;
     }
 
-    function hintText(d) {
+    function setText(text, tone) {
+      if (text === shown && textEl.className === tone) { resize(); return; }
+      shown = text;
+      textEl.classList.add('swap');
+      setTimeout(() => {
+        textEl.textContent = text;
+        textEl.className = tone;
+        resize();
+      }, 120);
+    }
+
+    function resize() {
+      if (body.classList.contains('rest') && !hovering) { pill.style.width = ''; return; }
+      measure.textContent = textEl.textContent;
+      const extra = body.classList.contains('rest') ? 26 + 16 : 13 + 18 + 10 + 14;
+      pill.style.width = `${Math.min(460, Math.max(body.classList.contains('rest') ? 120 : 132, measure.offsetWidth + extra + 2))}px`;
+    }
+
+    function close(ms) {
+      clearTimeout(closeTimer);
+      closeTimer = setTimeout(() => { closeTimer = null; mode = null; cls('open', false); }, ms);
+    }
+
+    function openAs(m) {
+      mode = m;
+      clearTimeout(closeTimer); closeTimer = null;
+      cls('open', show !== 'off');
+    }
+
+    function hint(d) {
       if (d.paused) return 'Paused. Say "wake up"';
       if (d.listen_mode === 'ptt') return 'Hold Shift and speak';
       if (d.follow_up_open) return 'Go ahead, I\'m listening';
-      if (d.listen_mode === 'always') return 'Listening';
-      return 'Say "Hey Seven"';
-    }
-
-    let card = null;                 // null | 'wake' (heard "Hey Seven", waiting) | 'turn' (a request and its reply)
-
-    function setAnim(kind) { body.className = body.className.replace(/\bs-\w+/g, '').trim() + ` s-${kind}`; }
-
-    function scheduleClose(ms) {
-      clearTimeout(closeTimer);
-      closeTimer = setTimeout(() => { closeTimer = null; card = null; setOpen(false); }, ms);
+      return d.listen_mode === 'always' ? 'Listening' : 'Say "Hey Seven"';
     }
 
     function update(d) {
@@ -210,51 +168,44 @@
       const level = d.mic_level || 0;
       cls('listening', listening);
       cls('followup', listening && d.follow_up_open);
-      cls('hearing', hearing);
-      cls('shown', show === 'always' ? true : show === 'active' ? open || hearing || hovering : open);
-      hint.textContent = hintText(d);
-      meter.forEach((m, i) => { m.style.height = `${3 + Math.max(0, Math.min(1, level * 1.6 - i * 0.12)) * 7}px`; });
 
       // A voice request starts a turn (main_modules/startup/voice_loop.py sets voice_turn after user_text).
       if (d.voice_turn && d.voice_turn !== turn) {
         turn = d.voice_turn;
-        card = 'turn';
-        clearTimeout(closeTimer); closeTimer = null;
-        youEl.textContent = d.user_text ? `“${d.user_text}”` : '';
-        sevenEl.textContent = '';
-        setOpen(show !== 'off');
+        openAs('turn');
+        setText(d.user_text || '', 'you');
       }
       // "Hey Seven" on its own: Seven is waiting for the request.
       const ig = d.voice_ignored;
-      if (ig && ig.at !== last.ignoredAt) {
-        last.ignoredAt = ig.at;
-        if (/wake word: listening/.test(ig.reason || '') && show !== 'off') {
-          card = 'wake';
-          youEl.textContent = '';
-          sevenEl.textContent = '';
-          setOpen(true);
-          scheduleClose((d.follow_up_seconds || 8) * 1000);
-        }
+      if (ig && ig.at !== lastIgnored) {
+        lastIgnored = ig.at;
+        if (/wake word: listening/.test(ig.reason || '')) { openAs('wake'); setText('Listening', 'quiet'); close(8000); }
       }
-      if (!open) return;
+      // Speech Seven will act on (in the follow-up window, always-on or push to talk): show it's being heard.
+      const heardForSeven = hearing && listening && (d.follow_up_open || d.listen_mode !== 'wake');
+      if (heardForSeven && mode !== 'turn' && mode !== 'wake') { openAs('hear'); setText('Listening', 'quiet'); }
+      if (mode === 'hear' && !hearing && d.voice_state !== 'processing' && !closeTimer) close(1200);
 
-      if (card === 'wake') {
-        stateEl.textContent = 'Listening';
-        subEl.textContent = 'Go ahead';
-        setAnim('level');
-      } else {
-        stateEl.textContent = d.thinking && !d.speaking ? 'Thinking' : 'Seven';
-        subEl.textContent = d.speaking ? 'Say "stop" to cut in' : '';
-        setAnim(d.speaking ? 'speaking' : d.thinking ? 'thinking' : 'done');
-        const reply = (d.seven_text || '').trim();
-        if (reply && reply !== sevenEl.textContent) sevenEl.textContent = reply;
+      if (mode === 'turn') {
         const busy = d.speaking || d.thinking;
-        if (!busy && sevenEl.textContent && !closeTimer) scheduleClose(HOLD_MS);
+        const reply = caption(d.seven_text || '');
+        if (reply) setText(reply, '');
+        setLook(d.speaking ? 'speaking' : d.thinking && !reply ? 'thinking' : busy ? 'speaking' : 'done');
+        if (!busy && reply && !closeTimer) close(HOLD_MS);
         else if (busy && closeTimer) { clearTimeout(closeTimer); closeTimer = null; }
+      } else if (mode) {
+        setLook('level');
       }
-      // In the "level" look the bars follow your voice; otherwise they animate on their own.
-      wave.forEach((w, i) => { w.style.height = card === 'wake' ? `${4 + Math.max(0, Math.min(1, level * 1.8 - i * 0.1)) * 9}px` : ''; });
-      fit();
+      if (mode === 'wake' || mode === 'hear') {
+        bars.forEach((b, i) => { b.style.height = `${4 + Math.max(0, Math.min(1, level * 1.8 - Math.abs(i - 2) * 0.18)) * 10}px`; });
+      } else {
+        bars.forEach(b => { b.style.height = ''; });
+      }
+
+      // Nothing to say: the small light ("Always"), or nothing.
+      const resting = !mode && show === 'always' && !!d.listening;
+      if (resting !== body.classList.contains('rest')) { cls('rest', resting); if (resting) setText(hint(d), 'quiet'); resize(); }
+      if (resting && hovering) setText(hint(d), 'quiet');
     }
 
     // ── status feed ──
@@ -264,26 +215,28 @@
         ws = new WebSocket('ws://127.0.0.1:7777/ws/status');
         ws.onopen = () => { retries = 0; loadConfig(); };
         ws.onmessage = e => { try { update(JSON.parse(e.data)); } catch {} };
-        ws.onclose = () => { ws = null; cls('shown', false); setOpen(false); setTimeout(connect, Math.min(10000, 1500 + retries++ * 500)); };
+        ws.onclose = () => { ws = null; mode = null; cls('open', false); cls('rest', false); setTimeout(connect, Math.min(10000, 1500 + retries++ * 500)); };
         ws.onerror = () => ws && ws.close();
       } catch { setTimeout(connect, 3000); }
     }
 
     async function loadConfig() {
       try {
-        const r = await fetch('http://127.0.0.1:7777/api/config');
-        const c = await r.json();
+        const c = await (await fetch('http://127.0.0.1:7777/api/config')).json();
         const v = c?.voice_bar?.show;
-        show = ['always', 'active', 'off'].includes(v) ? v : 'always';
+        show = ['always', 'active', 'off'].includes(v) ? v : 'active';
       } catch {}
     }
     setInterval(loadConfig, 5000);
 
-    // ── mouse: only the bar takes clicks; everywhere else they pass through to the desktop ──
-    bar.addEventListener('mouseenter', () => { hovering = true; cls('hover', !open); window.orbAPI?.setIgnoreMouseEvents(false); });
-    bar.addEventListener('mouseleave', () => { hovering = false; cls('hover', false); window.orbAPI?.setIgnoreMouseEvents(true); });
-    bar.addEventListener('click', () => { if (open) { clearTimeout(closeTimer); closeTimer = null; card = null; setOpen(false); } else window.orbAPI?.toggleDashboard(); });
-    bar.addEventListener('contextmenu', e => { e.preventDefault(); window.orbAPI?.showMenu(); });
+    // ── mouse: only the pill takes clicks; everywhere else they pass through to the desktop ──
+    pill.addEventListener('mouseenter', () => { hovering = true; cls('hover', true); resize(); window.orbAPI?.setIgnoreMouseEvents(false); });
+    pill.addEventListener('mouseleave', () => { hovering = false; cls('hover', false); resize(); window.orbAPI?.setIgnoreMouseEvents(true); });
+    pill.addEventListener('click', () => {
+      if (mode) { clearTimeout(closeTimer); closeTimer = null; mode = null; cls('open', false); }
+      else window.orbAPI?.toggleDashboard();
+    });
+    pill.addEventListener('contextmenu', e => { e.preventDefault(); window.orbAPI?.showMenu(); });
 
     window.orbAPI?.setIgnoreMouseEvents(true);
     setTimeout(connect, 800);
