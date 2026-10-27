@@ -97,27 +97,20 @@ function Hardware() {
   );
 }
 
-const OPACITY = [{ value: 0.4, label: 'Light' }, { value: 0.65, label: 'Balanced' }, { value: 0.85, label: 'Solid' }];
+const BAR = [{ value: 'always', label: 'Always' }, { value: 'active', label: 'While talking' }, { value: 'off', label: 'Off' }];
+const BAR_HINT = {
+  always: 'A slim bar at the top of your screen shows that Seven is listening, and opens when you talk to it.',
+  active: 'Appears only while you talk to Seven, then folds away.',
+  off: 'No bar. Seven still listens and answers out loud.',
+};
 
-function AmbientPanel({ config }) {
-  const current = config.ambient_panel?.opacity ?? 0.65;
-  const nearest = OPACITY.reduce((a, b) => (Math.abs(b.value - current) < Math.abs(a.value - current) ? b : a)).value;
-  const change = async value => {
-    await saveConfig({ ambient_panel: { opacity: value } });
-    try { await api.post('/config/ambient-opacity', { opacity: value }); }
-    catch {
-      try { localStorage.setItem('seven_panel_opacity', String(value)); localStorage.setItem('seven_panel_opacity_ts', String(Date.now())); } catch {}
-    }
-  };
+function VoiceBar({ config }) {
+  const [show, setShow] = useState(config.voice_bar?.show || 'always');
+  const change = value => { setShow(value); saveConfig({ voice_bar: { show: value } }); };
   return (
-    <Section title="Floating panel" description="The panel that appears next to the Seven orb.">
-      <Row label="Background" description="How much of your desktop shows through. Applies immediately.">
-        <div className="flex items-center gap-3">
-          <div className="h-8 w-14 rounded-md border border-s-border-l" style={{ background: `rgba(9,9,11,${nearest})`,
-               backgroundImage: 'linear-gradient(45deg,var(--color-s-border-l) 25%,transparent 25%,transparent 75%,var(--color-s-border-l) 75%),linear-gradient(45deg,var(--color-s-border-l) 25%,transparent 25%,transparent 75%,var(--color-s-border-l) 75%)',
-               backgroundSize: '8px 8px', backgroundPosition: '0 0,4px 4px', backgroundBlendMode: 'multiply' }} />
-          <Segmented value={nearest} options={OPACITY} onChange={change} />
-        </div>
+    <Section title="Voice bar" description="What you said and Seven's reply, at the top centre of your screen.">
+      <Row label="Show" description={BAR_HINT[show]}>
+        <Segmented value={show} options={BAR} onChange={change} />
       </Row>
     </Section>
   );
@@ -265,7 +258,7 @@ export default function SystemSection({ config }) {
   return (
     <>
       <Hardware />
-      <AmbientPanel config={config} />
+      <VoiceBar config={config} />
       <PanelShortcut />
       <Repair />
       <Appearance />
