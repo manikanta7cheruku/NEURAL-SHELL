@@ -50,6 +50,9 @@ class ExplainsItself(BrainTest):
         self.assertEqual(LLM_CALLS, [])
 
     def test_model_details_only_when_asked(self):
+        from brain_modules import settings_control           # don't depend on what this PC has installed
+        settings_control.set_model_lister(lambda: ["llama3.2:1b", "qwen2.5:7b"])
+        self.addCleanup(settings_control.set_model_lister, None)
         self.ask("Set your model to llama3.2:1b")
         short = self.ask("What model are you using")
         self.assertIn("Llama 3.2 1B", short)
