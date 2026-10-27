@@ -1,7 +1,13 @@
 # ears/__init__.py
-# Bridge file — keeps backward compatibility
-# V1.2: listen() returns (text, audio_path) tuple
-# V1.3: Added listen_for_interrupt for full duplex
+# listen() and listen_for_interrupt() load ears.core (and with it Whisper) on first use, not on import: the trigger
+# daemon imports ears.snap_detector and ears.audio_triggers and must not load a speech model to listen for snaps.
 
-from ears.core import listen
-from ears.core import listen_for_interrupt
+
+def listen():
+    from ears.core import listen as _listen
+    return _listen()
+
+
+def listen_for_interrupt(interrupt_words, on_interrupt_callback, stop_event):
+    from ears.core import listen_for_interrupt as _lfi
+    return _lfi(interrupt_words, on_interrupt_callback, stop_event)
