@@ -168,12 +168,15 @@ def _read() -> dict:
     seven = {"Seven": {"cpu": 0.0, "ram": 0, "vram": 0.0, "count": 0},
              "AI model": {"cpu": 0.0, "ram": 0, "vram": 0.0, "count": 0}}
     apps = {}
+    idle = None
     for pid, (name, private, cpu_time) in procs.items():
         name = name.lower()
         # CPU since the last reading, as a share of every core (cpu_time is in 100 ns units)
         cpu = 0.0
         if elapsed > 0 and pid in before:
             cpu = max(0.0, (cpu_time - before[pid]) / 1e7 / elapsed / cores * 100)
+        if pid == 0:                                 # the idle process: what's left is the PC's total load
+            idle = cpu if elapsed > 0 and pid in before else None
         if not name or name in _SYSTEM or pid in (0, 4):
             continue
         exe = _exe_of(pid)
@@ -203,7 +206,7 @@ def _read() -> dict:
     top = sorted(apps.items(), key=lambda kv: kv[1]["ram"], reverse=True)[:5]
     snap = system_info.snapshot()
     return {
-        "total": {"cpu": snap.get("cpu_load", 0), "ram_used_gb": gb(vm.total - vm.available),
+        "total": {"cpu": round(max(0.0, 100.0 - idle), 1) if idle is not None else snap.get("cpu_load", 0), "ram_used_gb": gb(vm.total - vm.available),
                   "ram_total_gb": gb(vm.total), "ram_percent": int(vm.percent), "gpu": snap.get("gpu"),
                   "cpu_name": snap.get("cpu", "")},
         "seven": {"cpu": round(sum(v["cpu"] for v in seven.values()), 1), "ram_gb": gb(seven_ram),
