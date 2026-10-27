@@ -1,51 +1,30 @@
 """
 =============================================================================
 PROJECT SEVEN - ears/core.py
-Version: 1.2.7 - Final Production Pipeline
+Version: 2.0 - speech-detector pipeline
 
-PIPELINE (in order):
-    1. Microphone capture (SpeechRecognition, adaptive threshold)
-    2. AGC — normalize volume (ears/agc.py)
-    3. AEC — remove echo if speaking (ears/aec.py)
-    4. Signal gates — RMS, duration, crest factor (ears/signal_gates.py)
-    5. Whisper transcription — in memory via BytesIO
-    6. TranscriptionInfo confidence — avg_logprob, VAD removal ratio
-    7. Per-segment confidence — no_speech_prob filter
-    8. Non-ASCII / emoji filter — catches music emoji output
-    9. Hallucination filter — exact, substring, saturation, music patterns
-    10. Repetition loop detection
-    11. Semantic coherence check
-    12. Autocorrect — RapidFuzz fuzzy correction
-    13. Return clean text
+PIPELINE:
+    1. ears/stream.py     one open microphone; a neural speech detector (Silero) cuts whole utterances out of
+                          the sound, so fans, typing and TV noise never reach Whisper
+    2. Echo rejection     utterances that began while Seven was talking, or right after, are Seven hearing itself
+    3. Whisper            speech-only audio, greedy decoding, Whisper's own silence and confidence checks
+    4. Text checks        non-English or music output, known hallucinations ("thanks for watching"),
+                          repetition loops, transcripts that match what Seven just said
+    5. Autocorrect        RapidFuzz correction of app names and common words
 
-ARCHITECTURE:
-    ears/core.py              This file. Orchestrator only.
-    ears/noise_floor.py       Adaptive noise floor + calibration.
-    ears/signal_gates.py      RMS, duration, crest factor gates.
-    ears/hallucination_filter.py  Hallucination detection (JSON-backed).
-    ears/hallucinations.json  Updatable phrase list.
-    ears/autocorrect.py       RapidFuzz fuzzy autocorrect.
-    ears/agc.py               Automatic gain control.
-    ears/aec.py               Acoustic echo cancellation.
-
-NO TEMP FILES:
-    Audio stays in RAM via BytesIO throughout.
-    temp_audio.wav written only when Voice ID is enabled in config.
-
-SOURCE TAGGING:
-    Returns ("__voice__", audio_path) on valid speech from microphone.
-    audio_path is "__voice__" sentinel when Voice ID disabled.
-    audio_path is "temp_audio.wav" when Voice ID enabled.
-    main.py uses audio_path to set speaker_id correctly.
+Returns ("text", "__voice__") for a valid utterance (or "temp_audio.wav" when voice verification needs the audio),
+(None, None) otherwise. Every rejection is published to the app ("voice_ignored") so the home screen can show it.
 =============================================================================
 """
 
 import io
+import json
 import os
 import re
-import json
-import time
 import threading
+import time
+import wave
+
 import numpy as np
 import colorama
 from colorama import Fore
@@ -54,46 +33,33 @@ from colorama import Fore
 if not hasattr(np, 'iterable'):
     np.iterable = lambda obj: hasattr(obj, '__iter__')
 
-import speech_recognition as sr
 from faster_whisper import WhisperModel
 
-# Sub-modules
-from ears import noise_floor as _nf
-from ears.signal_gates import check as _signal_check
-from ears.hallucination_filter import (
-    is_hallucination,
-    is_repetition_loop,
-    is_incoherent,
-)
+from ears.stream import STREAM, RATE
+from ears.hallucination_filter import is_hallucination, is_repetition_loop, is_incoherent
 from ears.autocorrect import correct as _autocorrect
-from ears import agc as _agc
-from ears import aec as _aec
+from ears.wake_word import normalize_wake
 
 colorama.init(autoreset=True)
-
-# Start AEC loopback capture
-# Gracefully disables itself if pyaudiowpatch not installed
-_aec.start()
 
 
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
 
-def _get_configured_model() -> str:
+def _config() -> dict:
     try:
-        cfg_path = os.path.join(
-            os.environ.get('APPDATA', os.path.expanduser('~')),
-            'SEVEN', 'config.json'
-        )
-        if os.path.exists(cfg_path):
-            with open(cfg_path, 'r', encoding='utf-8') as f:
-                cfg = json.load(f)
-            model = cfg.get('brain', {}).get('whisper_model', '').strip()
-            if model:
-                return model
+        p = os.path.join(os.environ.get('APPDATA', os.path.expanduser('~')), 'SEVEN', 'config.json')
+        with open(p, 'r', encoding='utf-8') as f:
+            return json.load(f)
     except Exception:
-        pass
+        return {}
+
+
+def _get_configured_model() -> str:
+    model = os.environ.get('SEVEN_WHISPER_MODEL') or _config().get('brain', {}).get('whisper_model', '').strip()
+    if model:
+        return model
     # Default by hardware: medium on a GPU, small on a CPU (medium on a CPU made the whole PC lag).
     return "medium.en" if _gpu_available() else "small.en"
 
@@ -102,7 +68,10 @@ def _gpu_available() -> bool:
     """
     Ask CTranslate2, the engine faster-whisper runs on. Do not ask torch: the bundled torch is a CPU-only
     build, so torch.cuda.is_available() is False even on an RTX card and Whisper silently ran on the CPU.
+    SEVEN_WHISPER_DEVICE=cpu forces the CPU path (scripts/voice_bench.py measures what users without a GPU get).
     """
+    if os.environ.get('SEVEN_WHISPER_DEVICE') == 'cpu':
+        return False
     try:
         import ctranslate2
         return ctranslate2.get_cuda_device_count() > 0
@@ -111,24 +80,29 @@ def _gpu_available() -> bool:
 
 
 def _is_voice_id_enabled() -> bool:
-    """Read Voice ID gate state from config."""
-    try:
-        cfg_path = os.path.join(
-            os.environ.get('APPDATA', os.path.expanduser('~')),
-            'SEVEN', 'config.json'
-        )
-        if os.path.exists(cfg_path):
-            with open(cfg_path, 'r', encoding='utf-8') as f:
-                cfg = json.load(f)
-            return (
-                cfg
-                .get('voice_gates', {})
-                .get('speaker_verify', {})
-                .get('enabled', False)
-            )
-    except Exception:
-        pass
-    return False
+    cfg = _config()
+    return bool(cfg.get('voice', {}).get('only_me')
+                or cfg.get('voice_gates', {}).get('speaker_verify', {}).get('enabled', False))
+
+
+def voice_settings() -> dict:
+    """The listening settings, with defaults. Older installs kept them under voice_gates."""
+    cfg = _config()
+    v = cfg.get('voice', {})
+    gates = cfg.get('voice_gates', {})
+    mode = v.get('listen_mode')
+    if mode not in ('wake', 'always', 'ptt'):
+        mode = 'ptt' if gates.get('push_to_talk', {}).get('enabled') else 'wake'
+    sens = v.get('sensitivity') if v.get('sensitivity') in ('relaxed', 'balanced', 'strict') else 'balanced'
+    return {
+        'listen_mode': mode,
+        'sensitivity': sens,
+        'follow_up_seconds': float(v.get('follow_up_seconds', 8)),
+        'interrupt': bool(v.get('interrupt', True)),
+        'only_me': bool(v.get('only_me', False)),
+        'mic': v.get('mic', '') or '',
+        'wake_words': v.get('wake_words') or ['hey seven', 'ok seven', 'okay seven', 'seven'],
+    }
 
 
 # =============================================================================
@@ -148,239 +122,182 @@ def _load_whisper(model_size: str) -> WhisperModel:
 def _load_whisper_cached(model_size: str) -> WhisperModel:
     if _gpu_available():
         try:
-            model = WhisperModel(
-                model_size, device="cuda", compute_type="float16"
-            )
+            model = WhisperModel(model_size, device="cuda", compute_type="float16")
             print(Fore.GREEN + f"[EARS] Whisper {model_size}: GPU ready")
             return model
         except Exception as e:
             print(Fore.YELLOW + f"[EARS] GPU init failed: {e}")
 
-    try:
-        # Leave cores for the rest of the PC: transcription on every core froze other apps.
-        threads = max(2, min(4, (os.cpu_count() or 4) // 2))
-        model = WhisperModel(
-            model_size, device="cpu", compute_type="int8", cpu_threads=threads
-        )
-        print(Fore.YELLOW + f"[EARS] Whisper {model_size}: CPU mode ({threads} threads)")
-        return model
-    except Exception as e:
-        print(Fore.RED + f"[EARS] Whisper load failed: {e}")
-        raise
+    # Leave cores for the rest of the PC: transcription on every core froze other apps.
+    threads = max(2, min(4, (os.cpu_count() or 4) // 2))
+    model = WhisperModel(model_size, device="cpu", compute_type="int8", cpu_threads=threads)
+    print(Fore.YELLOW + f"[EARS] Whisper {model_size}: CPU mode ({threads} threads)")
+    return model
 
 
 _MODEL_SIZE = _get_configured_model()
 print(Fore.CYAN + f"[EARS] Loading Whisper ({_MODEL_SIZE})...")
 audio_model = _load_whisper(_MODEL_SIZE)
 
-# Calibrate after Whisper loads — mic may be busy during model load
-_nf.calibrate()
+# Two-stage hearing on PCs without a GPU. Whisper always encodes a 30-second window, so small.en takes ~1.5 s per
+# request on a laptop CPU while base.en takes ~0.4 s. base.en's mistakes ("open crown" for "open chrome") come with
+# low confidence, and its correct transcripts with high confidence, so: hear with base.en, and only when it isn't
+# sure, listen again with the accurate model. (scripts/voice_bench.py measured this: same accuracy, ~4x faster.)
+_fast_model = None
+_UNSURE = -0.45                     # lowest segment avg_logprob below which the fast transcript is re-checked
+if not _gpu_available() and _MODEL_SIZE in ("small.en", "medium.en") and not os.environ.get('SEVEN_WHISPER_MODEL') \
+        and not _config().get('brain', {}).get('whisper_model'):
+    try:
+        _fast_model = _load_whisper("base.en")
+        print(Fore.CYAN + f"[EARS] Fast first pass: base.en, re-checked with {_MODEL_SIZE} when unsure")
+    except Exception as _fm_err:
+        print(Fore.YELLOW + f"[EARS] Fast model unavailable, using {_MODEL_SIZE} only: {_fm_err}")
 
 
 # =============================================================================
-# INTERRUPT FLAG
+# WIRING (main loop and mouth)
 # =============================================================================
 
 _force_return_event = threading.Event()
+_is_speaking_fn = lambda: False
+_spoken_fn = lambda: []            # recent sentences Seven said, for echo rejection
+_ended_at_fn = lambda: 0.0         # when Seven last stopped talking
+_publish = lambda key, value: None
 
 
 def set_force_return(val: bool):
-    if val:
-        _force_return_event.set()
-    else:
-        _force_return_event.clear()
-
-
-# =============================================================================
-# SPEAKING STATE HOOK
-# Injected by main.py after mouth module loads.
-# Returns True if Seven is currently playing TTS audio.
-# Prevents main listen() from processing mic audio while Seven speaks.
-# =============================================================================
-
-_is_speaking_fn = lambda: False
+    (_force_return_event.set if val else _force_return_event.clear)()
 
 
 def set_speaking_fn(fn):
-    """
-    Register the function that returns True when Seven is speaking.
-    Called by main.py after ctx.mouth is loaded:
-        ears.core.set_speaking_fn(ctx.mouth.is_speaking)
-    """
+    """Register the function that returns True while Seven is speaking (called by the voice loop)."""
     global _is_speaking_fn
     _is_speaking_fn = fn
+    STREAM.set_speaking_fn(fn)
+
+
+def set_mouth(engine):
+    """The natural-voice engine, so the ears know what Seven said and when it stopped."""
+    global _spoken_fn, _ended_at_fn
+    _spoken_fn = engine.recently_said
+    _ended_at_fn = engine.ended_at
+
+
+def set_publisher(fn):
+    global _publish
+    _publish = fn
+    STREAM.set_publisher(fn)
+
+
+def start():
+    """Open the microphone with the current settings. Safe to call again after settings change."""
+    s = voice_settings()
+    STREAM.configure(sensitivity=s['sensitivity'], device_name=s['mic'])
+    STREAM.start()
+
+
+def _ignored(reason: str, text: str = ""):
+    print(Fore.YELLOW + f"[EARS] Ignored: {reason}{f' ({text[:50]})' if text else ''}")
+    _publish("voice_ignored", {"reason": reason, "text": text[:80], "at": time.time()})
+    STREAM._set_state("idle")
 
 
 # =============================================================================
-# WHISPER TRANSCRIPTION — IN MEMORY
+# TRANSCRIPTION
 # =============================================================================
 
-def _transcribe(wav_bytes: bytes) -> tuple:
+def transcribe(audio: np.ndarray, fast: bool = False) -> tuple:
     """
-    Transcribe WAV bytes using Whisper via BytesIO.
-    No temp files written.
-
-    Returns:
-        (full_text: str, info: TranscriptionInfo or None)
+    (text, reason) for 16 kHz float32 speech. text is "" when Whisper itself says there is no reliable speech.
+    The speech detector already trimmed the audio, so Whisper's own VAD is off and decoding is greedy (fast).
     """
     try:
-        wav_buf = io.BytesIO(wav_bytes)
-        result  = audio_model.transcribe(
-            wav_buf,
-            beam_size=5,
-            language="en",
-            condition_on_previous_text=False,
-            no_speech_threshold=0.6,
-            # Reduced from 0.7 — stricter silence rejection.
-            # 0.7 meant Whisper would accept segments it was 30% unsure about.
-            # 0.6 means it must be 40% sure there is real speech.
-            log_prob_threshold=-0.4,
-            # Tightened from -0.5 — rejects low-confidence segments sooner.
-            # -0.5 let through many borderline guesses ("Bonjour", "Can save").
-            # -0.4 requires Whisper to be more confident before accepting.
-            vad_filter=True,
-            vad_parameters={
-                "threshold":               0.6,
-                # Raised from 0.5 — Silero VAD must be 60% sure speech
-                # is present before passing segment to Whisper decoder.
-                # This is the most impactful single parameter for
-                # reducing ambient audio transcription.
-                "min_speech_duration_ms":  300,
-                # Raised from 200 — segments shorter than 300ms are
-                # almost never real voice commands. Rejects clicks,
-                # coughs, brief noise bursts that Silero misclassifies.
-                "min_silence_duration_ms": 400,
-            },
-        )
-
-        if isinstance(result, tuple):
-            segments = list(result[0])
-            info     = result[1] if len(result) > 1 else None
-        else:
-            segments = list(result)
-            info     = None
-
-        # Per-segment confidence filter
-        # Whisper sets no_speech_prob per segment — high value means
-        # Whisper detected that segment contains no real speech.
-        # Filter out segments where Whisper is not confident.
-        # Threshold: 0.6 — above this the segment is likely silence/noise.
-        clean_segments = []
+        segments = None
+        if _fast_model is not None:
+            first = list(_run(_fast_model, audio, beam=1))
+            if first and min(s.avg_logprob for s in first) >= _UNSURE:
+                segments = first
+        if segments is None:
+            segments = _run(audio_model, audio, beam=1 if fast else 2)
+        kept = []
         for seg in segments:
-            seg_no_speech = getattr(seg, 'no_speech_prob', 0.0)
-            seg_avg_logp  = getattr(seg, 'avg_logprob',    0.0)
-            if seg_no_speech > 0.6:
-                # Whisper says this segment has no speech — skip it
-                continue
-            if seg_avg_logp < -1.2:
-                # Whisper had very low confidence on this segment — skip it
-                continue
-            clean_segments.append(seg)
-
-        full_text = "".join(s.text for s in clean_segments).strip()
-        return full_text, info
-
+            if getattr(seg, 'no_speech_prob', 0.0) > 0.6 and getattr(seg, 'avg_logprob', 0.0) < -0.5:
+                continue                                    # Whisper: no speech here
+            if getattr(seg, 'avg_logprob', 0.0) < -1.1:
+                continue                                    # a guess, not a hearing
+            if getattr(seg, 'compression_ratio', 0.0) > 2.6:
+                continue                                    # the same phrase over and over
+            kept.append(seg.text)
+        text = "".join(kept).strip()
+        return text, ("ok" if text else "no clear speech")
     except Exception as e:
         print(Fore.YELLOW + f"[EARS] Whisper error: {e}")
-        return "", None
+        return "", "transcription failed"
 
 
-def _check_confidence(info) -> tuple:
-    """
-    Check TranscriptionInfo for hallucination signals.
-
-    Duration-aware thresholds:
-        Short clips (< 1.5s) require higher confidence.
-        Whisper is much less reliable on short clips — the decoder
-        has less context to work with and guesses more aggressively.
-        A 1-second clip that passes VAD with low logprob is almost
-        certainly a mishearing.
-
-    Returns: (passed: bool, reason: str)
-    """
-    if info is None:
-        return True, "no info"
-
-    try:
-        duration = getattr(info, 'duration', None)
-
-        # Duration-aware logprob threshold
-        # Short clips need stricter confidence requirement
-        if duration is not None and duration < 1.5:
-            logprob_threshold = -0.35
-            # Stricter than normal (-0.4 in Whisper params) for short clips
-            # "Bonjour" from 1.09s clip would have been caught here
-        else:
-            logprob_threshold = -0.8
-
-        avg_lp = getattr(info, 'avg_logprob', None)
-        if avg_lp is not None and avg_lp < logprob_threshold:
-            return False, (
-                f"avg_logprob {avg_lp:.3f} below "
-                f"{'strict ' if duration and duration < 1.5 else ''}"
-                f"threshold {logprob_threshold} "
-                f"(clip duration: {duration:.2f}s)"
-            )
-
-        duration_vad = getattr(info, 'duration_after_vad', None)
-        if duration and duration_vad is not None and duration > 0:
-            removed = duration - duration_vad
-            ratio   = removed / duration
-            if ratio > 0.85:
-                return False, f"VAD removed {ratio:.0%} of audio"
-
-    except Exception as e:
-        print(Fore.YELLOW + f"[EARS] Confidence check error: {e}")
-        return True, "check_error"
-
-    return True, "ok"
-
-
-# =============================================================================
-# NON-ASCII / EMOJI / MUSIC DETECTION
-# =============================================================================
-
-def _check_text_validity(text: str) -> tuple:
-    """
-    Reject non-ASCII content and detected music patterns.
-
-    Whisper outputs emoji (🎵🎶) when it detects music but cannot
-    transcribe words. These are never valid voice commands.
-
-    Whisper also transcribes sung lyrics with phonetic patterns like
-    "o-o-o-o-oh" and "we-e-e" which are never commands.
-
-    Returns: (valid: bool, reason: str)
-    """
-    if not text or not text.strip():
-        return False, "empty text"
-
-    # Check ASCII ratio — music emoji fail this
-    ascii_chars = sum(1 for c in text if ord(c) < 128)
-    total_chars = len(text.replace(" ", ""))
-    if total_chars > 0 and ascii_chars / total_chars < 0.85:
-        return False, (
-            f"non-ASCII content ({ascii_chars}/{total_chars} ASCII chars) "
-            f"— likely music emoji"
-        )
-
-    # Check for music-specific unicode characters
-    music_chars = set('♪♫🎵🎶🎤🎼')
-    if any(c in music_chars for c in text):
-        return False, "music unicode characters in transcription"
-
-    words = text.lower().split()
-    hyphenated_count = sum(
-        1 for w in words
-        if '-' in w and len(w) > 3 and w.count('-') >= 2
+def _run(model, audio, beam):
+    segments, _ = model.transcribe(
+        audio.astype(np.float32),
+        language="en",
+        beam_size=beam,
+        temperature=0.0,
+        condition_on_previous_text=False,
+        without_timestamps=True,
+        vad_filter=False,
+        no_speech_threshold=0.6,
+        log_prob_threshold=-1.0,
+        compression_ratio_threshold=2.4,
     )
-    if len(words) >= 4 and hyphenated_count >= 2:
-        return False, (
-            f"sung phonetics detected "
-            f"({hyphenated_count} hyphenated syllable words)"
-        )
+    return segments
 
-    return True, "ok"
+
+def _text_problem(text: str):
+    """Why a transcript isn't a real request, or None."""
+    if not text.strip():
+        return "empty"
+    letters = text.replace(" ", "")
+    if letters and sum(1 for c in letters if ord(c) < 128) / len(letters) < 0.85:
+        return "not English speech (music or noise)"
+    if any(c in text for c in '♪♫🎵🎶🎤🎼'):
+        return "music"
+    words = text.lower().split()
+    if len(words) >= 4 and sum(1 for w in words if w.count('-') >= 2) >= 2:
+        return "sung syllables"
+    clean = re.sub(r"[.!,?]+", "", text.lower()).strip()
+    ghost, why = is_hallucination(clean, text.lower())
+    if ghost:
+        return f"a known mishearing ({why})"
+    if is_repetition_loop(clean):
+        return "a repetition loop"
+    if is_incoherent(clean):
+        return "incoherent"
+    return None
+
+
+def _is_echo(text: str) -> bool:
+    """True when the transcript is (part of) something Seven just said: Seven hearing its own voice."""
+    t = re.sub(r"[^a-z0-9 ]", "", text.lower()).strip()
+    if len(t) < 4:
+        return False
+    try:
+        from rapidfuzz import fuzz
+        for said in _spoken_fn(within=12.0):
+            s = re.sub(r"[^a-z0-9 ]", "", said.lower())
+            if fuzz.partial_ratio(t, s) >= 85:
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def _wav_bytes(audio: np.ndarray) -> bytes:
+    buf = io.BytesIO()
+    with wave.open(buf, 'wb') as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(RATE)
+        w.writeframes((np.clip(audio, -1, 1) * 32767).astype(np.int16).tobytes())
+    return buf.getvalue()
 
 
 # =============================================================================
@@ -389,321 +306,67 @@ def _check_text_validity(text: str) -> tuple:
 
 def listen() -> tuple:
     """
-    Listen for one utterance and return transcribed text.
-
-    Returns:
-        (text: str, audio_path: str) on valid speech
-            audio_path = "__voice__" when Voice ID disabled
-            audio_path = "temp_audio.wav" when Voice ID enabled
-        (None, None) on silence, noise, or any rejection
+    Wait briefly for the next utterance and return (text, audio_path), or (None, None).
+    Returns quickly (about half a second) when nobody is talking, so the voice loop stays responsive.
     """
-    print(Fore.WHITE + "[EARS] Waiting for input...")
-
-    try:
-        mic = sr.Microphone()
-    except Exception as e:
-        print(Fore.YELLOW + f"[EARS] Microphone unavailable: {e}")
-        time.sleep(2)
+    start()
+    utt = STREAM.next(timeout=0.5)
+    if utt is None:
         return None, None
 
-    try:
-        with mic as source:
-            recognizer = sr.Recognizer()
-            recognizer.dynamic_energy_threshold = False
-            recognizer.energy_threshold         = _nf.get_threshold()
-            recognizer.pause_threshold          = 0.8
-            recognizer.non_speaking_duration    = 0.4
-            recognizer.phrase_threshold         = 0.1
-
-            if _force_return_event.is_set():
-                recognizer.energy_threshold = _nf.get_min_noise_floor()
-                listen_timeout              = 1.5
-                phrase_limit                = 1
-            else:
-                listen_timeout  = 10
-                phrase_limit    = 15
-
-            print(Fore.WHITE + (
-                f"[EARS] Listening — "
-                f"threshold={recognizer.energy_threshold:.0f}"
-            ))
-
-            # ── Capture ─────────────────────────────────────────────────
-            try:
-                audio     = recognizer.listen(
-                    source,
-                    timeout=listen_timeout,
-                    phrase_time_limit=phrase_limit
-                )
-                wav_bytes = audio.get_wav_data()
-                print(Fore.WHITE + (
-                    f"[EARS] Captured — "
-                    f"{len(wav_bytes) // 1024}KB"
-                ))
-                _nf.on_audio_captured()
-
-            except sr.WaitTimeoutError:
-                _nf.on_timeout()
-                return None, None
-            except OSError as e:
-                print(Fore.YELLOW + f"[EARS] Mic error: {e}")
-                time.sleep(1)
-                return None, None
-            except Exception:
-                return None, None
-
-            # ── AGC — normalize volume ───────────────────────────────────
-            wav_bytes = _agc.apply_to_wav_bytes(wav_bytes)
-
-            # ── AEC — remove echo ────────────────────────────────────────
-            if _aec.is_available():
-                try:
-                    import wave as _wv
-                    with _wv.open(io.BytesIO(wav_bytes), 'rb') as wf:
-                        _sr  = wf.getframerate()
-                        _pcm = wf.readframes(wf.getnframes())
-                    _mic_f32 = (
-                        np.frombuffer(_pcm, dtype=np.int16)
-                        .astype(np.float32) / 32767.0
-                    )
-                    _cleaned = _aec.apply(_mic_f32, _sr)
-                    _buf = io.BytesIO()
-                    with _wv.open(_buf, 'wb') as wf_out:
-                        wf_out.setnchannels(1)
-                        wf_out.setsampwidth(2)
-                        wf_out.setframerate(_sr)
-                        wf_out.writeframes(
-                            (_cleaned * 32767.0)
-                            .astype(np.int16)
-                            .tobytes()
-                        )
-                    wav_bytes = _buf.getvalue()
-                except Exception as e:
-                    print(Fore.YELLOW + f"[EARS] AEC error: {e}")
-
-            # ── Signal gates ─────────────────────────────────────────────
-            passed, rms, reason = _signal_check(
-                wav_bytes, _nf.get_threshold()
-            )
-            if not passed:
-                _nf.update(rms)
-                print(Fore.YELLOW + f"[EARS] Gate rejected — {reason}")
-                return None, None
-
-            # ── Speaking guard ────────────────────────────────────────────
-            # If Seven is currently speaking, audio captured now is either:
-            # (a) Seven's own TTS feeding back through the mic, or
-            # (b) User trying to interrupt — handled by listen_for_interrupt.
-            # Either way, the main pipeline should not process this clip.
-            # main.py double-speech lock handles this at a higher level,
-            # but checking here prevents Whisper from running unnecessarily.
-            if _is_speaking_fn():
-                return None, None
-
-            # ── Whisper transcription ────────────────────────────────────
-            full_text, info = _transcribe(wav_bytes)
-            if not full_text:
-                print(Fore.YELLOW + "[EARS] Whisper returned empty")
-                return None, None
-
-            # ── TranscriptionInfo confidence ─────────────────────────────
-            conf_ok, conf_reason = _check_confidence(info)
-            if not conf_ok:
-                print(Fore.YELLOW + f"[EARS] Confidence rejected — {conf_reason}")
-                return None, None
-
-            # ── Non-ASCII / emoji / music filter ─────────────────────────
-            text_ok, text_reason = _check_text_validity(full_text)
-            if not text_ok:
-                print(Fore.YELLOW + f"[EARS] Content rejected — {text_reason}")
-                return None, None
-
-            # ── Normalise for filter checks ──────────────────────────────
-            clean = full_text.lower().strip()
-            for ch in [".", "!", ",", "?", "..."]:
-                clean = clean.replace(ch, "")
-            clean = clean.strip()
-
-            if len(clean) < 2:
-                return None, None
-
-            # Single word guard
-            # Single isolated words from Whisper are almost always
-            # mishearings or hallucinations unless they are a known command.
-            # "Bonjour", "Yes", "Okay", "Sure" — these are not commands.
-            # Exception: single-word wake words like "Seven" are handled
-            # by the wake word gate in main.py, not here.
-            _single_word_passthrough = {
-                "stop", "seven", "pause", "resume", "yes", "no",
-                "open", "close", "help", "back", "next", "play",
-            }
-            words_check = clean.split()
-            if len(words_check) == 1 and clean not in _single_word_passthrough:
-                print(Fore.YELLOW + (
-                    f"[EARS] Single word rejected — '{clean}' "
-                    f"(not in passthrough list)"
-                ))
-                return None, None
-
-            # ── Hallucination filter ─────────────────────────────────────
-            is_ghost, ghost_reason = is_hallucination(clean, full_text.lower())
-            if is_ghost:
-                print(Fore.YELLOW + f"[EARS] Hallucination — {ghost_reason}")
-                return None, None
-
-            # ── Repetition loop ──────────────────────────────────────────
-            if is_repetition_loop(clean):
-                print(Fore.YELLOW + (
-                    f"[EARS] Repetition loop — '{clean[:60]}'"
-                ))
-                return None, None
-
-            # ── Semantic coherence ───────────────────────────────────────
-            if is_incoherent(clean):
-                print(Fore.YELLOW + (
-                    f"[EARS] Incoherent input — '{clean[:60]}'"
-                ))
-                return None, None
-
-            # ── Autocorrect ──────────────────────────────────────────────
-            corrected = _autocorrect(full_text)
-            final     = corrected.strip().capitalize()
-            if not final:
-                return None, None
-
-            print(Fore.GREEN + f"[EARS] Transcribed: '{final}'")
-
-            # ── Determine audio path for Voice ID ────────────────────────
-            # Write temp file only when Voice ID is enabled.
-            # Avoids unnecessary disk writes in the common case.
-            audio_out_path = "__voice__"
-            if _is_voice_id_enabled():
-                try:
-                    with open("temp_audio.wav", "wb") as f:
-                        f.write(wav_bytes)
-                    audio_out_path = "temp_audio.wav"
-                except Exception as e:
-                    print(Fore.YELLOW + f"[EARS] Audio save failed: {e}")
-
-            return final, audio_out_path
-
-    except OSError as e:
-        print(Fore.YELLOW + f"[EARS] Stream error: {e}")
-        time.sleep(1)
+    # Seven hearing itself: began while it was talking, or in the echo tail right after.
+    if utt.during_speech or _is_speaking_fn() or utt.started < _ended_at_fn() + 0.35:
+        _ignored("Seven's own voice")
         return None, None
-    except Exception as e:
-        print(Fore.RED + f"[EARS] Unexpected error: {e}")
-        import traceback
-        traceback.print_exc()
+
+    t = time.time()
+    text, reason = transcribe(utt.audio)
+    if not text:
+        _ignored(reason)
         return None, None
+    problem = _text_problem(text)
+    if problem:
+        _ignored(problem, text)
+        return None, None
+    if _is_echo(text):
+        _ignored("Seven's own voice", text)
+        return None, None
+
+    final = normalize_wake(_autocorrect(text).strip())
+    final = final[:1].upper() + final[1:]
+    print(Fore.GREEN + f"[EARS] Heard: '{final}' ({utt.seconds:.1f}s audio, {time.time() - t:.2f}s to text)")
+    STREAM._set_state("idle")
+
+    audio_out_path = "__voice__"
+    if _is_voice_id_enabled():
+        try:
+            with open("temp_audio.wav", "wb") as f:
+                f.write(_wav_bytes(utt.audio))
+            audio_out_path = "temp_audio.wav"
+        except Exception as e:
+            print(Fore.YELLOW + f"[EARS] Audio save failed: {e}")
+    return final, audio_out_path
 
 
 # =============================================================================
 # INTERRUPT LISTENER
-# Mic opened ONCE. Audio in RAM. beam_size=1 for speed.
+# While Seven talks the main loop is busy speaking, so this is the only reader of the utterance queue.
 # =============================================================================
 
 def listen_for_interrupt(interrupt_words, on_interrupt_callback, stop_event):
-    """
-    Lightweight interrupt detector during TTS playback.
-    Runs in background thread. Returns on first match.
-    """
-    recognizer                          = sr.Recognizer()
-    recognizer.dynamic_energy_threshold = False
-    recognizer.energy_threshold         = _nf.get_threshold()
-    recognizer.pause_threshold          = 0.6
-    recognizer.non_speaking_duration    = 0.3
-
-    _interrupt_ghosts = {
-        "thank you", "thanks", "you", "bye",
-        "okay", "subtitles", "subscribe", "caption",
-    }
-
-    # Open mic once — hold for duration of TTS
-    try:
-        interrupt_mic = sr.Microphone()
-        mic_ctx       = interrupt_mic.__enter__()
-    except Exception as e:
-        print(Fore.YELLOW + f"[EARS] Interrupt mic unavailable: {e}")
-        return
-
-    try:
-        while not stop_event.is_set():
-            try:
-                audio = recognizer.listen(
-                    mic_ctx, timeout=1.5, phrase_time_limit=3
-                )
-            except sr.WaitTimeoutError:
-                continue
-            except Exception:
-                break
-
-            try:
-                wav_bytes = audio.get_wav_data()
-
-                # Quick energy check — if clip is near-silent, skip Whisper.
-                # This prevents 3 unnecessary Whisper runs while Seven speaks.
-                # The interrupt listener runs during TTS — most clips are
-                # just Seven's own voice or room noise. Check energy first.
-                import wave as _wv_int
-                with _wv_int.open(io.BytesIO(wav_bytes), 'rb') as _wf_int:
-                    _pcm_int = _wf_int.readframes(_wf_int.getnframes())
-                _arr_int = np.frombuffer(_pcm_int, dtype=np.int16).astype(np.float32)
-                _rms_int = float(np.sqrt(np.mean(_arr_int ** 2)))
-                # Use a lower threshold than main pipeline — interrupt words
-                # might be spoken quietly. But reject near-silence entirely.
-                _interrupt_threshold = max(_nf.get_threshold() * 0.5, 200.0)
-                if _rms_int < _interrupt_threshold:
-                    continue
-
-                wav_buf   = io.BytesIO(wav_bytes)
-
-                result = audio_model.transcribe(
-                    wav_buf,
-                    beam_size=1,
-                    language="en",
-                    no_speech_threshold=0.7,
-                    vad_filter=True,
-                )
-
-                if isinstance(result, tuple):
-                    segments = list(result[0])
-                else:
-                    segments = list(result)
-
-                text = "".join(
-                    s.text for s in segments
-                ).strip().lower()
-
-            except Exception:
-                continue
-
-            if not text or len(text) < 2:
-                continue
-
-            clean = (
-                text
-                .replace(".", "")
-                .replace("!", "")
-                .replace(",", "")
-                .strip()
-            )
-
-            if clean in _interrupt_ghosts:
-                continue
-
-            for word in interrupt_words:
-                if re.search(
-                    r'\b' + re.escape(word) + r'\b', clean
-                ):
-                    print(Fore.YELLOW + (
-                        f"[EARS] Interrupt: '{word}' in '{clean}'"
-                    ))
-                    on_interrupt_callback()
-                    return
-
-    finally:
-        try:
-            interrupt_mic.__exit__(None, None, None)
-        except Exception:
-            pass
+    """Stop Seven when the user says a stop word over it. Returns on the first match or when speech ends."""
+    start()
+    words = [w.lower() for w in interrupt_words]
+    while not stop_event.is_set():
+        utt = STREAM.next(timeout=0.2)
+        if utt is None or utt.speech_seconds > 6.0:      # long stretches are Seven's own sentences
+            continue
+        text, _ = transcribe(utt.audio, fast=True)
+        clean = re.sub(r"[^a-z ]", "", text.lower()).strip()
+        if not clean or _is_echo(clean):
+            continue
+        for word in words:
+            if re.search(r'\b' + re.escape(word) + r'\b', clean):
+                print(Fore.YELLOW + f"[EARS] Interrupt: '{word}' in '{clean}'")
+                on_interrupt_callback()
+                return
