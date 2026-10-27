@@ -1,8 +1,9 @@
 """
 main_modules/handlers/pre_executor.py
 
-Runs SYS, OPEN, and CLOSE tags BEFORE Seven speaks.
-This way the app is already launching while user hears confirmation.
+Runs SYS, OPEN, CLOSE and WINDOW tags BEFORE Seven speaks.
+This way the app is already launching (or the window already in front) while the user hears the confirmation:
+"show Chrome" brings Chrome forward at once instead of after Seven finishes saying "Chrome".
 Sets flags on ctx so main handlers skip re-running these tags.
 """
 
@@ -14,14 +15,30 @@ from colorama import Fore
 def pre_execute(response, ctx):
     """
     Pre-execute SYS, OPEN, CLOSE tags before speech.
-    Updates ctx flags: pre_executed_sys, pre_executed_open, pre_executed_close.
+    Updates ctx flags: pre_executed_sys, pre_executed_open, pre_executed_close, pre_executed_window.
     """
     if not isinstance(response, str):
+        ctx.pre_executed_window = False
         return
 
+    _pre_execute_window(response, ctx)
     _pre_execute_sys(response, ctx)
     _pre_execute_open(response, ctx)
     _pre_execute_close(response, ctx)
+
+
+def _pre_execute_window(response, ctx):
+    """Window actions (focus, minimize, snap...) are quick and silent: do them now. "list" speaks, so it waits."""
+    ctx.pre_executed_window = False
+    if "###WINDOW:" not in response:
+        return
+    from main_modules.handlers.window_handler import WindowHandler
+    handler = WindowHandler()
+    params = [p for p in handler.extract_params(response) if p.get("action") != "list"]
+    if not params or len(params) != len(handler.extract_params(response)):
+        return
+    ctx.pre_executed_window = True
+    threading.Thread(target=handler.run, args=(response, ctx), daemon=True, name="PreExecWindow").start()
 
 
 def _pre_execute_sys(response, ctx):
