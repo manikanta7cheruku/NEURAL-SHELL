@@ -152,12 +152,10 @@ class WorkspaceHandler(BaseHandler):
                             app_count=len(apps),
                             tab_count=sum(len(a.get("tabs", [])) for a in apps),
                             app_names=app_names_str,
+                            workspace_apps=apps,      # also brings up the arrangement card once the windows are open
                         )
                     except Exception:
                         pass
-
-                    # Poll for arrangement card visibility after voice restore
-                    _poll_and_fire_arrangement(apps)
 
                     if opened > 0:
                         ctx.speak(f"{name} workspace restored. {opened} apps opened.")

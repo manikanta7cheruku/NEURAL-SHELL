@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>VII</title>
+  <title>Seven</title>
   <style>
     * { margin:0; padding:0; box-sizing:border-box; user-select:none; }
 
@@ -117,7 +117,7 @@
       text-transform: uppercase;
       color: rgba(60, 200, 180,0.4);
       flex-shrink: 0;
-      width: 20px;
+      width: 30px;
       padding-top: 1px;
     }
 
@@ -274,10 +274,10 @@
 
     #orb-text {
       font-family: 'Segoe UI', system-ui, sans-serif;
-      font-size: 9.5px;
-      font-weight: 700;
+      font-size: 12px;
+      font-weight: 600;
       color: rgba(255,255,255,0.14);
-      letter-spacing: 3px;
+      letter-spacing: 0;
       text-transform: uppercase;
       z-index: 4;
       transition:
@@ -453,7 +453,7 @@
       </div>
       <div id="live-sep" class="hist-sep" style="display:none"></div>
       <div id="live-seven-row" class="hist-seven" style="display:none">
-        <span id="live-seven-label" class="hist-seven-label">VII</span>
+        <span id="live-seven-label" class="hist-seven-label">Seven</span>
         <div style="flex:1;overflow:hidden">
           <div id="thinking"><span></span><span></span><span></span></div>
           <span id="live-seven-text" class="hist-seven-text"></span>
@@ -466,7 +466,7 @@
     <div id="orb-ambient"></div>
     <div id="ghost-ring"></div>
     <div id="pulse-ring"></div>
-    <div id="orb"><span id="orb-text">VII</span></div>
+    <div id="orb"><span id="orb-text">S</span></div>
     <div id="interaction-layer"></div>
     <div id="tooltip">Idle</div>
   </div>
@@ -562,7 +562,7 @@
           const sRow = document.createElement('div');
           sRow.className = 'hist-seven hist-entry';
           sRow.style.opacity = '0.45';
-          sRow.innerHTML = `<span class="hist-seven-label">VII</span><span class="hist-seven-text">${entry.seven}</span>`;
+          sRow.innerHTML = `<span class="hist-seven-label">Seven</span><span class="hist-seven-text">${entry.seven}</span>`;
           frag.appendChild(sRow);
           const sep = document.createElement('div');
           sep.className = 'hist-sep hist-entry';

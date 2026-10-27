@@ -565,6 +565,7 @@ def search_files(query: str, max_results: int = None, user_name: str = "") -> li
             results = []
     else:
         print(Fore.YELLOW + "[FILES] Index empty, falling back to os.walk")
+        _build_index_soon()
         results = _search_walk(keywords, target_extensions, looking_for_folder,
                                max_results, user_name)
 
@@ -607,7 +608,82 @@ def search_files(query: str, max_results: int = None, user_name: str = "") -> li
     if results:                         # "tnf" should not list NotNFKC.pl next to TNF.mp4
         top = results[0]["score"]
         results = [r for r in results if r["score"] >= top * 0.35]
+    if not results and _allow_similar:
+        results = _search_similar(query, keywords, max_results, user_name)
     return results[:max_results]
+
+
+_index_kicked = threading.Event()
+
+
+def _build_index_soon():
+    """An empty index makes every search a 10-second walk of the disk. The first search that finds it empty starts
+    the build (once per run), so the ones after it are instant, whatever happened to the build at startup."""
+    if _index_kicked.is_set():
+        return
+    _index_kicked.set()
+    threading.Thread(target=build_file_index, daemon=True, name="SevenFileIndexer").start()
+
+
+# -- Typo tolerance --
+# The index finds candidates by word prefix, so "gookarna" never reaches GOKARNA.mp4 and the fuzzy scoring never
+# sees it. When nothing matches at all, each search word that is not a word in any file name is replaced by the
+# closest one that is ("gookarna" -> "gokarna"), and the search runs again. Those results are near matches: they are
+# marked with similar_to and kept below CONFIDENT_SCORE, so Seven asks before opening one.
+_vocab_cache = {"count": -1, "words": []}
+_allow_similar = True
+
+
+def _name_vocabulary() -> list:
+    """Every distinct word (3+ letters) in an indexed file or folder name. Rebuilt when the index size changes."""
+    count = _index_count()
+    if count != _vocab_cache["count"]:
+        words = set()
+        with _get_conn() as conn:
+            for (stem,) in conn.execute("SELECT name_stem FROM files"):
+                words.update(w for w in re.split(r"[^0-9a-z]+", (stem or "").lower()) if len(w) >= 3)
+        _vocab_cache.update(count=count, words=sorted(words))
+    return _vocab_cache["words"]
+
+
+def _closest_word(word: str, vocab: list):
+    """The file-name word one or two typing slips away from word, or None."""
+    if not HAS_FUZZY or len(word) < 4 or not vocab:
+        return None
+    from rapidfuzz import process
+    cutoff = 86 if len(word) <= 5 else 80          # one slip in a short word, about two in a long one
+    hit = process.extractOne(word, vocab, scorer=_fuzz.ratio, score_cutoff=cutoff)
+    return hit[0] if hit and hit[0] != word else None
+
+
+def _search_similar(query, keywords, max_results, user_name):
+    global _allow_similar
+    try:
+        vocab = _name_vocabulary()
+        vocab_set = set(vocab)
+        fixed = {}
+        for kw in keywords:
+            if kw in _TYPE_MAP or kw in _FOLDER_WORDS or kw in vocab_set:
+                continue
+            near = _closest_word(kw, vocab)
+            if near:
+                fixed[kw] = near
+        if not fixed:
+            return []
+        corrected = " ".join(fixed.get(w, w) for w in query.lower().split())
+        print(Fore.CYAN + f"[FILES] Nothing for '{query}', trying the closest names: '{corrected}'")
+        _allow_similar = False
+        try:
+            results = search_files(corrected, max_results, user_name)
+        finally:
+            _allow_similar = True
+        for r in results:
+            r["similar_to"] = corrected
+            r["score"] = min(r["score"], CONFIDENT_SCORE - 1)
+        return results
+    except Exception as e:
+        print(Fore.YELLOW + f"[FILES] Similar-name search failed: {e}")
+        return []
 
 
 CONFIDENT_SCORE = 250     # below this the top result is a guess: list the matches instead of opening one
@@ -888,34 +964,80 @@ def _visible_windows() -> set:
         return set()
 
 
+def _default_app_name(path: str) -> str:
+    """The name Windows shows for the app that opens this kind of file ("Media Player", "VLC media player")."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+        ext = os.path.splitext(path)[1]
+        if not ext:
+            return ""
+        size = wintypes.DWORD(260)
+        buf = ctypes.create_unicode_buffer(260)
+        # ASSOCF_NOTRUNCATE, ASSOCSTR_FRIENDLYAPPNAME
+        if ctypes.windll.shlwapi.AssocQueryStringW(0x20, 4, ext, None, buf, ctypes.byref(size)) == 0:
+            return buf.value.lower()
+    except Exception:
+        pass
+    return ""
+
+
+def _to_front(hwnd) -> bool:
+    """Restore if minimized and bring to the front. Windows only lets the app the user is using change the
+    foreground; if the first request is refused, a tap of Alt (which counts as input to this process) lifts that."""
+    import ctypes
+    import win32con
+    import win32gui
+    from hands.windows import _safe_foreground
+    if win32gui.IsIconic(hwnd):
+        win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+    _safe_foreground(hwnd)
+    time.sleep(0.12)
+    if win32gui.GetForegroundWindow() == hwnd:
+        return True
+    user32 = ctypes.windll.user32
+    user32.keybd_event(0x12, 0, 0, 0)                 # Alt down
+    user32.keybd_event(0x12, 0, 2, 0)                 # Alt up
+    user32.SetForegroundWindow(hwnd)
+    time.sleep(0.12)
+    return win32gui.GetForegroundWindow() == hwnd
+
+
 def _bring_forward(path: str, before: set = frozenset(), timeout: float = 6.0) -> None:
     """Players and viewers can take a few seconds to show a window, and Windows may open it behind Seven. Wait for
-    the window that names the file (or the first new window, since some players title themselves only by app name),
-    then bring it to the front."""
+    the right window, then bring it to the front. In order of preference: a window that names the file; a new
+    window; or the default app's own window, which players such as Windows Media Player reuse and title only with
+    their own name ("Media Player")."""
     try:
         import win32gui
-        from hands.windows import _is_seven_window, _safe_foreground
+        from hands.windows import _is_seven_window
     except Exception:
         return
     name = os.path.basename(path.rstrip("\\/")).lower()
     stem = os.path.splitext(name)[0]
-    deadline = time.time() + timeout
+    app = _default_app_name(path)
+    started = time.time()
+    deadline = started + timeout
     while time.time() < deadline:
-        found = []
+        named, new, by_app = [], [], []
 
         def _cb(hwnd, _):
-            if win32gui.IsWindowVisible(hwnd):
+            if win32gui.IsWindowVisible(hwnd) or win32gui.IsIconic(hwnd):
                 title = win32gui.GetWindowText(hwnd).lower()
                 if title and not _is_seven_window(hwnd):
                     if name in title or (len(stem) > 2 and stem in title):
-                        found.insert(0, hwnd)
-                    elif before and hwnd not in before:
-                        found.append(hwnd)
+                        named.append(hwnd)
+                    elif before and hwnd not in before and win32gui.IsWindowVisible(hwnd):
+                        new.append(hwnd)
+                    elif app and app in title:
+                        by_app.append(hwnd)
             return True
         win32gui.EnumWindows(_cb, None)
-        if found:
+        # A reused player window shows the new file only after a moment, so give the better matches a second first.
+        pick = (named or new or (by_app if time.time() - started > 1.0 else []))
+        if pick:
             try:
-                _safe_foreground(found[0])
+                _to_front(pick[0])
             except Exception:
                 pass
             return
@@ -983,10 +1105,13 @@ def format_results_for_speech(results: list, query: str,
     ])
 
 
-def format_results_for_chat(results: list, query: str) -> dict:
+def format_results_for_chat(results: list, query: str, opened: bool = False) -> dict:
+    """opened: the first result was opened (the chat marks it). similar_to: these are near matches for a mistyped name."""
     return {
         "type":    "file_search",
         "query":   query,
+        "opened":  bool(opened),
+        "similar_to": results[0].get("similar_to") if results else None,
         "count":   len(results),
         "results": [
             {

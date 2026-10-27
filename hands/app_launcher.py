@@ -536,6 +536,22 @@ def _fast_launch(app_name: str) -> bool:
         return False
 
 
+class AppNotInstalled(Exception):
+    """The app is listed (Start menu shortcut, uninstall entry) but its program file is gone. Its message is the
+    explanation Seven gives, instead of claiming a launch that can't happen."""
+
+
+def _missing_target(best: dict):
+    """The program path a discovery hit would run, when that path no longer exists; else None."""
+    path = best.get("exe_path") or ""
+    if not path:
+        m = re.match(r'^\s*"([^"]+\.exe)"|^\s*([A-Za-z]:\\[^"]+?\.exe)\b', best.get("launch", ""), re.I)
+        path = (m.group(1) or m.group(2)) if m else ""
+    if path and os.path.isabs(path) and not os.path.exists(path):
+        return path
+    return None
+
+
 def _launch_via_discovery(app_name: str) -> bool:
     """Query app_discovery index and launch the best match."""
     try:
@@ -554,6 +570,12 @@ def _launch_via_discovery(app_name: str) -> bool:
 
         print(Fore.CYAN + f"   -> Discovery match: '{display}' ({best['source']})")
 
+        # A shell launch of a missing program "succeeds" and then fails silently; say what is wrong instead.
+        missing = _missing_target(best)
+        if missing:
+            raise AppNotInstalled(f"{display} isn't where Windows thinks it is ({os.path.dirname(missing)}). "
+                                  "It may have been moved or uninstalled")
+
         if launch_cmd.startswith("explorer.exe shell:AppsFolder"):
             proc = subprocess.Popen(launch_cmd, shell=True, creationflags=_CREATE_NO_WINDOW)
             focus_target_window(proc)
@@ -567,6 +589,8 @@ def _launch_via_discovery(app_name: str) -> bool:
         print(Fore.GREEN + f"   -> Launched via discovery: {display}")
         return True
 
+    except AppNotInstalled:
+        raise
     except Exception as e:
         print(Fore.YELLOW + f"   -> Discovery launch failed: {e}")
         return False
@@ -783,6 +807,11 @@ def open_app(app_name: str) -> bool:
         mood_engine.on_command_result(False)
         return False
 
+    except AppNotInstalled as e:
+        print(Fore.YELLOW + f"   -> {e}")
+        command_log.log_command("OPEN", clean, False, str(e))
+        mood_engine.on_command_result(False)
+        raise
     except Exception as e:
         print(Fore.RED + f"HANDS: Failed to open '{clean}': {e}")
         command_log.log_command("OPEN", clean, False, str(e))

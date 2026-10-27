@@ -2,12 +2,13 @@
  * electron/overlay_daemon.js
  *
  * Persistent Electron overlay host.
- * Runs continuously — pre-loads notification & arrangement windows.
+ * Runs continuously — pre-loads the status card, the arrangement card and the reminder card.
  * Listens on TCP 7891 for JSON commands from Python.
  *
  * Message format:
- *   {"type": "notif",  "data": {title, subtitle, detail, holdMs}}
- *   {"type": "arrange", "data": {appNames: [...]}}
+ *   {"type": "notif",       "data": {title, subtitle, detail, holdMs, state, replace}}
+ *   {"type": "arrange",     "data": {windows: [{hwnd, title, exe}], allWindows: [...]}}
+ *   {"type": "sched_notif", "data": {type, message}}
  *   {"type": "ping"}
  *
  * Response: {"ok": true}
@@ -16,13 +17,21 @@
  * Spawning a fresh Electron process per notification takes 800-1500ms
  * (cold start of V8 + window creation + HTML load + acrylic).
  * With pre-warmed windows, we just call show() = 30-50ms total.
+ *
+ * HOW THE CARDS LOOK:
+ * Each card is a window of Windows' own acrylic glass, so whatever is behind it blurs through. Windows draws a
+ * shadow and a second edge around such a window; seven_overlay/_glass.py turns that off and asks for rounded corners.
+ * Every window is sized to its content (the page reports its size), and slides and fades in and out.
  */
 
 const { app, BrowserWindow, screen, ipcMain } = require('electron');
 const path = require('node:path');
 const net  = require('node:net');
+const fs   = require('node:fs');
+const http = require('node:http');
 
 const IPC_PORT = Number(process.env.SEVEN_OVERLAY_PORT) || 7891;   // override only for testing a second copy
+const PROJECT_ROOT = path.resolve(path.join(__dirname, '..'));
 
 // DO NOT use app.requestSingleInstanceLock() here.
 // On Windows NSIS builds, Electron derives the lock key from the installer appId
@@ -39,41 +48,31 @@ app.on('window-all-closed', () => {});
 let notifWindow    = null;
 let arrangeWindow  = null;
 let schedWindow    = null;
-let arrangeAppNames = [];
 
 // ─────────────────────────────────────────────────────────────────────────
-// WINDOW CREATION
+// PYTHON (for the glass helper and the direct layout fallback)
 // ─────────────────────────────────────────────────────────────────────────
 
-// The status card is a small window of real Windows glass (acrylic): the desktop blurs through it, with no drawn
-// shadow. It fades in and out by window opacity, since the glass itself can't be animated with CSS.
-const NOTIF_W = 360;
-const NOTIF_H = 56;
-
-function fadeWindow(win, to, ms, done) {
-  if (!win || win.isDestroyed()) return;
-  clearInterval(win.__fade);
-  const from = win.getOpacity();
-  const start = Date.now();
-  win.__fade = setInterval(() => {
-    if (win.isDestroyed()) { clearInterval(win.__fade); return; }
-    const t = Math.min(1, (Date.now() - start) / ms);
-    const eased = 1 - Math.pow(1 - t, 3);
-    win.setOpacity(from + (to - from) * eased);
-    if (t >= 1) { clearInterval(win.__fade); if (done) done(); }
-  }, 16);
+function findPython() {
+  for (const p of [
+    path.join(PROJECT_ROOT, 'python', 'python.exe'),                    // installed
+    path.join(PROJECT_ROOT, 'python-dist', 'python', 'python.exe'),     // development, the bundled runtime
+    path.join(PROJECT_ROOT, 'venv', 'Scripts', 'python.exe'),
+  ]) {
+    if (fs.existsSync(p)) return p;
+  }
+  return 'python';
 }
 
-function createNotifWindow() {
-  const { width: sw, y: top } = screen.getPrimaryDisplay().workArea;
-  const W = NOTIF_W;
-  const H = NOTIF_H;
+// ─────────────────────────────────────────────────────────────────────────
+// GLASS WINDOWS
+// ─────────────────────────────────────────────────────────────────────────
 
-  notifWindow = new BrowserWindow({
-    width:              W,
-    height:             H,
-    x:                  Math.round((sw - W) / 2),
-    y:                  top + 12,
+const EDGE = 14;        // gap between a card and the screen edge
+
+function glassWindow({ width, height, focusable, page }) {
+  const win = new BrowserWindow({
+    width, height, x: 0, y: 0,
     frame:              false,
     transparent:        false,
     backgroundColor:    '#00000000',
@@ -85,7 +84,7 @@ function createNotifWindow() {
     minimizable:        false,
     maximizable:        false,
     closable:           false,
-    focusable:          false,
+    focusable,
     hasShadow:          false,
     show:               false,
     roundedCorners:     true,
@@ -96,289 +95,236 @@ function createNotifWindow() {
       backgroundThrottling: false,
     },
   });
+  win.setAlwaysOnTop(true, 'pop-up-menu', 999);
+  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  win.loadFile(path.join(PROJECT_ROOT, 'seven_overlay', page));
+  applyGlass(win);
+  return win;
+}
 
-  notifWindow.setAlwaysOnTop(true, 'pop-up-menu', 999);
-  notifWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+// One clean pane of glass: no Windows shadow, rounded corners. Runs once per window, off the UI thread.
+function applyGlass(win) {
+  if (process.platform !== 'win32') return;
+  try {
+    const hwnd = win.getNativeWindowHandle().readBigUInt64LE(0).toString();
+    const { execFile } = require('node:child_process');
+    execFile(findPython(), ['-I', path.join(PROJECT_ROOT, 'seven_overlay', '_glass.py'), hwnd],
+             { windowsHide: true, timeout: 15000 }, () => {});
+  } catch (e) {
+    console.warn('[OVERLAY DAEMON] Glass setup skipped:', e.message);
+  }
+}
+
+// Where a card of this size sits: top centre, or bottom right for reminders.
+function placement(kind, w, h) {
+  const wa = screen.getPrimaryDisplay().workArea;
+  if (kind === 'sched') return { x: wa.x + wa.width - w - EDGE, y: wa.y + wa.height - h - EDGE };
+  return { x: Math.round(wa.x + (wa.width - w) / 2), y: wa.y + EDGE };
+}
+
+// Slide (a few pixels, toward its edge) and fade. Window opacity and position are animated, since the glass itself
+// is drawn by Windows and can't be animated with CSS.
+function animate(win, { fromY, toY, fromO, toO, ms, done }) {
+  if (!win || win.isDestroyed()) return;
+  clearInterval(win.__anim);
+  const b = win.getBounds();
+  const start = Date.now();
+  const ease = t => 1 - Math.pow(1 - t, 3);
+  win.__anim = setInterval(() => {
+    if (win.isDestroyed()) { clearInterval(win.__anim); return; }
+    const t = Math.min(1, (Date.now() - start) / ms);
+    const k = ease(t);
+    win.setOpacity(fromO + (toO - fromO) * k);
+    if (fromY !== toY) win.setBounds({ x: b.x, y: Math.round(fromY + (toY - fromY) * k), width: b.width, height: b.height });
+    if (t >= 1) { clearInterval(win.__anim); if (done) done(); }
+  }, 16);
+}
+
+const SLIDE = 8;
+
+function reveal(win, kind, w, h, { focus = false } = {}) {
+  const { x, y } = placement(kind, w, h);
+  const dir = kind === 'sched' ? 1 : -1;          // reminders rise from below, top cards drop from above
+  win.setOpacity(0);
+  win.setBounds({ x, y: y + dir * SLIDE, width: w, height: h });
+  if (focus) win.show(); else win.showInactive();
+  win.moveTop();
+  win.__shown = true;
+  animate(win, { fromY: y + dir * SLIDE, toY: y, fromO: 0, toO: 1, ms: 220 });
+}
+
+function retire(win, kind) {
+  if (!win || win.isDestroyed() || !win.isVisible() || !win.__shown) return;
+  win.__shown = false;
+  const y = win.getBounds().y;
+  const dir = kind === 'sched' ? 1 : -1;
+  animate(win, { fromY: y, toY: y + dir * SLIDE, fromO: win.getOpacity(), toO: 0, ms: 170,
+                 done: () => { if (!win.isDestroyed()) win.hide(); } });
+}
+
+// Size a visible card to new content (the arrangement card grows when you pick a layout), keeping its anchor.
+function refit(win, kind, w, h) {
+  if (!win || win.isDestroyed()) return;
+  const { x, y } = placement(kind, w, h);
+  win.setBounds({ x, y, width: w, height: h });
+}
+
+// Hand the page its data; it returns the size it needs.
+async function load(win, fn, data) {
+  try {
+    const size = await win.webContents.executeJavaScript(`window.${fn} ? window.${fn}(${JSON.stringify(data)}) : null`);
+    if (size && size.w && size.h) return { w: Math.ceil(size.w), h: Math.ceil(size.h) };
+  } catch (e) {
+    console.error('[OVERLAY DAEMON] Inject failed:', e.message);
+  }
+  return null;
+}
+
+function kindOf(win) {
+  return win === schedWindow ? 'sched' : win === arrangeWindow ? 'arrange' : 'notif';
+}
+
+function createNotifWindow() {
+  notifWindow = glassWindow({ width: 300, height: 56, focusable: false, page: 'notification.html' });
   notifWindow.setIgnoreMouseEvents(true, { forward: true });
-
-  const htmlPath = path.join(__dirname, '..', 'seven_overlay', 'notification.html');
-  notifWindow.loadFile(htmlPath);
-
-  notifWindow.on('closed', () => {
-    notifWindow = null;
-    // Recreate after 500ms to keep host warm
-    setTimeout(createNotifWindow, 500);
-  });
-
+  notifWindow.on('closed', () => { notifWindow = null; setTimeout(createNotifWindow, 500); });
   console.log('[OVERLAY DAEMON] Notification window pre-loaded');
 }
 
 function createArrangeWindow() {
-  const { width: sw } = screen.getPrimaryDisplay().workArea;
-  const W = 380;
-  const H = 300;
-
-  arrangeWindow = new BrowserWindow({
-    width:              W,
-    height:             H,
-    x:                  Math.round((sw - W) / 2),
-    y:                  0,
-    frame:              false,
-    transparent:        false,
-    backgroundColor:    '#00000000',
-    backgroundMaterial: 'acrylic',
-    alwaysOnTop:        true,
-    skipTaskbar:        true,
-    resizable:          false,
-    movable:            false,
-    minimizable:        false,
-    maximizable:        false,
-    closable:           false,
-    focusable:          true,
-    hasShadow:          false,
-    show:               false,
-    roundedCorners:     true,
-    webPreferences: {
-      nodeIntegration:  false,
-      contextIsolation: true,
-      preload: path.join(__dirname, 'notif_preload.js'),
-      backgroundThrottling: false,
-    },
-  });
-
-  arrangeWindow.setAlwaysOnTop(true, 'pop-up-menu', 999);
-  arrangeWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-
-  // Blur handler removed intentionally — user controls dismissal via
-  // close button (X), Escape key, or click on transparent area outside card.
-  // This gives users time to think about their layout choice.
-
-  const htmlPath = path.join(__dirname, '..', 'seven_overlay', 'arrangement.html');
-  arrangeWindow.loadFile(htmlPath);
-
-  arrangeWindow.on('closed', () => {
-    arrangeWindow = null;
-    setTimeout(createArrangeWindow, 500);
-  });
-
-  console.log('[OVERLAY DAEMON] Arrangement window pre-loaded (400x220)');
+  arrangeWindow = glassWindow({ width: 392, height: 220, focusable: true, page: 'arrangement.html' });
+  // A click anywhere else on the screen takes focus away: the card glides out.
+  arrangeWindow.on('blur', () => retire(arrangeWindow, 'arrange'));
+  arrangeWindow.on('closed', () => { arrangeWindow = null; setTimeout(createArrangeWindow, 500); });
+  console.log('[OVERLAY DAEMON] Arrangement window pre-loaded');
 }
 
 function createSchedWindow() {
-  const display = screen.getPrimaryDisplay();
-  const { width: sw, height: sh } = display.workArea;
-  const W = 372;
-  const H = 140;
-
-  schedWindow = new BrowserWindow({
-    width:              W,
-    height:             H,
-    x:                  sw - W - 16,
-    y:                  sh - H - 16,
-    frame:              false,
-    transparent:        true,
-    backgroundColor:    '#00000000',
-    alwaysOnTop:        true,
-    skipTaskbar:        true,
-    resizable:          false,
-    movable:            false,
-    minimizable:        false,
-    maximizable:        false,
-    closable:           false,
-    focusable:          true,
-    hasShadow:          false,
-    show:               false,
-    roundedCorners:     true,
-    webPreferences: {
-      nodeIntegration:  false,
-      contextIsolation: true,
-      preload: path.join(__dirname, 'notif_preload.js'),
-      backgroundThrottling: false,
-    },
-  });
-
-  schedWindow.setAlwaysOnTop(true, 'pop-up-menu', 999);
-  schedWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-  schedWindow.setIgnoreMouseEvents(false);
-
-  const htmlPath = path.join(__dirname, '..', 'seven_overlay', 'schedule_notification.html');
-  schedWindow.loadFile(htmlPath);
-
-  schedWindow.on('closed', () => {
-    schedWindow = null;
-    setTimeout(createSchedWindow, 500);
-  });
-
-  console.log('[OVERLAY DAEMON] Schedule notification window pre-loaded');
-}
-
-function showScheduleNotification(data) {
-  if (!schedWindow || schedWindow.isDestroyed()) {
-    console.warn('[OVERLAY DAEMON] Sched window not ready - recreating');
-    createSchedWindow();
-    setTimeout(() => showScheduleNotification(data), 400);
-    return;
-  }
-
-  try {
-    schedWindow.hide();
-    const display = screen.getPrimaryDisplay();
-    const { width: sw, height: sh } = display.workArea;
-    const W = 372;
-    const H = 140;
-    schedWindow.setPosition(sw - W - 16, sh - H - 16);
-  } catch (e) {}
-
-  const script = `
-    (function() {
-      window.__SCHED_DATA__ = ${JSON.stringify(data)};
-      const card = document.getElementById('card');
-      if (card) {
-        card.classList.remove('show', 'hiding');
-        void card.offsetWidth;
-      }
-      if (typeof window.__applyScheduleData === 'function') {
-        window.__applyScheduleData(window.__SCHED_DATA__);
-      }
-    })();
-  `;
-
-  schedWindow.webContents.executeJavaScript(script).catch((e) => {
-    console.error('[OVERLAY DAEMON] Sched inject failed:', e.message);
-  });
-
-  schedWindow.showInactive();
-  schedWindow.moveTop();
-  // No auto-hide. User must click dismiss.
+  schedWindow = glassWindow({ width: 340, height: 120, focusable: true, page: 'schedule_notification.html' });
+  schedWindow.on('closed', () => { schedWindow = null; setTimeout(createSchedWindow, 500); });
+  console.log('[OVERLAY DAEMON] Reminder window pre-loaded');
 }
 
 // ─────────────────────────────────────────────────────────────────────────
 // SHOW LOGIC
 // ─────────────────────────────────────────────────────────────────────────
 
-function showNotification(data) {
+async function showNotification(data) {
   if (!notifWindow || notifWindow.isDestroyed()) {
-    console.warn('[OVERLAY DAEMON] Notif window not ready — recreating');
     createNotifWindow();
-    setTimeout(() => showNotification(data), 300);
+    setTimeout(() => showNotification(data), 400);
     return;
   }
-
   // An update to a card that is showing ("Scanning..." becoming "Saved") morphs in place, without sliding again.
-  if (data.replace && notifWindow.isVisible()) {
-    notifWindow.webContents.executeJavaScript(
-      `window.__applyNotifData && window.__applyNotifData(${JSON.stringify(data)})`).catch(() => {});
+  if (data.replace && notifWindow.__shown) {
+    const size = await load(notifWindow, '__applyNotifData', data);
+    if (size) refit(notifWindow, 'notif', size.w, size.h);
     scheduleAutoHide(notifWindow, (data.holdMs || 4500) + 1500);
     return;
   }
-
-  // Fresh card: centre it on the primary screen, just below the top edge, fully transparent until it fades in.
-  try {
-    const { width: sw, y: top } = screen.getPrimaryDisplay().workArea;
-    notifWindow.setOpacity(0);
-    notifWindow.setBounds({ x: Math.round((sw - NOTIF_W) / 2), y: top + 12, width: NOTIF_W, height: NOTIF_H });
-  } catch (e) {}
-
-  // Inject data & trigger animation
-  const script = `
-    (function() {
-      window.__NOTIF_DATA__ = ${JSON.stringify(data)};
-      // Reset card state
-      const card = document.getElementById('card');
-      if (card) {
-        card.classList.remove('show', 'hiding');
-        // Force reflow
-        void card.offsetWidth;
-      }
-      // Apply data (triggers animation via .show class)
-      if (typeof window.__applyNotifData === 'function') {
-        window.__applyNotifData(window.__NOTIF_DATA__);
-      }
-    })();
-  `;
-
-  notifWindow.webContents.executeJavaScript(script).catch((e) => {
-    console.error('[OVERLAY DAEMON] Notif inject failed:', e.message);
-  });
-
-  notifWindow.showInactive();
-  notifWindow.moveTop();
-  fadeWindow(notifWindow, 1, 180);
-  // Give card enough time: hold duration + animations (600ms in + 500ms out) + buffer
+  const size = await load(notifWindow, '__applyNotifData', data) || { w: 300, h: 56 };
+  reveal(notifWindow, 'notif', size.w, size.h);
   scheduleAutoHide(notifWindow, (data.holdMs || 4500) + 1500);
 }
 
-function showArrangement(data) {
-  if (!arrangeWindow || arrangeWindow.isDestroyed()) {
-    console.warn('[OVERLAY DAEMON] Arrange window not ready');
-    return;
-  }
-
-  arrangeAppNames = (data.windows || []).map(w => w.title || '');
-
-  try { arrangeWindow.hide(); } catch (e) {}
-
-  const { width: sw } = screen.getPrimaryDisplay().workArea;
-  const W = 380;
-  const H = 300;
-  try {
-    arrangeWindow.setSize(W, H);
-    arrangeWindow.setMinimumSize(W, H);
-    arrangeWindow.setMaximumSize(W, H);
-    arrangeWindow.setPosition(Math.round((sw - W) / 2), 0);
-  } catch (e) {}
-
-  const script = `
-    (function() {
-      window.__ARRANGEMENT_DATA__ = ${JSON.stringify(data)};
-      const card = document.getElementById('card');
-      if (card) {
-        card.classList.remove('show', 'hiding');
-        void card.offsetWidth;
-      }
-      if (typeof window.__applyArrangementData === 'function') {
-        window.__applyArrangementData(window.__ARRANGEMENT_DATA__);
-      }
-    })();
-  `;
-
-  arrangeWindow.webContents.executeJavaScript(script).catch((e) => {
-    console.error('[OVERLAY DAEMON] Arrange inject failed:', e.message);
-  });
-
-  arrangeWindow.showInactive();
+async function showArrangement(data) {
+  if (!arrangeWindow || arrangeWindow.isDestroyed()) return;
+  retire(notifWindow, 'notif');                  // never two cards stacked at the top of the screen
+  const size = await load(arrangeWindow, '__applyArrangementData', data) || { w: 392, h: 220 };
+  reveal(arrangeWindow, 'arrange', size.w, size.h, { focus: true });
   arrangeWindow.focus();
-  // No auto-hide. User dismisses via close button, Esc, or click-outside.
 }
 
-// Hide handlers (called by HTML after animation completes)
-ipcMain.on('overlay-close', (event) => {
-  const senderWin = BrowserWindow.fromWebContents(event.sender);
-  if (!senderWin || senderWin.isDestroyed()) return;
-  if (senderWin === notifWindow) {
-    fadeWindow(senderWin, 0, 200, () => senderWin.hide());     // glass fades out, never blinks away
-  } else {
-    senderWin.hide();
+async function showScheduleNotification(data) {
+  if (!schedWindow || schedWindow.isDestroyed()) {
+    createSchedWindow();
+    setTimeout(() => showScheduleNotification(data), 400);
+    return;
   }
+  const size = await load(schedWindow, '__applyScheduleData', data) || { w: 340, h: 120 };
+  reveal(schedWindow, 'sched', size.w, size.h);
+  // No auto-hide: a reminder stays until you choose Done or Snooze.
+}
+
+// The page finished its exit (or a button closed it): glide out.
+ipcMain.on('overlay-close', (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (win && !win.isDestroyed()) retire(win, kindOf(win));
+});
+
+// The page's content changed size.
+ipcMain.on('overlay-fit', (event, size) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (win && !win.isDestroyed() && size && size.w && size.h) refit(win, kindOf(win), Math.ceil(size.w), Math.ceil(size.h));
 });
 
 ipcMain.on('apply-layout', (event, payload) => {
   applyLayoutDirect(payload).catch(() => {});
 });
 
-// Auto-hide safety: force-hide notification after 8s no matter what
-// Prevents stuck cards if animation callback never fires
+ipcMain.on('reminder-snooze', (event, payload) => {
+  snoozeReminder(payload || {}).catch(e => console.error('[OVERLAY DAEMON] Snooze failed:', e.message));
+});
+
+// Auto-hide safety: a status card never stays up forever, even if its page timer never fires.
 const _autoHide = new Map();   // one safety timer per window, so a finished "working" card can't hide its update
 
 function scheduleAutoHide(win, maxMs) {
   if (!win) return;
   clearTimeout(_autoHide.get(win.id));
-  _autoHide.set(win.id, setTimeout(() => {
-    if (win && !win.isDestroyed() && win.isVisible()) {
-      console.log('[OVERLAY DAEMON] Auto-hide safety triggered');
-      win.hide();
-    }
-  }, maxMs));
+  _autoHide.set(win.id, setTimeout(() => retire(win, kindOf(win)), maxMs));
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// REMINDER SNOOZE
+// ─────────────────────────────────────────────────────────────────────────
+
+function sevenIsRunning() {
+  return new Promise(resolve => {
+    const req = http.get({ hostname: '127.0.0.1', port: 7777, path: '/api/status', timeout: 800 },
+                         res => { res.resume(); resolve(res.statusCode === 200); });
+    req.on('error', () => resolve(false));
+    req.on('timeout', () => { req.destroy(); resolve(false); });
+  });
+}
+
+function postJSON(p, body) {
+  return new Promise((resolve, reject) => {
+    const payload = JSON.stringify(body);
+    const req = http.request({ hostname: '127.0.0.1', port: 7777, path: p, method: 'POST', timeout: 3000,
+                               headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) } },
+                             res => { res.resume(); resolve(res.statusCode); });
+    req.on('error', reject);
+    req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
+    req.write(payload);
+    req.end();
+  });
+}
+
+function localISO(d) {
+  const z = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}T${z(d.getHours())}:${z(d.getMinutes())}:${z(d.getSeconds())}`;
+}
+
+// While Seven runs, its scheduler owns schedules.json (it holds the list in memory and rewrites the file), so the
+// snooze goes through its API. While Seven is closed, the reminder daemon re-reads the file, so it is written directly.
+async function snoozeReminder({ message = 'Reminder', type = 'reminder', minutes = 10 }) {
+  if (await sevenIsRunning()) {
+    const code = await postJSON('/api/schedules', { type, message, time: `in ${minutes} minutes` });
+    console.log(`[OVERLAY DAEMON] Snoozed through Seven (${code})`);
+    return;
+  }
+  const file = path.join(process.env.APPDATA || '', 'SEVEN', 'schedules.json');
+  let all = [];
+  try { all = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { all = []; }
+  const now = new Date();
+  all.push({
+    id: all.reduce((m, s) => Math.max(m, Number(s.id) || 0), 0) + 1,
+    type, message, status: 'active', speaker_id: 'default',
+    created: localISO(now), time: localISO(new Date(now.getTime() + minutes * 60000)), recur: 'none',
+  });
+  fs.writeFileSync(file, JSON.stringify(all, null, 2));
+  console.log('[OVERLAY DAEMON] Snoozed in schedules.json');
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -479,7 +425,6 @@ function handleMessage(msg, socket) {
 
 
 async function applyLayoutDirect(data) {
-  const http = require('node:http');
   const payload = JSON.stringify(data);
 
   return new Promise((resolve, reject) => {
@@ -496,7 +441,11 @@ async function applyLayoutDirect(data) {
     }, (res) => {
       let body = '';
       res.on('data', c => body += c);
-      res.on('end', () => resolve({ via: 'backend', status: res.statusCode, body }));
+      res.on('end', () => {
+        // With Seven closed, the tab listener holds the port and answers 503: arrange directly instead.
+        if (res.statusCode === 200) resolve({ via: 'backend', status: res.statusCode, body });
+        else spawnPythonLayout(data).then(resolve).catch(reject);
+      });
     });
 
     req.on('error', () => {
@@ -515,27 +464,10 @@ async function applyLayoutDirect(data) {
 
 function spawnPythonLayout(data) {
   const { spawn } = require('node:child_process');
-  const path = require('node:path');
-  const fs   = require('node:fs');
 
   return new Promise((resolve, reject) => {
-    const projectRoot = path.resolve(path.join(__dirname, '..'));
-    
-    // Production-safe Python path resolver
-    const embeddedPy = path.join(projectRoot, 'python', 'python.exe');
-    const devPy      = path.join(projectRoot, 'venv', 'Scripts', 'python.exe');
-    const devPyw     = path.join(projectRoot, 'venv', 'Scripts', 'pythonw.exe');
-    
-    let python = '';
-    if (fs.existsSync(embeddedPy)) {
-      python = embeddedPy;
-    } else if (fs.existsSync(devPy)) {
-      python = devPy;
-    } else if (fs.existsSync(devPyw)) {
-      python = devPyw;
-    } else {
-      python = 'python';
-    }
+    const projectRoot = PROJECT_ROOT;
+    const python = findPython();
 
     if (python !== 'python' && !fs.existsSync(python)) {
       return reject(new Error('Python not found at ' + python));

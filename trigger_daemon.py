@@ -40,6 +40,10 @@ for _p in [_app_path, _this_dir]:
     if _p and os.path.exists(_p) and _p not in sys.path:
         sys.path.insert(0, _p)
 
+# Triggers open the user's apps; they must not inherit Seven's private Python package path (see main.py).
+for _var in ("PYTHONPATH", "PYTHONHOME"):
+    os.environ.pop(_var, None)
+
 # Import config first — triggers logging, console hiding, UTF-8 setup
 from trigger_modules.config import setup_logging, is_seven_running  # noqa
 from trigger_modules.lock import acquire_lock, release_lock

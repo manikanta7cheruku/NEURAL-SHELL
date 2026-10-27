@@ -103,6 +103,8 @@ def arrange_specific_windows(hwnd_list: list, layout: str,
         return _do_grid(handles, mx, my, mw, mh)
     elif layout == "stack":
         return _do_stack(handles, mx, my, mw, mh)
+    elif layout == "main_two":
+        return _do_main_two(handles, mx, my, mw, mh)
     elif layout in ("minimize_others", "solo", "solo_focus"):
         # Solo Focus: maximize the selected window(s), everything else
         # is already minimized by the caller via minimize_hwnds
@@ -278,6 +280,37 @@ def _do_stack(handles, mx, my, mw, mh):
 
     print(Fore.GREEN + f"[LAYOUT] Stack: {handles[0][1]} / {handles[1][1]}")
     return True, f"Stack: {handles[0][1]} and {handles[1][1]}"
+
+
+def _do_main_two(handles, mx, my, mw, mh):
+    """
+    One main window on the left (60% of the width), up to two stacked on the right. The arrangement card's
+    "Main and two". With two windows, the second takes the whole right side; any beyond three are minimized.
+    """
+    if len(handles) == 1:
+        return _do_maximize(handles)
+
+    main_w = int(mw * 0.6)
+    side_w = mw - main_w
+    _place(handles[0], mx, my, main_w, mh)
+    side = handles[1:3]
+    side_h = mh // len(side)
+    for i, h in enumerate(side):
+        _place(h, mx + main_w, my + i * side_h, side_w, mh - side_h * i if i == len(side) - 1 else side_h)
+
+    for hwnd, name in handles[3:]:
+        try:
+            win32gui.ShowWindow(hwnd, win32con.SW_MINIMIZE)
+        except Exception:
+            pass
+
+    try:
+        _safe_foreground(handles[0][0])
+    except Exception:
+        pass
+
+    print(Fore.GREEN + f"[LAYOUT] Main and two: {handles[0][1]} with {len(side)} beside it")
+    return True, f"{handles[0][1]} as the main window, {len(side)} beside it"
 
 
 # ── Window finding ────────────────────────────────────────────────────────

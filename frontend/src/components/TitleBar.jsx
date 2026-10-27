@@ -1,4 +1,5 @@
 import React from 'react';
+import { Wordmark } from './Mark';
 
 export default function TitleBar() {
   const handleMinimize = () => {
@@ -29,9 +30,7 @@ export default function TitleBar() {
       className="h-7 bg-s-bg border-b border-s-border flex items-center justify-between px-3 select-none"
       style={{ WebkitAppRegion: 'drag' }}
     >
-      <div className="font-serif text-sm tracking-wider text-white/70" style={{ fontFamily: 'Georgia, serif' }}>
-        VII
-      </div>
+      <Wordmark size={12.5} className="text-s-text-2" />
       
       <div className="flex items-center gap-3" style={{ WebkitAppRegion: 'no-drag' }}>
         <button

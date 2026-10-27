@@ -9,6 +9,7 @@ LAYER 015: CONVERSATION STATE
 """
 
 import logging
+import re
 
 from brain_modules import conversation_state as cs
 from brain_modules import correction_detector, fact_extractor, memory_gate, speech_acts
@@ -96,6 +97,28 @@ def _handle_pending(ctx, deps, st, pend, text):
             return LayerResult.stop(f"Okay. {pend.data['tags']}")
         if ans == "no":
             return LayerResult.stop("Okay, leaving it as it is.")
+        return None
+    if pend.type == "open_file_suggestion":
+        st.pending = None
+        if ans == "yes":
+            from hands.files import open_file
+            name = pend.data["name"]
+            return LayerResult.stop(f"Opening {name}." if open_file(pend.data["path"]) else f"Windows couldn't open {name}.")
+        if ans == "no":
+            return LayerResult.stop("Okay. Tell me another part of the name and I'll look again.")
+        return None
+    if pend.type == "file_where":
+        st.pending = None
+        low = text.lower().strip(" .!?")
+        # "in the system", "on my pc", "in downloads", "on S drive": every drive was already searched, so a place
+        # can't find more. Say so plainly and ask for what can help, a different word from the name.
+        m = re.fullmatch(r"(?:it'?s |its |maybe |probably )?(?:somewhere )?(?:in|on|inside|under) (?:the |my |this )?(.+?)", low)
+        if m and len(m.group(1).split()) <= 4:
+            place = m.group(1)
+            whole = re.fullmatch(r"(?:system|pc|computer|laptop|drives?|disk|machine)", place)
+            where = "every drive I can see on this PC" if whole else f"every drive I can see, {place} included"
+            return LayerResult.stop(f"I searched {where}, and nothing is named like \"{pend.data['query']}\". "
+                                    "Another word from the file name would help me find it.")
         return None
     if pend.type == "clarify_ref":
         st.pending = None
