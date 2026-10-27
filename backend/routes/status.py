@@ -69,6 +69,7 @@ def get_status():
             "listening":      bool(_state.get("listening", False)),
             "speaking":       bool(_state.get("speaking",  False)),
             "thinking":       bool(_state.get("thinking",  False)),
+            "paused":         bool(_state.get("paused",    False)),
             "user_text":      str(_state.get("user_text",  "")),
             "seven_text":     str(_state.get("seven_text", "")),
             "mood":           mood_label,
@@ -131,6 +132,9 @@ async def status_websocket(websocket: WebSocket):
                 "voice_ignored": _state.get("voice_ignored"),      # {reason, text, at}: the last thing not acted on
                 "listen_mode": _state.get("listen_mode", "wake"),
                 "follow_up_open": _state.get("follow_up_open", False),
+                "paused": _state.get("paused", False),
+                "voice_turn": _state.get("voice_turn", 0),         # changes when a voice request starts
+                "voice_files": _state.get("voice_files"),          # {at, data}: file matches from the last voice request
             })
             await asyncio.sleep(0.1)
     except Exception as _e:

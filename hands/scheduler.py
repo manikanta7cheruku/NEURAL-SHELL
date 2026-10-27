@@ -915,9 +915,13 @@ def _fire_schedule(schedule):
     message = schedule.get("message", "")
     speaker_id = schedule.get("speaker_id", "default")
     
-    # Build natural fire message based on type
-    # Try to get speaker's name
-    speaker_name = speaker_id.title() if speaker_id not in ("default", "unknown") else ""
+    # Build natural fire message based on type. Generic ids ("voice_user" from the mic, "default" from typing) mean
+    # the owner, so use their name rather than saying "Voice_User".
+    try:
+        from brain_modules.session import display_name
+        speaker_name = display_name(speaker_id)
+    except Exception:
+        speaker_name = ""
     name_prefix = f"{speaker_name}, " if speaker_name else ""
     
     import random as _rand3

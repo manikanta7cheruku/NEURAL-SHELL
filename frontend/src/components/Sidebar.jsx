@@ -135,7 +135,7 @@ export default function Sidebar() {
 
   const badges = { tasks: stats?.pending ?? 0, triggers, update: updateAvailable && !dismissed };
   const state = connected ? label() : 'Offline';
-  const stateDot = !connected ? 'bg-s-red' : state === 'Listening' ? 'bg-s-green' : state === 'Thinking' ? 'bg-s-yellow'
+  const stateDot = !connected ? 'bg-s-red' : state === 'Listening' ? 'bg-s-green' : state === 'Thinking' || state === 'Starting' ? 'bg-s-yellow'
     : state === 'Speaking' ? 'bg-s-accent' : 'bg-s-text-4';
 
   return (
