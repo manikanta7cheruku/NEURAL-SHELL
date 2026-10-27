@@ -75,20 +75,33 @@ export function Body({ children, className }) {
  * Switch. A quiet track with a hairline edge; on, it fills with the accent. The thumb glides with a soft ease and
  * stretches a little while pressed, the way a physical switch gives under a finger.
  */
+/**
+ * The switch. A soft-cornered track with a key, not a pill and a dot: off is an outlined track with a muted key;
+ * on, the track takes a light tint of the accent and the key turns solid with a drawn check. The key travels with a
+ * small spring and stretches while pressed.
+ */
 export function Toggle({ checked, onChange, disabled, label }) {
+  const on = !!checked;
   return (
-    <button type="button" role="switch" aria-checked={!!checked} aria-label={label} disabled={disabled}
-            onClick={() => onChange(!checked)}
-            className={cx('group/sw relative inline-flex h-[18px] w-[30px] shrink-0 items-center rounded-full',
-                          'transition-[background-color,box-shadow] duration-200 ease-[cubic-bezier(0.2,0.8,0.2,1)]',
-                          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-s-accent/50 focus-visible:ring-offset-2 focus-visible:ring-offset-s-bg',
-                          checked ? 'bg-s-accent shadow-[inset_0_0_0_1px_rgba(0,0,0,0.08)]'
-                                  : 'bg-s-card-h shadow-[inset_0_0_0_1px_var(--color-s-border-l)] hover:bg-s-border',
+    <button type="button" role="switch" aria-checked={on} aria-label={label} disabled={disabled}
+            onClick={() => onChange(!on)}
+            className={cx('group/sw relative inline-flex h-5 w-9 shrink-0 items-center rounded-[7px] border',
+                          'transition-[background-color,border-color] duration-200 ease-out',
+                          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-s-accent/45 focus-visible:ring-offset-2 focus-visible:ring-offset-s-bg',
+                          on ? 'border-s-accent/60 bg-s-accent/[0.16]'
+                             : 'border-s-border-l bg-transparent hover:border-s-text-4',
                           disabled ? 'cursor-not-allowed opacity-40' : 'cursor-pointer')}>
-      <span className={cx('absolute top-[3px] h-3 rounded-full transition-all duration-200 ease-[cubic-bezier(0.2,0.8,0.2,1)]',
-                          'w-3 group-active/sw:w-[15px]',
-                          checked ? 'left-[15px] bg-s-on-accent group-active/sw:left-[12px]'
-                                  : 'left-[3px] bg-s-text-3 group-hover/sw:bg-s-text-2')} />
+      <span className={cx('absolute top-[2px] flex h-[14px] items-center justify-center rounded-[5px]',
+                          'transition-[left,width,background-color] duration-[260ms] ease-[cubic-bezier(0.34,1.4,0.64,1)]',
+                          'w-[14px] group-active/sw:w-[18px]',
+                          on ? 'left-[18px] bg-s-accent group-active/sw:left-[14px]'
+                             : 'left-[2px] bg-s-text-4 group-hover/sw:bg-s-text-3')}>
+        <svg viewBox="0 0 10 10" className="h-2 w-2" aria-hidden="true">
+          <path d="M2.2 5.3l1.9 1.8 3.7-4" fill="none" stroke="var(--color-s-on-accent)" strokeWidth="1.6"
+                strokeLinecap="round" strokeLinejoin="round" pathLength="1"
+                style={{ strokeDasharray: 1, strokeDashoffset: on ? 0 : 1, transition: 'stroke-dashoffset 220ms ease 80ms' }} />
+        </svg>
+      </span>
     </button>
   );
 }

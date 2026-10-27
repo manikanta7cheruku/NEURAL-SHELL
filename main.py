@@ -15,6 +15,25 @@ import time
 import threading
 import subprocess
 
+# A crash inside native code (an audio or AI library) kills the process with no Python traceback. faulthandler writes
+# every thread's stack to logs\native_crash.log when that happens, so the library at fault can be found.
+try:
+    import faulthandler
+    _crash_dir = os.path.join(os.environ.get('APPDATA', os.path.expanduser('~')), 'SEVEN', 'logs')
+    os.makedirs(_crash_dir, exist_ok=True)
+    _crash_log = open(os.path.join(_crash_dir, 'native_crash.log'), 'a', encoding='utf-8')
+    _crash_log.write(f"\n--- Seven started {time.strftime('%Y-%m-%d %H:%M:%S')} (pid {os.getpid()}) ---\n")
+    _crash_log.flush()
+    faulthandler.enable(file=_crash_log, all_threads=True)
+except Exception:
+    pass
+
+# Electron passes PYTHONPATH to find Seven's packages; sys.path has it now. Left in the environment, every app Seven
+# opens (a terminal, VS Code, the user's own Python) would inherit Seven's private package folder. Seven's own
+# helpers set the paths they need explicitly, and its bundled Python ignores PYTHONPATH anyway.
+for _var in ("PYTHONPATH", "PYTHONHOME"):
+    os.environ.pop(_var, None)
+
 if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 if sys.stderr and hasattr(sys.stderr, 'reconfigure'):

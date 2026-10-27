@@ -152,8 +152,7 @@ class TabHTTPHandler(BaseHTTPRequestHandler):
                 self.send_response(400)
                 self.end_headers()
         else:
-            self.send_response(404)
-            self.end_headers()
+            self._offline()
 
     def do_GET(self):
         if self.path.startswith("/api/chrome/tabs"):
@@ -177,17 +176,24 @@ class TabHTTPHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(resp)))
             self.end_headers()
             self.wfile.write(resp)
-        elif self.path in ("/api/status", "/status", "/health", "/api/health"):
-            resp = b'{"status":"ready","mode":"offline_tab_listener"}'
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.send_header("Content-Length", str(len(resp)))
-            self.end_headers()
-            self.wfile.write(resp)
+        elif self.path in ("/health", "/api/health"):
+            # Seven's backend and the trigger daemon read this body to tell the listener apart from Seven
+            self._json(200, b'{"status":"ready","mode":"offline_tab_listener"}')
         else:
-            self.send_response(404)
-            self.end_headers()
+            self._offline()
+
+    def _json(self, code, body):
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _offline(self):
+        """Everything else, /api/status included, is Seven's. Never answer 200 for it: the reminder daemon, the trigger
+        daemon and Electron read a 200 from /api/status as "Seven is running" and would leave their work to it."""
+        self._json(503, b'{"detail":"Seven is closed or starting","mode":"offline_tab_listener"}')
 
 
 def run_server(port=7777):

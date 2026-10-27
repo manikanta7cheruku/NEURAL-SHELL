@@ -43,6 +43,11 @@ function renderTaskCard(task, index) {
 
   html += `
     <div class="card-top">
+      <button class="card-action-btn check" id="check-${taskId}"
+              onclick="startComplete(${taskId})" title="Complete">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)"
+             stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+      </button>
       <div class="card-title" id="title-${taskId}"
            ondblclick="startEditTitle(${taskId})">${escHtml(task.text || '')}</div>
       <div class="card-actions">
@@ -58,11 +63,6 @@ function renderTaskCard(task, index) {
                stroke-width="1.8" stroke-linecap="round">
             <path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/>
           </svg>
-        </button>
-        <button class="card-action-btn check" id="check-${taskId}"
-                onclick="startComplete(${taskId})" title="Complete">
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--accent)"
-               stroke-width="2.5" stroke-linecap="round"><path d="M20 6L9 17l-5-5"/></svg>
         </button>
       </div>
     </div>

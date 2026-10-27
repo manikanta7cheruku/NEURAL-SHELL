@@ -92,13 +92,14 @@ def _get_venv_python(project_root: str) -> str:
             print(Fore.GREEN + f"[TRIGGER] Using root Python: {c}")
             return c
 
-    # Priority 3: Dev mode venv
+    # Priority 3: Dev mode: the bundled runtime the installer ships (complete, with working ssl), then the venv
     for c in [
+        os.path.join(project_root, "python-dist", "python", "pythonw.exe"),
         os.path.join(project_root, "venv", "Scripts", "pythonw.exe"),
         os.path.join(project_root, "venv", "Scripts", "python.exe"),
     ]:
         if os.path.exists(c):
-            print(Fore.YELLOW + f"[TRIGGER] Using venv Python (dev): {c}")
+            print(Fore.YELLOW + f"[TRIGGER] Using development Python: {c}")
             return c
 
     # Priority 4: Last resort

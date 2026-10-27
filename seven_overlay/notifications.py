@@ -226,11 +226,14 @@ def show_trigger_notification(
     app_count: int = 0,
     tab_count: int = 0,
     app_names: str = "",
+    workspace_apps: list = None,
+    arrange: bool = True,
 ):
     """
     Full two-stage trigger notification.
     Stage 1: notification (3.5s)
-    Stage 2: arrangement card (workspace only) — appears after stage 1 dismisses
+    Stage 2: arrangement card (workspace only) — appears after stage 1 dismisses, once 2+ of its windows are open.
+    workspace_apps (the saved app dicts) finds windows by exe path; without it, app_names finds them by title.
     """
     subtitle_map = {
         "open_app":       "App launched",
@@ -252,15 +255,28 @@ def show_trigger_notification(
 
     is_workspace = (action_type == "open_workspace")
     hold_ms = 3800 if is_workspace else 3200
+    is_workspace = is_workspace and arrange
 
     threading.Thread(
         target=_do_two_stage,
-        args=(trigger_name, subtitle, detail, hold_ms, is_workspace, app_names),
+        args=(trigger_name, subtitle, detail, hold_ms, is_workspace, app_names, workspace_apps),
         daemon=True,
     ).start()
 
 
-def _do_two_stage(title, subtitle, detail, hold_ms, show_arrangement, app_names):
+def _find_arrange_windows(app_names, workspace_apps):
+    """(windows, other_windows) as the arrangement card needs them: dicts with hwnd, title, exe."""
+    try:
+        from trigger_modules.window_finder import get_windows_by_workspace_apps, get_windows_for_arrange
+        if workspace_apps:
+            return get_windows_by_workspace_apps(workspace_apps)
+        return get_windows_for_arrange([a.strip() for a in app_names.split(",") if a.strip()])
+    except Exception as e:
+        print(f"[OVERLAY] Window lookup for arrangement failed: {e}")
+        return [], []
+
+
+def _do_two_stage(title, subtitle, detail, hold_ms, show_arrangement, app_names, workspace_apps=None):
     """Internal: fire notification, then arrangement after delay."""
     if not _ensure_daemon_running():
         return
@@ -280,12 +296,17 @@ def _do_two_stage(title, subtitle, detail, hold_ms, show_arrangement, app_names)
     if not show_arrangement:
         return
 
-    # Wait for stage 1 to finish (hold + slide-up animation)
-    time.sleep((hold_ms + 500) / 1000.0)
-
-    # Stage 2: arrangement card
-    app_list = [a.strip() for a in app_names.split(",") if a.strip()]
-    _send_ipc({
-        "type": "arrange",
-        "data": {"appNames": app_list},
-    })
+    # Stage 2: the arrangement card, after stage 1 has gone and once the restored windows exist. The card arranges
+    # windows by handle, so it needs the real windows; names alone gave it nothing to arrange.
+    deadline = time.time() + 10 + hold_ms / 1000.0
+    time.sleep((hold_ms + 300) / 1000.0)
+    windows, others = [], []
+    while time.time() < deadline:
+        windows, others = _find_arrange_windows(app_names, workspace_apps)
+        if len(windows) >= 2:
+            break
+        time.sleep(1.0)
+    if len(windows) < 2:
+        print("[OVERLAY] Fewer than 2 workspace windows open, no arrangement card")
+        return
+    _send_ipc({"type": "arrange", "data": {"windows": windows, "allWindows": others}})

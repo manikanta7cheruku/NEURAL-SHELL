@@ -27,6 +27,7 @@ STORAGE: SQLite WAL mode at seven_data/triggers.db
 import sqlite3
 import os
 import json
+import time
 from datetime import datetime
 from typing import Optional, List
 from fastapi import APIRouter, HTTPException
@@ -289,9 +290,82 @@ def _check_voice_phrase_conflict(phrase, exclude_id=None):
     return dict(row) if row else None
 
 
+# Shortcuts Windows and everyday apps already use. A trigger on one of these would take it over everywhere.
+_SYSTEM_SHORTCUTS = {
+    "ctrl+c": "Copy", "ctrl+v": "Paste", "ctrl+x": "Cut", "ctrl+z": "Undo", "ctrl+y": "Redo",
+    "ctrl+a": "Select all", "ctrl+s": "Save", "ctrl+f": "Find", "ctrl+p": "Print", "ctrl+n": "New window",
+    "ctrl+t": "New tab", "ctrl+w": "Close tab", "ctrl+r": "Reload", "ctrl+tab": "Next tab",
+    "alt+tab": "Switch windows", "alt+f4": "Close window", "alt+space": "Window menu",
+    "ctrl+alt+delete": "Security screen", "ctrl+shift+esc": "Task Manager",
+    "win+d": "Show desktop", "win+e": "File Explorer", "win+l": "Lock", "win+r": "Run", "win+tab": "Task view",
+    "win+v": "Clipboard history", "win+i": "Settings", "win+s": "Search", "win+a": "Quick settings",
+    "win+shift+s": "Screenshot", "win+.": "Emoji", "win+print_screen": "Screenshot",
+}
+
+
+def _seven_shortcuts() -> dict:
+    """Shortcuts Seven itself listens for (the task panel; push-to-talk if set)."""
+    out = {"alt+shift+t": "Seven's task panel"}
+    try:
+        import config
+        panel = (config.KEY.get("panel", {}) or {}).get("hotkey")
+        if panel:
+            out = {_normalize_hotkey(panel.replace("Alt", "alt").replace("Shift", "shift")): "Seven's task panel"}
+        ptt = (config.KEY.get("voice", {}) or {}).get("ptt_key")
+        if ptt:
+            out[_normalize_hotkey(str(ptt))] = "Seven's push-to-talk"
+    except Exception:
+        pass
+    return out
+
+
+def _capture_flag_path() -> str:
+    return os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "SEVEN", "cache", "hotkey_capture.json")
+
+
+class CaptureRequest(BaseModel):
+    active: bool
+
+
 # ─────────────────────────────────────────────────────────────────────────
 # ROUTES — SPECIFIC BEFORE PARAMETERIZED (FastAPI order matters)
 # ─────────────────────────────────────────────────────────────────────────
+
+@router.post("/api/triggers/capture", summary="Pause hotkeys while one is being recorded",
+             description="While the trigger form records a shortcut, the trigger daemon fires nothing, so pressing a "
+                         "combination that is already taken shows the clash instead of running that trigger. "
+                         "The pause lapses by itself after 30 seconds.")
+def hotkey_capture(body: CaptureRequest):
+    path = _capture_flag_path()
+    try:
+        if body.active:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump({"until": time.time() + 30}, f)
+        elif os.path.exists(path):
+            os.remove(path)
+    except Exception as e:
+        print(Fore.YELLOW + f"[TRIGGERS] Capture flag: {e}")
+    return {"ok": True}
+
+
+@router.get("/api/triggers/hotkey-check", summary="Is this shortcut free?",
+            description="Whether a combination is used by another trigger (on or off), by Seven, or by Windows.")
+def hotkey_check(hotkey: str, exclude_id: Optional[int] = None):
+    combo = _normalize_hotkey(hotkey)
+    used_by = None
+    with _get_conn() as conn:
+        rows = conn.execute("SELECT id, name, hotkey, enabled FROM triggers WHERE hotkey IS NOT NULL").fetchall()
+    for row in rows:
+        if exclude_id is not None and row["id"] == exclude_id:
+            continue
+        if _normalize_hotkey(row["hotkey"]) == combo:
+            used_by = {"id": row["id"], "name": row["name"], "enabled": bool(row["enabled"])}
+            break
+    reserved = _seven_shortcuts().get(combo) or _SYSTEM_SHORTCUTS.get(combo)
+    return {"hotkey": combo, "used_by": used_by, "reserved": reserved,
+            "available": not (used_by and used_by["enabled"]) and not reserved}
+
 
 @router.get("/api/triggers/stats", summary="Trigger statistics",
             description="Returns count of total, enabled, hotkey, voice, and audio triggers. Used by dashboard.")
@@ -753,6 +827,7 @@ def fire_trigger(trigger_id: int):
                     app_count=app_count,
                     tab_count=tab_count,
                     app_names=app_names,
+                    arrange=False,          # execute_trigger_action below brings up the arrangement card itself
                 )
                 print(Fore.GREEN + f"[TRIGGERS] Notification fired instantly for '{name}'")
 

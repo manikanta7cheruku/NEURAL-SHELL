@@ -5,7 +5,7 @@
  * The paperclip (or a drop) reads a document into this chat: it uploads at once, shows reading progress while
  * you type, and every later question in the chat is answered from it, with page citations under the reply.
  */
-import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
+import { useRef, useEffect, useLayoutEffect, useState, useCallback, useMemo } from 'react';
 import useChatSessions from '../stores/useChatSessions';
 import api from '../api';
 import {
@@ -289,7 +289,26 @@ export default function Console() {
     return () => { window.removeEventListener('seven:chats', onChats); window.removeEventListener('keydown', onKey); };
   }, [panel, newChat, setPanelOpen]);
 
-  useEffect(() => { if (atBottom) endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }); }, [messages, phase, atBottom]);
+  // Opening or switching to a chat lands on its latest message at once, before the first paint; only messages that
+  // arrive while you watch glide into view.
+  // The messages already there when a chat opens appear as they are; only new ones rise in.
+  const jumpPending = useRef(true);
+  const shownChat = useRef(undefined);
+  const [settled, setSettled] = useState(() => new Set());
+  useLayoutEffect(() => {
+    const el = scroller.current;
+    if (!el) return;
+    if (shownChat.current !== conversationId) { shownChat.current = conversationId; jumpPending.current = true; }
+    if (jumpPending.current) {
+      if (messages.length) {
+        el.scrollTop = el.scrollHeight;
+        jumpPending.current = false;
+        setSettled(new Set(messages.map(m => m.id)));
+      }
+      return;
+    }
+    if (atBottom) endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, [messages, phase, atBottom, conversationId]);
   useEffect(() => { if (!sending) inputRef.current?.focus(); }, [sending]);
   useEffect(() => {
     const el = inputRef.current;
@@ -397,12 +416,6 @@ export default function Console() {
     <div className="relative flex h-full bg-s-bg"
          onDragOver={e => { e.preventDefault(); setDragOver(true); }}
          onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget)) setDragOver(false); }} onDrop={onDrop}>
-      <style>{`
-        @keyframes sevenScan { from { transform: translateX(-110%);} to { transform: translateX(220%);} }
-        @keyframes sevenCaret { 0%,100% { opacity: 1;} 50% { opacity: .15;} }
-        @keyframes sevenRise { from { opacity: 0; transform: translateY(6px);} to { opacity: 1; transform: none;} }
-      `}</style>
-
       <div className={cx('pointer-events-none absolute inset-3 z-50 flex items-center justify-center rounded-xl border-2 border-dashed border-s-accent/40 bg-s-accent/5',
                          'transition-opacity duration-200', dragOver ? 'opacity-100' : 'opacity-0')}>
         <div className="flex flex-col items-center gap-2 text-s-accent-h">
@@ -448,7 +461,7 @@ export default function Console() {
             {messages.length === 0 ? <Empty onPick={send} /> : (
               <div className="space-y-6">
                 {messages.map((m, i) => (
-                  <div key={m.id} style={{ animation: `sevenRise .28s cubic-bezier(0.32,0.72,0,1)` }}>
+                  <div key={m.id} style={settled.has(m.id) ? undefined : { animation: 'sevenRise .28s cubic-bezier(0.32,0.72,0,1)' }}>
                     <Message msg={m} since={sentAt} prompt={messages[i - 1]?.text} canRetry={i === lastBotIndex && !sending} onRetry={retry} onRate={rate} />
                   </div>))}
               </div>

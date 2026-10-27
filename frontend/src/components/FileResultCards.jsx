@@ -79,13 +79,17 @@ export default function FileResultCards({ data }) {
   const [all, setAll] = useState(false);
   if (!data?.results?.length) return null;
   const { query, results } = data;
-  const opened = /opened|opening/i.test(data.message || '') || data.opened !== false;
+  const opened = data.opened === true;             // the backend says whether the first one was opened
+  const near = !!data.similar_to;                  // nothing matched as typed: these are close names
   const shown = all ? results : results.slice(0, 5);
 
   return (
     <div className="mt-3 overflow-hidden rounded-lg border border-s-border bg-s-surface">
       <div className="flex h-8 items-center justify-between border-b border-s-border px-3 text-[11px] text-s-text-4">
-        <span className="truncate">{query ? <>Files for <span className="text-s-text-3">"{query}"</span></> : 'Files'}</span>
+        <span className="truncate">
+          {near ? <>Close matches for <span className="text-s-text-3">"{query}"</span></>
+            : query ? <>Files for <span className="text-s-text-3">"{query}"</span></> : 'Files'}
+        </span>
         <span className="tabular-nums">{results.length}</span>
       </div>
       <div className="p-1">

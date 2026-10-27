@@ -63,7 +63,14 @@ class AppHandler(BaseHandler):
             def _open_one(name):
                 if not name:
                     return
-                ctx.core.open_app(name)
+                try:
+                    ctx.core.open_app(name)
+                except Exception as e:            # AppNotInstalled: the shortcut points at a program that is gone
+                    try:
+                        ctx.mouth.speak(f"{e}.")
+                    except Exception:
+                        pass
+                    return
                 if telemetry_mod:
                     telemetry_mod.log_activity()
             _threads = []

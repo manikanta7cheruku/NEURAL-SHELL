@@ -93,6 +93,9 @@ def reconcile_reply(text: str, receipts: List[ActionReceipt]) -> str:
     for r in failed:
         verb = _VERBS.get(r.kind.upper(), "do that")
         tgt = f" {r.target}" if r.target and r.kind.upper() in ("OPEN", "CLOSE") else ""
+        if r.detail and r.detail[:1].isupper() and len(r.detail) > 40:     # the action explained itself in a sentence
+            parts.append(f"I couldn't {verb}{tgt}. {r.detail.rstrip('.')}.")
+            continue
         why = f" ({r.detail})" if r.detail else ""
         parts.append(f"I tried to {verb}{tgt}, but it didn't work{why}.")
     return " ".join(parts)

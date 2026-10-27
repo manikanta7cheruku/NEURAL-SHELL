@@ -6,6 +6,21 @@ import TitleBar       from './components/TitleBar';
 import UpdateBanner   from './components/UpdateBanner';
 import AdminMessageBanner from './components/AdminMessageBanner';
 import { Toaster }    from './components/ui';
+import Mark, { Wordmark } from './components/Mark';
+
+// The screen while Seven starts: the mark, the name, what it is doing, and a hairline that keeps moving.
+function Splash({ status }) {
+  return (
+    <div className="flex h-screen w-screen flex-col items-center justify-center bg-s-bg" style={{ animation: 'sevenRise .5s cubic-bezier(0.32,0.72,0,1)' }}>
+      <Mark size={44} />
+      <Wordmark size={22} className="mt-4" />
+      <div className="mt-2 text-[12px] text-s-text-3">{status}</div>
+      <div className="relative mt-6 h-px w-40 overflow-hidden rounded-full bg-s-border">
+        <span className="absolute inset-y-0 w-1/3 rounded-full bg-s-accent/80" style={{ animation: 'sevenScan 1.4s cubic-bezier(0.45,0,0.55,1) infinite' }} />
+      </div>
+    </div>
+  );
+}
 import Landing        from './pages/Landing';
 import Home           from './pages/Home';
 import Console        from './pages/Console';
@@ -306,43 +321,12 @@ export default function App() {
 
   // ── Render Case 3: Setup Complete Voice Loading Page ──
   if (setupDone && isFirstLaunch && !voiceReady) {
-    return (
-      <div className="h-screen w-screen bg-s-bg flex flex-col items-center justify-center gap-6">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-14 h-14 rounded-2xl bg-s-accent/10 border border-s-accent/20 flex items-center justify-center">
-            <div className="w-3.5 h-3.5 rounded-full bg-s-accent animate-pulse" />
-          </div>
-          <div className="text-center">
-            <div className="text-xl font-semibold text-white tracking-widest">SEVEN</div>
-            <div className="text-[10px] text-white/40 font-light tracking-wider mt-1">Starting voice engine...</div>
-          </div>
-        </div>
-        <div className="w-48 h-1 bg-white/5 overflow-hidden rounded-full">
-          <div className="h-full bg-s-accent rounded-full animate-pulse" style={{ width: '70%' }} />
-        </div>
-        <div className="text-[10px] text-white/30 font-light">Loading AI modules and microphone...</div>
-      </div>
-    );
+    return <Splash status="Starting the voice engine" />;
   }
 
   // ── Render Case 4: Default Initial Config Fetching ──
   if (setupDone === null) {
-    return (
-      <div className="h-screen w-screen bg-s-bg flex flex-col items-center justify-center gap-6">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-12 h-12 rounded-2xl bg-s-accent/10 border border-s-accent/20 flex items-center justify-center">
-            <div className="w-3 h-3 rounded-full bg-s-accent animate-pulse" />
-          </div>
-          <div className="text-center">
-            <div className="text-xl font-semibold text-white tracking-widest">SEVEN</div>
-            <div className="text-[10px] text-white/40 font-light tracking-wider mt-0.5">Loading configuration...</div>
-          </div>
-        </div>
-        <div className="w-48 h-px bg-white/5 overflow-hidden rounded-full">
-          <div className="h-full bg-s-accent rounded-full animate-pulse" style={{ width: '60%' }} />
-        </div>
-      </div>
-    );
+    return <Splash status="Starting up" />;
   }
 
   // Development only: open the setup wizard without resetting anything, at #/setup-preview.

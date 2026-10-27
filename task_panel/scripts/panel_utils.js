@@ -119,3 +119,13 @@ function priorityLabelColor(pri) {
   if (pri === 'medium') return 'rgba(255, 255, 255, 0.45)';
   return 'rgba(255, 255, 255, 0.25)';
 }
+// A short message above the footer, gone after a few seconds. html is trusted markup built by the panel itself.
+let _noticeTimer = null;
+function showNotice(html, tone = '') {
+  const el = document.getElementById('panel-notice');
+  if (!el) return;
+  el.innerHTML = html;
+  el.className = `panel-notice show ${tone}`;
+  clearTimeout(_noticeTimer);
+  _noticeTimer = setTimeout(() => { el.className = `panel-notice ${tone}`; }, 5200);
+}
