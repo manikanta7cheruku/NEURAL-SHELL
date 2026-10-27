@@ -176,10 +176,11 @@ class Detector:
 def _open_input(pa, device_index=None):
     """The mic at the best rate it supports: 48 kHz keeps a snap's sharp edge, 16 kHz works too."""
     import pyaudio
+    from seven_utils import audio
     for rate in (48000, 44100, 16000):
         try:
-            stream = pa.open(format=pyaudio.paFloat32, channels=1, rate=rate, input=True,
-                             frames_per_buffer=int(rate * 0.01), input_device_index=device_index)
+            stream = audio.open_stream(format=pyaudio.paFloat32, channels=1, rate=rate, input=True,
+                                       frames_per_buffer=int(rate * 0.01), input_device_index=device_index)
             return stream, rate
         except Exception:
             continue
@@ -248,8 +249,8 @@ class SnapDetector:
             print(f"[SNAP] Keyboard and mouse watch unavailable: {e}")
 
     def _run(self):
-        import pyaudio
-        pa = pyaudio.PyAudio()
+        from seven_utils import audio
+        pa = audio.pa()
         backoff = 1.0
         while self._running.is_set():
             stream = None
@@ -275,12 +276,7 @@ class SnapDetector:
                 time.sleep(backoff)
                 backoff = min(backoff * 2, 15)
             finally:
-                if stream is not None:
-                    try:
-                        stream.close()
-                    except Exception:
-                        pass
-        pa.terminate()
+                audio.close_stream(stream)
 
 
 # ═════════════════════════════════════════════════════════════════════════
@@ -292,12 +288,11 @@ def snap_test(seconds: float = 6.0, device_index=None) -> dict:
     Listen while the user snaps three times; say in plain words whether this mic hears snaps.
     {"ok": bool, "heard": taps accepted, "sharp": sharp sounds noticed, "verdict": str, "advice": str|None}
     """
-    import pyaudio
-    pa = pyaudio.PyAudio()
+    from seven_utils import audio
+    pa = audio.pa()
     try:
         stream, rate = _open_input(pa, device_index)
     except Exception as e:
-        pa.terminate()
         return {"ok": False, "heard": 0, "sharp": 0, "verdict": "No microphone could be opened.", "advice": str(e)}
     det = Detector(rate, "relaxed")
     taps = 0
@@ -313,8 +308,7 @@ def snap_test(seconds: float = 6.0, device_index=None) -> dict:
             det.feed(np.zeros(n, dtype=np.float32))
             taps = max(taps, det.stats["accepted"])
     finally:
-        stream.close()
-        pa.terminate()
+        audio.close_stream(stream)
     taps = det.stats["accepted"]
     sharp = sum(det.stats.values())
     if taps >= 2:
