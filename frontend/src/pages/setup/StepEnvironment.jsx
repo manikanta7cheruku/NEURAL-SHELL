@@ -2,8 +2,8 @@
  * Setup, step 4: getting this PC ready.
  *
  * A plain checklist of what Seven puts on the computer, what each piece is for and how big it is, with live
- * progress. Seven's own engine ships inside the installer, so only two things download here: the local AI runtime
- * (Ollama) and the small search model. The AI model itself is chosen on the next step.
+ * progress. Seven's own engine ships inside the installer; what downloads here is the search model, the natural voice,
+ * speech recognition and the local AI runtime (Ollama). The AI model itself is chosen on the next step.
  */
 import { useEffect, useRef, useState } from 'react';
 import useSetup from '../../stores/useSetup';
@@ -20,6 +20,16 @@ const ITEMS = [
     key: 'search_model', name: 'Search model', size: '90 MB',
     what: 'A small model that understands meaning, so "the rule about currents" finds Kirchhoff\'s law in your notes.',
     why: 'It lets Seven find your memories and document passages by what they mean, not only by exact words.',
+  },
+  {
+    key: 'voice_model', name: 'Natural voice', size: '205 MB',
+    what: 'The voice Seven speaks with: warm and human, with eight voices to choose from.',
+    why: 'It runs on this PC, so Seven can talk to you even with no internet, and nothing you hear comes from a server.',
+  },
+  {
+    key: 'speech_model', name: 'Speech recognition', size: 'About 600 MB',
+    what: 'What turns your voice into words, tuned for this PC (a faster model on PCs without a graphics card).',
+    why: 'Your voice is understood here on the computer and is never uploaded anywhere.',
   },
   {
     key: 'ollama_install', name: 'Local AI runtime (Ollama)', size: 'About 700 MB',
@@ -107,7 +117,7 @@ export default function StepEnvironment() {
       .then(r => r.json())
       .then(d => {
         setChecking(false);
-        if (d.packages_installed && d.ollama_installed) { setStarted(true); setDone(true); }
+        if (d.packages_installed && d.ollama_installed && d.voice_ready) { setStarted(true); setDone(true); }
       })
       .catch(() => { if (++tries < 10) setTimeout(check, 2000); else setChecking(false); });
     check();

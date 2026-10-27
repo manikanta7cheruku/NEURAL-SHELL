@@ -73,6 +73,13 @@ rapidfuzz
 # Falls back gracefully if not installed
 pyaudiowpatch
 
+# --- Natural voice (Kokoro) ---
+# kokoro-onnx itself is installed with --no-deps by scripts/build-installer.ps1: it declares numpy>=2, which would
+# break the numpy pin above, but it runs on numpy 1.26. These are its real dependencies.
+phonemizer-fork
+espeakng-loader
+colorlog
+
 # --- Torch (GPU support) ---
 # Install separately with CUDA:
 # pip install torch torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128

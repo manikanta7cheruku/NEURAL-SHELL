@@ -786,11 +786,18 @@ def check_environment():
     except ImportError:
         packages_ok = False
 
+    try:
+        from mouth import voices
+        voice_ready = voices.kokoro_ready()
+    except Exception:
+        voice_ready = False
+
     return {
         "packages_installed": packages_ok,
         "ollama_installed":   ollama_installed,
         "ollama_running":     ollama_running,
-        "needs_setup":        not (packages_ok and ollama_installed)
+        "voice_ready":        voice_ready,
+        "needs_setup":        not (packages_ok and ollama_installed and voice_ready)
     }
 
 
