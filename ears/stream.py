@@ -18,6 +18,9 @@ with faster-whisper) scores every 32 ms of sound, and a small state machine turn
 
 Utterances that begin while Seven is speaking are marked, so the main loop ignores Seven's own voice and the
 interrupt listener can still catch "stop".
+
+Push to talk replaces start and end with the key: holding it starts an utterance (with the same ~300 ms pre-roll),
+letting go ends it at once. The speech detector still has to find real speech in it, so a tap of the key is nothing.
 """
 import collections
 import os
@@ -91,6 +94,7 @@ class MicStream:
         self._thread = None
         self._running = threading.Event()
         self._paused = threading.Event()
+        self._ptt = None             # push to talk: a function, True while the key is held; None in other modes
         self.level = 0.0
         self.state = "idle"          # idle | hearing | processing
         self.last_error = ""
@@ -112,6 +116,10 @@ class MicStream:
         if device_name is not None and device_name != self.device_name:
             self.device_name = device_name
             self._reopen = True
+
+    def set_push_to_talk(self, held_fn):
+        """held_fn() -> True while the push-to-talk key is held. None turns push to talk off."""
+        self._ptt = held_fn
 
     def pause(self, paused: bool):
         """Push-to-talk off, or the mic muted: frames are read but nothing is turned into utterances."""
@@ -221,6 +229,31 @@ class MicStream:
                 continue
 
             start_p, keep_p, end_s = SENSITIVITY[self.sensitivity]
+            ptt = self._ptt
+            if ptt is not None:                          # push to talk: the key decides where speech starts and ends
+                try:
+                    held = bool(ptt())
+                except Exception:
+                    held = False
+                if held:
+                    if not frames:
+                        frames = list(pre_roll)
+                        probs = [0.0] * len(frames)
+                        started = now - len(frames) * FRAME / RATE
+                        speaking_at_start = bool(self._is_speaking())
+                        self._set_state("hearing")
+                    frames.append(frame)
+                    probs.append(p)
+                    if len(frames) * FRAME / RATE <= 15.0:
+                        continue
+                if frames:
+                    self._finish(frames, probs, keep_p, 0.0, started, now, speaking_at_start, ptt=True)
+                    frames, probs = [], []
+                    pre_roll.clear()
+                    continue
+                pre_roll.append(frame)
+                continue
+
             if not frames:
                 pre_roll.append(frame)
                 above = above + 1 if p >= start_p else 0
@@ -238,29 +271,32 @@ class MicStream:
             quiet = quiet + FRAME / RATE if p < keep_p else 0.0
             too_long = len(frames) * FRAME / RATE > 15.0
             if quiet >= end_s or too_long:
-                speech_frames = sum(1 for x in probs if x >= keep_p)
-                speech_s = speech_frames * FRAME / RATE
-                audio = np.concatenate(frames)
-                trim = int(max(0.0, quiet - 0.25) * RATE)          # keep a little silence at the end
-                if trim:
-                    audio = audio[:-trim]
+                self._finish(frames, probs, keep_p, quiet, started, now, speaking_at_start)
                 frames, probs, above = [], [], 0
                 pre_roll.clear()
-                if speech_s < 0.35:
-                    self._publish("voice_ignored", {"reason": "too short", "at": now})
-                    self._set_state("idle")
-                    continue
-                utt = Utterance(audio=audio, started=started, ended=now, during_speech=speaking_at_start,
-                                peak=max(probs) if probs else 0.0, speech_seconds=speech_s)
-                try:
-                    self.utterances.put_nowait(utt)
-                except queue.Full:                       # nobody is listening (Seven is busy): keep the newest
-                    try:
-                        self.utterances.get_nowait()
-                    except queue.Empty:
-                        pass
-                    self.utterances.put_nowait(utt)
-                self._set_state("processing")
+
+    def _finish(self, frames, probs, keep_p, quiet, started, now, speaking_at_start, ptt=False):
+        """Turn the collected frames into an Utterance, or drop them if there's too little actual speech."""
+        speech_s = sum(1 for x in probs if x >= keep_p) * FRAME / RATE
+        audio = np.concatenate(frames)
+        trim = int(max(0.0, quiet - 0.25) * RATE)          # keep a little silence at the end
+        if trim:
+            audio = audio[:-trim]
+        if speech_s < 0.35:
+            self._publish("voice_ignored", {"reason": "too short", "at": now})
+            self._set_state("idle")
+            return
+        utt = Utterance(audio=audio, started=started, ended=now, during_speech=speaking_at_start,
+                        peak=max(probs) if probs else 0.0, speech_seconds=speech_s, meta={"ptt": ptt})
+        try:
+            self.utterances.put_nowait(utt)
+        except queue.Full:                               # nobody is listening (Seven is busy): keep the newest
+            try:
+                self.utterances.get_nowait()
+            except queue.Empty:
+                pass
+            self.utterances.put_nowait(utt)
+        self._set_state("processing")
 
     def _set_state(self, state):
         if state != self.state:

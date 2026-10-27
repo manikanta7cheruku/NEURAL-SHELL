@@ -116,15 +116,13 @@ def run_voice_loop(ctx, config, app_ui, api_set_state, safe_mode_file):
         _combined_wake = list(dict.fromkeys(_wake + _resume)) if _resume else _wake
         return _combined_wake, _pause, _kill
 
-    # ── PTT ──────────────────────────────────────────────────────────
-    _is_ptt_active_fn = lambda: True
+    # ── Push to talk: holding Shift starts and ends an utterance (ears/push_to_talk.py, ears/stream.py) ──
+    _ptt_held = None
     try:
-        from ears.push_to_talk import start as _ptt_start, is_ptt_active
+        from ears.push_to_talk import start as _ptt_start, is_held as _ptt_held
         _ptt_start()
-        _is_ptt_active_fn = is_ptt_active
-        print(Fore.CYAN + "[GATES] PTT keyboard listener started")
     except Exception as _ptt_err:
-        print(Fore.YELLOW + f"[GATES] PTT init failed: {_ptt_err}")
+        print(Fore.YELLOW + f"[GATES] Push to talk unavailable: {_ptt_err}")
 
     # ── Speak with interrupt ─────────────────────────────────────────
     def speak_with_interrupt(text):
@@ -244,15 +242,16 @@ def run_voice_loop(ctx, config, app_ui, api_set_state, safe_mode_file):
     _shown_state = [None]
 
     def _show(state):
+        # Published on every pass, not only on a change: answering a request sets "listening" off, and the app (the
+        # sidebar, the home screen, the voice bar) has to see it come back on as soon as Seven is ready again.
+        api_set_state("listening", state == "listening")
+        api_set_state("paused", state == "paused")
         if state != _shown_state[0]:
             _shown_state[0] = state
             if state == "listening":
                 app_ui.update_status("LISTENING...", "#00ff00")
-                api_set_state("listening", True)
-                api_set_state("thinking", False)
             else:
                 app_ui.update_status("PAUSED (Say 'Wake Up')", "#555555")
-                api_set_state("listening", False)
 
     while True:
         try:
@@ -262,10 +261,7 @@ def run_voice_loop(ctx, config, app_ui, api_set_state, safe_mode_file):
 
             _show("listening" if is_active else "paused")
             _vs = _ears_core.voice_settings()
-            if _vs["listen_mode"] == "ptt":
-                _ears_core.STREAM.pause(not _is_ptt_active_fn())
-            else:
-                _ears_core.STREAM.pause(False)
+            _ears_core.STREAM.set_push_to_talk(_ptt_held if _vs["listen_mode"] == "ptt" else None)
             _ears_core.STREAM.configure(sensitivity=_vs["sensitivity"], device_name=_vs["mic"])
             api_set_state("listen_mode", _vs["listen_mode"])
             api_set_state("follow_up_open", time.time() < follow_up_until[0])
@@ -285,13 +281,7 @@ def run_voice_loop(ctx, config, app_ui, api_set_state, safe_mode_file):
                 continue
 
             WAKE_WORDS, PAUSE_WORDS, KILL_WORDS = _get_voice_control_words()
-            _sv_enabled = _vs["only_me"] or config.KEY.get("voice_gates", {}).get("speaker_verify", {}).get("enabled", False)
-
-            try:
-                from ears.push_to_talk import set_enabled as _ptt_set
-                _ptt_set(_vs["listen_mode"] == "ptt")
-            except Exception:
-                pass
+            _sv_enabled = _vs["only_me"]          # off until "only my voice" ships (ears/core.voice_settings)
 
             # ── Wake word ──────────────────────────────────────────────
             # In wake mode a request must start with "Hey Seven" (or "Seven"), except in the follow-up window. "Hey
@@ -402,9 +392,19 @@ def run_voice_loop(ctx, config, app_ui, api_set_state, safe_mode_file):
             api_set_state("listening", False)
             api_set_state("user_text", user_input)
             api_set_state("seven_text", "")
+            api_set_state("voice_turn", time.time())     # the voice bar opens for this request (electron/status.html)
 
             response = ctx.brain.think(user_input, speaker_id=speaker_id)
             telemetry.log_activity()
+            # File matches ("open resume") go to the app, so the other matches Seven mentions are on screen.
+            try:
+                from backend.api_server import get_state as _get_state
+                _files = _get_state().get("file_search_results")
+                api_set_state("voice_files", {"at": time.time(), "data": _files} if _files else None)
+                if _files:
+                    api_set_state("file_search_results", None)
+            except Exception:
+                pass
 
             if response == "":
                 continue

@@ -99,7 +99,7 @@ def voice_settings() -> dict:
         'sensitivity': sens,
         'follow_up_seconds': float(v.get('follow_up_seconds', 8)),
         'interrupt': bool(v.get('interrupt', True)),
-        'only_me': bool(v.get('only_me', False)),
+        'only_me': False,               # "only my voice" is coming in a later version; an old setting must not mute Seven
         'mic': v.get('mic', '') or '',
         'wake_words': v.get('wake_words') or ['hey seven', 'ok seven', 'okay seven', 'seven'],
     }
