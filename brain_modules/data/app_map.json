@@ -1,62 +1,47 @@
 {
   "app_map_version": 1,
-  "source_hash": "fd8ff181cbee360c",
+  "source_hash": "c2e6e1048017a71d",
   "pages": [
     {
       "id": "home",
       "route": "/",
       "component": "Landing",
-      "title": "Prompt",
-      "purpose": "Seven's home screen: the orb shows what Seven is doing, the session log shows what was said, type to Seven or use /commands, live system and today panels, shortcuts to every page",
+      "title": "Vitals",
+      "purpose": "Seven's home screen: the orb shows what Seven is doing, live processor, RAM and graphics readings with Seven's own share marked, the busiest app, today's tasks and reminders, shortcuts to every page",
       "controls": [
         {
-          "label": "Prompt",
-          "description": "Type anything to Seven, or a /command such as /tasks or /settings to open that page.",
+          "label": "Vitals",
+          "description": "Processor, RAM and graphics in use; the accent part of each ring is Seven's share.",
+          "file": "Landing.jsx"
+        },
+        {
+          "label": "Busiest app",
+          "description": "The app using the most RAM right now. Hover for the top apps, Seven among them.",
           "file": "Landing.jsx"
         },
         {
           "label": "Shortcuts",
-          "description": "Press 1 to 7 to open Dashboard, Console, Tasks, Schedules, Memory, Settings or Guide.",
+          "description": "Press 1 to 7 to open Dashboard, Chat, Tasks, Reminders, Memory, Settings or Guide. Press / to type to Seven in Chat.",
           "file": "Landing.jsx"
         },
         {
-          "label": "SEVEN",
+          "label": "Most memory",
           "description": "",
           "file": "Landing.jsx"
         },
         {
-          "label": "MODEL",
+          "label": "Using the most memory",
           "description": "",
           "file": "Landing.jsx"
         },
         {
-          "label": "SESSION LOG",
-          "description": "Seven is ready. Everything said here, by voice or text, appears in this log.",
-          "file": "Landing.jsx"
-        },
-        {
-          "label": "Try",
+          "label": "Next:",
           "description": "",
           "file": "Landing.jsx"
         },
         {
-          "label": "what can you do?",
+          "label": "things remembered",
           "description": "",
-          "file": "Landing.jsx"
-        },
-        {
-          "label": "for commands.",
-          "description": "",
-          "file": "Landing.jsx"
-        },
-        {
-          "label": "running",
-          "description": "",
-          "file": "Landing.jsx"
-        },
-        {
-          "label": "nothing open",
-          "description": "ALT+S hide \u00b7 ALT+SHIFT+T tasks",
           "file": "Landing.jsx"
         }
       ],
@@ -65,8 +50,12 @@
         "start",
         "orb",
         "landing",
-        "terminal",
-        "command",
+        "listening",
+        "vitals",
+        "ram usage",
+        "cpu",
+        "gpu",
+        "busiest app",
         "session"
       ],
       "sections": []
@@ -75,7 +64,7 @@
       "id": "dashboard",
       "route": "/dashboard",
       "component": "Home",
-      "title": "Dashboard",
+      "title": "Home",
       "purpose": "An overview of today: Seven's status, your tasks and upcoming schedules, memory, activity and your computer",
       "controls": [
         {
@@ -128,9 +117,14 @@
       "id": "console",
       "route": "/console",
       "component": "Console",
-      "title": "Console",
+      "title": "Chat",
       "purpose": "",
       "controls": [
+        {
+          "label": "From",
+          "description": "",
+          "file": "Console.jsx"
+        },
         {
           "label": "Not certain",
           "description": "",
@@ -143,7 +137,7 @@
         },
         {
           "label": "What can I help with?",
-          "description": "Ask anything, type / for commands, or drop a document to learn from it.",
+          "description": "Ask anything, type / for commands, or attach notes or a PDF and ask about them.",
           "file": "Console.jsx"
         },
         {
@@ -153,6 +147,11 @@
         },
         {
           "label": "New chat",
+          "description": "",
+          "file": "Console.jsx"
+        },
+        {
+          "label": "Answering from",
           "description": "",
           "file": "Console.jsx"
         },
@@ -234,6 +233,11 @@
         },
         {
           "label": "Interrupted",
+          "description": "",
+          "file": "Memory.jsx"
+        },
+        {
+          "label": "0 : c.voice_count",
           "description": "",
           "file": "Memory.jsx"
         }
@@ -449,33 +453,58 @@
       "purpose": "",
       "controls": [
         {
-          "label": "Knowledge",
-          "description": "Documents Seven references during conversations",
-          "file": "Knowledge.jsx"
-        },
-        {
-          "label": "Clear all",
-          "description": "PDF, DOCX, PPTX, XLSX, TXT, MD \u00b7 Max 50MB",
-          "file": "Knowledge.jsx"
-        },
-        {
-          "label": "Indexed Files",
+          "label": "Contents",
           "description": "",
           "file": "Knowledge.jsx"
         },
         {
-          "label": "Test Search",
+          "label": "Open",
           "description": "",
           "file": "Knowledge.jsx"
         },
         {
-          "label": "Results",
+          "label": "Try again",
           "description": "",
           "file": "Knowledge.jsx"
         },
         {
-          "label": "No documents indexed",
-          "description": "Upload PDF, DOCX, PPTX, XLSX, or text files. Seven will reference them when answering your questions.",
+          "label": "Ask about it in a chat",
+          "description": "",
+          "file": "Knowledge.jsx"
+        },
+        {
+          "label": "Opening passage",
+          "description": "",
+          "file": "Knowledge.jsx"
+        },
+        {
+          "label": "Ask about this",
+          "description": "",
+          "file": "Knowledge.jsx"
+        },
+        {
+          "label": "Bring your study material",
+          "description": "Notes, textbooks, slides or sheets. Seven reads them here on this computer and answers your questions with page numbers.",
+          "file": "Knowledge.jsx"
+        },
+        {
+          "label": "Choose files",
+          "description": "or drop them here \u00b7 PDF, Word, PowerPoint, Excel, TXT, MD \u00b7 up to 50 MB",
+          "file": "Knowledge.jsx"
+        },
+        {
+          "label": "See plans",
+          "description": "",
+          "file": "Knowledge.jsx"
+        },
+        {
+          "label": "Add documents",
+          "description": "",
+          "file": "Knowledge.jsx"
+        },
+        {
+          "label": ": !docs.length ?",
+          "description": "",
           "file": "Knowledge.jsx"
         }
       ],
@@ -777,14 +806,14 @@
           "section": "System"
         },
         {
-          "label": "Floating panel",
-          "description": "The panel that appears next to the Seven orb.",
+          "label": "Voice bar",
+          "description": "Live captions of what you said and what Seven is saying, at the top centre of your screen.",
           "file": "SystemSection.jsx",
           "section": "System"
         },
         {
-          "label": "Background",
-          "description": "How much of your desktop shows through. Applies immediately.",
+          "label": "Show",
+          "description": "",
           "file": "SystemSection.jsx",
           "section": "System"
         },
@@ -819,8 +848,50 @@
           "section": "System"
         },
         {
-          "label": "Speaking voice",
-          "description": "Runs offline. Neural voices sound more natural; Windows voices use less memory.",
+          "label": "Seven's voice",
+          "description": "",
+          "file": "VoiceSection.jsx",
+          "section": "Voice"
+        },
+        {
+          "label": "How Seven listens",
+          "description": "",
+          "file": "VoiceSection.jsx",
+          "section": "Voice"
+        },
+        {
+          "label": "Listening mode",
+          "description": "",
+          "file": "VoiceSection.jsx",
+          "section": "Voice"
+        },
+        {
+          "label": "Sensitivity",
+          "description": "",
+          "file": "VoiceSection.jsx",
+          "section": "Voice"
+        },
+        {
+          "label": "Keep listening after a reply",
+          "description": "For 8 seconds after Seven answers, reply without saying its name.",
+          "file": "VoiceSection.jsx",
+          "section": "Voice"
+        },
+        {
+          "label": "Microphone",
+          "description": "",
+          "file": "VoiceSection.jsx",
+          "section": "Voice"
+        },
+        {
+          "label": "Snaps and claps",
+          "description": "Triggers you start with a snap. Typing and mouse clicks never count.",
+          "file": "VoiceSection.jsx",
+          "section": "Voice"
+        },
+        {
+          "label": "Snap sensitivity",
+          "description": "",
           "file": "VoiceSection.jsx",
           "section": "Voice"
         },
@@ -837,26 +908,14 @@
           "section": "Voice"
         },
         {
-          "label": "Voice security",
-          "description": "",
+          "label": "Only respond to my voice",
+          "description": "Seven will recognise your voice and ignore everyone else. Voiceprints will stay on this PC.",
           "file": "VoiceSection.jsx",
           "section": "Voice"
         },
         {
-          "label": "Push to talk",
-          "description": "Seven listens only while you hold Shift.",
-          "file": "VoiceSection.jsx",
-          "section": "Voice"
-        },
-        {
-          "label": "Require a wake word",
-          "description": "Seven ignores speech that doesn\\'t start with a wake word. \"Hey Seven, open Chrome\" runs \"open Chrome\".",
-          "file": "VoiceSection.jsx",
-          "section": "Voice"
-        },
-        {
-          "label": "Speaker verification",
-          "description": "Respond only to enrolled voices.",
+          "label": "Respond only to my voice",
+          "description": "Coming in an upcoming version. Until then, the wake word keeps others from triggering Seven.",
           "file": "VoiceSection.jsx",
           "section": "Voice"
         }
@@ -1053,7 +1112,12 @@
         },
         {
           "label": "Shift",
-          "description": "], [MessageSquare, 'Console',",
+          "description": "",
+          "file": "Guide.jsx"
+        },
+        {
+          "label": "], [MessageSquare, 'Chat',",
+          "description": "Type anything, the same as speaking. Seven shows what it did after each reply, and chats are saved so you can pick them up later.",
           "file": "Guide.jsx"
         },
         {
