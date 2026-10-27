@@ -64,7 +64,7 @@ let _lastCrashTime = 0;
 // The voice bar sits at the top centre of the primary screen (electron/status.html). The window is wider and taller
 // than the bar so the card can grow into it; everywhere outside the bar lets clicks through.
 const BAR_W = 520;
-const BAR_H = 260;
+const BAR_H = 64;
 function barBounds() {
   const area = screen.getPrimaryDisplay().workArea;
   return { width: BAR_W, height: BAR_H, x: Math.round(area.x + (area.width - BAR_W) / 2), y: area.y };

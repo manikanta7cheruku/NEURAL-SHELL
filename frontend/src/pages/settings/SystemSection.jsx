@@ -97,18 +97,18 @@ function Hardware() {
   );
 }
 
-const BAR = [{ value: 'always', label: 'Always' }, { value: 'active', label: 'While talking' }, { value: 'off', label: 'Off' }];
+const BAR = [{ value: 'active', label: 'While talking' }, { value: 'always', label: 'Always' }, { value: 'off', label: 'Off' }];
 const BAR_HINT = {
-  always: 'A slim bar at the top of your screen shows that Seven is listening, and opens when you talk to it.',
-  active: 'Appears only while you talk to Seven, then folds away.',
-  off: 'No bar. Seven still listens and answers out loud.',
+  active: 'A one-line caption appears at the top of your screen while you talk to Seven, then fades away.',
+  always: 'Also keeps a small light at the top edge while Seven listens. Hover it for how to talk to Seven.',
+  off: 'No caption. Seven still listens and answers out loud.',
 };
 
 function VoiceBar({ config }) {
-  const [show, setShow] = useState(config.voice_bar?.show || 'always');
+  const [show, setShow] = useState(config.voice_bar?.show || 'active');
   const change = value => { setShow(value); saveConfig({ voice_bar: { show: value } }); };
   return (
-    <Section title="Voice bar" description="What you said and Seven's reply, at the top centre of your screen.">
+    <Section title="Voice bar" description="Live captions of what you said and what Seven is saying, at the top centre of your screen.">
       <Row label="Show" description={BAR_HINT[show]}>
         <Segmented value={show} options={BAR} onChange={change} />
       </Row>
