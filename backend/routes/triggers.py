@@ -475,6 +475,35 @@ def list_triggers(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def plan_limit_detail(active_count: int, action: str = "enable this one"):
+    """
+    The 403 payload when having one more active trigger would pass the plan's limit, or None when it is allowed.
+    active_count is how many are active now, not counting the one being created or enabled. If the plan can't be
+    read, nothing is blocked.
+    """
+    try:
+        from backend.api_server import check_limit
+        check = check_limit("triggers", active_count)
+    except Exception as exc:
+        print(Fore.YELLOW + f"[TRIGGERS] Plan check skipped: {exc}")
+        return None
+    if check["allowed"]:
+        return None
+    tier, limit = check["tier"], check["limit"]
+    upgrade = check.get("upgrade_needed") or "pro"
+    print(Fore.YELLOW + f"[TRIGGERS] Blocked: {active_count + 1}/{limit} active triggers on {tier.upper()}")
+    return {
+        "error":           "plan_limit_reached",
+        "message":         (f"You have reached the {tier.upper()} plan limit of {limit} active triggers. "
+                            f"Disable another trigger or upgrade to {upgrade.upper()} to {action}."),
+        "current":         active_count + 1,
+        "limit":           limit,
+        "tier":            tier,
+        "upgrade_to":      upgrade,
+        "upgrade_message": f"Upgrade to {upgrade.upper()} for more triggers.",
+    }
+
+
 @router.post("/api/triggers")
 def create_trigger(body: TriggerCreate):
     """Create a new trigger with conflict checking."""
@@ -511,6 +540,18 @@ def create_trigger(body: TriggerCreate):
             )
 
     now_iso = datetime.now().isoformat()
+
+    # A new trigger starts active, so it counts against the plan's limit of active triggers.
+    if body.enabled:
+        try:
+            with _get_conn() as conn:
+                active_now = conn.execute("SELECT COUNT(*) FROM triggers WHERE enabled = 1").fetchone()[0]
+        except Exception as e:
+            print(Fore.RED + f"[TRIGGERS] create error: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+        blocked = plan_limit_detail(active_now, "add another")
+        if blocked:
+            raise HTTPException(status_code=403, detail=blocked)
 
     try:
         with _get_conn() as conn:
@@ -645,39 +686,14 @@ def update_trigger(trigger_id: int, body: TriggerUpdate):
                 was_enabled = bool(existing["enabled"])
                 will_enable = bool(body.enabled)
 
-                # Enforce plan limit on enable. Reject with 403 if over limit.
+                # Enforce the plan limit on enabling. Reject with 403 if it would pass the limit.
                 if will_enable and not was_enabled:
-                    try:
-                        from backend.api_server import check_limit
-                        active_count = conn.execute(
-                            "SELECT COUNT(*) FROM triggers WHERE enabled = 1 AND id != ?",
-                            (trigger_id,)
-                        ).fetchone()[0]
-                        limit_check = check_limit("triggers", active_count)
-
-                        if not limit_check["allowed"]:
-                            tier    = limit_check["tier"]
-                            limit   = limit_check["limit"]
-                            upgrade = limit_check.get("upgrade_needed", "pro")
-                            print(Fore.YELLOW + f"[TRIGGERS] Enable blocked: "
-                                  f"{active_count + 1}/{limit} triggers on {tier.upper()}")
-                            raise HTTPException(status_code=403, detail={
-                                "error":           "plan_limit_reached",
-                                "message":         (
-                                    f"You have reached the {tier.upper()} plan limit of "
-                                    f"{limit} active triggers. Disable another trigger or "
-                                    f"upgrade to {upgrade.upper()} to enable this one."
-                                ),
-                                "current":         active_count + 1,
-                                "limit":           limit,
-                                "tier":            tier,
-                                "upgrade_to":      upgrade,
-                                "upgrade_message": f"Upgrade to {upgrade.upper()} for more triggers.",
-                            })
-                    except HTTPException:
-                        raise
-                    except Exception as _limit_err:
-                        print(Fore.YELLOW + f"[TRIGGERS] Plan check skipped: {_limit_err}")
+                    active_count = conn.execute(
+                        "SELECT COUNT(*) FROM triggers WHERE enabled = 1 AND id != ?", (trigger_id,)
+                    ).fetchone()[0]
+                    blocked = plan_limit_detail(active_count, "enable this one")
+                    if blocked:
+                        raise HTTPException(status_code=403, detail=blocked)
 
                 updates.append("enabled = ?")
                 params.append(1 if body.enabled else 0)
