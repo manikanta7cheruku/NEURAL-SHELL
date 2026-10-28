@@ -1,6 +1,6 @@
 {
   "app_map_version": 1,
-  "source_hash": "e26e26bd1f93b97a",
+  "source_hash": "d0c3b4b75755285c",
   "pages": [
     {
       "id": "home",
@@ -31,21 +31,6 @@
         },
         {
           "label": "Using the most memory",
-          "description": "",
-          "file": "Landing.jsx"
-        },
-        {
-          "label": "Nothing heard yet",
-          "description": "",
-          "file": "Landing.jsx"
-        },
-        {
-          "label": "Heard",
-          "description": "",
-          "file": "Landing.jsx"
-        },
-        {
-          "label": "\u201cHey Seven\u201d",
           "description": "",
           "file": "Landing.jsx"
         },
