@@ -372,6 +372,10 @@ export default function Landing() {
       </section>
 
       <footer data-tour="footer" className="relative z-10 flex shrink-0 items-center justify-center border-t border-s-border/50 px-5 py-1.5">
+        <button onClick={() => window.dispatchEvent(new Event('seven:welcome'))} title="Welcome guide, feedback and roadmap"
+                className="absolute left-5 flex h-7 items-center rounded-md px-2 text-[12px] text-s-text-4 transition-colors duration-200 hover:bg-s-surface/80 hover:text-s-text-2">
+          Welcome guide
+        </button>
         <nav aria-label="Pages" className="flex items-center gap-0.5">
           {NAV.map(n => (
             <button key={n.key} onClick={() => navigate(n.to)}
