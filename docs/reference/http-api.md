@@ -6,7 +6,7 @@ The backend listens on `http://127.0.0.1:7777` only (never on the network). The 
 the overlay and the Chrome extension are its only clients. There is no authentication because nothing outside
 this computer can reach it.
 
-207 endpoints in 28 files.
+214 endpoints in 29 files.
 
 ## `backend/admin_server.py`
 
@@ -239,6 +239,7 @@ this computer can reach it.
 | Method | Path | What it does |
 |---|---|---|
 | POST | `/api/interrupt` | Interrupt Seven's current speech immediately. |
+| GET | `/api/ready` | Is Seven ready to be used? |
 | GET | `/api/status` | Get current Seven system status. Guaranteed to never return 500. |
 | GET | `/api/version` | Get version info. |
 | WEBSOCKET | `/ws/status` | Real-time status, 10 times a second: the orb follows the mic level and shows "Hearing you" as it happens. |
@@ -316,6 +317,17 @@ this computer can reach it.
 | GET | `/api/voice/gates` | Get current voice gate configuration. |
 | POST | `/api/voice/gates` | Save voice gate configuration. |
 | POST | `/api/voice/play-sample` | Play back a recorded voice sample for the user to verify. |
+
+## `backend/routes/welcome.py`
+
+| Method | Path | What it does |
+|---|---|---|
+| POST | `/api/tour/ack` | The welcome card is open |
+| POST | `/api/tour/replay` | Replay the welcome tour |
+| POST | `/api/tour/skip` | Skip the spoken tour |
+| GET | `/api/welcome` | First-run welcome state |
+| POST | `/api/welcome/hint/hide` | Hide the getting-started hint |
+| POST | `/api/welcome/hint/show` | Show the getting-started hint again |
 
 ## `backend/routes/workspaces.py`
 

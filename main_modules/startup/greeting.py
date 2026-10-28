@@ -6,7 +6,8 @@ Before, the voice loop spoke a morning brief at startup and the setup screen ask
 so a new user heard two greetings. Now greet() is the only thing that greets, and only once per launch, whoever
 asks first.
 
-    First launch after setup   a short welcome that teaches the one thing to know: say "Hey Seven", then ask.
+    First launch after setup   the spoken welcome tour (main_modules/startup/tour.py): it makes sure you can hear it,
+                               introduces Seven and walks through the home screen, then a welcome card opens.
     Every launch after that    a greeting and the single most useful thing right now, in this order:
                                overdue tasks, what's due today, the next reminder today, pending tasks, a clear day.
                                Low battery is added only when it matters. Two sentences at most.
@@ -39,6 +40,33 @@ def _save(state: dict) -> None:
             json.dump(state, f)
     except Exception:
         pass
+
+
+def welcome_state() -> dict:
+    """What the welcome card and its hint need: the tour ran, the hint was hidden, the first command was given."""
+    s = _load()
+    return {"tour_done": bool(s.get("tour_done")), "hint_dismissed": bool(s.get("hint_dismissed")),
+            "first_command": bool(s.get("first_command"))}
+
+
+def update_welcome(**changes) -> dict:
+    """Save welcome flags and tell the app."""
+    s = _load()
+    s.update(changes)
+    _save(s)
+    w = welcome_state()
+    try:
+        from backend.api_server import set_state
+        set_state("welcome", w)
+    except Exception:
+        pass
+    return w
+
+
+def mark_first_command() -> None:
+    """The first real voice request after the tour: the welcome card's first command is done."""
+    if _load().get("tour_done") and not _load().get("first_command"):
+        update_welcome(first_command=True)
 
 
 def _name(config) -> str:
@@ -142,6 +170,10 @@ def greet(ctx, config, speak=None) -> str:
     except Exception:
         pass
     print(f"[GREETING] {kind}: {text}")
+    if kind == "welcome":
+        from main_modules.startup import tour
+        tour.run(ctx, config, speak=speak)
+        return text
     try:
         (speak or ctx.mouth.speak)(text)
     except Exception as e:

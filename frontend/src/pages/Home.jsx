@@ -6,8 +6,9 @@
               "keywords": ["dashboard", "overview", "home", "today", "summary", "status"]} */
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowRight, Check, CalendarClock, CheckCircle2, MessageSquare, Mic, Repeat, Bell, AlarmClock, Timer, Calendar } from 'lucide-react';
+import { ArrowRight, Check, CalendarClock, CheckCircle2, MessageSquare, Repeat, Bell, AlarmClock, Timer, Calendar } from 'lucide-react';
 import api from '../api';
+import WelcomeHint from '../components/WelcomeHint';
 import useStatus from '../stores/useStatus';
 import useTasks from '../stores/useTasks';
 import useConfig from '../stores/useConfig';
@@ -90,12 +91,11 @@ function TaskLine({ task, onDone }) {
   );
 }
 
-export default function Home({ isFirstLaunch }) {
+export default function Home() {
   const navigate = useNavigate();
   const st = useStatus();
   const { config } = useConfig();
   const { tasks, stats, fetch: fetchTasks, fetchStats, update } = useTasks();
-  const [welcome, setWelcome] = useState(!!isFirstLaunch);
   const [scheds, setScheds] = useState([]);
   const [overview, setOverview] = useState(null);
   const [history, setHistory] = useState([]);
@@ -115,12 +115,6 @@ export default function Home({ isFirstLaunch }) {
     const id = setInterval(load, 20000);
     return () => clearInterval(id);
   }, [fetchTasks, fetchStats]);
-
-  useEffect(() => {
-    if (!welcome) return undefined;
-    const t = setTimeout(() => setWelcome(false), 9000);
-    return () => clearTimeout(t);
-  }, [welcome]);
 
   const today = useMemo(() => {
     const end = new Date(); end.setHours(23, 59, 59, 999);
@@ -148,18 +142,7 @@ export default function Home({ isFirstLaunch }) {
         </>
       }>
       <div className="mx-auto max-w-[1080px] space-y-4 px-6 py-5">
-        {welcome && (
-          <div className="page-in flex items-center justify-between rounded-lg border border-s-accent/30 bg-s-accent/5 px-4 py-3">
-            <div className="flex items-center gap-3">
-              <Mic size={16} className="text-s-accent-h" />
-              <div>
-                <p className="text-[12.5px] font-medium text-s-text">Seven is ready. Say "Hey Seven" to start.</p>
-                <p className="text-[11.5px] text-s-text-3">Or type in the Console. Everything runs on this computer.</p>
-              </div>
-            </div>
-            <Button size="sm" variant="ghost" onClick={() => setWelcome(false)}>Dismiss</Button>
-          </div>
-        )}
+        <WelcomeHint />
 
         {(st.userText || st.sevenText) && (
           <section className="page-in flex gap-4 rounded-lg border border-s-border bg-s-surface px-4 py-3 shadow-[var(--s-shadow)]">

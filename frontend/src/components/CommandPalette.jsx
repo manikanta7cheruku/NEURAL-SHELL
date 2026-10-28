@@ -60,6 +60,8 @@ export default function CommandPalette() {
     { group: 'Voice', label: 'Listen: wake word', kw: 'hey seven', run: () => setListenMode('wake') },
     { group: 'Voice', label: 'Listen: always on', kw: 'continuous', run: () => setListenMode('always') },
     { group: 'Voice', label: 'Listen: push to talk', kw: 'shift key', run: () => setListenMode('ptt') },
+    { group: 'Welcome', label: 'Show the welcome guide', kw: 'beta intro first command feedback', run: () => { api.post('/welcome/hint/show').catch(() => {}); window.dispatchEvent(new Event('seven:welcome')); } },
+    { group: 'Welcome', label: 'Replay the welcome tour', kw: 'intro walkthrough tutorial', run: () => { navigate('/'); api.post('/tour/replay').catch(() => {}); } },
     { group: 'Appearance', label: 'Dark theme', kw: 'ink night', run: () => setTheme('dark') },
     { group: 'Appearance', label: 'Light theme', kw: 'paper day', run: () => setTheme('light') },
     { group: 'Appearance', label: 'Match Windows theme', kw: 'system auto', run: () => setTheme('system') },

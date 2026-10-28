@@ -56,11 +56,40 @@ Runs on a daemon thread after the modules load.
 
 One greeting per launch, said by one place (it used to be two: the voice loop and the setup screen both spoke).
 
-- **First launch after setup:** "Hi {name}, I'm Seven. Whenever you need me, just say "Hey Seven" and ask, like "Hey
-  Seven, open Chrome". You can also type to me any time."
+- **First launch after setup:** the spoken welcome tour (section 3a).
 - **Every launch after:** a greeting and the single most useful thing now, in order: overdue tasks, due today, the next
   reminder today, pending tasks, or a clear day. A battery note is added at 20% or below. Two sentences at most.
 - The setup endpoint `POST /api/setup/welcome-greeting` returns the text only; it never speaks.
+
+### 3a. Ready, then the welcome tour
+
+**The app opens when Seven can speak.** The backend answers requests long before its brain, ears and voice are loaded,
+so the app used to open in a half-working state and the greeting arrived late. Now the voice loop publishes `ready`
+(`GET /api/ready`, `{ready, stage}`) once the brain and apps are loaded, the ears are listening and the natural voice
+is warm, and the app shows a loading screen with the stage ("Loading Seven's brain", "Starting the ears", "Warming
+up the voice") until then. The voice starts loading at the very beginning, beside the rest, instead of after it. The
+greeting starts 0.8 s after `ready`, as the window appears. After two minutes the app opens anyway, so one broken part
+never locks anyone out; the needs-attention strip says what is wrong.
+
+**The first launch after setup** runs `main_modules/startup/tour.py` instead of a one-line welcome:
+
+1. **Audio check.** If the volume is muted or at 40% or less, it is raised to 60% (never higher, never lowered) and
+   Seven says so, with how to change it. At 41% or more nothing is touched.
+2. **The tour,** about 25 seconds, spoken as one stream so sentences follow each other without gaps. As each sentence
+   starts, the status feed's `tour` value changes and the screen lights up what Seven is talking about: the orb
+   ("I'm an assistant that lives on your PC"), the listening switch ("Hey Seven"), Test mic, the footer pages and
+   Ctrl+K. The rest of the screen dims (`TourLayer`). The voice bar shows the captions, and a **Skip tour** button stops
+   the talking and goes straight to the card.
+3. **The welcome card** (`WelcomeCard`) opens: what Seven is, **your first command** ("Hey Seven, set volume to 50",
+   which ticks itself off when Seven handles its first spoken request after the tour), what to ask, an invitation to give
+   feedback with a Send feedback button, an honest line that this is a beta, and what leaves the PC (name, email, country
+   and usage time, which Settings, Privacy and data can turn off). Buttons: Open the guide, Send feedback.
+4. **The hint.** Closing the card (Esc, the X, or either button) leaves a quiet pill on the home screen and Overview
+   (`WelcomeHint`): "Try it: say ..." until the first command is done, then "Welcome guide: tips and feedback". Clicking
+   it reopens the card. "Hide this hint" in the card removes it for good.
+
+State lives in `%APPDATA%\SEVEN\greeting.json`: `welcomed` (set as the tour starts, so a crash can't loop it),
+`tour_done`, `hint_dismissed`, `first_command`. Ctrl+K has **Replay the welcome tour** and **Show the welcome guide**.
 
 ## 4. Live state: `/ws/status`
 
@@ -76,6 +105,9 @@ One greeting per launch, said by one place (it used to be two: the voice loop an
 | `listen_mode`, `follow_up_open` | How Seven listens right now |
 | `voice_turn` | Changes when a voice request starts |
 | `voice_files` | `{at, data}`: file matches from the last voice request |
+| `ready`, `ready_stage` | Seven's brain, ears and voice are loaded (the app opens on this); the stage until then |
+| `tour` | `{step, n}`: the thing the first-run tour is talking about (`audio`, `intro`, `listen`, `mic`, `pages`, `outro`), `card` when the card should open, then null |
+| `welcome` | `{tour_done, hint_dismissed, first_command}` |
 
 ## 5. The voice bar: `electron/status.html`
 
@@ -176,5 +208,9 @@ the sidebar used to call "Home"; the home screen is the one with the orb.
 | POST | `/api/voice/test` | Wait up to 10 s for one request; return what was heard, without acting |
 | GET | `/api/system/usage` | Seven's share and the apps using the most memory |
 | GET | `/api/attention` | What needs the user's attention (microphone, voice, AI model), most important first |
+| GET | `/api/ready` | Is Seven ready (brain, ears and voice loaded), and the stage until then |
+| GET | `/api/welcome` | The first-run welcome state |
+| POST | `/api/welcome/hint/hide`, `/api/welcome/hint/show` | Hide or show the getting-started hint |
+| POST | `/api/tour/skip`, `/api/tour/ack`, `/api/tour/replay` | Skip the spoken tour, acknowledge the card opened, run the tour again |
 | POST | `/api/triggers/snap-test` | Record a few seconds and say whether the mic hears snaps |
 | POST | `/api/system/sound-settings` | Open Windows sound settings |
