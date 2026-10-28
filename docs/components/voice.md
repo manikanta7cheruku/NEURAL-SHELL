@@ -80,13 +80,21 @@ never locks anyone out; the needs-attention strip says what is wrong.
    ("I'm an assistant that lives on your PC"), the listening switch ("Hey Seven"), Test mic, the footer pages and
    Ctrl+K. The rest of the screen dims (`TourLayer`). The voice bar shows the captions, and a **Skip tour** button stops
    the talking and goes straight to the card.
-3. **The welcome card** (`WelcomeCard`) opens: what Seven is, **your first command** ("Hey Seven, set volume to 50",
-   which ticks itself off when Seven handles its first spoken request after the tour), what to ask, an invitation to give
-   feedback with a Send feedback button, an honest line that this is a beta, and what leaves the PC (name, email, country
-   and usage time, which Settings, Privacy and data can turn off). Buttons: Open the guide, Send feedback.
-4. **The hint.** Closing the card (Esc, the X, or either button) leaves a quiet pill on the home screen and Overview
-   (`WelcomeHint`): "Try it: say ..." until the first command is done, then "Welcome guide: tips and feedback". Clicking
-   it reopens the card. "Hide this hint" in the card removes it for good.
+3. **The welcome card** (`WelcomeCard`) opens, on a fixed-size card with three tabs so nothing jumps:
+   - **Get started:** your first command ("Hey Seven, set volume to 50", which ticks itself off when Seven handles its
+     first spoken request after the tour), what to ask, and how to talk to Seven.
+   - **Feedback:** how to tell us what is off or missing, an honest line that this is a beta, and what stays on the PC
+     versus what is shared to run the beta (name, email, country and usage time, which Settings, Privacy and data can
+     turn off).
+   - **Roadmap:** what works in this beta, what is next and what is planned, in themes with no dates, ending with
+     "What should come first? Tell us." The content is `frontend/src/lib/roadmap.js`, a summary of
+     `docs/product/roadmap.md`; update both when something ships.
+4. **The card is for everyone, at any time.** It is not only a first-run thing. A quiet pill on the home screen and
+   Overview (`WelcomeHint`) opens it: "Try it: say ..." until the first command is done, then "Welcome guide: tips,
+   feedback and what's coming". It is also reachable from the **Welcome guide** link in the home footer (always there),
+   the **Welcome and roadmap** button on Guide, and Ctrl+K ("Show the welcome guide", "Roadmap: what is coming", "Send
+   feedback"). "Hide the home hint" in the card removes only the pill. `window.dispatchEvent(new CustomEvent(
+   'seven:welcome', { detail: { tab: 'roadmap' } }))` opens it on a tab.
 
 State lives in `%APPDATA%\SEVEN\greeting.json`: `welcomed` (set as the tour starts, so a crash can't loop it),
 `tour_done`, `hint_dismissed`, `first_command`. Ctrl+K has **Replay the welcome tour** and **Show the welcome guide**.
