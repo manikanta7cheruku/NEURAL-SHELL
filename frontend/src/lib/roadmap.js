@@ -1,45 +1,59 @@
 /**
- * What the welcome card's Roadmap tab shows: a short, honest summary of docs/product/roadmap.md, in themes rather
- * than version numbers, with no dates. Keep it in step with that page when something ships.
- *   now    works in this beta
- *   next   being worked on
- *   later  planned, in no fixed order
+ * What the welcome card says about Seven and where it is going. A short, honest summary of docs/product/roadmap.md,
+ * in themes rather than version numbers, with no dates. Keep it in step with that page when something ships.
+ */
+
+export const ABOUT = {
+  lead: 'Seven is the layer between you and your computer.',
+  body: [
+    'Today it listens, understands and acts on this PC. In time it will see your screen, plan and carry out multi-step work, handle your messages, and reach your phone and your home.',
+    'The aim is an assistant that can do whatever you can do at a computer, and runs on your own device while it does.',
+  ],
+  stands: [
+    ['Local first', 'It runs on your PC. Your conversations and memory stay with you.'],
+    ['Yours', 'It remembers you, and can show where it learned each thing.'],
+    ['Acts, not only answers', 'Opens, arranges, controls and schedules, and says plainly when something did not work.'],
+    ['You stay in control', 'It asks before anything risky, and nothing is sent or posted without your approval.'],
+    ['Built with you', 'Each beta release is shaped by what you tell us.'],
+  ],
+};
+
+/**
+ * now and next are one line each (titles only); later is the point of the tab, so each theme gets its own paragraph.
  */
 export const ROADMAP = [
   {
     id: 'now',
-    label: 'In this beta',
-    items: [
-      ['Chat with memory', 'Seven remembers what you tell it, and can show where it learned it.'],
-      ['Natural voice', 'Say "Hey Seven". Replies start as soon as the first sentence is ready.'],
-      ['Control your PC', 'Apps, windows, volume, brightness, Wi-Fi, Bluetooth and dark mode.'],
-      ['Reminders and tasks', 'Reminders, alarms, timers and repeating events.'],
-      ['Your documents', 'Ask questions about your PDFs and notes, with page references.'],
-      ['Workspaces and triggers', 'Save everything you have open and bring it back by voice, hotkey, snap or clap.'],
-      ['Live answers', 'Optional web lookups, and honest when you are offline.'],
-    ],
+    label: 'Working today',
+    titles: ['Chat with memory', 'Natural voice', 'Apps, windows and system control', 'Reminders and tasks',
+             'Your documents', 'Workspaces and triggers', 'Live answers'],
   },
   {
     id: 'next',
     label: 'Next',
-    items: [
-      ['Sharper understanding', 'Fewer misheard or misrouted commands, and clearer confirmation when Seven acts.'],
-      ['Knows who is speaking', 'Separate profiles and memory for each person on the PC.'],
-      ['Natural conversation', 'Talk over Seven and keep the thread going, not only stop it.'],
-      ['Offline knowledge', 'Answers from a downloaded encyclopedia, with no internet.'],
-      ['Chrome extension in the store', 'Install it in one click.'],
-    ],
+    titles: ['Sharper understanding', 'Knows who is speaking', 'Natural conversation', 'Offline knowledge',
+             'Chrome extension in the store'],
   },
   {
     id: 'later',
-    label: 'Later',
+    label: 'Where Seven is going',
     items: [
-      ['Seeing and using your screen', 'Read what is on screen, click buttons by name, scroll, fill forms and dictate into any app.'],
-      ['Multi-step tasks', 'Plans you approve first, daily routines, file organising, PC health alerts and day planning.'],
-      ['Messages and calls', 'Read and reply by voice, always with your approval before anything is sent.'],
-      ['Creating', 'Writing, images and scheduled posts.'],
-      ['Phone and home', 'Control your PC from your phone, a mobile Seven, and smart-home devices.'],
-      ['Safety and polish', 'Confirmation already guards risky actions; a fuller safety shield, backup and restore, more languages and plugins are planned.'],
+      ['Seeing and using your screen',
+       'Seven will read what is on your screen, understand it, and use the mouse and keyboard for you: click a button by its name, scroll, fill in a form, dictate into any app.'],
+      ['Multi-step work',
+       'Give Seven a goal and it plans the steps, shows you the plan, and carries it out. Download this PDF and summarise it. Tidy my Downloads. Plan my day. It retries what fails and tells you what happened.'],
+      ['Looking after your PC',
+       'It will watch memory, disk, battery and temperature, and speak up before something becomes a problem: your disk is almost full, this app is using 4 GB.'],
+      ['Messages, calls and email',
+       'Read, draft and send by voice, in your own style, and always with your approval first.'],
+      ['Creating',
+       'Write posts, make images and short videos, and publish them on a schedule you set.'],
+      ['Your phone and your home',
+       'Control your PC from your phone, run a standalone Seven on mobile, and drive your smart-home devices.'],
+      ['Everyone, everywhere',
+       'More than twenty languages, accessibility modes for blind, deaf and older users, and plugins from other developers.'],
+      ['Safety and privacy at the core',
+       'A safety shield for risky actions, your voice as a key, encrypted data, backup and restore, and one-click delete, all open to inspection.'],
     ],
   },
 ];

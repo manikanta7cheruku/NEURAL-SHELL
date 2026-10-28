@@ -419,7 +419,6 @@ def run_voice_loop(ctx, config, app_ui, api_set_state, safe_mode_file):
             api_set_state("user_text", user_input)
             api_set_state("seven_text", "")
             api_set_state("voice_turn", time.time())     # the voice bar opens for this request (electron/status.html)
-            greeting.mark_first_command()                # ticks off the welcome card's first command
 
             response = ctx.brain.think(user_input, speaker_id=speaker_id)
             telemetry.log_activity()

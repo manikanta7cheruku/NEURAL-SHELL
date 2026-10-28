@@ -80,24 +80,25 @@ never locks anyone out; the needs-attention strip says what is wrong.
    ("I'm an assistant that lives on your PC"), the listening switch ("Hey Seven"), Test mic, the footer pages and
    Ctrl+K. The rest of the screen dims (`TourLayer`). The voice bar shows the captions, and a **Skip tour** button stops
    the talking and goes straight to the card.
-3. **The welcome card** (`WelcomeCard`) opens, on a fixed-size card with three tabs so nothing jumps:
-   - **Get started:** your first command ("Hey Seven, set volume to 50", which ticks itself off when Seven handles its
-     first spoken request after the tour), what to ask, and how to talk to Seven.
-   - **Feedback:** how to tell us what is off or missing, an honest line that this is a beta, and what stays on the PC
-     versus what is shared to run the beta (name, email, country and usage time, which Settings, Privacy and data can
-     turn off).
-   - **Roadmap:** what works in this beta, what is next and what is planned, in themes with no dates, ending with
-     "What should come first? Tell us." The content is `frontend/src/lib/roadmap.js`, a summary of
+3. **The welcome card** (`WelcomeCard`) opens. It is about what Seven is and where it is going, and it asks for
+   feedback; it is not a how-to (Guide covers that). A fixed-size card with three tabs so nothing jumps:
+   - **About:** what Seven is, the larger aim (an assistant that can do whatever you can do at a computer, running on
+     your own device), and what it stands for.
+   - **Roadmap:** what works today and what is next as one line each, then the later scope in full: seeing and using
+     your screen, multi-step work, looking after your PC, messages and email, creating, phone and home, accessibility
+     and languages, safety and privacy. No dates. The text is `frontend/src/lib/roadmap.js`, a summary of
      `docs/product/roadmap.md`; update both when something ships.
+   - **Feedback:** how to tell us what is off or missing, and what stays on the PC versus what is shared to run the
+     beta (name, email, country and usage time, which Settings, Privacy and data can turn off).
+   **Send feedback** is in the footer on every tab, because feedback is what the beta is for.
 4. **The card is for everyone, at any time.** It is not only a first-run thing. A quiet pill on the home screen and
-   Overview (`WelcomeHint`) opens it: "Try it: say ..." until the first command is done, then "Welcome guide: tips,
-   feedback and what's coming". It is also reachable from the **Welcome guide** link in the home footer (always there),
-   the **Welcome and roadmap** button on Guide, and Ctrl+K ("Show the welcome guide", "Roadmap: what is coming", "Send
-   feedback"). "Hide the home hint" in the card removes only the pill. `window.dispatchEvent(new CustomEvent(
+   Overview (`WelcomeHint`) opens it. It is also reachable from the **Welcome guide** link in the home footer (always
+   there), the **Welcome and roadmap** button on Guide, and Ctrl+K ("Show the welcome guide", "Roadmap: what is coming",
+   "Send feedback"). "Hide the home hint" in the card removes only the pill. `window.dispatchEvent(new CustomEvent(
    'seven:welcome', { detail: { tab: 'roadmap' } }))` opens it on a tab.
 
 State lives in `%APPDATA%\SEVEN\greeting.json`: `welcomed` (set as the tour starts, so a crash can't loop it),
-`tour_done`, `hint_dismissed`, `first_command`. Ctrl+K has **Replay the welcome tour** and **Show the welcome guide**.
+`tour_done`, `hint_dismissed`. Ctrl+K has **Replay the welcome tour** and **Show the welcome guide**.
 
 ## 4. Live state: `/ws/status`
 
@@ -115,7 +116,7 @@ State lives in `%APPDATA%\SEVEN\greeting.json`: `welcomed` (set as the tour star
 | `voice_files` | `{at, data}`: file matches from the last voice request |
 | `ready`, `ready_stage` | Seven's brain, ears and voice are loaded (the app opens on this); the stage until then |
 | `tour` | `{step, n}`: the thing the first-run tour is talking about (`audio`, `intro`, `listen`, `mic`, `pages`, `outro`), `card` when the card should open, then null |
-| `welcome` | `{tour_done, hint_dismissed, first_command}` |
+| `welcome` | `{tour_done, hint_dismissed}` |
 
 ## 5. The voice bar: `electron/status.html`
 

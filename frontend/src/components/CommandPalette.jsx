@@ -60,7 +60,7 @@ export default function CommandPalette() {
     { group: 'Voice', label: 'Listen: wake word', kw: 'hey seven', run: () => setListenMode('wake') },
     { group: 'Voice', label: 'Listen: always on', kw: 'continuous', run: () => setListenMode('always') },
     { group: 'Voice', label: 'Listen: push to talk', kw: 'shift key', run: () => setListenMode('ptt') },
-    { group: 'Welcome', label: 'Show the welcome guide', kw: 'beta intro first command feedback', run: () => { api.post('/welcome/hint/show').catch(() => {}); window.dispatchEvent(new CustomEvent('seven:welcome', { detail: { tab: 'start' } })); } },
+    { group: 'Welcome', label: 'Show the welcome guide', kw: 'beta intro about welcome feedback', run: () => { api.post('/welcome/hint/show').catch(() => {}); window.dispatchEvent(new CustomEvent('seven:welcome', { detail: { tab: 'about' } })); } },
     { group: 'Welcome', label: 'Roadmap: what is coming', kw: 'future plans upcoming features next later', run: () => window.dispatchEvent(new CustomEvent('seven:welcome', { detail: { tab: 'roadmap' } })) },
     { group: 'Welcome', label: 'Send feedback', kw: 'report bug idea suggestion', run: () => navigate('/feedback') },
     { group: 'Welcome', label: 'Replay the welcome tour', kw: 'intro walkthrough tutorial', run: () => { navigate('/'); api.post('/tour/replay').catch(() => {}); } },

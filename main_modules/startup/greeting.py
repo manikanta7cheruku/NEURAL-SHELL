@@ -43,10 +43,9 @@ def _save(state: dict) -> None:
 
 
 def welcome_state() -> dict:
-    """What the welcome card and its hint need: the tour ran, the hint was hidden, the first command was given."""
+    """What the welcome card and its hint need: the tour ran, the hint was hidden."""
     s = _load()
-    return {"tour_done": bool(s.get("tour_done")), "hint_dismissed": bool(s.get("hint_dismissed")),
-            "first_command": bool(s.get("first_command"))}
+    return {"tour_done": bool(s.get("tour_done")), "hint_dismissed": bool(s.get("hint_dismissed"))}
 
 
 def update_welcome(**changes) -> dict:
@@ -61,12 +60,6 @@ def update_welcome(**changes) -> dict:
     except Exception:
         pass
     return w
-
-
-def mark_first_command() -> None:
-    """The first real voice request after the tour: the welcome card's first command is done."""
-    if _load().get("tour_done") and not _load().get("first_command"):
-        update_welcome(first_command=True)
 
 
 def _name(config) -> str:

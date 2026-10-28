@@ -58,8 +58,8 @@ def script(name: str) -> list:
         ("listen", "You can change how I listen up here: wake word, always on, or push to talk."),
         ("mic", "Not sure I can hear you? Press Test mic, and say anything."),
         ("pages", "Your everyday pages are along the bottom, and Control K searches everything."),
-        ("outro", "I've put a short welcome guide on your screen."),
-        ("outro", "Your first command is waiting there."),
+        ("outro", "I've put a short welcome on your screen."),
+        ("outro", "It shows where I'm heading, and how to tell us what you think."),
     ]
 
 
