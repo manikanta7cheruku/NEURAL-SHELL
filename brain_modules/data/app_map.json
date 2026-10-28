@@ -1,6 +1,6 @@
 {
   "app_map_version": 1,
-  "source_hash": "ad2490315935e0cb",
+  "source_hash": "8419822fef99c994",
   "pages": [
     {
       "id": "home",
@@ -21,7 +21,7 @@
         },
         {
           "label": "Shortcuts",
-          "description": "Press 1 to 7 to open Dashboard, Chat, Tasks, Reminders, Memory, Settings or Guide. Press / to type to Seven in Chat.",
+          "description": "Press 1 to 5 to open Overview, Chat, Tasks, Reminders or Memory, comma for Settings, slash to type to Seven in Chat, Ctrl+K to search everything.",
           "file": "Landing.jsx"
         },
         {
@@ -41,6 +41,16 @@
         },
         {
           "label": "things remembered",
+          "description": "",
+          "file": "Landing.jsx"
+        },
+        {
+          "label": "Search",
+          "description": "",
+          "file": "Landing.jsx"
+        },
+        {
+          "label": "Ctrl K",
           "description": "",
           "file": "Landing.jsx"
         }
@@ -64,7 +74,7 @@
       "id": "dashboard",
       "route": "/dashboard",
       "component": "Home",
-      "title": "Home",
+      "title": "Overview",
       "purpose": "An overview of today: Seven's status, your tasks and upcoming schedules, memory, activity and your computer",
       "controls": [
         {

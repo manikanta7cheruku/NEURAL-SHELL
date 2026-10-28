@@ -318,6 +318,7 @@ from backend.routes import panel_extras as panel_extras_routes
 from backend.routes import brain as brain_routes
 from backend.routes import conversations as conversation_routes
 from backend.routes import voice as voice_routes
+from backend.routes import attention as attention_routes
 
 app.include_router(health_routes.router)
 app.include_router(status_routes.router)
@@ -341,6 +342,7 @@ app.include_router(panel_extras_routes.router)
 app.include_router(brain_routes.router)
 app.include_router(conversation_routes.router)
 app.include_router(voice_routes.router)
+app.include_router(attention_routes.router)
 from backend.routes import feedback as feedback_routes
 app.include_router(feedback_routes.router)
 from backend.routes import models as model_routes

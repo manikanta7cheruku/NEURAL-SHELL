@@ -121,6 +121,30 @@ keeps filling while you are on another page.
 
 What Seven answered appears in the voice bar and in Chat, not on the home screen.
 
+### Needs attention
+
+When Seven can't do its job, one quiet line appears under the header with a button to the fix, and nothing appears
+when all is well. `GET /api/attention` (`backend/routes/attention.py`) reports, most important first:
+
+| Level | Problem | Button |
+|---|---|---|
+| error | The microphone can't be opened (unplugged, or used by another app). Can't be dismissed | Choose microphone |
+| warn | The natural voice failed to download, or isn't installed | Open voice settings |
+| warn | The AI model isn't running (reported only after Seven has been up 90 s, so a slow start isn't an alarm) | Open brain settings |
+| info | The natural voice is downloading, with the percentage | none |
+
+The app adds an update that is ready and a plan that ends within 7 days. The first item shows; "+N more" lists the
+rest; warnings and notes can be dismissed for the session. Nothing is reported before setup finishes. The raw
+microphone error never reaches the screen, only the plain sentence.
+
+### Navigation
+
+The footer holds the five pages used every day (Overview, Chat, Tasks, Reminders, Memory; keys 1 to 5), Settings is the
+gear in the header (key comma) and **Ctrl+K** opens the command palette from any page: go to a page, open a settings
+section, test the microphone, change how Seven listens, or switch the theme. "Overview" (`/dashboard`) is the page
+the sidebar used to call "Home"; the home screen is the one with the orb.
+
+
 ## 7. Settings, Voice
 
 `frontend/src/pages/settings/VoiceSection.jsx`:
@@ -151,5 +175,6 @@ What Seven answered appears in the voice bar and in Chat, not on the home screen
 | GET | `/api/voice/mics` | Microphones (WASAPI names, no virtual devices) |
 | POST | `/api/voice/test` | Wait up to 8 s for one request; return what was heard, without acting |
 | GET | `/api/system/usage` | Seven's share and the apps using the most memory |
+| GET | `/api/attention` | What needs the user's attention (microphone, voice, AI model), most important first |
 | POST | `/api/triggers/snap-test` | Record a few seconds and say whether the mic hears snaps |
 | POST | `/api/system/sound-settings` | Open Windows sound settings |

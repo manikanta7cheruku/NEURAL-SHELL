@@ -8,7 +8,8 @@
  *            share (its app and the local AI model), and the app using the most memory right now, with the full
  *            ranking on hover, so it's plain when something other than Seven is slowing the PC down
  *   today    a single line: open tasks, the next reminder, what Seven remembers
- *   footer   numbered shortcuts to every major area
+ *   strip    only when something is wrong (no microphone, voice or AI model not ready, update, plan ending)
+ *   footer   the daily pages (1 to 5) and search (Ctrl K); Settings is the gear in the header
  *
  * What you said and what Seven answered appear in the voice bar at the top of the screen (electron/status.html)
  * and in Chat; the home screen stays a glance.
@@ -18,7 +19,7 @@
               "controls": [
                 {"label": "Vitals", "description": "Processor, RAM and graphics in use; the accent part of each ring is Seven's share."},
                 {"label": "Busiest app", "description": "The app using the most RAM right now. Hover for the top apps, Seven among them."},
-                {"label": "Shortcuts", "description": "Press 1 to 7 to open Dashboard, Chat, Tasks, Reminders, Memory, Settings or Guide. Press / to type to Seven in Chat."}
+                {"label": "Shortcuts", "description": "Press 1 to 5 to open Overview, Chat, Tasks, Reminders or Memory, comma for Settings, slash to type to Seven in Chat, Ctrl+K to search everything."}
               ]} */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -27,17 +28,18 @@ import useStatus from '../stores/useStatus';
 import useTasks from '../stores/useTasks';
 import useConfig from '../stores/useConfig';
 import OrbGL from '../components/OrbGL';
+import AttentionStrip from '../components/AttentionStrip';
+import { GearSix, MagnifyingGlass } from '@phosphor-icons/react';
 import { Wordmark } from '../components/Mark';
 import { cx } from '../lib/cx';
 
+// The pages used every day, numbered for the keyboard. Everything else: the gear (Settings), "," and Ctrl+K.
 const NAV = [
-  { key: '1', to: '/dashboard', label: 'Dashboard' },
+  { key: '1', to: '/dashboard', label: 'Overview' },
   { key: '2', to: '/console', label: 'Chat' },
   { key: '3', to: '/tasks', label: 'Tasks' },
   { key: '4', to: '/schedules', label: 'Reminders' },
   { key: '5', to: '/memory', label: 'Memory' },
-  { key: '6', to: '/settings', label: 'Settings' },
-  { key: '7', to: '/guide', label: 'Guide' },
 ];
 const MODES = [
   { id: 'wake', label: 'Wake word', hint: 'Say "Hey Seven" first' },
@@ -188,6 +190,12 @@ function MicTest({ mode }) {
   const [state, setState] = useState({ phase: 'idle', text: '' });
   const timer = useRef(null);
   useEffect(() => () => clearTimeout(timer.current), []);
+  const runRef = useRef(null);
+  useEffect(() => {
+    const go = () => runRef.current?.();
+    window.addEventListener('seven:test-mic', go);
+    return () => window.removeEventListener('seven:test-mic', go);
+  }, []);
   const run = async () => {
     if (state.phase === 'listening') return;
     setState({ phase: 'listening', text: mode === 'ptt' ? 'Hold Shift and speak…' : 'Say something…' });
@@ -205,6 +213,7 @@ function MicTest({ mode }) {
     setState({ phase: ok ? 'ok' : 'fail', text });
     timer.current = setTimeout(() => setState({ phase: 'idle', text: '' }), 6000);
   };
+  runRef.current = run;
   const busy = state.phase === 'listening';
   return (
     <button onClick={run} disabled={busy} title="Say something and see what Seven hears"
@@ -260,13 +269,14 @@ export default function Landing() {
     return () => { clearTimeout(first); clearInterval(slow); };
   }, [fetchTasks]);
 
-  // Keys: 1 to 7 open pages, "/" opens Chat to type to Seven.
+  // Keys: 1 to 5 open the daily pages, "," Settings, "/" Chat to type to Seven. Ctrl+K is the command palette.
   useEffect(() => {
     const onKey = e => {
       if (e.ctrlKey || e.metaKey || e.altKey || e.target.closest?.('input, textarea, select')) return;
       const link = NAV.find(n => n.key === e.key);
       if (link) { e.preventDefault(); navigate(link.to); }
       else if (e.key === '/') { e.preventDefault(); navigate('/console'); }
+      else if (e.key === ',') { e.preventDefault(); navigate('/settings'); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -309,11 +319,16 @@ export default function Landing() {
             <span className="text-s-text-2">{badge[0]}</span>
           </span>
           <span className="tabular-nums text-s-text-2">{clock(now)}</span>
+          <button onClick={() => navigate('/settings')} aria-label="Settings" title="Settings  ,"
+                  className="-mr-1.5 flex h-8 w-8 items-center justify-center rounded-lg text-s-text-3 transition-colors duration-200 hover:bg-s-surface hover:text-s-text">
+            <GearSix size={17} />
+          </button>
         </div>
       </header>
       <VoiceLog entries={st.voiceLog} />
 
       <main className="relative z-10 flex min-h-0 flex-1 flex-col items-center justify-center overflow-hidden px-6">
+        <AttentionStrip />
         <h1 className="text-center text-[26px] font-light tracking-[-0.01em] text-s-text">
           {hello(now.getHours())}{name ? `, ${name}` : ''}
         </h1>
@@ -354,13 +369,21 @@ export default function Landing() {
         </div>
       </section>
 
-      <footer className="relative z-10 flex shrink-0 flex-wrap items-center justify-center gap-1 border-t border-s-border/60 px-5 py-2">
-        {NAV.map(n => (
-          <button key={n.key} onClick={() => navigate(n.to)}
-                  className="group/n flex h-7 items-center gap-2 rounded-md px-2.5 text-[12px] text-s-text-3 transition-colors duration-200 hover:bg-s-surface/80 hover:text-s-text">
-            <kbd className="rounded border border-s-border bg-s-card px-1 text-[10.5px] text-s-text-4 transition-colors group-hover/n:text-s-accent-h">{n.key}</kbd>
-            {n.label}
-          </button>))}
+      <footer className="relative z-10 flex shrink-0 items-center justify-center border-t border-s-border/50 px-5 py-1.5">
+        <nav aria-label="Pages" className="flex items-center gap-0.5">
+          {NAV.map(n => (
+            <button key={n.key} onClick={() => navigate(n.to)}
+                    className="group/n flex h-7 items-center gap-1.5 rounded-md px-2.5 text-[12px] text-s-text-3 transition-colors duration-200 hover:bg-s-surface/80 hover:text-s-text">
+              {n.label}
+              <kbd className="font-sans text-[10.5px] text-s-text-4 opacity-0 transition-opacity duration-200 group-hover/n:opacity-100 group-focus-visible/n:opacity-100">{n.key}</kbd>
+            </button>))}
+        </nav>
+        <button onClick={() => window.dispatchEvent(new Event('seven:palette'))} title="Search pages and actions"
+                className="absolute right-5 flex h-7 items-center gap-2 rounded-md px-2 text-[12px] text-s-text-4 transition-colors duration-200 hover:bg-s-surface/80 hover:text-s-text-2">
+          <MagnifyingGlass size={13} aria-hidden />
+          Search
+          <kbd className="rounded border border-s-border px-1 font-sans text-[10.5px]">Ctrl K</kbd>
+        </button>
       </footer>
     </div>
   );
