@@ -10,6 +10,21 @@ import api from '../../api';
 import { Section, Row, Toggle, Button, Input, Dialog } from '../../components/ui';
 import { toast } from '../../lib/toast';
 import { saveConfig } from './save';
+import useChatSessions from '../../stores/useChatSessions';
+import useTasks from '../../stores/useTasks';
+import useTriggers from '../../stores/useTriggers';
+import useSchedules from '../../stores/useSchedules';
+import useConfig from '../../stores/useConfig';
+
+/** After memory was cleared or a backup restored, every page that holds a copy on screen must see what is saved now. */
+function refreshAppData({ clearedChats = false } = {}) {
+  if (clearedChats) useChatSessions.getState().reset();
+  else useChatSessions.getState().refreshList();
+  useTasks.getState().fetch(); useTasks.getState().fetchStats();
+  useTriggers.getState().fetchTriggers(); useTriggers.getState().fetchStats(); useTriggers.getState().fetchWorkspaces();
+  useSchedules.getState().fetch();
+  useConfig.getState().fetch();
+}
 
 function Network({ config }) {
   const flags = {
@@ -85,21 +100,23 @@ function Backup() {
     if (!file) return;
     setImporting(true);
     try {
-      const data = JSON.parse(await file.text());
-      const r = await api.post('/memory/import', data);
-      toast.success('Backup imported', r.data.message);
-    } catch {
-      toast.error('Import failed', 'That file is not a valid Seven backup.');
+      let data;
+      try { data = JSON.parse(await file.text()); } catch { throw new Error('That file is not a Seven backup.'); }
+      const r = await api.post('/memory/import', data, { timeout: 120000 });
+      toast.success('Backup restored', r.data.message);
+      refreshAppData();
+    } catch (err) {
+      toast.error('Import failed', err.response?.data?.detail || err.message || 'Check that Seven is running, then try again.');
     }
     setImporting(false);
   };
 
   return (
-    <Section title="Backup" description="A single JSON file with your facts, conversations, schedules, tasks, triggers and workspaces.">
+    <Section title="Backup" description="One JSON file with your facts, chats, what Seven has learned, reminders, tasks, triggers, workspaces, command history and settings. Documents you added to Knowledge are not included.">
       <Row label="Export" description="Save a copy you can restore on this or another computer.">
         <Button icon={Download} onClick={exportData} loading={exporting}>Download backup</Button>
       </Row>
-      <Row label="Import" description="Adds the backup to what you already have. Nothing is replaced.">
+      <Row label="Import" description="Adds the backup to what you already have. Nothing is replaced, and anything already here is skipped, so importing twice is safe.">
         <Button icon={Upload} onClick={() => fileRef.current?.click()} loading={importing}>Choose file</Button>
         <input ref={fileRef} type="file" accept=".json,application/json" onChange={importData} className="hidden" />
       </Row>
@@ -119,6 +136,7 @@ function ClearMemory({ onCleared }) {
       if (!r.data?.success) throw new Error(r.data?.error);
       toast.success('Memory cleared', r.data.message);
       setOpen(false);
+      refreshAppData({ clearedChats: true });
       onCleared();
     } catch (e) {
       toast.error('Could not clear memory', e.message || 'Check that Seven is running.');
@@ -129,12 +147,12 @@ function ClearMemory({ onCleared }) {
   return (
     <Section title="Clear all memory" tone="danger">
       <Row label="Delete everything Seven remembers"
-           description="Every fact, conversation, goal and learned preference. This can't be undone, so download a backup first.">
+           description="Every fact, conversation, goal, learned preference and your command history. This can't be undone, so download a backup first.">
         <Button variant="danger" onClick={() => { setTyped(''); setOpen(true); }}>Clear memory</Button>
       </Row>
       <Dialog open={open} tone="danger" title="Clear all memory?" busy={busy} confirmLabel="Delete everything"
               confirmDisabled={typed !== 'DELETE'} onConfirm={clear} onCancel={() => setOpen(false)}
-              description="Seven will forget every fact, conversation, goal and preference. Type DELETE to confirm.">
+              description="Seven will forget every fact, conversation, goal, preference and command you have given it. Type DELETE to confirm.">
         <Input value={typed} onChange={e => setTyped(e.target.value)} placeholder="DELETE" aria-label="Type DELETE to confirm" className="w-full" />
       </Dialog>
     </Section>

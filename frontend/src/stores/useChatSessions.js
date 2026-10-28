@@ -38,6 +38,14 @@ const useChatSessions = create((set, get) => ({
   requestedId: null,         // set by other pages (Memory) to open a specific chat when the Console mounts
   requestedPrompt: null,     // {text, name}: sent once that chat opens (Knowledge page study shortcuts)
 
+  /** Forget everything held on screen (after Clear all memory, or a restored backup, which changed what is saved). */
+  reset: () => {
+    get().stop();
+    set({ conversationId: null, conversations: [], totalConversations: 0, messages: [], sending: false, phase: 'idle',
+          sentAt: null, warning: '', searchResults: null, profile: null, requestedId: null, requestedPrompt: null });
+    useChat.getState().clear();
+  },
+
   // ---------------------------------------------------------------- sessions
   init: async () => {
     const wanted = get().requestedId;
