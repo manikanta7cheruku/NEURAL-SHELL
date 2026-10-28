@@ -29,6 +29,7 @@ import useTasks from '../stores/useTasks';
 import useConfig from '../stores/useConfig';
 import OrbGL from '../components/OrbGL';
 import AttentionStrip from '../components/AttentionStrip';
+import WelcomeHint from '../components/WelcomeHint';
 import { GearSix, MagnifyingGlass } from '@phosphor-icons/react';
 import { Wordmark } from '../components/Mark';
 import { cx } from '../lib/cx';
@@ -171,7 +172,7 @@ function ListenMode({ mode }) {
     }
   };
   return (
-    <div role="radiogroup" aria-label="How Seven listens" className="inline-flex rounded-full border border-s-border bg-s-surface/70 p-0.5">
+    <div data-tour="listen" role="radiogroup" aria-label="How Seven listens" className="inline-flex rounded-full border border-s-border bg-s-surface/70 p-0.5">
       {MODES.map(m => (
         <button key={m.id} role="radio" aria-checked={current === m.id} onClick={() => choose(m.id)} title={m.hint}
                 className={cx('h-6 rounded-full px-3 text-[11.5px] transition-colors duration-200',
@@ -216,7 +217,7 @@ function MicTest({ mode }) {
   runRef.current = run;
   const busy = state.phase === 'listening';
   return (
-    <button onClick={run} disabled={busy} title="Say something and see what Seven hears"
+    <button data-tour="mic" onClick={run} disabled={busy} title="Say something and see what Seven hears"
             className={cx('flex h-6 max-w-[260px] items-center gap-1.5 rounded-full px-2.5 text-[11.5px] transition-colors duration-200',
                           state.phase === 'ok' ? 'text-s-accent-h' : state.phase === 'fail' ? 'text-s-yellow' : busy ? 'text-s-text' : 'text-s-text-3 hover:text-s-text')}>
       <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden className={busy ? 'animate-pulse' : ''}>
@@ -329,12 +330,13 @@ export default function Landing() {
 
       <main className="relative z-10 flex min-h-0 flex-1 flex-col items-center justify-center overflow-hidden px-6">
         <AttentionStrip />
+        <WelcomeHint className="mb-3" />
         <h1 className="text-center text-[26px] font-light tracking-[-0.01em] text-s-text">
           {hello(now.getHours())}{name ? `, ${name}` : ''}
         </h1>
         <p className="mt-1 text-[13px] text-s-text-4 [@media(max-height:780px)]:hidden">{now.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}</p>
 
-        <div className="relative -my-6 mt-0 transition-transform duration-100 ease-out" style={{ transform: `scale(${breathe})` }}>
+        <div data-tour="orb" className="relative -my-6 mt-0 transition-transform duration-100 ease-out" style={{ transform: `scale(${breathe})` }}>
           <OrbGL state={state} size={232} />
         </div>
         <p className={cx('text-[13.5px] transition-colors duration-300', hearing ? 'text-s-accent-h' : 'text-s-text-2')} aria-live="polite">{doing}</p>
@@ -369,7 +371,11 @@ export default function Landing() {
         </div>
       </section>
 
-      <footer className="relative z-10 flex shrink-0 items-center justify-center border-t border-s-border/50 px-5 py-1.5">
+      <footer data-tour="footer" className="relative z-10 flex shrink-0 items-center justify-center border-t border-s-border/50 px-5 py-1.5">
+        <button onClick={() => window.dispatchEvent(new Event('seven:welcome'))} title="Welcome guide, feedback and roadmap"
+                className="absolute left-5 flex h-7 items-center rounded-md px-2 text-[12px] text-s-text-4 transition-colors duration-200 hover:bg-s-surface/80 hover:text-s-text-2">
+          Welcome guide
+        </button>
         <nav aria-label="Pages" className="flex items-center gap-0.5">
           {NAV.map(n => (
             <button key={n.key} onClick={() => navigate(n.to)}

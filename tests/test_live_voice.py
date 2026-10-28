@@ -184,5 +184,66 @@ class Attention(unittest.TestCase):
         self.assertEqual(self.collect(mic_error=boom, voice=boom, ollama_up=boom), [])
 
 
+@unittest.skipUnless(sys.platform == "win32", "Windows' proactor event loop")
+class ApiSurvivesDroppedConnections(unittest.TestCase):
+    """npm run dev showed "Backend Unreachable" while Seven kept talking: on Windows' default event loop one dropped
+    connection during startup (WinError 64) closes the API's listening socket for good. The API runs on a selector loop."""
+
+    def test_the_api_uses_a_selector_loop(self):
+        import asyncio
+        from seven_utils.event_loop import new_event_loop
+        loop = new_event_loop()
+        try:
+            self.assertIsInstance(loop, asyncio.SelectorEventLoop)
+            self.assertNotIsInstance(loop, asyncio.ProactorEventLoop)
+        finally:
+            loop.close()
+
+    def test_the_listener_survives_connections_dropped_the_instant_they_open(self):
+        import asyncio
+        import socket
+        import struct
+        import time
+
+        import uvicorn
+        from fastapi import FastAPI
+        from seven_utils.event_loop import new_event_loop
+
+        with socket.socket() as probe:                      # a free port
+            probe.bind(("127.0.0.1", 0))
+            port = probe.getsockname()[1]
+        app = FastAPI()
+        server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error"))
+
+        def run():
+            loop = new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(server.serve())
+        t = threading.Thread(target=run, daemon=True)
+        t.start()
+        self.addCleanup(t.join, 5)
+        self.addCleanup(setattr, server, "should_exit", True)
+
+        def listening():
+            with socket.socket() as s:
+                s.settimeout(1)
+                return s.connect_ex(("127.0.0.1", port)) == 0
+
+        deadline = time.time() + 10
+        while not listening() and time.time() < deadline:
+            time.sleep(0.1)
+        self.assertTrue(listening())
+        for _ in range(600):
+            s = socket.socket()
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))   # close sends a reset
+            try:
+                s.connect(("127.0.0.1", port))
+            except OSError:
+                pass
+            s.close()
+        time.sleep(0.5)
+        self.assertTrue(listening())
+
+
 if __name__ == "__main__":
     unittest.main()

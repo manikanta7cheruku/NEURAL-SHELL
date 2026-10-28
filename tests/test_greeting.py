@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from unittest import mock
 
 import support  # noqa: F401  (sets up paths and test mode)
-from main_modules.startup import greeting
+from main_modules.startup import greeting, tour
 
 
 class _Cfg:
@@ -56,8 +56,74 @@ class Greeting(unittest.TestCase):
         said = []
         with self._tasks():
             greeting.greet(_Ctx(), _Cfg(), speak=said.append)
+            first = len(said)
             greeting.greet(_Ctx(), _Cfg(), speak=said.append)
+        self.assertGreater(first, 0)
+        self.assertEqual(len(said), first)                 # the second call said nothing
+
+    def test_the_welcome_is_a_tour_of_the_home_screen_then_a_card(self):
+        said, steps = [], []
+        with self._tasks(), mock.patch.object(tour, "_step", steps.append):
+            greeting.greet(_Ctx(), _Cfg(), speak=said.append)
+        text = " ".join(said)
+        self.assertIn("Hi Manikanta, I'm Seven.", text)
+        for word in ("Hey Seven", "Test mic", "Control K"):
+            self.assertIn(word, text)
+        self.assertEqual([s for s in steps if s in ("intro", "listen", "mic", "pages")][:1], ["intro"])
+        self.assertEqual(steps[-1], "card")                # the screen opens the welcome card at the end
+        self.assertTrue(greeting.welcome_state()["tour_done"])
+
+    def test_skipping_goes_straight_to_the_card(self):
+        said, steps = [], []
+
+        def speak(text):
+            said.append(text)
+            tour._skip.set()                               # the Skip button, pressed during the first sentence
+        with self._tasks(), mock.patch.object(tour, "_step", steps.append):
+            greeting.greet(_Ctx(), _Cfg(), speak=speak)
         self.assertEqual(len(said), 1)
+        self.assertEqual(steps[-1], "card")
+
+    def test_volume_is_raised_only_when_it_is_low_or_muted(self):
+        class Vol:
+            def __init__(self, level, muted):
+                self.level, self.muted = level, muted
+
+            def GetMasterVolumeLevelScalar(self):
+                return self.level / 100
+
+            def GetMute(self):
+                return self.muted
+
+        class Sys:
+            def __init__(self, vol):
+                self.vol, self.calls = vol, []
+
+            def _get_volume(self):
+                return self.vol
+
+            def _volume_set(self, n):
+                self.calls.append(("set", n))
+
+            def _volume_unmute(self):
+                self.calls.append(("unmute",))
+
+        def run(level, muted):
+            ctx = _Ctx()
+            ctx.system_mod = Sys(Vol(level, muted))
+            return tour.ensure_audible(ctx), ctx.system_mod.calls
+
+        self.assertEqual(run(70, False), ("", []))                       # fine: untouched
+        self.assertEqual(run(41, False), ("", []))
+        said, calls = run(15, False)
+        self.assertEqual(calls, [("set", 60)])
+        self.assertIn("60 percent", said)
+        said, calls = run(80, True)                                      # muted but loud: only unmute, never lower
+        self.assertEqual(calls, [("unmute",)])
+        self.assertIn("unmuted", said)
+        said, calls = run(10, True)
+        self.assertEqual(calls, [("unmute",), ("set", 60)])
+        self.assertEqual(tour.ensure_audible(_Ctx()), "")                # no audio control: nothing happens
 
     def test_after_the_welcome_it_is_a_daily_greeting(self):
         with self._tasks():

@@ -50,6 +50,9 @@ const useStatus = create((set, get) => ({
 
   // What Seven heard and what it ignored, kept here (not in a page) so the log keeps filling while you're elsewhere.
   voiceLog: [],
+  ready: false,
+  tour: { step: null, n: 0 },     // the first-run tour: which thing Seven is talking about
+  welcome: {},                   // { tour_done, hint_dismissed }
   seenTurn: 0,
   seenIgnored: 0,
 
@@ -79,6 +82,9 @@ const useStatus = create((set, get) => ({
       followUp:   data.follow_up_open ?? false,
       paused:     data.paused ?? false,
       voiceFiles: data.voice_files ?? null,
+      ready:      data.ready ?? s.ready,
+      tour:       data.tour ?? s.tour,
+      welcome:    data.welcome ?? s.welcome,
       seenTurn:    turn || s.seenTurn,
       seenIgnored: ig?.at || s.seenIgnored,
       voiceLog: log.length ? [...s.voiceLog, ...log].sort((x, y) => x.at - y.at).slice(-40) : s.voiceLog,

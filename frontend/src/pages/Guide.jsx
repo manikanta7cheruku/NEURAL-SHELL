@@ -266,10 +266,13 @@ export default function Guide() {
 
   return (
     <PageShell title="Guide" description="What Seven can do and how to get the most from it"
-               actions={<div className="relative w-56">
-                 <Search size={13} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-s-text-4" />
-                 <Input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search the guide" className="pl-7" />
-               </div>}
+               actions={<>
+                 <Button variant="ghost" onClick={() => window.dispatchEvent(new Event('seven:welcome'))}>Welcome and roadmap</Button>
+                 <div className="relative w-56">
+                   <Search size={13} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-s-text-4" />
+                   <Input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search the guide" className="pl-7" />
+                 </div>
+               </>}
                toolbar={<nav className="-mb-1 flex gap-1 overflow-x-auto">
                  {NAV.map(([id, label]) => (
                    <button key={id} onClick={() => jump(id)}

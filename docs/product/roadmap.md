@@ -6,6 +6,9 @@ devices. Version numbers below are the planning labels from the master roadmap; 
 
 Status key: **Shipped**, **Partial**, **Next**, **Planned**.
 
+The app shows a short version of this page to users: the Roadmap tab of the welcome card (`frontend/src/lib/roadmap.js`),
+in themes without version numbers or dates. When something ships or moves, update both.
+
 ## Phase 1: Mind and hands (foundation)
 
 | Item | Status | Notes |
