@@ -1,9 +1,9 @@
 /**
  * Landing: Seven's home screen. One calm composition around the orb.
  *
- *   header   the wordmark; Seven's state (listening, paused, starting) and how it listens; the time
- *   centre   a greeting and the date, the orb (which breathes with your voice), what Seven is doing now, a switch
- *            for how it listens (wake word, always on, push to talk) and the last few things it heard or ignored
+ *   header   the wordmark; a switch for how Seven listens (wake word, always on, push to talk); its state; the time;
+ *            and under the time the last three things it heard or ignored, fading with age
+ *   centre   a greeting and the date, the orb (which breathes with your voice), what Seven is doing now
  *   vitals   one row of instruments: processor, memory and graphics, each a ring whose accent arc is Seven's own
  *            share (its app and the local AI model), and the app using the most memory right now, with the full
  *            ranking on hover, so it's plain when something other than Seven is slowing the PC down
@@ -180,31 +180,27 @@ function ListenMode({ mode }) {
   );
 }
 
-/** The last few things Seven heard or ignored, newest first, one short line each. */
+// How visible each of the last three lines is: the newest clearly, the one before faint, the oldest a trace.
+const FADE = [0.7, 0.35, 0.07];
+
+/** The last three things Seven heard or ignored, newest first, one short line each, under the clock. */
 function VoiceLog({ entries }) {
-  const rows = [...entries].reverse().slice(0, 4);
+  const rows = [...entries].reverse().slice(0, 3);
+  if (!rows.length) return null;
   return (
-    <div className="mt-4 w-full max-w-[440px]" aria-label="What Seven heard">
-      {rows.length === 0 ? (
-        <p className="text-center text-[12px] text-s-text-4">Nothing heard yet</p>
-      ) : (
-        <ul className="space-y-1">
-          {rows.map((e, i) => (
-            <li key={e.id} className={cx('page-in flex items-center gap-3 text-[12px] leading-5', i === 3 && '[@media(max-height:840px)]:hidden')} style={{ opacity: 1 - i * 0.2 }}>
-              <span className="w-9 shrink-0 tabular-nums text-s-text-4">{hhmm(e.at)}</span>
-              <span className={cx('h-1.5 w-1.5 shrink-0 rounded-full', e.kind === 'ignored' ? 'bg-s-border-l' : 'bg-s-accent')} />
-              {e.kind === 'ignored' ? (
-                <span className="min-w-0 truncate text-s-text-4">
-                  Ignored{e.text ? <> <span className="text-s-text-3">“{e.text}”</span></> : ''} · {why(e.reason)}
-                </span>
-              ) : (
-                <span className="min-w-0 truncate text-s-text-2">
-                  {e.kind === 'wake' ? <>Heard <span className="text-s-text">“Hey Seven”</span></> : <>Heard <span className="text-s-text">“{e.text}”</span></>}
-                </span>
-              )}
-            </li>))}
-        </ul>)}
-    </div>
+    <ul aria-label="What Seven heard" className="pointer-events-none absolute right-6 top-11 z-10 w-[300px] space-y-0.5">
+      {rows.map((e, i) => (
+        <li key={e.id} className="page-in flex items-center justify-end gap-2 text-[11.5px] leading-5 text-s-text transition-opacity duration-500"
+            style={{ opacity: FADE[i] }}>
+          <span className="min-w-0 truncate">
+            {e.kind === 'ignored'
+              ? <>Ignored{e.text ? ` “${e.text}”` : ''} · {why(e.reason)}</>
+              : <>Heard “{e.kind === 'wake' ? 'Hey Seven' : e.text}”</>}
+          </span>
+          <span className={cx('h-1.5 w-1.5 shrink-0 rounded-full', e.kind === 'ignored' ? 'bg-s-text-4' : 'bg-s-accent')} />
+          <span className="w-9 shrink-0 text-right tabular-nums">{hhmm(e.at)}</span>
+        </li>))}
+    </ul>
   );
 }
 
@@ -279,6 +275,7 @@ export default function Landing() {
           <span className="tabular-nums text-s-text-2">{clock(now)}</span>
         </div>
       </header>
+      <VoiceLog entries={st.voiceLog} />
 
       <main className="relative z-10 flex min-h-0 flex-1 flex-col items-center justify-center overflow-hidden px-6">
         <h1 className="text-center text-[26px] font-light tracking-[-0.01em] text-s-text">
@@ -290,7 +287,6 @@ export default function Landing() {
           <OrbGL state={state} size={232} />
         </div>
         <p className={cx('text-[13.5px] transition-colors duration-300', hearing ? 'text-s-accent-h' : 'text-s-text-2')} aria-live="polite">{doing}</p>
-        <VoiceLog entries={st.voiceLog} />
       </main>
 
       <section aria-label="This PC" className="relative z-10 mx-auto w-full max-w-[920px] shrink-0 px-6 pb-5">
