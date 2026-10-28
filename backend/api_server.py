@@ -394,13 +394,6 @@ from backend.routes.schedules import set_schedule_alert, dismiss_schedule_alert_
 # SERVER LAUNCHER — Called from main.py
 # =========================================================================
 
-def _new_event_loop():
-    """The loop the API runs on. On Windows a selector loop, never the default proactor loop: after a single failed
-    accept (WinError 64) the proactor loop closes the listening socket and the server silently stops answering."""
-    import asyncio
-    return asyncio.SelectorEventLoop() if os.name == "nt" else asyncio.new_event_loop()
-
-
 def _listening(host: str, port: int) -> bool:
     import socket
     s = socket.socket()
@@ -426,13 +419,14 @@ def start_api_server(host="127.0.0.1", port=7777):
     """
     import asyncio
     import uvicorn
+    from seven_utils.event_loop import new_event_loop
     servers = []
 
     def _run():
         _evict_offline_listener()      # again, right before binding: loading the app takes several seconds
         server = uvicorn.Server(uvicorn.Config(app, host=host, port=port, log_level="warning", access_log=False))
         servers.append(server)
-        loop = _new_event_loop()
+        loop = new_event_loop()                        # a selector loop on Windows (seven_utils/event_loop.py)
         asyncio.set_event_loop(loop)
         try:
             loop.run_until_complete(server.serve())

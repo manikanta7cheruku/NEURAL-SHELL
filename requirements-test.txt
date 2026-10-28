@@ -6,6 +6,7 @@ requests
 colorama
 psutil
 fastapi
+uvicorn
 pydantic
 chromadb==1.5.8
 pypdf>=4.0
