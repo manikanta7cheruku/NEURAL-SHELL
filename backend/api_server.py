@@ -394,25 +394,72 @@ from backend.routes.schedules import set_schedule_alert, dismiss_schedule_alert_
 # SERVER LAUNCHER — Called from main.py
 # =========================================================================
 
+def _new_event_loop():
+    """The loop the API runs on. On Windows a selector loop, never the default proactor loop: after a single failed
+    accept (WinError 64) the proactor loop closes the listening socket and the server silently stops answering."""
+    import asyncio
+    return asyncio.SelectorEventLoop() if os.name == "nt" else asyncio.new_event_loop()
+
+
+def _listening(host: str, port: int) -> bool:
+    import socket
+    s = socket.socket()
+    s.settimeout(0.5)
+    try:
+        return s.connect_ex((host, port)) == 0
+    finally:
+        s.close()
+
+
 def start_api_server(host="127.0.0.1", port=7777):
     """
     Start the FastAPI server on a background thread.
     Called from main.py AFTER all modules are initialized.
+
+    Two protections against the app showing "Backend Unreachable" while Seven itself keeps running:
+
+    * The server runs on a selector event loop. Windows' default (proactor) loop stops accepting connections for
+      good after ONE failed accept ("[WinError 64] The specified network name is no longer available", logged as
+      "Accept failed on a socket"), which happens when a client drops a connection the instant it opens it, as the
+      app, Vite and Electron all do while polling a backend that is still starting. The selector loop shrugs it off.
+    * A watchdog checks the port every few seconds and restarts the server if it ever stops listening.
     """
+    import asyncio
     import uvicorn
+    servers = []
 
     def _run():
         _evict_offline_listener()      # again, right before binding: loading the app takes several seconds
-        uvicorn.run(
-            app,
-            host=host,
-            port=port,
-            log_level="warning",
-            access_log=False
-        )
+        server = uvicorn.Server(uvicorn.Config(app, host=host, port=port, log_level="warning", access_log=False))
+        servers.append(server)
+        loop = _new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(server.serve())
+        except BaseException as exc:                  # SystemExit from a failed bind, or anything else: say so
+            print(f"[API] server stopped: {exc!r}")
+        finally:
+            loop.close()
 
     thread = threading.Thread(target=_run, daemon=True, name="SevenAPI")
     thread.start()
+
+    def _watch():
+        time.sleep(20)                                 # let it come up first
+        misses = 0
+        while True:
+            time.sleep(3)
+            misses = 0 if _listening(host, port) else misses + 1
+            if misses >= 2:
+                print("[API] the server stopped listening; restarting it")
+                for old in servers:
+                    old.should_exit = True
+                servers.clear()
+                threading.Thread(target=_run, daemon=True, name="SevenAPI").start()
+                misses = 0
+                time.sleep(20)
+
+    threading.Thread(target=_watch, daemon=True, name="SevenAPIWatch").start()
 
     # Start background update checker - runs 15s after startup
     try:
