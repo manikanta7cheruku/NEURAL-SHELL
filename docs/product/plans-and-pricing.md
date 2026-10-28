@@ -14,7 +14,7 @@ the brain and the enforcement cannot disagree. Change a limit there and everythi
 | Feature | Free | Pro | Ultimate |
 |---|---|---|---|
 | Conversations, facts, tasks, workspaces | Unlimited | Unlimited | Unlimited |
-| Triggers | 7 | 77 | Unlimited |
+| Active triggers | 7 | 77 | Unlimited |
 | Schedules | 7 | 77 | Unlimited |
 | Recurring schedules | No | No | Yes |
 | Knowledge files | 3 | 7 | Unlimited |
