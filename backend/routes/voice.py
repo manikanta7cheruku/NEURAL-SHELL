@@ -6,7 +6,7 @@ Seven's voice and hearing, for Settings and setup.
     POST /api/voice/preview    hear a voice say a line (stops any preview already playing)
     POST /api/voice/install    download the natural voice if it isn't here yet; GET for progress
     GET  /api/voice/mics       the microphones Windows offers
-    POST /api/voice/test       say something: returns exactly what Seven heard (or why it ignored it), without acting
+    POST /api/voice/test       say something (up to 10 s): returns exactly what Seven heard (or why it ignored it), without acting
 """
 import json
 import os
@@ -136,14 +136,14 @@ def mics():
 
 @router.post("/api/voice/test", summary="What does Seven hear?")
 def hearing_test():
-    """Wait up to 8 seconds for one thing said; return what Seven heard, without acting on it."""
+    """Wait up to 10 seconds for one thing said; return what Seven heard, without acting on it."""
     try:
         import ears.core as ears
     except Exception:
         raise HTTPException(status_code=409, detail="Seven's hearing hasn't started yet.")
     if not ears.listening():
         raise HTTPException(status_code=409, detail="Seven isn't listening right now.")
-    result = ears.hearing_test(8.0)
+    result = ears.hearing_test()
     if result is None:
-        return {"heard": "", "ignored": "Nothing was said in 8 seconds.", "raw": ""}
+        return {"heard": "", "ignored": "Nothing was said in 10 seconds.", "raw": ""}
     return result
