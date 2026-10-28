@@ -111,7 +111,9 @@ Task Manager calls Memory) and CPU time, and Windows' GPU counters give dedicate
 Seven's processes are its own executables and anything running from its install folder; the AI model is Ollama's
 processes.
 
-The header has a switch for how Seven listens (wake word, always on, push to talk). It writes `voice.listen_mode`
+The header has a switch for how Seven listens (wake word, always on, push to talk) and a **Test mic** button: it
+waits up to 8 seconds for you to say something and shows what Seven heard, or why it ignored it, without acting on it
+(the same `POST /api/voice/test` as Settings, Voice, Test). It writes `voice.listen_mode`
 and the voice loop picks it up on its next pass, about half a second later. Under the clock, top right, is a short log of the last
 seven things Seven heard or ignored, newest first: `Heard "open chrome"`, or `Ignored "let's get lunch" · no "Hey
 Seven"`. The log lives in the status store (`useStatus.voiceLog`, built from `voice_turn` and `voice_ignored`), so it

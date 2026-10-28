@@ -1,7 +1,7 @@
 /**
  * Landing: Seven's home screen. One calm composition around the orb.
  *
- *   header   the wordmark; a switch for how Seven listens (wake word, always on, push to talk); its state; the time;
+ *   header   the wordmark; a switch for how Seven listens (wake word, always on, push to talk) and a mic test; its state; the time;
  *            and under the time the last seven things it heard or ignored, fading with age
  *   centre   a greeting and the date, the orb (which breathes with your voice), what Seven is doing now
  *   vitals   one row of instruments: processor, memory and graphics, each a ring whose accent arc is Seven's own
@@ -20,7 +20,7 @@
                 {"label": "Busiest app", "description": "The app using the most RAM right now. Hover for the top apps, Seven among them."},
                 {"label": "Shortcuts", "description": "Press 1 to 7 to open Dashboard, Chat, Tasks, Reminders, Memory, Settings or Guide. Press / to type to Seven in Chat."}
               ]} */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api';
 import useStatus from '../stores/useStatus';
@@ -183,6 +183,41 @@ function ListenMode({ mode }) {
 // How visible each of the last seven lines is: the newest at 77%, then evenly down to 7% for the oldest.
 const FADE = Array.from({ length: 7 }, (_, i) => +(0.77 - i * (0.7 / 6)).toFixed(3));
 
+/** Say something and see exactly what Seven heard (the same test as Settings, Voice, Test). Nothing is acted on. */
+function MicTest({ mode }) {
+  const [state, setState] = useState({ phase: 'idle', text: '' });
+  const timer = useRef(null);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  const run = async () => {
+    if (state.phase === 'listening') return;
+    setState({ phase: 'listening', text: mode === 'ptt' ? 'Hold Shift and speak…' : 'Say something…' });
+    let text = 'No answer. Is Seven running?';
+    let ok = false;
+    try {
+      const { data } = await api.post('/voice/test', {}, { timeout: 15000 });
+      ok = !!data.heard;
+      text = data.heard ? `Heard “${data.heard}”`
+        : /Nothing was said/.test(data.ignored || '') ? 'Heard nothing. Check your microphone'
+        : `Ignored · ${why(data.ignored)}`;
+    } catch (e) {
+      text = e?.response?.data?.detail || text;
+    }
+    setState({ phase: ok ? 'ok' : 'fail', text });
+    timer.current = setTimeout(() => setState({ phase: 'idle', text: '' }), 6000);
+  };
+  const busy = state.phase === 'listening';
+  return (
+    <button onClick={run} disabled={busy} title="Say something and see what Seven hears"
+            className={cx('flex h-6 max-w-[260px] items-center gap-1.5 rounded-full px-2.5 text-[11.5px] transition-colors duration-200',
+                          state.phase === 'ok' ? 'text-s-accent-h' : state.phase === 'fail' ? 'text-s-yellow' : busy ? 'text-s-text' : 'text-s-text-3 hover:text-s-text')}>
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden className={busy ? 'animate-pulse' : ''}>
+        <rect x="9" y="2" width="6" height="12" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v4" />
+      </svg>
+      <span className="truncate">{state.phase === 'idle' ? 'Test mic' : state.text}</span>
+    </button>
+  );
+}
+
 /** The last seven things Seven heard or ignored, newest first, one short line each, under the clock. */
 function VoiceLog({ entries }) {
   const rows = [...entries].reverse().slice(0, FADE.length);
@@ -268,6 +303,7 @@ export default function Landing() {
         <Wordmark size={15} />
         <div className="flex items-center gap-5 text-[12px] text-s-text-3">
           {st.connected && <ListenMode mode={mode} />}
+          {st.connected && <MicTest mode={mode} />}
           <span className="flex items-center gap-2">
             <span className={cx('h-1.5 w-1.5 rounded-full', badge[1])} />
             <span className="text-s-text-2">{badge[0]}</span>
