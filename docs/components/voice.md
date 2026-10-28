@@ -111,7 +111,13 @@ Task Manager calls Memory) and CPU time, and Windows' GPU counters give dedicate
 Seven's processes are its own executables and anything running from its install folder; the AI model is Ollama's
 processes.
 
-What you said and what Seven answered appear in the voice bar and in Chat, not on the home screen.
+The header has a switch for how Seven listens (wake word, always on, push to talk). It writes `voice.listen_mode`
+and the voice loop picks it up on its next pass, about half a second later. Under the orb is a short log of the last
+four things Seven heard or ignored, newest first: `Heard "open chrome"`, or `Ignored "let's get lunch" · no "Hey
+Seven"`. The log lives in the status store (`useStatus.voiceLog`, built from `voice_turn` and `voice_ignored`), so it
+keeps filling while you are on another page.
+
+What Seven answered appears in the voice bar and in Chat, not on the home screen.
 
 ## 7. Settings, Voice
 

@@ -2,7 +2,8 @@
  * Landing: Seven's home screen. One calm composition around the orb.
  *
  *   header   the wordmark; Seven's state (listening, paused, starting) and how it listens; the time
- *   centre   a greeting and the date, the orb (which breathes with your voice), and what Seven is doing now
+ *   centre   a greeting and the date, the orb (which breathes with your voice), what Seven is doing now, a switch
+ *            for how it listens (wake word, always on, push to talk) and the last few things it heard or ignored
  *   vitals   one row of instruments: processor, memory and graphics, each a ring whose accent arc is Seven's own
  *            share (its app and the local AI model), and the app using the most memory right now, with the full
  *            ranking on hover, so it's plain when something other than Seven is slowing the PC down
@@ -38,7 +39,23 @@ const NAV = [
   { key: '6', to: '/settings', label: 'Settings' },
   { key: '7', to: '/guide', label: 'Guide' },
 ];
-const MODE = { wake: 'Wake word', always: 'Always on', ptt: 'Push to talk' };
+const MODES = [
+  { id: 'wake', label: 'Wake word', hint: 'Say "Hey Seven" first' },
+  { id: 'always', label: 'Always on', hint: 'Acts on everything it hears' },
+  { id: 'ptt', label: 'Push to talk', hint: 'Hold Shift while you speak' },
+];
+
+// Why the ears ignored something, in two or three words (ears/core.py, ears/stream.py, voice_loop.py).
+const WHY = [
+  [/no wake word/, 'no "Hey Seven"'],
+  [/own voice/, 'my own voice'],
+  [/too short/, 'short noise'],
+  [/no clear speech|transcription failed|empty/, 'noise'],
+  [/music|sung|not English/, 'music'],
+  [/mishearing|repetition|incoherent/, 'unclear'],
+];
+const why = reason => (WHY.find(([re]) => re.test(reason || '')) || [null, 'not a request'])[1];
+const hhmm = ms => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
 
 const clock = d => d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 const size = gb => (gb == null ? '–' : gb < 1 ? `${Math.round(gb * 1024)} MB` : `${gb.toFixed(1)} GB`);
@@ -134,6 +151,63 @@ function Heaviest({ usage }) {
   );
 }
 
+/** How Seven listens, changed right here; the voice loop picks it up on its next pass (about half a second). */
+function ListenMode({ mode }) {
+  const [picked, setPicked] = useState(null);
+  const current = picked || mode;
+  useEffect(() => {
+    if (picked && picked === mode) setPicked(null);
+  }, [picked, mode]);
+  const choose = async id => {
+    if (id === current) return;
+    setPicked(id);
+    try {
+      const fresh = (await api.get('/config')).data?.voice || {};
+      await api.put('/config', { updates: { voice: { ...fresh, listen_mode: id } } });
+    } catch {
+      setPicked(null);
+    }
+  };
+  return (
+    <div role="radiogroup" aria-label="How Seven listens" className="inline-flex rounded-full border border-s-border bg-s-surface/70 p-0.5">
+      {MODES.map(m => (
+        <button key={m.id} role="radio" aria-checked={current === m.id} onClick={() => choose(m.id)} title={m.hint}
+                className={cx('h-6 rounded-full px-3 text-[11.5px] transition-colors duration-200',
+                              current === m.id ? 'bg-s-card-h text-s-text' : 'text-s-text-3 hover:text-s-text-2')}>
+          {m.label}
+        </button>))}
+    </div>
+  );
+}
+
+/** The last few things Seven heard or ignored, newest first, one short line each. */
+function VoiceLog({ entries }) {
+  const rows = [...entries].reverse().slice(0, 4);
+  return (
+    <div className="mt-4 w-full max-w-[440px]" aria-label="What Seven heard">
+      {rows.length === 0 ? (
+        <p className="text-center text-[12px] text-s-text-4">Nothing heard yet</p>
+      ) : (
+        <ul className="space-y-1">
+          {rows.map((e, i) => (
+            <li key={e.id} className={cx('page-in flex items-center gap-3 text-[12px] leading-5', i === 3 && '[@media(max-height:840px)]:hidden')} style={{ opacity: 1 - i * 0.2 }}>
+              <span className="w-9 shrink-0 tabular-nums text-s-text-4">{hhmm(e.at)}</span>
+              <span className={cx('h-1.5 w-1.5 shrink-0 rounded-full', e.kind === 'ignored' ? 'bg-s-border-l' : 'bg-s-accent')} />
+              {e.kind === 'ignored' ? (
+                <span className="min-w-0 truncate text-s-text-4">
+                  Ignored{e.text ? <> <span className="text-s-text-3">“{e.text}”</span></> : ''} · {why(e.reason)}
+                </span>
+              ) : (
+                <span className="min-w-0 truncate text-s-text-2">
+                  {e.kind === 'wake' ? <>Heard <span className="text-s-text">“Hey Seven”</span></> : <>Heard <span className="text-s-text">“{e.text}”</span></>}
+                </span>
+              )}
+            </li>))}
+        </ul>)}
+    </div>
+  );
+}
+
 export default function Landing() {
   const navigate = useNavigate();
   const st = useStatus();
@@ -197,25 +271,26 @@ export default function Landing() {
       <header className="relative z-10 flex h-12 shrink-0 items-center justify-between px-6">
         <Wordmark size={15} />
         <div className="flex items-center gap-5 text-[12px] text-s-text-3">
+          {st.connected && <ListenMode mode={mode} />}
           <span className="flex items-center gap-2">
             <span className={cx('h-1.5 w-1.5 rounded-full', badge[1])} />
             <span className="text-s-text-2">{badge[0]}</span>
-            {st.connected && <span className="hidden text-s-text-4 sm:inline">{MODE[mode]}</span>}
           </span>
           <span className="tabular-nums text-s-text-2">{clock(now)}</span>
         </div>
       </header>
 
-      <main className="relative z-10 flex min-h-0 flex-1 flex-col items-center justify-center px-6">
+      <main className="relative z-10 flex min-h-0 flex-1 flex-col items-center justify-center overflow-hidden px-6">
         <h1 className="text-center text-[26px] font-light tracking-[-0.01em] text-s-text">
           {hello(now.getHours())}{name ? `, ${name}` : ''}
         </h1>
-        <p className="mt-1 text-[13px] text-s-text-4">{now.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}</p>
+        <p className="mt-1 text-[13px] text-s-text-4 [@media(max-height:780px)]:hidden">{now.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}</p>
 
         <div className="relative -my-6 mt-0 transition-transform duration-100 ease-out" style={{ transform: `scale(${breathe})` }}>
           <OrbGL state={state} size={232} />
         </div>
         <p className={cx('text-[13.5px] transition-colors duration-300', hearing ? 'text-s-accent-h' : 'text-s-text-2')} aria-live="polite">{doing}</p>
+        <VoiceLog entries={st.voiceLog} />
       </main>
 
       <section aria-label="This PC" className="relative z-10 mx-auto w-full max-w-[920px] shrink-0 px-6 pb-5">
