@@ -1,10 +1,11 @@
 /**
- * WelcomeCard: what Seven is about, where it is going, and an invitation to tell us what you think. Not a how-to
- * (Guide covers that). It opens by itself when the first-run spoken tour ends (the status feed's tour step "card")
+ * WelcomeCard: what Seven is about, where it is going, and an invitation to tell us what you think. Not a how-to:
+ * the About tab points to Guide for that. It opens by itself when the first-run spoken tour ends (the status feed's tour step "card")
  * and any time you choose: the hint on the home screen and Overview, the Welcome guide link in the home footer, the
  * button on Guide, or Ctrl+K.
  *
- * Three tabs on a fixed-size card, so nothing jumps: About (what Seven is and stands for), Roadmap (what works, what
+ * Three tabs on a fixed-size card, so nothing jumps: About (the whole message for someone who reads only this tab:
+ * what Seven is, what it is becoming, why feedback matters, where the Guide is), Roadmap (what works, what
  * is next, and the large later scope; lib/roadmap.js), Feedback (how to tell us, what stays on the PC and what is
  * shared). Send feedback is in the footer on every tab, because feedback is what the beta is for. Open a tab directly:
  *   window.dispatchEvent(new CustomEvent('seven:welcome', { detail: { tab: 'roadmap' } }))
@@ -23,22 +24,37 @@ function Heading({ children }) {
   return <h3 className="mb-1 text-[11px] font-medium uppercase tracking-[0.14em] text-s-text-4">{children}</h3>;
 }
 
-function About() {
+function About({ go, toRoadmap }) {
+  const link = 'text-s-text-2 underline decoration-s-border-l underline-offset-4 transition-colors hover:text-s-text';
   return (
-    <div className="space-y-7">
+    <div className="space-y-6">
       <section>
         <p className="text-[19px] font-light leading-snug tracking-[-0.01em] text-s-text">{ABOUT.lead}</p>
-        {ABOUT.body.map(p => <p key={p} className="mt-3 max-w-[54ch] text-[13px] leading-relaxed text-s-text-3">{p}</p>)}
+        <p className="mt-3 max-w-[54ch] text-[13px] leading-relaxed text-s-text-3">{ABOUT.body}</p>
       </section>
-      <section aria-label="What Seven stands for">
-        <Heading>What it stands for</Heading>
-        <dl>
-          {ABOUT.stands.map(([k, v]) => (
-            <div key={k} className="grid grid-cols-[148px_1fr] gap-x-5 border-b border-s-border/70 py-2.5 first:border-t first:border-s-border last:border-b-0">
-              <dt className="text-[13px] text-s-text">{k}</dt>
-              <dd className="text-[13px] leading-relaxed text-s-text-3">{v}</dd>
-            </div>))}
-        </dl>
+      <section aria-label="What Seven is becoming">
+        <Heading>What Seven is becoming</Heading>
+        <ul className="border-t border-s-border">
+          {ABOUT.becoming.map(t => (
+            <li key={t} className="flex gap-3.5 border-b border-s-border/70 py-2 text-[13px] leading-relaxed text-s-text-2 last:border-b-0">
+              <span aria-hidden className="mt-[7px] h-[7px] w-[7px] shrink-0 rounded-full border border-dashed border-s-text-4" />
+              {t}
+            </li>))}
+        </ul>
+        <p className="mt-3 text-[12.5px] text-s-text-3">
+          The full road ahead is in the <button onClick={toRoadmap} className={link}>Roadmap</button>.
+        </p>
+      </section>
+      <section aria-label="Why your feedback matters">
+        <Heading>Why your feedback matters</Heading>
+        <p className="max-w-[54ch] border-t border-s-border pt-3 text-[13px] leading-relaxed text-s-text-2">{ABOUT.feedback}</p>
+      </section>
+      <section aria-label="The guide">
+        <Heading>New to Seven?</Heading>
+        <p className="max-w-[54ch] border-t border-s-border pt-3 text-[13px] leading-relaxed text-s-text-3">
+          The Guide shows how to use everything, step by step, from voice commands to workspaces and reminders.{' '}
+          <button onClick={() => go('/guide')} className={link}>Open the guide</button>.
+        </p>
       </section>
     </div>
   );
@@ -184,7 +200,7 @@ export default function WelcomeCard() {
     <div className="fixed inset-0 z-[1000] flex items-center justify-center p-6" onMouseDown={close}>
       <div className="absolute inset-0 bg-[var(--s-scrim)] animate-[fadeIn_120ms_ease-out]" />
       <div ref={box} role="dialog" aria-modal="true" aria-labelledby="welcome-title" onMouseDown={e => e.stopPropagation()}
-           className="relative flex h-[min(620px,90vh)] w-full max-w-[600px] flex-col overflow-hidden rounded-2xl border border-s-border bg-s-surface shadow-[var(--s-shadow-raised)] animate-[dialogReveal_160ms_ease-out]">
+           className="relative flex h-[min(680px,92vh)] w-full max-w-[600px] flex-col overflow-hidden rounded-2xl border border-s-border bg-s-surface shadow-[var(--s-shadow-raised)] animate-[dialogReveal_160ms_ease-out]">
         <header className="shrink-0 px-8 pt-7">
           <button onClick={close} aria-label="Close"
                   className="absolute right-4 top-4 flex h-8 w-8 items-center justify-center rounded-lg text-s-text-3 transition-colors hover:bg-s-card hover:text-s-text">
@@ -206,7 +222,7 @@ export default function WelcomeCard() {
 
         <div id="welcome-panel" role="tabpanel" aria-labelledby={`welcome-tab-${tab}`} tabIndex={0}
              className="min-h-0 flex-1 overflow-y-auto px-8 py-6 focus-visible:outline-none">
-          {tab === 'about' && <About />}
+          {tab === 'about' && <About go={go} toRoadmap={() => setTab('roadmap')} />}
           {tab === 'roadmap' && <Roadmap />}
           {tab === 'feedback' && <Feedback go={go} />}
         </div>
