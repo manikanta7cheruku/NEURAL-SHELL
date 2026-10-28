@@ -319,6 +319,48 @@ def delete_everything() -> int:
     return n
 
 
+def export_all() -> List[Dict[str, Any]]:
+    """Every conversation of every speaker with all its messages, oldest first: what a backup keeps."""
+    out = []
+    for conv in _rows("SELECT * FROM conversations ORDER BY created_at, id"):
+        conv["messages"] = _rows("SELECT role, content, ts, source, meta FROM messages WHERE conversation_id=? "
+                                 "ORDER BY id", (conv["id"],))
+        out.append(conv)
+    return out
+
+
+def import_conversation(conv: Dict[str, Any], speaker_key: Optional[str] = None) -> int:
+    """
+    Restore one conversation from a backup, keeping its id, title, times and messages. A conversation whose id is
+    already here is skipped, so importing the same file twice adds nothing. Returns the messages restored (0 if skipped).
+    """
+    msgs = [m for m in (conv.get("messages") or []) if isinstance(m, dict) and str(m.get("content") or "").strip()]
+    if not msgs:
+        return 0
+    _init()
+    cid = str(conv.get("id") or uuid.uuid4().hex[:12])
+    now = _now()
+    c = _conn()
+    try:
+        if c.execute("SELECT 1 FROM conversations WHERE id=?", (cid,)).fetchone():
+            return 0
+        created = conv.get("created_at") or msgs[0].get("ts") or now
+        c.execute("INSERT INTO conversations (id, speaker_key, title, created_at, updated_at, message_count, summary, "
+                  "summarized_at, archived) VALUES (?,?,?,?,?,?,?,?,?)",
+                  (cid, speaker_key or conv.get("speaker_key") or "default", conv.get("title"), created,
+                   conv.get("updated_at") or msgs[-1].get("ts") or created, len(msgs), conv.get("summary"),
+                   conv.get("summarized_at"), 1 if conv.get("archived") else 0))
+        for m in msgs:
+            meta = m.get("meta")
+            c.execute("INSERT INTO messages (conversation_id, role, content, ts, source, meta) VALUES (?,?,?,?,?,?)",
+                      (cid, m.get("role") or "user", str(m["content"]).strip(), m.get("ts") or created,
+                       m.get("source") or "chat", meta if isinstance(meta, str) or meta is None else json.dumps(meta)))
+        c.commit()
+        return len(msgs)
+    finally:
+        c.close()
+
+
 def export(conv_id: Optional[str] = None, speaker_key: Optional[str] = None) -> Dict[str, Any]:
     """Full transcript(s) as plain data, for the user's own backup."""
     convs = [get_conversation(conv_id)] if conv_id else _rows(

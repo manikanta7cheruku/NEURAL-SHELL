@@ -377,6 +377,60 @@ def get_facts(speaker_id: Optional[str] = None, category: Optional[str] = None,
     return _rows(query, tuple(params))
 
 
+def export_rows() -> List[Dict[str, Any]]:
+    """Every fact, current and superseded, oldest first: what a backup keeps."""
+    return _rows("SELECT * FROM facts ORDER BY id ASC")
+
+
+def import_rows(rows: List[Dict[str, Any]], speaker_map: Optional[Dict[str, str]] = None) -> tuple:
+    """
+    Restore facts from a backup. A fact already here (same speaker, key, value and time) is skipped, so importing the
+    same file twice adds nothing. The "replaced by" links between a fact and its history are kept. Restored facts are
+    marked for the semantic index again. Returns (added, skipped, ids of the restored current facts).
+    """
+    _init_schema()
+    speaker_map = speaker_map or {}
+    conn = _get_conn()
+    added, skipped, live, id_map, links = 0, 0, [], {}, []
+    try:
+        have = {(r["speaker_id"], r["key"] or "", r["value"], r["created_at"])
+                for r in conn.execute("SELECT speaker_id, key, value, created_at FROM facts").fetchall()}
+        for row in sorted((r for r in rows if isinstance(r, dict)), key=lambda r: r.get("id") or 0):
+            value = str(row.get("value") or row.get("text") or "").strip()
+            if not value:
+                continue
+            speaker = speaker_map.get(row.get("speaker_id") or "", row.get("speaker_id") or "default")
+            created = row.get("created_at") or _now()
+            sig = (speaker, row.get("key") or "", value, created)
+            if sig in have:
+                skipped += 1
+                continue
+            cur = conn.execute(
+                "INSERT INTO facts (speaker_id, category, key, value, raw_value, source_text, created_at, updated_at, "
+                "active, confidence, mentions, indexed, valid_from, valid_to, status, origin, conversation_id) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,0,?,?,?,?,?)",
+                (speaker, row.get("category") or "general", row.get("key"), value, row.get("raw_value") or value,
+                 row.get("source_text"), created, row.get("updated_at") or created,
+                 0 if row.get("active") in (0, False) else 1, row.get("confidence") or 0.8, row.get("mentions") or 1,
+                 row.get("valid_from"), row.get("valid_to"), row.get("status"), row.get("origin") or "explicit",
+                 row.get("conversation_id")))
+            have.add(sig)
+            added += 1
+            if row.get("id") is not None:
+                id_map[row["id"]] = cur.lastrowid
+            if row.get("superseded_by") is not None:
+                links.append((cur.lastrowid, row["superseded_by"]))
+            if row.get("active") not in (0, False):
+                live.append(cur.lastrowid)
+        for new_id, old_target in links:
+            if old_target in id_map:
+                conn.execute("UPDATE facts SET superseded_by=? WHERE id=?", (id_map[old_target], new_id))
+        conn.commit()
+    finally:
+        conn.close()
+    return added, skipped, live
+
+
 def find_similar_fact(speaker_id: str, key: Optional[str] = None,
                       category: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """Legacy API: most recent active fact for speaker plus key/category."""
