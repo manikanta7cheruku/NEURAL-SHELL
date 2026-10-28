@@ -5,17 +5,15 @@
 
 export const ABOUT = {
   lead: 'Seven is the layer between you and your computer.',
-  body: [
-    'Today it listens, understands and acts on this PC. In time it will see your screen, plan and carry out multi-step work, handle your messages, and reach your phone and your home.',
-    'The aim is an assistant that can do whatever you can do at a computer, and runs on your own device while it does.',
+  body: 'Today it listens, understands and acts on this PC, and everything stays on your device. We are building toward much more.',
+  becoming: [
+    'It will see your screen and use the mouse and keyboard for you.',
+    'Give it a goal and it plans the steps, shows you, and does them.',
+    'It will look after your PC and warn you before a problem starts.',
+    'It will handle messages and email in your style, with your approval.',
+    'It will follow you to your phone and your home.',
   ],
-  stands: [
-    ['Local first', 'It runs on your PC. Your conversations and memory stay with you.'],
-    ['Yours', 'It remembers you, and can show where it learned each thing.'],
-    ['Acts, not only answers', 'Opens, arranges, controls and schedules, and says plainly when something did not work.'],
-    ['You stay in control', 'It asks before anything risky, and nothing is sent or posted without your approval.'],
-    ['Built with you', 'Each beta release is shaped by what you tell us.'],
-  ],
+  feedback: 'Seven is early, and its first users shape it. Tell us what it misheard, what felt wrong and what you want first. Every note is read, and it decides what we build next.',
 };
 
 /**

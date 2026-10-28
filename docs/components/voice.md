@@ -82,8 +82,9 @@ never locks anyone out; the needs-attention strip says what is wrong.
    the talking and goes straight to the card.
 3. **The welcome card** (`WelcomeCard`) opens. It is about what Seven is and where it is going, and it asks for
    feedback; it is not a how-to (Guide covers that). A fixed-size card with three tabs so nothing jumps:
-   - **About:** what Seven is, the larger aim (an assistant that can do whatever you can do at a computer, running on
-     your own device), and what it stands for.
+   - **About:** the whole message for someone who reads only this tab: what Seven is, a short list of what it is
+     becoming (screen control, multi-step work, looking after the PC, messages, phone and home), why feedback matters,
+     and a pointer to the Guide for how to use it.
    - **Roadmap:** what works today and what is next as one line each, then the later scope in full: seeing and using
      your screen, multi-step work, looking after your PC, messages and email, creating, phone and home, accessibility
      and languages, safety and privacy. No dates. The text is `frontend/src/lib/roadmap.js`, a summary of
