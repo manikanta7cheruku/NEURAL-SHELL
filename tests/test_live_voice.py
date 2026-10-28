@@ -191,8 +191,8 @@ class ApiSurvivesDroppedConnections(unittest.TestCase):
 
     def test_the_api_uses_a_selector_loop(self):
         import asyncio
-        from backend.api_server import _new_event_loop
-        loop = _new_event_loop()
+        from seven_utils.event_loop import new_event_loop
+        loop = new_event_loop()
         try:
             self.assertIsInstance(loop, asyncio.SelectorEventLoop)
             self.assertNotIsInstance(loop, asyncio.ProactorEventLoop)
@@ -207,7 +207,7 @@ class ApiSurvivesDroppedConnections(unittest.TestCase):
 
         import uvicorn
         from fastapi import FastAPI
-        from backend.api_server import _new_event_loop
+        from seven_utils.event_loop import new_event_loop
 
         with socket.socket() as probe:                      # a free port
             probe.bind(("127.0.0.1", 0))
@@ -216,7 +216,7 @@ class ApiSurvivesDroppedConnections(unittest.TestCase):
         server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error"))
 
         def run():
-            loop = _new_event_loop()
+            loop = new_event_loop()
             asyncio.set_event_loop(loop)
             loop.run_until_complete(server.serve())
         t = threading.Thread(target=run, daemon=True)
