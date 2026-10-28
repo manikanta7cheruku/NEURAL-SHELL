@@ -112,7 +112,7 @@ Seven's processes are its own executables and anything running from its install 
 processes.
 
 The header has a switch for how Seven listens (wake word, always on, push to talk) and a **Test mic** button: it
-waits up to 8 seconds for you to say something and shows what Seven heard, or why it ignored it, without acting on it
+waits up to 10 seconds for you to say something and shows what Seven heard, or why it ignored it, without acting on it
 (the same `POST /api/voice/test` as Settings, Voice, Test). It writes `voice.listen_mode`
 and the voice loop picks it up on its next pass, about half a second later. Under the clock, top right, is a short log of the last
 seven things Seven heard or ignored, newest first: `Heard "open chrome"`, or `Ignored "let's get lunch" · no "Hey
@@ -173,7 +173,7 @@ the sidebar used to call "Home"; the home screen is the one with the orb.
 | POST | `/api/voice/stop` | Stop a preview |
 | POST, GET | `/api/voice/install` | Download the voice; progress |
 | GET | `/api/voice/mics` | Microphones (WASAPI names, no virtual devices) |
-| POST | `/api/voice/test` | Wait up to 8 s for one request; return what was heard, without acting |
+| POST | `/api/voice/test` | Wait up to 10 s for one request; return what was heard, without acting |
 | GET | `/api/system/usage` | Seven's share and the apps using the most memory |
 | GET | `/api/attention` | What needs the user's attention (microphone, voice, AI model), most important first |
 | POST | `/api/triggers/snap-test` | Record a few seconds and say whether the mic hears snaps |

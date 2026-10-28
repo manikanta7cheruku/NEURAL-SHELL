@@ -105,7 +105,8 @@ opens and closes streams through `audio.open_stream()` and `audio.close_stream()
 
 Anything dropped is published as `voice_ignored` with a reason, which the status feed carries to the app.
 
-`hearing_test(8)` (Settings, Voice, Test) captures the next request and returns exactly what was heard, or why it was
+`hearing_test()` (Settings, Voice, Test, and the home screen's Test mic) reads the microphone itself for up to 10
+seconds, with the voice loop standing aside, and returns exactly what was heard, or why it was
 ignored, without acting on it. `listen_for_interrupt()` runs while Seven speaks: short utterances only (long ones are
 Seven's own sentences), fast transcription, and a whole-word match against the interrupt words ("stop", "wait").
 

@@ -198,39 +198,35 @@ def start():
 
 def _ignored(reason: str, text: str = ""):
     print(Fore.YELLOW + f"[EARS] Ignored: {reason}{f' ({text[:50]})' if text else ''}")
-    _publish("voice_ignored", {"reason": reason, "text": text[:80], "at": time.time()})
+    if not _testing.is_set():                            # a hearing test reports its own result
+        _publish("voice_ignored", {"reason": reason, "text": text[:80], "at": time.time()})
     STREAM._set_state("idle")
-    _deliver_test("", reason, text)
 
 
-# ── Hearing test (Settings, Voice, Test) ─────────────────────────────────────
-# The next utterance goes to the test instead of being acted on, so the user sees exactly what Seven heard.
-_test_box = None
+# ── Hearing test (Settings, Voice, Test; the home screen's Test mic) ─────────────────────────────────────────────
+# The test reads the microphone itself while the voice loop stands aside. Before, it waited for the voice loop to
+# hand it the next utterance, and the loop is often busy (answering, speaking): the utterance then waited in the queue,
+# the test timed out with "heard nothing", and Seven acted on the words afterwards.
+_testing = threading.Event()
 
 
-def hearing_test(timeout: float = 8.0):
-    """Wait for the next utterance; {'heard': text, 'ignored': reason or '', 'raw': text} or None if nothing came."""
-    global _test_box
-    import queue as _q
-    box = _q.Queue(maxsize=1)
-    _test_box = box
+def hearing_test(timeout: float = 10.0):
+    """Wait for one thing said and return {'heard': text, 'ignored': reason or '', 'raw': text}, or None if nothing
+    came. Nothing is acted on. Time spent understanding the words isn't counted against the timeout."""
+    start()
+    _testing.set()
     try:
-        return box.get(timeout=timeout)
-    except _q.Empty:
+        STREAM.drain()                                   # what was said before the test doesn't count
+        end = time.time() + timeout
+        while time.time() < end:
+            utt = STREAM.next(timeout=0.25)
+            if utt is None:
+                continue
+            final, ignored, raw = _understand(utt)
+            return {"heard": final or "", "ignored": ignored, "raw": raw}
         return None
     finally:
-        _test_box = None
-
-
-def _deliver_test(heard: str, reason: str = "", raw: str = "") -> bool:
-    box = _test_box
-    if box is None:
-        return False
-    try:
-        box.put_nowait({"heard": heard, "ignored": reason, "raw": raw})
-    except Exception:
-        pass
-    return True
+        _testing.clear()
 
 
 def listening() -> bool:
@@ -340,39 +336,46 @@ def _wav_bytes(audio: np.ndarray) -> bytes:
 # MAIN LISTEN FUNCTION
 # =============================================================================
 
+def _understand(utt) -> tuple:
+    """One utterance to (text or None, why it was ignored, the raw text). Used by listen() and the hearing test."""
+    # Seven hearing itself: began while it was talking, or in the echo tail right after.
+    if utt.during_speech or _is_speaking_fn() or utt.started < _ended_at_fn() + 0.35:
+        _ignored("Seven's own voice")
+        return None, "Seven's own voice", ""
+    t = time.time()
+    text, reason = transcribe(utt.audio)
+    if not text:
+        _ignored(reason)
+        return None, reason, ""
+    problem = _text_problem(text)
+    if problem:
+        _ignored(problem, text)
+        return None, problem, text
+    if _is_echo(text):
+        _ignored("Seven's own voice", text)
+        return None, "Seven's own voice", text
+
+    final = normalize_wake(_autocorrect(text).strip())
+    final = final[:1].upper() + final[1:]
+    print(Fore.GREEN + f"[EARS] Heard: '{final}' ({utt.seconds:.1f}s audio, {time.time() - t:.2f}s to text)")
+    STREAM._set_state("idle")
+    return final, "", text
+
+
 def listen() -> tuple:
     """
     Wait briefly for the next utterance and return (text, audio_path), or (None, None).
     Returns quickly (about half a second) when nobody is talking, so the voice loop stays responsive.
     """
     start()
+    if _testing.is_set():                               # a hearing test is reading the microphone
+        time.sleep(0.2)
+        return None, None
     utt = STREAM.next(timeout=0.5)
     if utt is None:
         return None, None
-
-    # Seven hearing itself: began while it was talking, or in the echo tail right after.
-    if utt.during_speech or _is_speaking_fn() or utt.started < _ended_at_fn() + 0.35:
-        _ignored("Seven's own voice")
-        return None, None
-
-    t = time.time()
-    text, reason = transcribe(utt.audio)
-    if not text:
-        _ignored(reason)
-        return None, None
-    problem = _text_problem(text)
-    if problem:
-        _ignored(problem, text)
-        return None, None
-    if _is_echo(text):
-        _ignored("Seven's own voice", text)
-        return None, None
-
-    final = normalize_wake(_autocorrect(text).strip())
-    final = final[:1].upper() + final[1:]
-    print(Fore.GREEN + f"[EARS] Heard: '{final}' ({utt.seconds:.1f}s audio, {time.time() - t:.2f}s to text)")
-    STREAM._set_state("idle")
-    if _deliver_test(final):                    # a hearing test: show it, don't act on it
+    final, _, _ = _understand(utt)
+    if final is None:
         return None, None
 
     audio_out_path = "__voice__"
