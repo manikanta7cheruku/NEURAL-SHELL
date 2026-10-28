@@ -17,6 +17,14 @@ from seven_utils.version import get_version as app_version
 router = APIRouter()
 
 
+@router.get("/api/ready", summary="Is Seven ready to be used?",
+            description="True once the brain, ears and voice are loaded, which is when Seven says its greeting. "
+                        "The app shows a loading screen until then, with the stage Seven is at.")
+def get_ready():
+    from backend.api_server import _state
+    return {"ready": bool(_state.get("ready", False)), "stage": str(_state.get("ready_stage", ""))}
+
+
 @router.get("/api/status")
 def get_status():
     """Get current Seven system status. Guaranteed to never return 500."""
@@ -70,6 +78,10 @@ def get_status():
             "speaking":       bool(_state.get("speaking",  False)),
             "thinking":       bool(_state.get("thinking",  False)),
             "paused":         bool(_state.get("paused",    False)),
+            "ready":          bool(_state.get("ready", False)),
+            "ready_stage":    str(_state.get("ready_stage", "")),
+            "tour":           _state.get("tour") or {"step": None, "n": 0},
+            "welcome":        _state.get("welcome") or {},
             "user_text":      str(_state.get("user_text",  "")),
             "seven_text":     str(_state.get("seven_text", "")),
             "mood":           mood_label,
@@ -134,6 +146,8 @@ async def status_websocket(websocket: WebSocket):
                 "follow_up_open": _state.get("follow_up_open", False),
                 "paused": _state.get("paused", False),
                 "voice_turn": _state.get("voice_turn", 0),         # changes when a voice request starts
+                "tour": _state.get("tour") or {"step": None, "n": 0},   # the first-run tour: {step, n}
+                "welcome": _state.get("welcome") or {},            # {tour_done, hint_dismissed, first_command}
                 "voice_files": _state.get("voice_files"),          # {at, data}: file matches from the last voice request
             })
             await asyncio.sleep(0.1)

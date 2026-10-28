@@ -1,6 +1,6 @@
 {
   "app_map_version": 1,
-  "source_hash": "8419822fef99c994",
+  "source_hash": "5642d8f1c64bff3e",
   "pages": [
     {
       "id": "home",
@@ -79,11 +79,6 @@
       "controls": [
         {
           "label": "Ask Seven",
-          "description": "Seven is ready. Say \"Hey Seven\" to start.",
-          "file": "Home.jsx"
-        },
-        {
-          "label": "Dismiss",
           "description": "",
           "file": "Home.jsx"
         },

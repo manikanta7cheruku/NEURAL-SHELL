@@ -26,6 +26,7 @@ def run_voice_loop(ctx, config, app_ui, api_set_state, safe_mode_file):
         api_set_state("status_text", "SAFE MODE — AI offline")
         api_set_state("status_color", "#ffaa00")
         api_set_state("listening", False)
+        api_set_state("ready", True)                     # nothing to wait for: the app must still open
 
         from main_modules.startup.daemon_launcher import (
             launch_schedule_daemon, launch_panel_server
@@ -46,9 +47,18 @@ def run_voice_loop(ctx, config, app_ui, api_set_state, safe_mode_file):
         return
 
     # ── Load AI modules ──────────────────────────────────────────────
+    # The app shows a loading screen until Seven can speak (api_set_state "ready"), so it only opens when it works.
+    # The voice starts loading now, beside everything else, instead of after it: it is the slowest part to be ready.
     try:
+        api_set_state("ready", False)
+        api_set_state("ready_stage", "Loading Seven's brain")
         api_set_state("status_text", "Starting Seven AI...")
         api_set_state("status_color", "#ffaa00")
+    except Exception:
+        pass
+    try:
+        from mouth.engine import ENGINE as _early_voice
+        _early_voice.warm()
     except Exception:
         pass
 
@@ -59,12 +69,14 @@ def run_voice_loop(ctx, config, app_ui, api_set_state, safe_mode_file):
             api_set_state("status_text", "ERROR: AI modules failed to load")
             api_set_state("status_color", "#ff0000")
             api_set_state("listening", False)
+            api_set_state("ready", True)
             with open(safe_mode_file, 'w') as _sf:
                 _sf.write(str(time.time()))
         except Exception:
             pass
         return
 
+    api_set_state("ready_stage", "Starting the ears")
     # ── Wire the ears to the mouth and to the app ────────────────────
     # The ears need to know when Seven is talking and what it said (to ignore its own voice), and the app shows
     # the live mic level, "Hearing you", and what was ignored and why.
@@ -214,9 +226,23 @@ def run_voice_loop(ctx, config, app_ui, api_set_state, safe_mode_file):
     threading.Thread(target=_launch_daemons_staggered, daemon=True,
                      name="DaemonLauncher").start()
 
-    # ── Greeting (once per launch; main_modules/startup/greeting.py) ──
-    from main_modules.startup import greeting
+    # ── Ready: open the app, then greet (once per launch; main_modules/startup/greeting.py) ──
+    # The voice is loaded before the app opens, so the greeting starts the moment the window appears.
+    from main_modules.startup import greeting, tour
     ctx.greeting = greeting
+    tour.attach(ctx, config)
+    greeting.update_welcome()                            # tell the app the welcome state
+    api_set_state("ready_stage", "Warming up the voice")
+    try:
+        from mouth.engine import ENGINE as _voice
+        if _voice.available():
+            deadline = time.time() + 25
+            while not _voice.is_warm() and time.time() < deadline:
+                time.sleep(0.1)
+    except Exception:
+        pass
+    api_set_state("ready", True)
+    time.sleep(0.8)                                      # the window fades in; the greeting starts as it does
     greeting.greet(ctx, config)
 
     # ── Register handlers ────────────────────────────────────────────
@@ -393,6 +419,7 @@ def run_voice_loop(ctx, config, app_ui, api_set_state, safe_mode_file):
             api_set_state("user_text", user_input)
             api_set_state("seven_text", "")
             api_set_state("voice_turn", time.time())     # the voice bar opens for this request (electron/status.html)
+            greeting.mark_first_command()                # ticks off the welcome card's first command
 
             response = ctx.brain.think(user_input, speaker_id=speaker_id)
             telemetry.log_activity()

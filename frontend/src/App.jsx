@@ -7,6 +7,8 @@ import UpdateBanner   from './components/UpdateBanner';
 import AdminMessageBanner from './components/AdminMessageBanner';
 import { Toaster }    from './components/ui';
 import CommandPalette from './components/CommandPalette';
+import TourLayer from './components/TourLayer';
+import WelcomeCard from './components/WelcomeCard';
 import Mark, { Wordmark } from './components/Mark';
 
 // The screen while Seven starts: the mark, the name, what it is doing, and a hairline that keeps moving.
@@ -74,6 +76,8 @@ function MainApp({ isFirstLaunch }) {
           </Routes>
         </div>
         <CommandPalette />
+        <TourLayer />
+        <WelcomeCard />
       </div>
     );
   }
@@ -107,6 +111,8 @@ function MainApp({ isFirstLaunch }) {
       </div>
       <Toaster />
       <CommandPalette />
+      <TourLayer />
+      <WelcomeCard />
     </div>
   );
 }
@@ -119,7 +125,8 @@ export default function App() {
   const [backendReady, setBackendReady] = useState(false);
   const [backendChecking, setBackendChecking] = useState(true);
   const [retryCount, setRetryCount] = useState(0);
-  const [voiceReady, setVoiceReady] = useState(false);
+  const [sevenReady, setSevenReady] = useState(false);
+  const [readyStage, setReadyStage] = useState('Getting Seven ready');
 
   const checkRef = useRef(null);
 
@@ -219,29 +226,29 @@ export default function App() {
     }
   }, [config, configLoading]);
 
-  // 4. Poll voice loop state after first setup launch is executed
+  // 4. Wait until Seven is ready. The backend answers before its brain, ears and voice are loaded; the app opens only
+  //    when they are, which is the moment Seven says its greeting. After 2 minutes it opens anyway, so a problem
+  //    in one part never locks the person out (the home screen's "needs attention" strip says what is wrong).
   useEffect(() => {
-    if (isFirstLaunch && setupDone) {
-      let attempts = 0;
-      const checkVoice = setInterval(async () => {
-        attempts++;
-        try {
-          const r = await fetch(`${API_BASE}/api/status`, { signal: AbortSignal.timeout(2000) });
-          if (r.ok) {
-            const data = await r.json();
-            if (data.listening || data.status_text?.includes('ONLINE') || attempts > 30) {
-              clearInterval(checkVoice);
-              setVoiceReady(true);
-            }
-          }
-        } catch {}
-      }, 1000);
-      return () => clearInterval(checkVoice);
-    } else {
-      // If subsequent launch, skip loading layer
-      setVoiceReady(true);
-    }
-  }, [isFirstLaunch, setupDone]);
+    if (!setupDone) return undefined;
+    let stopped = false;
+    let timer = null;
+    const started = Date.now();
+    const tick = async () => {
+      try {
+        const r = await fetch(`${API_BASE}/api/ready`, { signal: AbortSignal.timeout(2000) });
+        if (r.ok) {
+          const d = await r.json();
+          if (d.ready === true) { if (!stopped) setSevenReady(true); return; }
+          if (d.stage && !stopped) setReadyStage(d.stage);
+        }
+      } catch { /* the backend may be restarting after setup: keep trying */ }
+      if (Date.now() - started > 120000) { if (!stopped) setSevenReady(true); return; }
+      if (!stopped) timer = setTimeout(tick, 400);
+    };
+    tick();
+    return () => { stopped = true; clearTimeout(timer); };
+  }, [setupDone]);
 
   // ── Render Case 1: Backend Connecting Screen ──
   if (backendChecking) {
@@ -322,9 +329,9 @@ export default function App() {
     );
   }
 
-  // ── Render Case 3: Setup Complete Voice Loading Page ──
-  if (setupDone && isFirstLaunch && !voiceReady) {
-    return <Splash status="Starting the voice engine" />;
+  // ── Render Case 3: Getting Seven ready (brain, ears and voice) ──
+  if (setupDone && !sevenReady) {
+    return <Splash status={readyStage} />;
   }
 
   // ── Render Case 4: Default Initial Config Fetching ──

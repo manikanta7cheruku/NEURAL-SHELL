@@ -57,6 +57,9 @@ class Engine:
                     self._kokoro.create("Hi.", voice=voices.DEFAULT_VOICE, lang="en-us")   # first run compiles kernels
         return self._kokoro
 
+    def is_warm(self) -> bool:
+        return self._kokoro is not None
+
     def warm(self):
         """Load the voice in the background at startup, so the first reply isn't the slow one."""
         if self.available():
