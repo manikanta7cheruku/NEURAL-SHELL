@@ -2,7 +2,7 @@
 backend/routes/welcome.py
 The first-run welcome: the spoken tour, and the welcome card's hint.
 
-    GET  /api/welcome              {tour_done, hint_dismissed, first_command}
+    GET  /api/welcome              {tour_done, hint_dismissed}
     POST /api/welcome/hint/hide    stop showing the "getting started" hint
     POST /api/welcome/hint/show    show it again
     POST /api/tour/skip            stop the spoken tour and go straight to the card

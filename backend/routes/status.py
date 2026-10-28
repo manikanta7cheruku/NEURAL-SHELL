@@ -147,7 +147,7 @@ async def status_websocket(websocket: WebSocket):
                 "paused": _state.get("paused", False),
                 "voice_turn": _state.get("voice_turn", 0),         # changes when a voice request starts
                 "tour": _state.get("tour") or {"step": None, "n": 0},   # the first-run tour: {step, n}
-                "welcome": _state.get("welcome") or {},            # {tour_done, hint_dismissed, first_command}
+                "welcome": _state.get("welcome") or {},            # {tour_done, hint_dismissed}
                 "voice_files": _state.get("voice_files"),          # {at, data}: file matches from the last voice request
             })
             await asyncio.sleep(0.1)

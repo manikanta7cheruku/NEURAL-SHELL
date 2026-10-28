@@ -52,7 +52,7 @@ const useStatus = create((set, get) => ({
   voiceLog: [],
   ready: false,
   tour: { step: null, n: 0 },     // the first-run tour: which thing Seven is talking about
-  welcome: {},                   // { tour_done, hint_dismissed, first_command }
+  welcome: {},                   // { tour_done, hint_dismissed }
   seenTurn: 0,
   seenIgnored: 0,
 

@@ -84,13 +84,6 @@ class Greeting(unittest.TestCase):
         self.assertEqual(len(said), 1)
         self.assertEqual(steps[-1], "card")
 
-    def test_first_command_is_ticked_off_only_after_the_tour(self):
-        greeting.mark_first_command()
-        self.assertFalse(greeting.welcome_state()["first_command"])
-        greeting.update_welcome(tour_done=True)
-        greeting.mark_first_command()
-        self.assertTrue(greeting.welcome_state()["first_command"])
-
     def test_volume_is_raised_only_when_it_is_low_or_muted(self):
         class Vol:
             def __init__(self, level, muted):
