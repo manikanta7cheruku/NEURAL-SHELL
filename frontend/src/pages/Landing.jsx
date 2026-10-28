@@ -2,7 +2,7 @@
  * Landing: Seven's home screen. One calm composition around the orb.
  *
  *   header   the wordmark; a switch for how Seven listens (wake word, always on, push to talk); its state; the time;
- *            and under the time the last three things it heard or ignored, fading with age
+ *            and under the time the last seven things it heard or ignored, fading with age
  *   centre   a greeting and the date, the orb (which breathes with your voice), what Seven is doing now
  *   vitals   one row of instruments: processor, memory and graphics, each a ring whose accent arc is Seven's own
  *            share (its app and the local AI model), and the app using the most memory right now, with the full
@@ -180,15 +180,15 @@ function ListenMode({ mode }) {
   );
 }
 
-// How visible each of the last three lines is: the newest clearly, the one before faint, the oldest a trace.
-const FADE = [0.7, 0.35, 0.07];
+// How visible each of the last seven lines is: the newest at 77%, then evenly down to 7% for the oldest.
+const FADE = Array.from({ length: 7 }, (_, i) => +(0.77 - i * (0.7 / 6)).toFixed(3));
 
-/** The last three things Seven heard or ignored, newest first, one short line each, under the clock. */
+/** The last seven things Seven heard or ignored, newest first, one short line each, under the clock. */
 function VoiceLog({ entries }) {
-  const rows = [...entries].reverse().slice(0, 3);
+  const rows = [...entries].reverse().slice(0, FADE.length);
   if (!rows.length) return null;
   return (
-    <ul aria-label="What Seven heard" className="pointer-events-none absolute right-6 top-11 z-10 w-[300px] space-y-0.5">
+    <ul aria-label="What Seven heard" className="pointer-events-none absolute right-6 top-[60px] z-10 w-[300px] space-y-0.5">
       {rows.map((e, i) => (
         <li key={e.id} className="page-in flex items-center justify-end gap-2 text-[11.5px] leading-5 text-s-text transition-opacity duration-500"
             style={{ opacity: FADE[i] }}>
