@@ -55,7 +55,7 @@ def _read_alert_file() -> dict:
 
 def set_schedule_alert(message: str, stype: str, schedule_id=None):
     """Called by voice pipeline when a schedule fires."""
-    data = {"active": True, "message": message, "type": stype, "id": schedule_id}
+    data = {"active": True, "message": message, "original": message, "overlay": False, "type": stype, "id": schedule_id}
     _schedule_alert_container[0] = data
     _write_alert_file(data)
     print(f"[API] Schedule alert set: {stype} - {message[:50]}")
@@ -172,12 +172,17 @@ async def dismiss_schedule_alert():
 @router.post("/api/schedule/alert/snooze")
 async def snooze_schedule_alert(minutes: int = 5):
     """Snooze current alert by creating a new schedule."""
-    if _schedule_alert_container[0].get("active"):
+    # The alert file is the truth: a reminder fired by the reminder daemon is only in the file, not in memory. And
+    # snooze the reminder itself, not the sentence Seven spoke for it, or it would come back wrapped in itself.
+    state = _read_alert_file()
+    if not state.get("active"):
+        state = _schedule_alert_container[0]
+    if state.get("active"):
         try:
             from hands.scheduler import add_schedule
             add_schedule(
                 stype="reminder",
-                message=_schedule_alert_container[0]["message"],
+                message=state.get("original") or state.get("message", ""),
                 time_str=f"in {minutes} minutes",
                 speaker_id="default"
             )

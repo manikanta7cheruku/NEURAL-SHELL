@@ -111,7 +111,8 @@
 
   function snooze() {
     clearInApp();
-    window.electronAPI && window.electronAPI.snooze({ message: _data.message || 'Reminder', type: _data.type || 'reminder', minutes: 10 });
+    // Snooze the reminder itself ("original"), not the sentence Seven spoke for it, or it returns wrapped in itself.
+    window.electronAPI && window.electronAPI.snooze({ message: _data.original || _data.message || 'Reminder', type: _data.type || 'reminder', minutes: 10 });
     window.electronAPI && window.electronAPI.close();
   }
 

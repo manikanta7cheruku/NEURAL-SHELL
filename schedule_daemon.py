@@ -273,9 +273,10 @@ def fire_notification(message, stype):
     _notif_success = _send_overlay({
         "type": "sched_notif",
         "data": {
-            "type":    stype,
-            "message": message,
-            "holdMs":  8000,
+            "type":     stype,
+            "message":  message,
+            "original": message,
+            "holdMs":   8000,
         },
     }, timeout=1.0)
 
@@ -297,10 +298,12 @@ def fire_notification(message, stype):
         os.makedirs(os.path.dirname(ALERT_FILE), exist_ok=True)
         with open(ALERT_FILE, 'w') as f:
             json.dump({
-                "active":  True,
-                "message": message,
-                "type":    stype,
-                "id":      None
+                "active":   True,
+                "message":  message,
+                "original": message,
+                "overlay":  bool(_notif_success),    # the Windows card already shows it: the app need not
+                "type":     stype,
+                "id":       None
             }, f)
     except Exception:
         pass

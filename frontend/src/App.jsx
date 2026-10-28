@@ -78,6 +78,7 @@ function MainApp({ isFirstLaunch }) {
         <CommandPalette />
         <TourLayer />
         <WelcomeCard />
+        <ScheduleAlert />
       </div>
     );
   }
