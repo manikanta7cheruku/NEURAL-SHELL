@@ -6,7 +6,7 @@ The backend listens on `http://127.0.0.1:7777` only (never on the network). The 
 the overlay and the Chrome extension are its only clients. There is no authentication because nothing outside
 this computer can reach it.
 
-206 endpoints in 27 files.
+207 endpoints in 28 files.
 
 ## `backend/admin_server.py`
 
@@ -26,6 +26,12 @@ this computer can reach it.
 | POST | `/api/bootstrap/restart` | Called by the setup wizard after first-launch setup completes. |
 | GET | `/api/health` | Guaranteed liveness probe. Registered directly on the app (not via router) |
 | GET | `/api/speed` | Diagnostic endpoint to prevent frontend 404. Returns latency metrics. |
+
+## `backend/routes/attention.py`
+
+| Method | Path | What it does |
+|---|---|---|
+| GET | `/api/attention` | What needs the user's attention |
 
 ## `backend/routes/brain.py`
 
