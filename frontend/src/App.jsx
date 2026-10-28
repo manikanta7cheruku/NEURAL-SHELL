@@ -6,6 +6,7 @@ import TitleBar       from './components/TitleBar';
 import UpdateBanner   from './components/UpdateBanner';
 import AdminMessageBanner from './components/AdminMessageBanner';
 import { Toaster }    from './components/ui';
+import CommandPalette from './components/CommandPalette';
 import Mark, { Wordmark } from './components/Mark';
 
 // The screen while Seven starts: the mark, the name, what it is doing, and a hairline that keeps moving.
@@ -72,6 +73,7 @@ function MainApp({ isFirstLaunch }) {
             <Route path="/" element={<Landing />} />
           </Routes>
         </div>
+        <CommandPalette />
       </div>
     );
   }
@@ -104,6 +106,7 @@ function MainApp({ isFirstLaunch }) {
         </main>
       </div>
       <Toaster />
+      <CommandPalette />
     </div>
   );
 }

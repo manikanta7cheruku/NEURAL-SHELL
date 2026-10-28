@@ -142,5 +142,47 @@ class Usage(unittest.TestCase):
         self.assertGreater(u["total"]["ram_total_gb"], 0)
 
 
+class Attention(unittest.TestCase):
+    """The home screen's "needs attention" strip: only real problems, most important first, nothing when all is well."""
+
+    def collect(self, **kw):
+        from backend.routes.attention import collect
+        probes = dict(mic_error=lambda: "", voice=lambda: {"ready": True, "status": "done", "progress": 100},
+                      ollama_up=lambda: True, uptime=lambda: 600, setup_done=lambda: True)
+        probes.update(kw)
+        return collect(**probes)
+
+    def test_nothing_when_all_is_well(self):
+        self.assertEqual(self.collect(), [])
+
+    def test_nothing_before_setup_is_finished(self):
+        self.assertEqual(self.collect(setup_done=lambda: False, mic_error=lambda: "no device"), [])
+
+    def test_a_microphone_problem_comes_first_and_points_to_the_fix(self):
+        items = self.collect(mic_error=lambda: "Invalid input device", ollama_up=lambda: False,
+                             voice=lambda: {"ready": False, "status": "running", "progress": 40})
+        self.assertEqual([i["id"] for i in items], ["mic", "model", "voice-downloading"])
+        self.assertEqual(items[0]["level"], "error")
+        self.assertEqual(items[0]["action"]["to"], "/settings?section=voice")
+        self.assertNotIn("Invalid input device", items[0]["message"])      # no raw error text
+
+    def test_voice_states(self):
+        down = self.collect(voice=lambda: {"ready": False, "status": "running", "progress": 62})[0]
+        self.assertEqual((down["level"], "62%" in down["message"]), ("info", True))
+        failed = self.collect(voice=lambda: {"ready": False, "status": "error", "progress": 0})[0]
+        self.assertEqual((failed["id"], failed["level"]), ("voice-failed", "warn"))
+        missing = self.collect(voice=lambda: {"ready": False, "status": "pending", "progress": 0})[0]
+        self.assertEqual(missing["id"], "voice-missing")
+
+    def test_model_is_not_reported_while_seven_is_still_starting(self):
+        self.assertEqual(self.collect(ollama_up=lambda: False, uptime=lambda: 20), [])
+        self.assertEqual(self.collect(ollama_up=lambda: False, uptime=lambda: 200)[0]["id"], "model")
+
+    def test_a_probe_that_fails_never_breaks_the_list(self):
+        def boom():
+            raise RuntimeError("x")
+        self.assertEqual(self.collect(mic_error=boom, voice=boom, ollama_up=boom), [])
+
+
 if __name__ == "__main__":
     unittest.main()

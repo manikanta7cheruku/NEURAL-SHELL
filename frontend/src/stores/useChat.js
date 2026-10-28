@@ -509,7 +509,7 @@ This will permanently delete:
 
 For safety, please use the Settings page to clear all memory.
 
-Dashboard → Settings → Clear Memory`;
+Settings → Clear Memory`;
     }
 
     // =========================================================================
@@ -1078,7 +1078,7 @@ This will permanently delete all indexed knowledge.
 
 For safety, please use the Knowledge page to clear.
 
-Dashboard → Knowledge → Clear Knowledge Base`;
+Knowledge → Clear Knowledge Base`;
     }
 
     // =========================================================================

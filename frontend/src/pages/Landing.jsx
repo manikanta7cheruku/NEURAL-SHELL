@@ -1,13 +1,15 @@
 /**
  * Landing: Seven's home screen. One calm composition around the orb.
  *
- *   header   the wordmark; Seven's state (listening, paused, starting) and how it listens; the time
- *   centre   a greeting and the date, the orb (which breathes with your voice), and what Seven is doing now
+ *   header   the wordmark; a switch for how Seven listens (wake word, always on, push to talk) and a mic test; its state; the time;
+ *            and under the time the last seven things it heard or ignored, fading with age
+ *   centre   a greeting and the date, the orb (which breathes with your voice), what Seven is doing now
  *   vitals   one row of instruments: processor, memory and graphics, each a ring whose accent arc is Seven's own
  *            share (its app and the local AI model), and the app using the most memory right now, with the full
  *            ranking on hover, so it's plain when something other than Seven is slowing the PC down
  *   today    a single line: open tasks, the next reminder, what Seven remembers
- *   footer   numbered shortcuts to every major area
+ *   strip    only when something is wrong (no microphone, voice or AI model not ready, update, plan ending)
+ *   footer   the daily pages (1 to 5) and search (Ctrl K); Settings is the gear in the header
  *
  * What you said and what Seven answered appear in the voice bar at the top of the screen (electron/status.html)
  * and in Chat; the home screen stays a glance.
@@ -17,28 +19,45 @@
               "controls": [
                 {"label": "Vitals", "description": "Processor, RAM and graphics in use; the accent part of each ring is Seven's share."},
                 {"label": "Busiest app", "description": "The app using the most RAM right now. Hover for the top apps, Seven among them."},
-                {"label": "Shortcuts", "description": "Press 1 to 7 to open Dashboard, Chat, Tasks, Reminders, Memory, Settings or Guide. Press / to type to Seven in Chat."}
+                {"label": "Shortcuts", "description": "Press 1 to 5 to open Overview, Chat, Tasks, Reminders or Memory, comma for Settings, slash to type to Seven in Chat, Ctrl+K to search everything."}
               ]} */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api';
 import useStatus from '../stores/useStatus';
 import useTasks from '../stores/useTasks';
 import useConfig from '../stores/useConfig';
 import OrbGL from '../components/OrbGL';
+import AttentionStrip from '../components/AttentionStrip';
+import { GearSix, MagnifyingGlass } from '@phosphor-icons/react';
 import { Wordmark } from '../components/Mark';
 import { cx } from '../lib/cx';
 
+// The pages used every day, numbered for the keyboard. Everything else: the gear (Settings), "," and Ctrl+K.
 const NAV = [
-  { key: '1', to: '/dashboard', label: 'Dashboard' },
+  { key: '1', to: '/dashboard', label: 'Overview' },
   { key: '2', to: '/console', label: 'Chat' },
   { key: '3', to: '/tasks', label: 'Tasks' },
   { key: '4', to: '/schedules', label: 'Reminders' },
   { key: '5', to: '/memory', label: 'Memory' },
-  { key: '6', to: '/settings', label: 'Settings' },
-  { key: '7', to: '/guide', label: 'Guide' },
 ];
-const MODE = { wake: 'Wake word', always: 'Always on', ptt: 'Push to talk' };
+const MODES = [
+  { id: 'wake', label: 'Wake word', hint: 'Say "Hey Seven" first' },
+  { id: 'always', label: 'Always on', hint: 'Acts on everything it hears' },
+  { id: 'ptt', label: 'Push to talk', hint: 'Hold Shift while you speak' },
+];
+
+// Why the ears ignored something, in two or three words (ears/core.py, ears/stream.py, voice_loop.py).
+const WHY = [
+  [/no wake word/, 'no "Hey Seven"'],
+  [/own voice/, 'my own voice'],
+  [/too short/, 'short noise'],
+  [/no clear speech|transcription failed|empty/, 'noise'],
+  [/music|sung|not English/, 'music'],
+  [/mishearing|repetition|incoherent/, 'unclear'],
+];
+const why = reason => (WHY.find(([re]) => re.test(reason || '')) || [null, 'not a request'])[1];
+const hhmm = ms => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
 
 const clock = d => d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 const size = gb => (gb == null ? '–' : gb < 1 ? `${Math.round(gb * 1024)} MB` : `${gb.toFixed(1)} GB`);
@@ -134,6 +153,101 @@ function Heaviest({ usage }) {
   );
 }
 
+/** How Seven listens, changed right here; the voice loop picks it up on its next pass (about half a second). */
+function ListenMode({ mode }) {
+  const [picked, setPicked] = useState(null);
+  const current = picked || mode;
+  useEffect(() => {
+    if (picked && picked === mode) setPicked(null);
+  }, [picked, mode]);
+  const choose = async id => {
+    if (id === current) return;
+    setPicked(id);
+    try {
+      const fresh = (await api.get('/config')).data?.voice || {};
+      await api.put('/config', { updates: { voice: { ...fresh, listen_mode: id } } });
+    } catch {
+      setPicked(null);
+    }
+  };
+  return (
+    <div role="radiogroup" aria-label="How Seven listens" className="inline-flex rounded-full border border-s-border bg-s-surface/70 p-0.5">
+      {MODES.map(m => (
+        <button key={m.id} role="radio" aria-checked={current === m.id} onClick={() => choose(m.id)} title={m.hint}
+                className={cx('h-6 rounded-full px-3 text-[11.5px] transition-colors duration-200',
+                              current === m.id ? 'bg-s-card-h text-s-text' : 'text-s-text-3 hover:text-s-text-2')}>
+          {m.label}
+        </button>))}
+    </div>
+  );
+}
+
+// How visible each of the last seven lines is: the newest at 77%, then evenly down to 7% for the oldest.
+const FADE = Array.from({ length: 7 }, (_, i) => +(0.77 - i * (0.7 / 6)).toFixed(3));
+
+/** Say something and see exactly what Seven heard (the same test as Settings, Voice, Test). Nothing is acted on. */
+function MicTest({ mode }) {
+  const [state, setState] = useState({ phase: 'idle', text: '' });
+  const timer = useRef(null);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  const runRef = useRef(null);
+  useEffect(() => {
+    const go = () => runRef.current?.();
+    window.addEventListener('seven:test-mic', go);
+    return () => window.removeEventListener('seven:test-mic', go);
+  }, []);
+  const run = async () => {
+    if (state.phase === 'listening') return;
+    setState({ phase: 'listening', text: mode === 'ptt' ? 'Hold Shift and speak…' : 'Say something…' });
+    let text = 'No answer. Is Seven running?';
+    let ok = false;
+    try {
+      const { data } = await api.post('/voice/test', {}, { timeout: 15000 });
+      ok = !!data.heard;
+      text = data.heard ? `Heard “${data.heard}”`
+        : /Nothing was said/.test(data.ignored || '') ? 'Heard nothing. Check your microphone'
+        : `Ignored · ${why(data.ignored)}`;
+    } catch (e) {
+      text = e?.response?.data?.detail || text;
+    }
+    setState({ phase: ok ? 'ok' : 'fail', text });
+    timer.current = setTimeout(() => setState({ phase: 'idle', text: '' }), 6000);
+  };
+  runRef.current = run;
+  const busy = state.phase === 'listening';
+  return (
+    <button onClick={run} disabled={busy} title="Say something and see what Seven hears"
+            className={cx('flex h-6 max-w-[260px] items-center gap-1.5 rounded-full px-2.5 text-[11.5px] transition-colors duration-200',
+                          state.phase === 'ok' ? 'text-s-accent-h' : state.phase === 'fail' ? 'text-s-yellow' : busy ? 'text-s-text' : 'text-s-text-3 hover:text-s-text')}>
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden className={busy ? 'animate-pulse' : ''}>
+        <rect x="9" y="2" width="6" height="12" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v4" />
+      </svg>
+      <span className="truncate">{state.phase === 'idle' ? 'Test mic' : state.text}</span>
+    </button>
+  );
+}
+
+/** The last seven things Seven heard or ignored, newest first, one short line each, under the clock. */
+function VoiceLog({ entries }) {
+  const rows = [...entries].reverse().slice(0, FADE.length);
+  if (!rows.length) return null;
+  return (
+    <ul aria-label="What Seven heard" className="pointer-events-none absolute right-6 top-[60px] z-10 w-[300px] space-y-0.5">
+      {rows.map((e, i) => (
+        <li key={e.id} className="page-in flex items-center justify-end gap-2 text-[11.5px] leading-5 text-s-text transition-opacity duration-500"
+            style={{ opacity: FADE[i] }}>
+          <span className="min-w-0 truncate">
+            {e.kind === 'ignored'
+              ? <>Ignored{e.text ? ` “${e.text}”` : ''} · {why(e.reason)}</>
+              : <>Heard “{e.kind === 'wake' ? 'Hey Seven' : e.text}”</>}
+          </span>
+          <span className={cx('h-1.5 w-1.5 shrink-0 rounded-full', e.kind === 'ignored' ? 'bg-s-text-4' : 'bg-s-accent')} />
+          <span className="w-9 shrink-0 text-right tabular-nums">{hhmm(e.at)}</span>
+        </li>))}
+    </ul>
+  );
+}
+
 export default function Landing() {
   const navigate = useNavigate();
   const st = useStatus();
@@ -155,13 +269,14 @@ export default function Landing() {
     return () => { clearTimeout(first); clearInterval(slow); };
   }, [fetchTasks]);
 
-  // Keys: 1 to 7 open pages, "/" opens Chat to type to Seven.
+  // Keys: 1 to 5 open the daily pages, "," Settings, "/" Chat to type to Seven. Ctrl+K is the command palette.
   useEffect(() => {
     const onKey = e => {
       if (e.ctrlKey || e.metaKey || e.altKey || e.target.closest?.('input, textarea, select')) return;
       const link = NAV.find(n => n.key === e.key);
       if (link) { e.preventDefault(); navigate(link.to); }
       else if (e.key === '/') { e.preventDefault(); navigate('/console'); }
+      else if (e.key === ',') { e.preventDefault(); navigate('/settings'); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -197,20 +312,27 @@ export default function Landing() {
       <header className="relative z-10 flex h-12 shrink-0 items-center justify-between px-6">
         <Wordmark size={15} />
         <div className="flex items-center gap-5 text-[12px] text-s-text-3">
+          {st.connected && <ListenMode mode={mode} />}
+          {st.connected && <MicTest mode={mode} />}
           <span className="flex items-center gap-2">
             <span className={cx('h-1.5 w-1.5 rounded-full', badge[1])} />
             <span className="text-s-text-2">{badge[0]}</span>
-            {st.connected && <span className="hidden text-s-text-4 sm:inline">{MODE[mode]}</span>}
           </span>
           <span className="tabular-nums text-s-text-2">{clock(now)}</span>
+          <button onClick={() => navigate('/settings')} aria-label="Settings" title="Settings  ,"
+                  className="-mr-1.5 flex h-8 w-8 items-center justify-center rounded-lg text-s-text-3 transition-colors duration-200 hover:bg-s-surface hover:text-s-text">
+            <GearSix size={17} />
+          </button>
         </div>
       </header>
+      <VoiceLog entries={st.voiceLog} />
 
-      <main className="relative z-10 flex min-h-0 flex-1 flex-col items-center justify-center px-6">
+      <main className="relative z-10 flex min-h-0 flex-1 flex-col items-center justify-center overflow-hidden px-6">
+        <AttentionStrip />
         <h1 className="text-center text-[26px] font-light tracking-[-0.01em] text-s-text">
           {hello(now.getHours())}{name ? `, ${name}` : ''}
         </h1>
-        <p className="mt-1 text-[13px] text-s-text-4">{now.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}</p>
+        <p className="mt-1 text-[13px] text-s-text-4 [@media(max-height:780px)]:hidden">{now.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}</p>
 
         <div className="relative -my-6 mt-0 transition-transform duration-100 ease-out" style={{ transform: `scale(${breathe})` }}>
           <OrbGL state={state} size={232} />
@@ -247,13 +369,21 @@ export default function Landing() {
         </div>
       </section>
 
-      <footer className="relative z-10 flex shrink-0 flex-wrap items-center justify-center gap-1 border-t border-s-border/60 px-5 py-2">
-        {NAV.map(n => (
-          <button key={n.key} onClick={() => navigate(n.to)}
-                  className="group/n flex h-7 items-center gap-2 rounded-md px-2.5 text-[12px] text-s-text-3 transition-colors duration-200 hover:bg-s-surface/80 hover:text-s-text">
-            <kbd className="rounded border border-s-border bg-s-card px-1 text-[10.5px] text-s-text-4 transition-colors group-hover/n:text-s-accent-h">{n.key}</kbd>
-            {n.label}
-          </button>))}
+      <footer className="relative z-10 flex shrink-0 items-center justify-center border-t border-s-border/50 px-5 py-1.5">
+        <nav aria-label="Pages" className="flex items-center gap-0.5">
+          {NAV.map(n => (
+            <button key={n.key} onClick={() => navigate(n.to)}
+                    className="group/n flex h-7 items-center gap-1.5 rounded-md px-2.5 text-[12px] text-s-text-3 transition-colors duration-200 hover:bg-s-surface/80 hover:text-s-text">
+              {n.label}
+              <kbd className="font-sans text-[10.5px] text-s-text-4 opacity-0 transition-opacity duration-200 group-hover/n:opacity-100 group-focus-visible/n:opacity-100">{n.key}</kbd>
+            </button>))}
+        </nav>
+        <button onClick={() => window.dispatchEvent(new Event('seven:palette'))} title="Search pages and actions"
+                className="absolute right-5 flex h-7 items-center gap-2 rounded-md px-2 text-[12px] text-s-text-4 transition-colors duration-200 hover:bg-s-surface/80 hover:text-s-text-2">
+          <MagnifyingGlass size={13} aria-hidden />
+          Search
+          <kbd className="rounded border border-s-border px-1 font-sans text-[10.5px]">Ctrl K</kbd>
+        </button>
       </footer>
     </div>
   );

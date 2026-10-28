@@ -48,20 +48,41 @@ const useStatus = create((set, get) => ({
     }
   },
 
-  setLive: (data) => set({
-    listening:  data.listening  ?? false,
-    thinking:   data.thinking   ?? false,
-    speaking:   data.speaking   ?? false,
-    userText:   data.user_text  ?? '',
-    sevenText:  data.seven_text ?? '',
-    statusText: data.status_text ?? '',
-    micLevel:   data.mic_level ?? 0,
-    voiceState: data.voice_state ?? 'idle',
-    ignored:    data.voice_ignored ?? null,
-    listenMode: data.listen_mode ?? 'wake',
-    followUp:   data.follow_up_open ?? false,
-    paused:     data.paused ?? false,
-    voiceFiles: data.voice_files ?? null,
+  // What Seven heard and what it ignored, kept here (not in a page) so the log keeps filling while you're elsewhere.
+  voiceLog: [],
+  seenTurn: 0,
+  seenIgnored: 0,
+
+  setLive: (data) => set(s => {
+    const log = [];
+    const turn = data.voice_turn || 0;
+    if (turn && turn !== s.seenTurn && data.user_text) {
+      log.push({ id: `h${turn}`, at: turn * 1000, kind: 'heard', text: data.user_text });
+    }
+    const ig = data.voice_ignored;
+    if (ig?.at && ig.at !== s.seenIgnored) {
+      log.push(/wake word: listening/.test(ig.reason || '')
+        ? { id: `i${ig.at}`, at: ig.at * 1000, kind: 'wake', text: 'Hey Seven' }
+        : { id: `i${ig.at}`, at: ig.at * 1000, kind: 'ignored', text: ig.text || '', reason: ig.reason || '' });
+    }
+    return {
+      listening:  data.listening  ?? false,
+      thinking:   data.thinking   ?? false,
+      speaking:   data.speaking   ?? false,
+      userText:   data.user_text  ?? '',
+      sevenText:  data.seven_text ?? '',
+      statusText: data.status_text ?? '',
+      micLevel:   data.mic_level ?? 0,
+      voiceState: data.voice_state ?? 'idle',
+      ignored:    data.voice_ignored ?? null,
+      listenMode: data.listen_mode ?? 'wake',
+      followUp:   data.follow_up_open ?? false,
+      paused:     data.paused ?? false,
+      voiceFiles: data.voice_files ?? null,
+      seenTurn:    turn || s.seenTurn,
+      seenIgnored: ig?.at || s.seenIgnored,
+      voiceLog: log.length ? [...s.voiceLog, ...log].sort((x, y) => x.at - y.at).slice(-40) : s.voiceLog,
+    };
   }),
 
   label: () => {

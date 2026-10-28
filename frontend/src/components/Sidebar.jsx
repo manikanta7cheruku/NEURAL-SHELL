@@ -21,7 +21,7 @@ import { cx } from '../lib/cx';
 
 const SECTIONS = [
   { label: null, items: [
-    { to: '/dashboard', label: 'Home', icon: House },
+    { to: '/dashboard', label: 'Overview', icon: House },
     { to: '/console', label: 'Chat', icon: ChatCircleText },
   ] },
   { label: 'Work', items: [
