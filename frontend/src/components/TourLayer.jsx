@@ -1,22 +1,24 @@
 /**
  * TourLayer: while Seven gives its first-run tour, the thing it is talking about is brightened and the rest of the
  * screen dims (a spotlight). It follows the `tour` step in the status feed (main_modules/startup/tour.py): each
- * step names a data-tour target on the home screen. A Skip button stops the talking and goes straight to the card.
+ * step names a data-tour target on the home screen, one for each link along the bottom. A Skip button stops the
+ * talking and goes straight to the card. (The steps card, feedback and about belong to WelcomeCard.)
  */
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import api from '../api';
 import useStatus from '../stores/useStatus';
 
-const TARGET = { intro: 'orb', listen: 'listen', mic: 'mic', pages: 'footer' };
-const STEPS = ['audio', 'intro', 'listen', 'mic', 'pages', 'outro'];
+const NAV_STEPS = ['nav-1', 'nav-2', 'nav-3', 'nav-4', 'nav-5'];
+const TARGET = { intro: 'orb', listen: 'listen', mic: 'mic', pages: 'footer', search: 'search', 'welcome-link': 'welcome-link' };
+const STEPS = ['audio', 'intro', 'listen', 'mic', 'pages', ...NAV_STEPS, 'search', 'welcome-link', 'outro'];
 const PAD = 12;
 
 export default function TourLayer() {
   const step = useStatus(s => s.tour?.step);
   const navigate = useNavigate();
   const { pathname } = useLocation();
-  const target = TARGET[step];
+  const target = TARGET[step] || (NAV_STEPS.includes(step) ? step : undefined);
   const [rect, setRect] = useState(null);
 
   useEffect(() => {

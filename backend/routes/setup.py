@@ -772,12 +772,19 @@ def check_environment():
     except Exception:
         voice_ready = False
 
+    try:
+        from backend.bootstrap import speech_model_ready
+        speech_ready = speech_model_ready()
+    except Exception:
+        speech_ready = True                      # cannot tell: never send someone back through setup for it
+
     return {
         "packages_installed": packages_ok,
         "ollama_installed":   ollama_installed,
         "ollama_running":     ollama_running,
         "voice_ready":        voice_ready,
-        "needs_setup":        not (packages_ok and ollama_installed and voice_ready)
+        "speech_ready":       speech_ready,
+        "needs_setup":        not (packages_ok and ollama_installed and voice_ready and speech_ready)
     }
 
 

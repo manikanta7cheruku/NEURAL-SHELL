@@ -29,6 +29,13 @@ def _mic_error() -> str:
     return getattr(getattr(mod, "STREAM", None), "last_error", "") if mod else ""
 
 
+def _speech() -> dict:
+    """{state, progress, detail} of the speech recognition model, once the ears have been loaded."""
+    import sys
+    mod = sys.modules.get("ears.core")
+    return mod.models_status() if mod and hasattr(mod, "models_status") else {}
+
+
 def _voice() -> dict:
     """{ready, status, progress} of the natural voice."""
     from mouth import voices
@@ -61,7 +68,8 @@ def _setup_done() -> bool:
         return False
 
 
-def collect(mic_error=_mic_error, voice=_voice, ollama_up=_ollama_up, uptime=_uptime, setup_done=_setup_done) -> list:
+def collect(mic_error=_mic_error, voice=_voice, ollama_up=_ollama_up, uptime=_uptime, setup_done=_setup_done,
+            speech=_speech) -> list:
     """The problems, most important first. The probes are parameters so tests can supply them."""
     if not setup_done():
         return []
@@ -71,6 +79,18 @@ def collect(mic_error=_mic_error, voice=_voice, ollama_up=_ollama_up, uptime=_up
             out.append({"id": "mic", "level": "error",
                         "message": "Seven can't use your microphone. It may be unplugged or in use by another app.",
                         "action": {"label": "Choose microphone", "to": "/settings?section=voice"}})
+    except Exception:
+        pass
+    try:
+        sp = speech() or {}
+        if sp.get("state") in ("downloading", "loading") and sp.get("progress", 0) < 100:
+            pct = int(sp.get("progress") or 0)
+            out.append({"id": "speech-downloading", "level": "info",
+                        "message": f"Seven is getting its speech recognition ready{f', {pct}%' if pct > 1 else ''}. "
+                                   "It can't hear you until then; typing works."})
+        elif sp.get("state") == "error":
+            out.append({"id": "speech-failed", "level": "warn",
+                        "message": "Speech recognition couldn't start, so Seven can't hear you. Check your internet connection and restart Seven."})
     except Exception:
         pass
     try:

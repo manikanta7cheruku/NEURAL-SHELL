@@ -1279,7 +1279,16 @@ def ensure_voice_model():
 
 
 def _speech_models():
-    """The Whisper models the ears load on this PC (ears/core.py): medium.en on a GPU, else base.en + small.en."""
+    """The Whisper models the ears load on this PC (ears/core.py): the one chosen in settings, else medium.en on a
+    GPU, else base.en + small.en."""
+    sizes = {"base.en": 150, "small.en": 480, "medium.en": 1500}
+    try:
+        import config as _cfg
+        chosen = (_cfg.KEY.get("brain", {}).get("whisper_model") or "").strip()
+        if chosen:
+            return [chosen], sizes.get(chosen, 1500)
+    except Exception:
+        pass
     try:
         import ctranslate2
         if ctranslate2.get_cuda_device_count() > 0:
@@ -1287,6 +1296,21 @@ def _speech_models():
     except Exception:
         pass
     return ["base.en", "small.en"], 620
+
+
+def speech_model_ready() -> bool:
+    """Are the speech models already on this PC? If not, the setup wizard downloads them (with progress) instead of
+    Seven doing it silently the first time it starts."""
+    hub = os.path.join(os.path.expanduser("~"), ".cache", "huggingface", "hub")
+    names, _ = _speech_models()
+    for n in names:
+        try:
+            snaps = os.path.join(hub, f"models--Systran--faster-whisper-{n}", "snapshots")
+            if not any(os.path.isfile(os.path.join(snaps, d, "model.bin")) for d in os.listdir(snaps)):
+                return False
+        except OSError:
+            return False
+    return True
 
 
 def ensure_speech_model():

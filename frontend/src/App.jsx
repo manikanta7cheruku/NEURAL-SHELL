@@ -12,15 +12,35 @@ import WelcomeCard from './components/WelcomeCard';
 import Mark, { Wordmark } from './components/Mark';
 
 // The screen while Seven starts: the mark, the name, what it is doing, and a hairline that keeps moving.
+// What Seven does while it opens, in the order it does it. The backend reports which one it is on (/api/ready).
+const BOOT_STEPS = ['Starting Seven', "Loading Seven's brain", 'Starting the ears', 'Warming up the voice'];
+const BOOT_SINCE = Date.now();
+
 function Splash({ status }) {
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setElapsed(Math.round((Date.now() - BOOT_SINCE) / 1000)), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const at = Math.max(0, BOOT_STEPS.indexOf(status));
   return (
     <div className="flex h-screen w-screen flex-col items-center justify-center bg-s-bg" style={{ animation: 'sevenRise .5s cubic-bezier(0.32,0.72,0,1)' }}>
       <Mark size={44} />
       <Wordmark size={22} className="mt-4" />
-      <div className="mt-2 text-[12px] text-s-text-3">{status}</div>
+      <div className="mt-2 text-[12px] text-s-text-3" aria-live="polite">{BOOT_STEPS.includes(status) ? status : (status || 'Starting Seven')}</div>
       <div className="relative mt-6 h-px w-40 overflow-hidden rounded-full bg-s-border">
         <span className="absolute inset-y-0 w-1/3 rounded-full bg-s-accent/80" style={{ animation: 'sevenScan 1.4s cubic-bezier(0.45,0,0.55,1) infinite' }} />
       </div>
+      <ol className="mt-6 flex items-center gap-3 text-[10.5px] text-s-text-4" aria-label="Start-up steps">
+        {BOOT_STEPS.map((label, i) => (
+          <li key={label} className="flex items-center gap-1.5">
+            <span className={`h-1.5 w-1.5 rounded-full transition-colors duration-300 ${i < at ? 'bg-s-accent' : i === at ? 'bg-s-accent-h animate-pulse' : 'bg-s-border'}`} />
+            <span className={i === at ? 'text-s-text-2' : ''}>{label.replace("Loading Seven's brain", 'Brain').replace('Starting the ears', 'Ears').replace('Warming up the voice', 'Voice').replace('Starting Seven', 'Engine')}</span>
+          </li>))}
+      </ol>
+      <p className="mt-5 h-4 text-[11px] text-s-text-4">
+        {elapsed > 45 ? 'Still opening. The first start after installing takes longer, and later starts are much quicker.' : ''}
+      </p>
     </div>
   );
 }
@@ -129,7 +149,7 @@ export default function App() {
   const [backendChecking, setBackendChecking] = useState(true);
   const [retryCount, setRetryCount] = useState(0);
   const [sevenReady, setSevenReady] = useState(false);
-  const [readyStage, setReadyStage] = useState('Getting Seven ready');
+  const [readyStage, setReadyStage] = useState("Loading Seven's brain");
 
   const checkRef = useRef(null);
 
@@ -255,40 +275,7 @@ export default function App() {
 
   // ── Render Case 1: Backend Connecting Screen ──
   if (backendChecking) {
-    return (
-      <div className="h-screen w-screen bg-s-bg flex flex-col items-center justify-center gap-6">
-        <div className="flex flex-col items-center gap-4">
-          <div className="relative flex h-14 w-14 items-center justify-center">
-            <div className="absolute inset-0 rounded-full bg-s-accent/20 blur-xl animate-pulse" />
-            <div className="h-3 w-3 rounded-full bg-s-accent-h shadow-[0_0_18px_var(--color-s-accent)]" />
-          </div>
-          <div className="text-center">
-            <div className="font-display text-[17px] tracking-[0.42em] text-s-text">SEVEN</div>
-            <div className="mt-2 font-mono text-[10.5px] tracking-[0.14em] text-s-text-4">THE LAYER BETWEEN YOU AND YOUR COMPUTER</div>
-          </div>
-        </div>
-
-        <div className="w-56 h-1 bg-white/5 overflow-hidden rounded-full">
-          <div className="h-full bg-s-accent rounded-full animate-pulse"
-               style={{ width: `${Math.min(95, retryCount * 2)}%`, transition: 'width 0.5s ease' }} />
-        </div>
-
-        <div className="text-center space-y-1">
-          <div className="text-[11px] text-white/50 font-light">
-            {retryCount < 5
-              ? 'Starting backend services...'
-              : retryCount < 15
-              ? 'Loading AI modules... This may take a moment on first launch.'
-              : retryCount < 30
-              ? 'Still initializing... Please wait.'
-              : 'Taking longer than expected...'}
-          </div>
-          <div className="text-[9px] text-white/25 font-mono">
-            Attempt {retryCount}
-          </div>
-        </div>
-      </div>
-    );
+    return <Splash status="Starting Seven" />;
   }
 
   // ── Render Case 2: Backend Unreachable Screen ──
