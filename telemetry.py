@@ -425,47 +425,37 @@ def get_active_minutes():
 
 
 def _check_server_messages():
-    """Poll the Render server for admin messages and store in API state."""
+    """Ask the server for announcements and keep the one to show in API state (a critical one first, else the newest)."""
     try:
         import server_sync
         import config as _cfg
+        import requests as _req
 
         tier = _cfg.KEY.get("license", {}).get("tier", "free")
-        result = server_sync._post("/api/messages/latest", {
-            "tier": tier,
-            "since": "2025-01-01"
-        })
-
-        # The endpoint returns a list via GET, but _post sends POST.
-        # Use direct GET instead.
-        import requests as _req
         r = _req.get(
             f"{server_sync.SERVER_URL}/api/messages/latest",
             params={"tier": tier, "since": "2025-01-01"},
-            timeout=5
+            timeout=5,
         )
-        if r.status_code == 200:
-            messages = r.json()
-            if messages and len(messages) > 0:
-                # Store the most recent message in API state
-                latest = messages[0]
-                try:
-                    from backend.api_server import set_state
-                    set_state("admin_message", {
-                        "id": latest.get("id"),
-                        "title": latest.get("title", ""),
-                        "body": latest.get("body", ""),
-                        "priority": latest.get("priority", "info")
-                    })
-                    print(f"[TELEMETRY] Admin message received: {latest.get('title')}")
-                except Exception:
-                    pass
-            else:
-                try:
-                    from backend.api_server import set_state
-                    set_state("admin_message", None)
-                except Exception:
-                    pass
+        if r.status_code != 200:
+            return
+        messages = r.json() or []
+        try:
+            from backend.api_server import set_state
+        except Exception:
+            return
+        if not messages:
+            set_state("admin_message", None)
+            return
+        shown = next((m for m in messages if m.get("priority") == "critical"), messages[0])
+        set_state("admin_message", {
+            "id": shown.get("id"),
+            "title": shown.get("title", ""),
+            "body": shown.get("body", ""),
+            "priority": shown.get("priority", "info"),
+            "created_at": shown.get("created_at", ""),
+        })
+        print(f"[TELEMETRY] Admin message received: {shown.get('title')}")
     except Exception as e:
         print(f"[TELEMETRY] Message check failed (ok): {e}")
 
@@ -716,8 +706,8 @@ def _start_telemetry_impl():
 
                 send_ping()
 
-                # Check for admin messages every 10 ticks (10 minutes)
-                if tick_count % 10 == 0:
+                # Announcements: after the first minute (so a new message shows soon after opening Seven), then every 10 minutes
+                if tick_count == 1 or tick_count % 10 == 0:
                     _check_server_messages()
 
             except Exception as e:

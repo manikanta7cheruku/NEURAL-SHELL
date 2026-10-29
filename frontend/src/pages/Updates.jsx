@@ -5,7 +5,7 @@
 /* SEVEN_DOC {"purpose": "Check for a new version of Seven, see what changed, download it and install it",
               "keywords": ["update", "upgrade", "new version", "changelog", "install", "release notes"]} */
 import { useEffect } from 'react';
-import { RefreshCw, Download, Check, ArrowRight, ShieldAlert, Loader2, RotateCw } from 'lucide-react';
+import { RefreshCw, Download, Check, ArrowRight, ShieldAlert, Loader2, RotateCw, WifiOff } from 'lucide-react';
 import useUpdate from '../stores/useUpdate';
 import useConfig from '../stores/useConfig';
 import { PageShell, Section, Row, Button, Toggle, Badge } from '../components/ui';
@@ -13,8 +13,15 @@ import { cx } from '../lib/cx';
 import { relativeTime } from '../lib/format';
 import { saveConfig } from './settings/save';
 
+const NOTE_GROUPS = [
+  { key: 'new', label: 'New', tone: 'text-s-green' },
+  { key: 'improved', label: 'Improved', tone: 'text-s-accent-h' },
+  { key: 'fixed', label: 'Fixed', tone: 'text-s-yellow' },
+];
+
 function StatusIcon({ state }) {
   const base = 'flex h-10 w-10 shrink-0 items-center justify-center rounded-full';
+  if (state === 'offline') return <span className={cx(base, 'bg-s-card-h text-s-text-3')}><WifiOff size={17} /></span>;
   if (state === 'checking') return <span className={cx(base, 'bg-s-card-h text-s-text-2')}><Loader2 size={18} className="animate-spin" /></span>;
   if (state === 'current') return <span className={cx(base, 'bg-s-green/12 text-s-green')}><Check size={18} /></span>;
   if (state === 'ready') return <span className={cx(base, 'bg-s-accent/12 text-s-accent-h')}><RotateCw size={17} /></span>;
@@ -22,11 +29,13 @@ function StatusIcon({ state }) {
 }
 
 export default function Updates() {
-  const { updateAvailable, checking, downloading, downloadProgress, downloadPath, error, info, currentVersion, lastChecked,
+  const { updateAvailable, checking, downloading, downloadProgress, downloadPath, error, info, currentVersion, lastChecked, checkFailed,
           fetchStatus, checkNow, startDownload, installUpdate } = useUpdate();
   const { config } = useConfig();
   const ready = !!downloadPath && downloadProgress === 100;
-  const state = ready ? 'ready' : downloading ? 'downloading' : updateAvailable ? 'available' : checking ? 'checking' : 'current';
+  const state = ready ? 'ready' : downloading ? 'downloading' : updateAvailable ? 'available' : checking ? 'checking' : checkFailed ? 'offline' : 'current';
+  const groups = NOTE_GROUPS.filter(g => info?.notes?.[g.key]?.length);
+  const hasNotes = groups.length > 0 || (info?.changelog?.length > 0) || !!info?.summary;
 
   useEffect(() => { fetchStatus(); }, [fetchStatus]);
   useEffect(() => {
@@ -37,6 +46,7 @@ export default function Updates() {
 
   const title = {
     current: "You're up to date",
+    offline: "Couldn't check for updates",
     checking: 'Checking for updates',
     available: `Seven ${info?.version} is available`,
     downloading: `Downloading Seven ${info?.version}`,
@@ -44,6 +54,7 @@ export default function Updates() {
   }[state];
   const subtitle = {
     current: `Seven ${currentVersion || ''} is the latest version.${lastChecked ? ` Checked ${relativeTime(lastChecked)}.` : ''}`,
+    offline: 'Seven could not reach the update service. Check your internet connection and try again.',
     checking: 'This takes a few seconds.',
     available: `You have ${currentVersion}.${info?.size_mb ? ` Download size ${info.size_mb} MB.` : ''}`,
     downloading: 'Seven keeps working while this downloads.',
@@ -57,8 +68,8 @@ export default function Updates() {
           <div className="flex items-start gap-3 rounded-lg border border-s-red/30 bg-s-red/5 px-4 py-3">
             <ShieldAlert size={16} className="mt-0.5 shrink-0 text-s-red" />
             <div className="text-[12.5px]">
-              <p className="font-medium text-s-text">Security update</p>
-              <p className="text-s-text-2">This version fixes a security problem. Install it as soon as you can.</p>
+              <p className="font-medium text-s-text">Important update</p>
+              <p className="text-s-text-2">This version fixes something that matters. Install it as soon as you can.</p>
             </div>
           </div>
         )}
@@ -70,7 +81,7 @@ export default function Updates() {
               <h2 className="text-[14px] font-semibold text-s-text">{title}</h2>
               <p className="mt-0.5 text-[12px] text-s-text-3">{subtitle}</p>
             </div>
-            {state === 'current' && <Button icon={RefreshCw} onClick={checkNow}>Check now</Button>}
+            {(state === 'current' || state === 'offline') && <Button icon={RefreshCw} onClick={checkNow}>{state === 'offline' ? 'Try again' : 'Check now'}</Button>}
             {state === 'available' && <Button variant="primary" icon={Download} onClick={startDownload}>Download</Button>}
             {state === 'ready' && <Button variant="primary" icon={RotateCw} onClick={installUpdate}>Restart and install</Button>}
           </div>
@@ -93,15 +104,30 @@ export default function Updates() {
           {error && <p className="mt-3 text-[12px] text-s-red">{error}</p>}
         </section>
 
-        {info?.changelog?.length > 0 && updateAvailable && (
+        {hasNotes && updateAvailable && (
           <Section title={`What's new in ${info.version}`}
                    description={info.published_at ? `Released ${new Date(info.published_at).toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' })}` : undefined}>
-            <ul className="space-y-2 px-4 py-3">
-              {info.changelog.map((line, i) => (
-                <li key={i} className="flex gap-2.5 text-[12.5px] leading-relaxed text-s-text-2">
-                  <span className="mt-[7px] h-1 w-1 shrink-0 rounded-full bg-s-text-4" />{line}
-                </li>))}
-            </ul>
+            <div className="space-y-4 px-4 py-3">
+              {info.summary && <p className="text-[13px] leading-relaxed text-s-text">{info.summary}</p>}
+              {groups.length > 0 ? groups.map(g => (
+                <div key={g.key}>
+                  <h3 className={cx('text-[11px] font-semibold uppercase tracking-wide', g.tone)}>{g.label}</h3>
+                  <ul className="mt-1.5 space-y-1.5">
+                    {info.notes[g.key].map((line, i) => (
+                      <li key={i} className="flex gap-2.5 text-[12.5px] leading-relaxed text-s-text-2">
+                        <span className="mt-[7px] h-1 w-1 shrink-0 rounded-full bg-s-text-4" />{line}
+                      </li>))}
+                  </ul>
+                </div>
+              )) : (
+                <ul className="space-y-1.5">
+                  {(info.changelog || []).map((line, i) => (
+                    <li key={i} className="flex gap-2.5 text-[12.5px] leading-relaxed text-s-text-2">
+                      <span className="mt-[7px] h-1 w-1 shrink-0 rounded-full bg-s-text-4" />{line}
+                    </li>))}
+                </ul>
+              )}
+            </div>
           </Section>
         )}
 

@@ -1,18 +1,28 @@
 import { useEffect, useState } from 'react';
 import api from '../api';
 
+// A closed announcement stays closed after Seven restarts. An edited one has a new `created_at`, so it shows again.
+const KEY = 'seven.dismissedMessages';
+const keyOf = m => `${m.id}:${m.created_at || ''}`;
+const loadDismissed = () => {
+  try { return new Set(JSON.parse(localStorage.getItem(KEY) || '[]')); } catch { return new Set(); }
+};
+const saveDismissed = set => {
+  try { localStorage.setItem(KEY, JSON.stringify([...set].slice(-50))); } catch { /* storage unavailable */ }
+};
+
 export default function AdminMessageBanner() {
   const [message, setMessage] = useState(null);
-  const [dismissed, setDismissed] = useState(new Set());
+  const [dismissed, setDismissed] = useState(loadDismissed);
 
   useEffect(() => {
     const check = async () => {
       try {
         const r = await api.get('/status');
         const msg = r.data?.admin_message;
-        if (msg && msg.id && !dismissed.has(msg.id)) {
+        if (msg && msg.id && (msg.priority === 'critical' || !dismissed.has(keyOf(msg)))) {
           setMessage(msg);
-        } else if (!msg) {
+        } else {
           setMessage(null);
         }
       } catch {}
@@ -57,9 +67,12 @@ export default function AdminMessageBanner() {
       {message.priority !== 'critical' && (
         <button
           onClick={() => {
-            setDismissed(prev => new Set([...prev, message.id]));
+            const next = new Set([...dismissed, keyOf(message)]);
+            saveDismissed(next);
+            setDismissed(next);
             setMessage(null);
           }}
+          aria-label="Dismiss message"
           className="opacity-40 hover:opacity-80 transition-opacity p-1 flex-shrink-0 ml-3"
         >
           <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
