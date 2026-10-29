@@ -22,7 +22,7 @@
 
   "groups": [
     {
-      "id": "apps", "title": "Apps and windows", "page": "/console", "pageLabel": "Console",
+      "id": "apps", "title": "Apps and windows", "page": "/console", "pageLabel": "Chat",
       "summary": "Seven has hands. It opens and closes apps, folders and sites, and moves windows around your screens.",
       "examples": [
         { "say": "Open calculator", "expect": "OPEN" },
@@ -38,7 +38,7 @@
       ]
     },
     {
-      "id": "system", "title": "System controls", "page": "/console", "pageLabel": "Console",
+      "id": "system", "title": "System controls", "page": "/console", "pageLabel": "Chat",
       "summary": "Volume, brightness, Wi-Fi, Bluetooth, dark mode, night light, do not disturb, airplane mode, media keys and battery.",
       "examples": [
         { "say": "Mute", "expect": "SYS" },
@@ -61,7 +61,7 @@
       ]
     },
     {
-      "id": "files", "title": "Find files", "page": "/console", "pageLabel": "Console",
+      "id": "files", "title": "Find files", "page": "/console", "pageLabel": "Chat",
       "summary": "Seven indexes your drives and finds files by name or by what is inside documents, then opens the best match.",
       "examples": [
         { "say": "Find my resume", "live": true },
