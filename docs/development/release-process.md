@@ -46,14 +46,19 @@ feature branch  ->  pull request  ->  CI green  ->  merge to main  ->  bump vers
 
 ## How users receive it
 
-The updater (`backend/updater.py`) checks 15 seconds after launch and then every 2 hours, in this order:
+The updater (`backend/updater.py`) checks 15 seconds after launch and then every 2 hours (unless the user turned
+automatic checking off; "Check now" always works), in this order:
 
 1. `%APPDATA%\SEVEN\update_override.json` (testing and emergencies).
-2. The Seven server (`/api/updates/latest`), which can target a plan tier and stage rollouts. Published from the admin
-   dashboard.
-3. GitHub Releases in `seven-releases` (any asset whose name ends in `.exe` and contains "Setup").
+2. The Seven server (`/api/updates/latest`), which can target a plan tier, stage rollouts, pause and withdraw. Published
+   from the admin dashboard with a summary, New / Improved / Fixed notes and a SHA-256 checksum. A sleeping server is
+   retried for about a minute and a half.
+3. GitHub Releases in `seven-releases` (any asset whose name ends in `.exe` and contains "Setup"), **only when the server
+   cannot be reached at all**. A server answer of "no update" is trusted. The release description is read for a summary,
+   `### New` / `### Improved` / `### Fixed` bullets, a `SHA256:` line and a `[critical]` marker.
 
-The user sees it on the Updates page. "Download" saves the installer to `%TEMP%`. "Restart and install" writes a
+The user sees a strip at the top of every screen and the Updates page with the notes. "Download" saves the installer
+to `%TEMP%`; Seven checks it (a real installer, and the published checksum) and refuses anything that does not match. "Restart and install" writes a
 small batch script that waits for Seven to exit, runs the installer with
 `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-`, relaunches `SEVEN.exe` and deletes itself. Everything under
 `%APPDATA%\SEVEN` (settings, memory, tasks, licence) is preserved.
