@@ -6,7 +6,7 @@ The backend listens on `http://127.0.0.1:7777` only (never on the network). The 
 the overlay and the Chrome extension are its only clients. There is no authentication because nothing outside
 this computer can reach it.
 
-214 endpoints in 29 files.
+215 endpoints in 29 files.
 
 ## `backend/admin_server.py`
 
@@ -328,6 +328,7 @@ this computer can reach it.
 | GET | `/api/welcome` | First-run welcome state |
 | POST | `/api/welcome/hint/hide` | Hide the getting-started hint |
 | POST | `/api/welcome/hint/show` | Show the getting-started hint again |
+| POST | `/api/welcome/speak` | Seven says the welcome message |
 
 ## `backend/routes/workspaces.py`
 

@@ -117,7 +117,7 @@ export default function StepEnvironment() {
       .then(r => r.json())
       .then(d => {
         setChecking(false);
-        if (d.packages_installed && d.ollama_installed && d.voice_ready) { setStarted(true); setDone(true); }
+        if (d.packages_installed && d.ollama_installed && d.voice_ready && d.speech_ready !== false) { setStarted(true); setDone(true); }
       })
       .catch(() => { if (++tries < 10) setTimeout(check, 2000); else setChecking(false); });
     check();

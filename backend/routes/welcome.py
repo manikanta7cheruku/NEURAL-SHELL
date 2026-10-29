@@ -8,6 +8,7 @@ The first-run welcome: the spoken tour, and the welcome card's hint.
     POST /api/tour/skip            stop the spoken tour and go straight to the card
     POST /api/tour/ack             the screen opened the card
     POST /api/tour/replay          run the tour again
+    POST /api/welcome/speak        Seven says the welcome message (the card was opened by hand)
 """
 from fastapi import APIRouter, HTTPException
 
@@ -47,3 +48,9 @@ def replay_tour():
     if not tour.replay():
         raise HTTPException(status_code=409, detail="Seven isn't ready to give the tour yet.")
     return {"ok": True}
+
+
+@router.post("/api/welcome/speak", summary="Seven says the welcome message")
+def speak_welcome():
+    """The welcome card was opened by hand: Seven says what it is for and why feedback matters. Closing it stops it."""
+    return {"ok": tour.speak_welcome()}

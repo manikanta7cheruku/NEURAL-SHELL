@@ -36,11 +36,11 @@ import { cx } from '../lib/cx';
 
 // The pages used every day, numbered for the keyboard. Everything else: the gear (Settings), "," and Ctrl+K.
 const NAV = [
-  { key: '1', to: '/dashboard', label: 'Overview' },
-  { key: '2', to: '/console', label: 'Chat' },
-  { key: '3', to: '/tasks', label: 'Tasks' },
-  { key: '4', to: '/schedules', label: 'Reminders' },
-  { key: '5', to: '/memory', label: 'Memory' },
+  { key: '1', to: '/dashboard', label: 'Overview', hint: 'How Seven and your PC are doing' },
+  { key: '2', to: '/console', label: 'Chat', hint: 'Type to Seven and see every conversation' },
+  { key: '3', to: '/tasks', label: 'Tasks', hint: 'Your to-do list' },
+  { key: '4', to: '/schedules', label: 'Reminders', hint: 'Alarms, timers and reminders' },
+  { key: '5', to: '/memory', label: 'Memory', hint: 'Everything Seven remembers about you' },
 ];
 const MODES = [
   { id: 'wake', label: 'Wake word', hint: 'Say "Hey Seven" first' },
@@ -372,19 +372,19 @@ export default function Landing() {
       </section>
 
       <footer data-tour="footer" className="relative z-10 flex shrink-0 items-center justify-center border-t border-s-border/50 px-5 py-1.5">
-        <button onClick={() => window.dispatchEvent(new Event('seven:welcome'))} title="Welcome guide, feedback and roadmap"
+        <button data-tour="welcome-link" onClick={() => window.dispatchEvent(new Event('seven:welcome'))} title="Welcome guide: what Seven is becoming, how to send feedback, and the tour again"
                 className="absolute left-5 flex h-7 items-center rounded-md px-2 text-[12px] text-s-text-4 transition-colors duration-200 hover:bg-s-surface/80 hover:text-s-text-2">
           Welcome guide
         </button>
         <nav aria-label="Pages" className="flex items-center gap-0.5">
           {NAV.map(n => (
-            <button key={n.key} onClick={() => navigate(n.to)}
+            <button key={n.key} data-tour={`nav-${n.key}`} onClick={() => navigate(n.to)} title={`${n.label}: ${n.hint}  (${n.key})`}
                     className="group/n flex h-7 items-center gap-1.5 rounded-md px-2.5 text-[12px] text-s-text-3 transition-colors duration-200 hover:bg-s-surface/80 hover:text-s-text">
               {n.label}
               <kbd className="font-sans text-[10.5px] text-s-text-4 opacity-0 transition-opacity duration-200 group-hover/n:opacity-100 group-focus-visible/n:opacity-100">{n.key}</kbd>
             </button>))}
         </nav>
-        <button onClick={() => window.dispatchEvent(new Event('seven:palette'))} title="Search pages and actions"
+        <button data-tour="search" onClick={() => window.dispatchEvent(new Event('seven:palette'))} title="Search: find any page or action (Ctrl K)"
                 className="absolute right-5 flex h-7 items-center gap-2 rounded-md px-2 text-[12px] text-s-text-4 transition-colors duration-200 hover:bg-s-surface/80 hover:text-s-text-2">
           <MagnifyingGlass size={13} aria-hidden />
           Search

@@ -14,6 +14,18 @@ project uses [semantic versioning](docs/development/release-process.md#versions)
 - `/api/chat` returns action receipts in non-streaming responses.
 
 ### Fixed
+- Opening Seven no longer waits on a speech-model download. The setup wizard now fetches it (with progress) when it is
+  missing, and if it is still missing at launch the app opens anyway and the home screen says it is getting speech
+  recognition ready. Before, a first launch could sit on the loading screen for minutes.
+- Finishing setup restarted the backend twice, throwing away a download the first restart had started. It restarts once.
+- The loading screen shows the real start-up steps (engine, brain, ears, voice) instead of an attempt counter.
+- The welcome tour now highlights Test mic. A sentence the voice split in two kept the previous step, so the listening
+  switch stayed lit.
+- The welcome tour names and highlights each link along the bottom (Overview, Chat, Tasks, Reminders, Memory, Search and
+  Welcome guide) and says what each is for. Each link also has a tooltip.
+- The welcome tour raises a screen dimmer than 60 percent to 60 (where the display allows it).
+- Opening the welcome guide has Seven say why feedback matters; closing it stops Seven. The tour replays from the card
+  (header link and a "Take the tour again" section).
 - "Snap Chrome to the left" targeted "chrom" (a character-set strip removed the trailing "e").
 - "Put Chrome and File Explorer side by side" split "File Explorer" into two apps. Multi-word app names now work in
   layouts and snaps, and File Explorer windows are found by window class.

@@ -4,6 +4,10 @@
  * and any time you choose: the hint on the home screen and Overview, the Welcome guide link in the home footer, the
  * button on Guide, or Ctrl+K.
  *
+ * Seven speaks while it is open: at the end of the first-run tour it says why feedback matters (the tour moves the
+ * card to its Feedback tab and back with the steps feedback and about), and when the card is opened by hand it says
+ * the short version (POST /api/welcome/speak). Closing the card stops it. "Replay the tour" is on the About tab.
+ *
  * Three tabs on a fixed-size card, so nothing jumps: About (the whole message for someone who reads only this tab:
  * what Seven is, what it is becoming, why feedback matters, where the Guide is), Roadmap (what works, what
  * is next, and the large later scope; lib/roadmap.js), Feedback (how to tell us, what stays on the PC and what is
@@ -24,7 +28,7 @@ function Heading({ children }) {
   return <h3 className="mb-1 text-[11px] font-medium uppercase tracking-[0.14em] text-s-text-4">{children}</h3>;
 }
 
-function About({ go, toRoadmap }) {
+function About({ go, toRoadmap, replay }) {
   const link = 'text-s-text-2 underline decoration-s-border-l underline-offset-4 transition-colors hover:text-s-text';
   return (
     <div className="space-y-6">
@@ -55,6 +59,18 @@ function About({ go, toRoadmap }) {
           The Guide shows how to use everything, step by step, from voice commands to workspaces and reminders.{' '}
           <button onClick={() => go('/guide')} className={link}>Open the guide</button>.
         </p>
+      </section>
+      <section aria-label="The tour" data-welcome="replay">
+        <Heading>Take the tour again</Heading>
+        <div className="flex items-center gap-4 border-t border-s-border pt-3">
+          <p className="min-w-0 flex-1 text-[13px] leading-relaxed text-s-text-3">
+            Seven walks you through the home screen again, out loud, and shows where everything is.
+          </p>
+          <button onClick={replay}
+                  className="h-8 shrink-0 rounded-md border border-s-border px-3.5 text-[12.5px] text-s-text-2 transition-colors hover:bg-s-card hover:text-s-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-s-accent/50">
+            Replay the tour
+          </button>
+        </div>
       </section>
     </div>
   );
@@ -141,30 +157,39 @@ export default function WelcomeCard() {
   const box = useRef(null);
   const returnTo = useRef(null);
 
-  const show = useCallback((which = 'about') => {
+  // spoken: Seven says the welcome message while the card is open (not when the tour is already saying it)
+  const show = useCallback((which = 'about', spoken = false) => {
     returnTo.current = document.activeElement;
     setTab(TABS.some(([id]) => id === which) ? which : 'about');
     setOpen(true);
     api.get('/version').then(r => setVersion(r.data?.version || '')).catch(() => {});
+    if (spoken) api.post('/welcome/speak').catch(() => {});
   }, []);
 
-  // Opens when the spoken tour ends, and acknowledges it so a reload doesn't open it again.
+  // The spoken tour: the card opens when Seven starts telling you about it, moves to Feedback while Seven explains
+  // why feedback matters, and back to About where the tour can be replayed. It acknowledges the opening so a reload
+  // doesn't open it again.
   useEffect(() => {
-    if (step === 'card' && n !== seen.current) {
+    if (n === seen.current) return;
+    if (step === 'card') {
       seen.current = n;
       show('about');
       api.post('/tour/ack').catch(() => {});
+    } else if (step === 'feedback' || step === 'about') {
+      seen.current = n;
+      setTab(step);
     }
   }, [step, n, show]);
 
   useEffect(() => {
-    const onShow = e => show(e.detail?.tab);
+    const onShow = e => show(e.detail?.tab, !e.detail?.silent);
     window.addEventListener('seven:welcome', onShow);
     return () => window.removeEventListener('seven:welcome', onShow);
   }, [show]);
 
   const close = useCallback(() => {
     setOpen(false);
+    api.post('/tour/skip').catch(() => {});          // closing the card stops Seven talking about it
     returnTo.current?.focus?.();
   }, []);
 
@@ -186,6 +211,7 @@ export default function WelcomeCard() {
 
   if (!open) return null;
   const go = to => { close(); navigate(to); };
+  const replay = () => { close(); setTimeout(() => api.post('/tour/replay').catch(() => {}), 400); };
   const hide = () => { api.post('/welcome/hint/hide').catch(() => {}); close(); };
   const onTabKey = e => {
     const i = TABS.findIndex(([id]) => id === tab);
@@ -208,7 +234,10 @@ export default function WelcomeCard() {
           </button>
           <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-s-text-4">Seven beta{version ? ` ${version}` : ''}</p>
           <h2 id="welcome-title" className="mt-2 text-[22px] font-light tracking-[-0.015em] text-s-text">Welcome to Seven</h2>
-          <p className="mt-1.5 text-[13px] leading-relaxed text-s-text-3">Thank you for being one of the first to try it.</p>
+          <p className="mt-1.5 text-[13px] leading-relaxed text-s-text-3">
+            Thank you for being one of the first to try it.{' '}
+            <button onClick={replay} className="text-s-text-2 underline decoration-s-border-l underline-offset-4 transition-colors hover:text-s-text">Replay the tour</button>
+          </p>
           <div role="tablist" aria-label="Welcome sections" onKeyDown={onTabKey} className="mt-6 flex gap-7 border-b border-s-border">
             {TABS.map(([id, label]) => (
               <button key={id} role="tab" id={`welcome-tab-${id}`} aria-selected={tab === id} aria-controls="welcome-panel"
@@ -222,7 +251,7 @@ export default function WelcomeCard() {
 
         <div id="welcome-panel" role="tabpanel" aria-labelledby={`welcome-tab-${tab}`} tabIndex={0}
              className="min-h-0 flex-1 overflow-y-auto px-8 py-6 focus-visible:outline-none">
-          {tab === 'about' && <About go={go} toRoadmap={() => setTab('roadmap')} />}
+          {tab === 'about' && <About go={go} toRoadmap={() => setTab('roadmap')} replay={replay} />}
           {tab === 'roadmap' && <Roadmap />}
           {tab === 'feedback' && <Feedback go={go} />}
         </div>

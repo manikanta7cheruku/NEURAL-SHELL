@@ -40,17 +40,27 @@ export default function StepDone({ onComplete }) {
     // Step 2: Wait a moment for config to flush to disk
     await new Promise(res => setTimeout(res, 1000));
 
-    // Step 3: Request backend restart
-    setStatusText('Restarting Seven with full voice engine...');
+    // Step 3: Switch the backend into full mode. It notices the finished setup and restarts itself within a second
+    // (main.py), so asking it to restart as well made it start twice: more than ten seconds lost, and any download
+    // the first restart had begun thrown away. Only ask when it is still answering, which is a repair run.
+    setStatusText('Starting Seven...');
+    await new Promise(res => setTimeout(res, 2500));
+    let restarting = false;
     try {
-      await fetch(`${API}/api/bootstrap/restart`, { method: 'POST' });
-    } catch (e) {
-      console.log('[SETUP] Restart request error (expected):', e.message);
+      await fetch(`${API}/api/health`, { signal: AbortSignal.timeout(1200) });
+    } catch {
+      restarting = true;
+    }
+    if (!restarting) {
+      try {
+        await fetch(`${API}/api/bootstrap/restart`, { method: 'POST' });
+      } catch (e) {
+        console.log('[SETUP] Restart request error (expected):', e.message);
+      }
+      await new Promise(res => setTimeout(res, 2000));
     }
 
-    // Step 4: Wait for backend to come back up
-    // Python exits and Electron restarts it — this takes 5-15 seconds
-    await new Promise(res => setTimeout(res, 3000));
+    // Step 4: Wait for the backend to come back up
     const ready = await waitForBackend();
 
     if (ready) {

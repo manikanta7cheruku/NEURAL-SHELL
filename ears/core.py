@@ -136,22 +136,124 @@ def _load_whisper_cached(model_size: str) -> WhisperModel:
 
 
 _MODEL_SIZE = _get_configured_model()
-print(Fore.CYAN + f"[EARS] Loading Whisper ({_MODEL_SIZE})...")
-audio_model = _load_whisper(_MODEL_SIZE)
+audio_model = None
+_fast_model = None
 
 # Two-stage hearing on PCs without a GPU. Whisper always encodes a 30-second window, so small.en takes ~1.5 s per
 # request on a laptop CPU while base.en takes ~0.4 s. base.en's mistakes ("open crown" for "open chrome") come with
 # low confidence, and its correct transcripts with high confidence, so: hear with base.en, and only when it isn't
 # sure, listen again with the accurate model. (scripts/voice_bench.py measured this: same accuracy, ~4x faster.)
-_fast_model = None
 _UNSURE = -0.45                     # lowest segment avg_logprob below which the fast transcript is re-checked
-if not _gpu_available() and _MODEL_SIZE in ("small.en", "medium.en") and not os.environ.get('SEVEN_WHISPER_MODEL') \
-        and not _config().get('brain', {}).get('whisper_model'):
+
+
+def _wants_fast_pass() -> bool:
+    return (not _gpu_available() and _MODEL_SIZE in ("small.en", "medium.en") and not os.environ.get('SEVEN_WHISPER_MODEL')
+            and not _config().get('brain', {}).get('whisper_model'))
+
+
+def _needed_models() -> list:
+    return [_MODEL_SIZE] + (["base.en"] if _wants_fast_pass() else [])
+
+
+_SIZE_MB = {"base.en": 150, "small.en": 480, "medium.en": 1500, "large-v3": 3000}
+
+
+def _hub_folder(name: str) -> str:
+    return os.path.join(os.path.expanduser("~"), ".cache", "huggingface", "hub", f"models--Systran--faster-whisper-{name}")
+
+
+def model_cached(name: str) -> bool:
+    """Is this speech model already on the PC? (A download is never needed to start Seven when it is.)"""
     try:
-        _fast_model = _load_whisper("base.en")
-        print(Fore.CYAN + f"[EARS] Fast first pass: base.en, re-checked with {_MODEL_SIZE} when unsure")
-    except Exception as _fm_err:
-        print(Fore.YELLOW + f"[EARS] Fast model unavailable, using {_MODEL_SIZE} only: {_fm_err}")
+        snaps = os.path.join(_hub_folder(name), "snapshots")
+        return any(os.path.isfile(os.path.join(snaps, d, "model.bin")) for d in os.listdir(snaps))
+    except OSError:
+        return False
+
+
+# What the app shows while Seven cannot hear yet: loading, downloading (with a percentage), ready or error.
+_model_state = {"state": "loading", "progress": 0, "detail": ""}
+_models_ready = threading.Event()
+
+
+def models_status() -> dict:
+    return dict(_model_state)
+
+
+def models_loaded() -> bool:
+    return audio_model is not None
+
+
+def _set_model_state(**changes):
+    _model_state.update(changes)
+    try:
+        _publish("speech_model", dict(_model_state))
+    except Exception:
+        pass
+
+
+def _download_missing(missing: list):
+    """Fetch speech models in the background, with progress, so starting Seven never waits on a 1.5 GB download."""
+    from seven_utils import hf_offline
+    total_mb = sum(_SIZE_MB.get(n, 1500) for n in missing)
+    done = threading.Event()
+
+    def _watch():
+        while not done.is_set():
+            size = 0
+            for n in missing:
+                for root, _dirs, files in os.walk(_hub_folder(n)):
+                    for f in files:
+                        try:
+                            size += os.path.getsize(os.path.join(root, f))
+                        except OSError:
+                            pass
+            _set_model_state(state="downloading", progress=max(1, min(97, int(size / (total_mb * 1024 * 1024) * 100))),
+                             detail="Downloading speech recognition (one time)")
+            done.wait(1.0)
+
+    threading.Thread(target=_watch, daemon=True, name="WhisperProgress").start()
+    try:
+        from faster_whisper import download_model
+        with hf_offline.allow_downloads():
+            for n in missing:
+                download_model(n)
+    finally:
+        done.set()
+
+
+def _load_models():
+    global audio_model, _fast_model
+    try:
+        missing = [n for n in _needed_models() if not model_cached(n)]
+        if missing:
+            print(Fore.YELLOW + f"[EARS] Speech model not on this PC yet ({', '.join(missing)}): downloading in the background")
+            _set_model_state(state="downloading", progress=1, detail="Downloading speech recognition (one time)")
+            _download_missing(missing)
+        _set_model_state(state="loading", progress=99, detail="Loading speech recognition")
+        print(Fore.CYAN + f"[EARS] Loading Whisper ({_MODEL_SIZE})...")
+        audio_model = _load_whisper(_MODEL_SIZE)
+        if _wants_fast_pass():
+            try:
+                _fast_model = _load_whisper("base.en")
+                print(Fore.CYAN + f"[EARS] Fast first pass: base.en, re-checked with {_MODEL_SIZE} when unsure")
+            except Exception as _fm_err:
+                print(Fore.YELLOW + f"[EARS] Fast model unavailable, using {_MODEL_SIZE} only: {_fm_err}")
+        _set_model_state(state="ready", progress=100, detail="")
+    except Exception as e:
+        print(Fore.RED + f"[EARS] Speech model failed: {e}")
+        _set_model_state(state="error", detail=f"Speech recognition could not start ({str(e)[:100]}). Check your internet connection and restart Seven.")
+    finally:
+        _models_ready.set()
+
+
+# A model already on disk loads right here, as it always did (the order of native libraries loading matters, see
+# main_modules/startup/module_loader.py). A model that must be downloaded never blocks startup: it downloads in the
+# background and Seven opens; it cannot hear until it is done, and says so.
+if all(model_cached(n) for n in _needed_models()):
+    _load_models()
+else:
+    threading.Thread(target=_load_models, daemon=True, name="WhisperDownload").start()
 
 
 # =============================================================================
@@ -187,6 +289,10 @@ def set_publisher(fn):
     global _publish
     _publish = fn
     STREAM.set_publisher(fn)
+    try:
+        fn("speech_model", dict(_model_state))
+    except Exception:
+        pass
 
 
 def start():
@@ -243,6 +349,8 @@ def transcribe(audio: np.ndarray, fast: bool = False) -> tuple:
     (text, reason) for 16 kHz float32 speech. text is "" when Whisper itself says there is no reliable speech.
     The speech detector already trimmed the audio, so Whisper's own VAD is off and decoding is greedy (fast).
     """
+    if audio_model is None:
+        return "", ("speech recognition is still " + ("downloading" if _model_state["state"] == "downloading" else "loading"))
     try:
         segments = None
         if _fast_model is not None:

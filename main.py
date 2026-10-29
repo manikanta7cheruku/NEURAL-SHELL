@@ -54,7 +54,7 @@ hf_offline.enable()
 # Before NumPy and PyTorch load: a few cores, and below-normal priority while the models load, so starting Seven
 # never makes the rest of Windows stutter.
 gentle.cap_threads()
-gentle.background(seconds=90)
+gentle.background(seconds=20)
 
 # ── System init (VC++, numpy, logging) ──────────────────────────────
 from main_modules.startup.system_init import (

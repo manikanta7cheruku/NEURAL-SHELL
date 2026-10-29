@@ -221,6 +221,7 @@ the sidebar used to call "Home"; the home screen is the one with the orb.
 | GET | `/api/ready` | Is Seven ready (brain, ears and voice loaded), and the stage until then |
 | GET | `/api/welcome` | The first-run welcome state |
 | POST | `/api/welcome/hint/hide`, `/api/welcome/hint/show` | Hide or show the getting-started hint |
-| POST | `/api/tour/skip`, `/api/tour/ack`, `/api/tour/replay` | Skip the spoken tour, acknowledge the card opened, run the tour again |
+| POST | `/api/tour/skip`, `/api/tour/ack`, `/api/tour/replay` | Skip the spoken tour (or stop it by closing the card), acknowledge the card opened, run the tour again |
+| POST | `/api/welcome/speak` | Seven says the welcome message (the card was opened by hand) |
 | POST | `/api/triggers/snap-test` | Record a few seconds and say whether the mic hears snaps |
 | POST | `/api/system/sound-settings` | Open Windows sound settings |
