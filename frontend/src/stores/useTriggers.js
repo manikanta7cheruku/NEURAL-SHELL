@@ -48,6 +48,9 @@ const useTriggers = create((set, get) => ({
       return { ok: false, msg: 'Failed to create trigger.' };
     } catch (e) {
       const detail = e.response?.data?.detail;
+      if (e.response?.status === 403 && detail && typeof detail === 'object') {      // over the plan's limit
+        return { ok: false, msg: detail.message || 'Plan limit reached.', plan_limit: detail };
+      }
       return { ok: false, msg: typeof detail === 'string' ? detail : 'Failed to create trigger.' };
     }
   },

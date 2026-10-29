@@ -2,7 +2,7 @@
  * Guide
  *
  * How to use Seven, written for people who just installed it. It opens with
- * live commands the user can run with one click, then walks through every
+ * live commands the user can try, then walks through every
  * ability with phrases that work today, the first-run setup, privacy facts,
  * common questions, shortcuts and what is planned next.
  *
@@ -13,7 +13,7 @@
 /* SEVEN_DOC {"purpose": "Learn how to use Seven: try live commands, see everything Seven can do with example phrases, set it up, privacy facts, questions and shortcuts",
               "keywords": ["guide", "help", "how", "tutorial", "learn", "examples", "commands", "faq", "shortcuts", "what can you do"],
               "controls": [
-                {"label": "Try it now", "description": "Run real commands like max brightness or open Chrome with one click."},
+                {"label": "Try it now", "description": "Try real commands such as setting the volume or opening Chrome, and see Seven's reply right there."},
                 {"label": "What Seven can do", "description": "Every ability with phrases you can say or type."},
                 {"label": "Set up Seven", "description": "A short checklist: your name, your voice, a workspace, a trigger and your documents."},
                 {"label": "Questions", "description": "Answers about privacy, the internet, models and troubleshooting."}
@@ -23,7 +23,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   Play, RotateCcw, Copy, Check, ArrowRight, Loader2, Mic, MessageSquare, PanelRight, ShieldCheck, WifiOff,
   HardDrive, Search, ChevronDown, Sparkles, AppWindow, SlidersHorizontal, Cpu, FolderSearch, LayoutGrid,
-  ListChecks, AlarmClock, Brain, Settings2, CircleCheck,
+  ListChecks, AlarmClock, Brain, Settings2, CircleCheck, AlertTriangle,
 } from 'lucide-react';
 import api from '../api';
 import useConfig from '../stores/useConfig';
@@ -51,7 +51,7 @@ const FAQ = [
   ['Which AI model does Seven use?',
     'A local model running through Ollama. On "auto", Seven picks one that fits your graphics card and memory. You can switch models in Settings, Brain, or just say "use the mistral model".'],
   ['Seven did not hear me.',
-    'Check that the right microphone is selected in Settings, Voice. You can also hold Shift to talk without the wake word, or type in the Console. If background noise wakes Seven by mistake, raise the listening threshold in the same section.'],
+    'Check that the right microphone is selected in Settings, Voice. Press Test mic on the home screen to see exactly what Seven hears. You can also switch to Push to talk, or type in Chat. If background noise wakes Seven by mistake, set the sensitivity to Strict in the same section.'],
   ['Seven opened the wrong app or file.',
     'Say the full name the first time, like "open Visual Studio Code". If Seven gets it wrong, tell it the right one. It remembers corrections and offers to save the name for next time.'],
   ['How do I stop Seven while it is talking?',
@@ -72,7 +72,7 @@ const SHORTCUTS = [
   [['Alt', 'S'], 'Show or hide Seven'],
   [['Alt', 'Shift', 'T'], 'Open the floating task panel'],
   [['Shift'], 'Hold to talk without the wake word'],
-  [['Ctrl', 'N'], 'New chat in the Console'],
+  [['Ctrl', 'N'], 'New chat in Chat'],
   [['Ctrl', 'Shift', 'S'], 'Show or hide the chats list'],
   [['Enter'], 'Send a message'],
   [['Shift', 'Enter'], 'New line in a message'],
@@ -102,15 +102,28 @@ function useRun() {
       const failed = (data?.receipts || []).some(rc => rc.status === 'failed');
       setRuns(r => ({ ...r, [key]: { state: failed ? 'failed' : 'done', reply: (data?.response || 'Done.').trim() } }));
     } catch (err) {
-      const reply = err?.response ? 'Seven could not finish that. Try it in the Console to see why.' : 'Seven is not running yet. Give it a moment and try again.';
+      const reply = err?.response ? 'Seven could not finish that.' : 'Seven is not running yet. Give it a moment and try again.';
       setRuns(r => ({ ...r, [key]: { state: 'failed', reply } }));
     }
   };
   return [runs, run];
 }
 
-function copy(text) {
-  navigator.clipboard?.writeText(text).then(() => toast.success('Copied')).catch(() => {});
+function CopyButton({ text, className }) {
+  const [copied, setCopied] = useState(false);
+  const onClick = () => {
+    navigator.clipboard?.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1400);
+    }).catch(() => toast.error('Could not copy', 'Select the phrase and copy it yourself.'));
+  };
+  return (
+    <button type="button" onClick={onClick} aria-label={copied ? 'Copied' : `Copy "${text}"`} title={copied ? 'Copied' : 'Copy'}
+            className={cx('flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-s-text-4 transition-colors hover:bg-s-card-h hover:text-s-text-2',
+                          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-s-accent/50', className)}>
+      {copied ? <Check size={12} className="text-s-green" /> : <Copy size={12} />}
+    </button>
+  );
 }
 
 function Heading({ id, eyebrow, title, description }) {
@@ -127,84 +140,98 @@ function Kbd({ children }) {
   return <kbd className="inline-flex h-5 min-w-5 items-center justify-center rounded border border-s-border bg-s-card px-1.5 text-[10.5px] font-medium text-s-text-2">{children}</kbd>;
 }
 
-function Reply({ run }) {
-  if (!run || run.state === 'running') return null;
+/** What happened when an example ran: working, done (with Seven's reply) or didn't work (with a way to see why). */
+function Outcome({ run, navigate, className }) {
+  if (!run) return null;
+  const failed = run.state === 'failed';
   return (
-    <p className={cx('mt-2 rounded-md px-2.5 py-1.5 text-[11.5px] leading-relaxed animate-[fadeIn_.25s_ease-out]',
-                     run.state === 'failed' ? 'bg-s-red/10 text-s-red' : 'bg-s-card text-s-text-2')}>
-      {run.reply}
-    </p>
+    <div role="status" aria-live="polite" className={cx('flex items-start gap-1.5 text-[11.5px] leading-relaxed animate-[fadeIn_.2s_ease-out]', className)}>
+      {run.state === 'running' ? (
+        <><Loader2 size={12} className="mt-[3px] shrink-0 animate-spin text-s-text-3" /><span className="text-s-text-3">Running on this PC</span></>
+      ) : failed ? (
+        <>
+          <AlertTriangle size={12} className="mt-[3px] shrink-0 text-s-red" />
+          <span className="min-w-0 text-s-text-2">
+            {run.reply}{' '}
+            <button type="button" onClick={() => navigate('/console')}
+                    className="text-s-text-3 underline decoration-s-border-l underline-offset-4 transition-colors hover:text-s-text">Open Chat</button>
+          </span>
+        </>
+      ) : (
+        <><Check size={12} className="mt-[3px] shrink-0 text-s-green" /><span className="min-w-0 text-s-text-2">{run.reply}</span></>
+      )}
+    </div>
   );
 }
 
-function TryCard({ item, run, onRun }) {
+function TryCard({ item, run, onRun, navigate }) {
   const busy = run?.state === 'running';
   const done = run?.state === 'done';
   return (
-    <div className="group/t flex flex-col rounded-lg border border-s-border bg-s-surface p-3 shadow-[var(--s-shadow)] transition-colors hover:border-s-border-l">
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <div className="text-[12.5px] font-medium text-s-text">{item.title}</div>
-          <div className="mt-0.5 text-[11.5px] text-s-text-3">{item.detail}</div>
-        </div>
-        {done && <Check size={14} className="mt-0.5 shrink-0 text-s-green" />}
+    <article className="flex flex-col rounded-lg border border-s-border bg-s-surface p-3.5 shadow-[var(--s-shadow)] transition-colors hover:border-s-border-l">
+      <h3 className="text-[13px] font-medium text-s-text">{item.title}</h3>
+      <p className="mt-0.5 text-[12px] leading-relaxed text-s-text-3">{item.detail}</p>
+      <div className="mt-3 flex items-center gap-1 rounded-md bg-s-card py-1 pl-2.5 pr-1">
+        <span className="min-w-0 flex-1 break-words text-[12px] leading-snug text-s-text-2">“{item.say}”</span>
+        <CopyButton text={item.say} />
       </div>
-      <button onClick={() => copy(item.say)} title="Copy"
-              className="mt-2.5 flex items-center justify-between gap-2 rounded-md border border-dashed border-s-border px-2 py-1 text-left text-[11.5px] text-s-text-2 transition-colors hover:border-s-border-l hover:text-s-text">
-        <span className="truncate">"{item.say}"</span>
-        <Copy size={11} className="shrink-0 opacity-0 transition-opacity group-hover/t:opacity-60" />
-      </button>
-      <Reply run={run} />
-      <div className="mt-auto flex items-center gap-1.5 pt-2.5">
-        <Button size="sm" variant={done ? 'secondary' : 'primary'} icon={busy ? undefined : Play} loading={busy}
-                onClick={() => onRun(item.id, item.say)}>
-          {busy ? 'Running' : done ? 'Run again' : 'Run'}
+      <Outcome run={run} navigate={navigate} className="mt-2.5" />
+      <div className="mt-auto flex flex-wrap items-center gap-1.5 pt-3">
+        <Button size="sm" icon={busy ? undefined : Play} loading={busy} onClick={() => onRun(item.id, item.say)}>
+          {busy ? 'Running' : done ? 'Try again' : 'Try it'}
         </Button>
         {item.undo && done && (
           <Button size="sm" variant="ghost" icon={RotateCcw} onClick={() => onRun(item.id, item.undo.say)}>{item.undo.label}</Button>
         )}
       </div>
-    </div>
+    </article>
+  );
+}
+
+/** One example in a list: the phrase, an explicit Try button (nothing runs by clicking the words), copy, and its own result. */
+function ExampleRow({ say, run, onRun, navigate }) {
+  const busy = run?.state === 'running';
+  return (
+    <li className="group/e py-2">
+      <div className="flex items-center gap-1.5">
+        <span className="min-w-0 flex-1 truncate text-[12.5px] text-s-text-2" title={say}>“{say}”</span>
+        <CopyButton text={say} className="opacity-0 transition-opacity focus-visible:opacity-100 group-hover/e:opacity-100 group-focus-within/e:opacity-100" />
+        <Button size="sm" variant="ghost" icon={busy ? undefined : Play} loading={busy} onClick={onRun}
+                aria-label={`Try: ${say}`}>
+          {busy ? 'Running' : 'Try'}
+        </Button>
+      </div>
+      <Outcome run={run} navigate={navigate} className="mt-1 pr-2" />
+    </li>
   );
 }
 
 function GroupCard({ group, runs, onRun, navigate }) {
   const Icon = GROUP_ICONS[group.id] || Sparkles;
-  const last = group.examples.map((ex, i) => runs[`${group.id}:${i}`]).filter(Boolean).pop();
   return (
-    <div className="rounded-lg border border-s-border bg-s-surface p-3.5 shadow-[var(--s-shadow)]">
+    <article className="rounded-lg border border-s-border bg-s-surface p-3.5 shadow-[var(--s-shadow)]">
       <div className="flex items-start gap-2.5">
         <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-s-border bg-s-card">
           <Icon size={14} className="text-s-text-2" />
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-2">
-            <h3 className="text-[12.5px] font-semibold text-s-text">{group.title}</h3>
+            <h3 className="text-[13px] font-semibold text-s-text">{group.title}</h3>
             <button onClick={() => navigate(group.page)}
-                    className="flex items-center gap-1 text-[11px] text-s-text-3 transition-colors hover:text-s-accent-h">
+                    className="flex items-center gap-1 text-[11.5px] text-s-text-3 transition-colors hover:text-s-accent-h">
               {group.pageLabel}<ArrowRight size={11} />
             </button>
           </div>
-          <p className="mt-0.5 text-[11.5px] leading-relaxed text-s-text-3">{group.summary}</p>
+          <p className="mt-0.5 text-[12px] leading-relaxed text-s-text-3">{group.summary}</p>
         </div>
       </div>
-      <div className="mt-2.5 flex flex-wrap gap-1.5">
+      <ul className="mt-3 divide-y divide-s-border/60 border-t border-s-border/60">
         {group.examples.map((ex, i) => {
           const key = `${group.id}:${i}`;
-          const busy = runs[key]?.state === 'running';
-          return (
-            <button key={ex.say} onClick={() => onRun(key, ex.say)} disabled={busy} title="Click to run, right-click to copy"
-                    onContextMenu={e => { e.preventDefault(); copy(ex.say); }}
-                    className="flex h-6 items-center gap-1 rounded-full border border-s-border bg-s-card px-2.5 text-[11.5px] text-s-text-2
-                               transition-colors hover:border-s-accent/40 hover:text-s-text disabled:opacity-60">
-              {busy && <Loader2 size={10} className="animate-spin" />}
-              {ex.say}
-            </button>
-          );
+          return <ExampleRow key={ex.say} say={ex.say} run={runs[key]} onRun={() => onRun(key, ex.say)} navigate={navigate} />;
         })}
-      </div>
-      <Reply run={last} />
-    </div>
+      </ul>
+    </article>
   );
 }
 
@@ -306,9 +333,9 @@ export default function Guide() {
         {!q && (
           <section>
             <Heading id="try" eyebrow="Start here" title="Try it now"
-                     description="These run for real on your computer, exactly as if you had said them. Press Run and watch." />
+                     description="These run for real on your computer, exactly as if you had said them. Press Try it and watch." />
             <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
-              {GUIDE.tryIt.map(item => <TryCard key={item.id} item={item} run={runs[item.id]} onRun={run} />)}
+              {GUIDE.tryIt.map(item => <TryCard key={item.id} item={item} run={runs[item.id]} onRun={run} navigate={navigate} />)}
             </div>
           </section>
         )}
@@ -318,7 +345,7 @@ export default function Guide() {
             <Heading id="talk" title="Three ways to talk to Seven" description="Use whichever fits the moment. They all reach the same Seven with the same memory." />
             <div className="grid grid-cols-1 gap-2.5 md:grid-cols-3">
               {[
-                [Mic, 'Voice', <>Say {wake}, then what you need. Hold <Kbd>Shift</Kbd> to talk without the wake word. Talk over Seven or say "stop" to interrupt. Say {pause} to pause and "{resume}" to resume.</>],
+                [Mic, 'Voice', <>Say {wake}, then what you need. In Push to talk mode, hold <Kbd>Shift</Kbd> while you speak instead; switch modes at the top of the home screen. Talk over Seven or say "stop" to interrupt. Say {pause} to pause and "{resume}" to resume.</>],
                 [MessageSquare, 'Chat', <>Type anything, the same as speaking. Seven shows what it did after each reply, and chats are saved so you can pick them up later.</>, '/console'],
                 [PanelRight, 'Task panel', <>Press <Kbd>Alt</Kbd> <Kbd>Shift</Kbd> <Kbd>T</Kbd> anywhere for a small panel with your tasks and reminders, on top of whatever you are doing.</>],
               ].map(([I, title, body, to]) => (
@@ -337,7 +364,7 @@ export default function Guide() {
 
         <section>
           <Heading id="abilities" title="What Seven can do today"
-                   description="Click a phrase to run it, right-click to copy it. You don't have to use these exact words; say it the way you normally would." />
+                   description="Press Try to run an example on this PC, or copy it to say it yourself. You don't have to use these exact words; say it the way you normally would." />
           {groups.length ? (
             <div className="grid grid-cols-1 gap-2.5 lg:grid-cols-2">
               {groups.map(g => <GroupCard key={g.id} group={g} runs={runs} onRun={run} navigate={navigate} />)}

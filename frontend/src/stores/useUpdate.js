@@ -11,6 +11,7 @@ const useUpdate = create((set, get) => ({
   error:            null,
   info:             null,          // full update object from server
   currentVersion:   '',
+  checkFailed:      false,         // the last check could not reach any update service
   dismissed:        false,         // user dismissed the banner this session
 
   // ── Poll status from Python backend ──
@@ -27,6 +28,7 @@ const useUpdate = create((set, get) => ({
         error:            d.error             ?? null,
         info:             d.info              ?? null,
         currentVersion:   d.current_version   ?? get().currentVersion,
+        checkFailed:      d.check_failed      ?? false,
         lastChecked:      d.last_check || d.last_checked || get().lastChecked,
       });
     } catch {

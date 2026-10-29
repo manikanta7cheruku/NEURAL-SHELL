@@ -70,6 +70,8 @@ function MainApp({ isFirstLaunch }) {
     return (
       <div className="h-screen bg-s-bg text-white overflow-hidden flex flex-col">
         <TitleBar />
+        <UpdateBanner />
+        <AdminMessageBanner />
         <div className="flex-1 overflow-hidden">
           <Routes>
             <Route path="/" element={<Landing />} />
@@ -78,6 +80,7 @@ function MainApp({ isFirstLaunch }) {
         <CommandPalette />
         <TourLayer />
         <WelcomeCard />
+        <ScheduleAlert />
       </div>
     );
   }

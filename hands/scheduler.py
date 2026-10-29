@@ -909,6 +909,20 @@ def manage_schedule(params):
 # BACKGROUND THREAD — Monitors and fires schedules
 # =========================================================================
 
+def _mark_overlay_shown(schedule_id):
+    """Record in the alert file that the Windows card is showing this reminder (if it is still the current one)."""
+    try:
+        path = os.path.join(_APPDATA, 'SEVEN', 'schedule_alert.json')
+        with open(path, 'r', encoding='utf-8') as f:
+            state = json.load(f)
+        if state.get("active") and state.get("id") == schedule_id:
+            state["overlay"] = True
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump(state, f)
+    except Exception:
+        pass
+
+
 def _fire_schedule(schedule):
     """Fire a schedule — speak the message."""
     stype = schedule["type"]
@@ -1080,10 +1094,12 @@ def _fire_schedule(schedule):
         )
         with open(_alert_path, 'w') as _f:
             _js.dump({
-                "active":  True,
-                "message": fire_msg,
-                "type":    stype,
-                "id":      schedule.get("id")
+                "active":   True,
+                "message":  fire_msg,
+                "original": message,          # what the reminder was, for Snooze (fire_msg is the decorated sentence)
+                "overlay":  False,            # set once the Windows card shows it, so the app doesn't repeat it
+                "type":     stype,
+                "id":       schedule.get("id")
             }, _f)
         print(Fore.CYAN + "[SCHEDULER] Alert written to file")
     except Exception as _ae:
@@ -1098,9 +1114,10 @@ def _fire_schedule(schedule):
             _msg_payload = _json_notif.dumps({
                 "type": "sched_notif",
                 "data": {
-                    "type":    stype,
-                    "message": fire_msg,
-                    "holdMs":  8000,
+                    "type":     stype,
+                    "message":  fire_msg,
+                    "original": message,
+                    "holdMs":   8000,
                 },
             }) + "\n"
             _s = _sock.create_connection(("127.0.0.1", 7891), timeout=2.0)
@@ -1117,6 +1134,7 @@ def _fire_schedule(schedule):
                 pass
             _s.close()
             if _resp and b'"ok":true' in _resp:
+                _mark_overlay_shown(schedule.get("id"))
                 print(Fore.GREEN + "[SCHEDULER] Overlay notification sent ✓")
             else:
                 print(Fore.YELLOW + "[SCHEDULER] Overlay no response")
@@ -1244,6 +1262,44 @@ def stop_background():
     """Stop the background scheduler thread."""
     global _running
     _running = False
+
+
+def import_schedules(items, active_limit=None):
+    """
+    Add schedules from a backup. Goes through the scheduler's own list (and then the file), because writing the file
+    alone left the running scheduler holding the old list, which it then wrote back over the imported ones.
+    One already here (same type, message, time and repeat) is skipped. Active ones beyond active_limit (the plan's
+    limit, -1 or None for no limit) are not added. Returns (added, skipped, over_limit).
+    """
+    global _next_id
+    added = skipped = over = 0
+    with _lock:
+        have = {(s.get("type"), s.get("message"), s.get("time"), s.get("recur", "none")) for s in _schedules}
+        active = sum(1 for s in _schedules if s.get("status") == "active")
+        for item in items or []:
+            if not isinstance(item, dict) or not item.get("message") or not item.get("type"):
+                continue
+            sig = (item.get("type"), item.get("message"), item.get("time"), item.get("recur", "none"))
+            if sig in have:
+                skipped += 1
+                continue
+            is_active = item.get("status", "active") == "active"
+            if is_active and active_limit not in (None, -1) and active >= active_limit:
+                over += 1
+                continue
+            entry = dict(item)
+            entry["id"] = _next_id
+            entry.setdefault("status", "active")
+            entry.setdefault("recur", "none")
+            entry.setdefault("created", datetime.now().isoformat())
+            _next_id += 1
+            _schedules.append(entry)
+            have.add(sig)
+            added += 1
+            active += 1 if is_active else 0
+        if added:
+            _save()
+    return added, skipped, over
 
 
 def get_all_schedules():

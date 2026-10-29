@@ -103,6 +103,13 @@ def trigger_install():
         if not os.path.exists(installer_path):
             raise HTTPException(status_code=400, detail="Downloaded file not found. Please download again.")
 
+        # Never run an installer that is not the file that was published.
+        verified, why = updater.verify_downloaded()
+        if not verified:
+            updater._discard_download()
+            updater._state["error"] = why
+            raise HTTPException(status_code=400, detail=why)
+
         # ── Build the silent update launcher script ──
         # This .bat runs completely independently after the app exits.
         bat_lines = [

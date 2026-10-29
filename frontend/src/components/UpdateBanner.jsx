@@ -63,11 +63,11 @@ export default function UpdateBanner() {
             Seven {info?.version} downloaded. Restart to apply.
           </span>
         ) : (
-          <span className="text-[11px] text-s-text-3">
-            {info?.is_critical
-              ? 'Critical security update: '
-              : 'Update available: '}
-            Seven {info?.version}
+          <span className="min-w-0 truncate text-[11px] text-s-text-3">
+            <span className="font-medium text-s-text-2">
+              {info?.is_critical ? 'Important update: ' : 'Update available: '}Seven {info?.version}
+            </span>
+            {info?.summary && <span className="ml-2">{info.summary}</span>}
           </span>
         )}
       </div>

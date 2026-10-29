@@ -260,6 +260,52 @@ def clear_speaker(speaker_key: str) -> None:
     _exec("DELETE FROM outcomes WHERE speaker_key=?", (speaker_key,))
 
 
+def clear_all() -> None:
+    """Forget everything learned, for every speaker."""
+    for table in ("gaps", "goals", "mentions", "outcomes"):
+        _exec(f"DELETE FROM {table}")
+
+
+def export_all() -> Dict[str, List[Dict[str, Any]]]:
+    """Goals, open questions and entity counts for every speaker: what a backup keeps (outcomes are analytics)."""
+    return {"goals": _rows("SELECT * FROM goals ORDER BY id"),
+            "gaps": _rows("SELECT * FROM gaps ORDER BY id"),
+            "mentions": _rows("SELECT * FROM mentions")}
+
+
+def import_all(data: Dict[str, Any], speaker_map: Optional[Dict[str, str]] = None) -> int:
+    """Restore goals, gaps and mentions; anything already here (same speaker and key) is left alone. Returns how many were added."""
+    _init()
+    speaker_map = speaker_map or {}
+    sp = lambda r: speaker_map.get(r.get("speaker_key") or "", r.get("speaker_key") or "default")
+    added = 0
+    c = _conn()
+    try:
+        for g in data.get("goals") or []:
+            if isinstance(g, dict) and g.get("key") and g.get("title"):
+                added += c.execute(
+                    "INSERT OR IGNORE INTO goals (speaker_key, key, title, status, origin, deadline_text, detail, created_at, "
+                    "updated_at, mentions) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                    (sp(g), g["key"], g["title"], g.get("status") or "active", g.get("origin") or "explicit",
+                     g.get("deadline_text"), g.get("detail"), g.get("created_at"), g.get("updated_at"),
+                     g.get("mentions") or 1)).rowcount
+        for g in data.get("gaps") or []:
+            if isinstance(g, dict) and g.get("kind") and g.get("subject"):
+                added += c.execute(
+                    "INSERT OR IGNORE INTO gaps (speaker_key, kind, subject, payload, status, priority, created_at, asked_at, "
+                    "answered_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                    (sp(g), g["kind"], g["subject"], g.get("payload"), g.get("status") or "open", g.get("priority") or 5,
+                     g.get("created_at"), g.get("asked_at"), g.get("answered_at"))).rowcount
+        for m in data.get("mentions") or []:
+            if isinstance(m, dict) and m.get("entity"):
+                added += c.execute("INSERT OR IGNORE INTO mentions (speaker_key, entity, count, last_ts) VALUES (?,?,?,?)",
+                                   (sp(m), m["entity"], m.get("count") or 1, m.get("last_ts"))).rowcount
+        c.commit()
+    finally:
+        c.close()
+    return added
+
+
 def rename_speaker(old: str, new: str) -> None:
     if not old or not new or old == new:
         return

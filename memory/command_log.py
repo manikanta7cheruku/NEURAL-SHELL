@@ -122,6 +122,31 @@ class CommandLog:
         sorted_apps = sorted(counts.items(), key=lambda x: x[1], reverse=True)
         return sorted_apps[:top_n]
 
+    def export_entries(self):
+        """Every logged command, for a backup."""
+        return self._load()
+
+    def import_entries(self, entries):
+        """Add commands from a backup that are not already here (same time, action and target). Returns (added, skipped)."""
+        logs = self._load()
+        have = {(e.get("timestamp"), e.get("action"), e.get("target")) for e in logs if isinstance(e, dict)}
+        added = skipped = 0
+        for e in entries or []:
+            if not isinstance(e, dict) or not e.get("action") or not e.get("target"):
+                continue
+            sig = (e.get("timestamp"), e.get("action"), e.get("target"))
+            if sig in have:
+                skipped += 1
+                continue
+            have.add(sig)
+            logs.append({"timestamp": e.get("timestamp") or "", "action": e["action"], "target": e["target"],
+                         "success": bool(e.get("success", True)), "detail": e.get("detail", "")})
+            added += 1
+        if added:
+            logs.sort(key=lambda e: e.get("timestamp") or "")
+            self._save(logs)
+        return added, skipped
+
     def clear(self):
         """Wipe all command logs."""
         self._save([])

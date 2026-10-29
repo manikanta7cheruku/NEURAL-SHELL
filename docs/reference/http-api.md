@@ -166,10 +166,10 @@ this computer can reach it.
 
 | Method | Path | What it does |
 |---|---|---|
-| DELETE | `/api/memory/clear` | Clear all facts and conversations |
+| DELETE | `/api/memory/clear` | Clear all memory |
 | GET | `/api/memory/conversations` | Get conversation history |
 | DELETE | `/api/memory/conversations/{conv_id}` | Delete a specific conversation. Never returns 500. |
-| GET | `/api/memory/export` | Export ALL user data as JSON for backup. |
+| GET | `/api/memory/export` | Download a backup of everything that is yours |
 | GET | `/api/memory/facts` | Get all stored facts. |
 | POST | `/api/memory/facts` | Manually add a fact. Enforces plan limit. |
 | GET | `/api/memory/facts/structured` | Get structured facts from SQLite store |
@@ -178,7 +178,7 @@ this computer can reach it.
 | PATCH | `/api/memory/facts/structured/{fact_id}` | Update or supersede a structured fact |
 | GET | `/api/memory/facts/structured/{fact_id}/history` | Get correction history for a fact |
 | DELETE | `/api/memory/facts/{fact_id}` | Delete a specific fact. Never returns 500. |
-| POST | `/api/memory/import` | Import ALL user data from backup JSON. Auto-patches DB schema on the fly. |
+| POST | `/api/memory/import` | Restore a backup |
 | GET | `/api/memory/overview` | What Seven remembers, from the stores the brain uses |
 | GET | `/api/memory/stats` | Memory statistics |
 

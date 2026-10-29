@@ -58,6 +58,7 @@ export default function Triggers() {
 
   const save = async data => {
     const r = editingId ? await updateTrigger(editingId, data) : await addTrigger(data);
+    if (r.plan_limit) setPlanWarning(r.plan_limit);
     if (r.ok) {
       toast.success(editingId ? 'Trigger updated' : 'Trigger created');
       setEditingId(null);
@@ -68,7 +69,7 @@ export default function Triggers() {
 
   const toggle = async (id, enabled) => {
     const r = await updateTrigger(id, { enabled });
-    if (r.ok && r.plan_warning) setPlanWarning(r.plan_warning);
+    if (r.plan_limit) setPlanWarning(r.plan_limit);
     else if (!r.ok) toast.error("Couldn't change that trigger", r.msg);
   };
 

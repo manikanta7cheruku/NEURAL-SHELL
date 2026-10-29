@@ -337,203 +337,42 @@ def delete_conversation(conv_id: str):
         return {"success": False, "error": str(e)}
 
 
-@router.get("/api/memory/export")
+@router.get("/api/memory/export", summary="Download a backup of everything that is yours",
+            description="Facts and their history, every chat, what Seven learned, reminders, tasks, triggers, workspaces, "
+                        "the commands you gave and your settings, as one JSON file (backend/backup.py).")
 def export_memory():
-    """
-    Export ALL user data as JSON for backup.
-    Includes: facts, conversations, schedules, tasks, triggers, workspaces.
-    """
-    import sqlite3
-    import json
-    import config as cfg
-    from memory.core import MEMORY_DIR
+    from backend import backup
+    return backup.export_all()
 
-    export = {
-        "exported_at": datetime.datetime.now().isoformat(),
-        "version":     get_version(),
-        "identity": {
-            "name":  cfg.KEY.get("identity", {}).get("user_name", ""),
-            "email": cfg.KEY.get("email", ""),
-        },
-        "facts":         [],
-        "conversations": [],
-        "schedules":     [],
-        "tasks":         [],
-        "triggers":      [],
-        "workspaces":    [],
-        "usage":         {}
-    }
 
-    # 1. Facts
-    try:
-        from memory import seven_memory
-        all_facts = seven_memory.user_facts.get()
-        if all_facts and all_facts.get('documents'):
-            for i, doc in enumerate(all_facts['documents']):
-                meta = all_facts['metadatas'][i] if all_facts.get('metadatas') else {}
-                export["facts"].append({
-                    "text":      doc,
-                    "category":  meta.get("category", "general"),
-                    "timestamp": meta.get("timestamp", "")
-                })
-    except Exception as e:
-        export["facts_error"] = str(e)
-
-    # 2. Conversations
-    try:
-        from memory import seven_memory
-        all_convos = seven_memory.conversations.get()
-        if all_convos and all_convos.get('documents'):
-            for i, doc in enumerate(all_convos['documents']):
-                meta = all_convos['metadatas'][i] if all_convos.get('metadatas') else {}
-                user_input     = meta.get("user_input", "")
-                seven_response = meta.get("seven_response", doc)
-                if user_input and seven_response:
-                    export["conversations"].append({
-                        "user":      user_input,
-                        "seven":     seven_response,
-                        "timestamp": meta.get("timestamp", "")
-                    })
-    except Exception:
-        try:
-            import sqlite3 as _sq
-            _db = os.path.join(MEMORY_DIR, "chroma.sqlite3")
-            if os.path.exists(_db):
-                _conn = _sq.connect(_db, timeout=5)
-                _conv_row = _conn.execute(
-                    "SELECT id FROM collections WHERE name = 'conversations'"
-                ).fetchone()
-                if _conv_row:
-                    _seg_ids = [r[0] for r in _conn.execute(
-                        "SELECT id FROM segments WHERE collection = ? AND scope = 'METADATA'",
-                        (_conv_row[0],)
-                    ).fetchall()]
-                    if _seg_ids:
-                        _ph = ",".join("?" * len(_seg_ids))
-                        _emb_rows = _conn.execute(
-                            f"SELECT id FROM embeddings WHERE segment_id IN ({_ph})",
-                            _seg_ids
-                        ).fetchall()
-                        for (_emb_id,) in _emb_rows:
-                            _meta = {
-                                r[0]: r[1] for r in _conn.execute(
-                                    "SELECT key, string_value FROM embedding_metadata WHERE id=?",
-                                    (_emb_id,)
-                                ).fetchall()
-                            }
-                            user_in  = _meta.get("user_input", "")
-                            seven_r  = _meta.get("seven_response", "")
-                            if user_in and seven_r:
-                                export["conversations"].append({
-                                    "user":      user_in,
-                                    "seven":     seven_r,
-                                    "timestamp": _meta.get("timestamp", "")
-                                })
-                _conn.close()
-        except Exception as _se:
-            export["conversations_error"] = str(_se)
-
-    # 3. Schedules
-    try:
-        _appdata = os.environ.get('APPDATA', '')
-        _sched_path = os.path.join(_appdata, 'SEVEN', 'schedules.json')
-        if os.path.exists(_sched_path):
-            with open(_sched_path, 'r', encoding='utf-8') as _f:
-                export["schedules"] = json.load(_f) if _f else []
-    except Exception as _e:
-        export["schedules_error"] = str(_e)
-
-    # 4. Tasks
-    try:
-        from backend.routes.tasks import TASKS_DB, _get_conn, _row_to_dict as _task_row
-        if os.path.exists(TASKS_DB):
-            with _get_conn() as conn:
-                rows = conn.execute("SELECT * FROM tasks ORDER BY id ASC").fetchall()
-                export["tasks"] = [_task_row(r) for r in rows]
-    except Exception as _e:
-        export["tasks_error"] = str(_e)
-
-    # 5. Triggers
-    try:
-        from backend.routes.triggers import TRIGGERS_DB
-        if os.path.exists(TRIGGERS_DB):
-            conn = sqlite3.connect(TRIGGERS_DB, timeout=5)
-            conn.row_factory = sqlite3.Row
-            rows = conn.execute("SELECT * FROM triggers ORDER BY id ASC").fetchall()
-            for row in rows:
-                d = dict(row)
-                d["enabled"] = bool(d.get("enabled", 1))
-                d["silent"]  = bool(d.get("silent", 0))
-                try:
-                    d["action_data"] = json.loads(d.get("action_data") or "{}")
-                except Exception:
-                    d["action_data"] = {}
-                export["triggers"].append(d)
-            conn.close()
-    except Exception as _e:
-        export["triggers_error"] = str(_e)
-
-    # 6. Workspaces
-    try:
-        from backend.routes.triggers import TRIGGERS_DB
-        if os.path.exists(TRIGGERS_DB):
-            conn = sqlite3.connect(TRIGGERS_DB, timeout=5)
-            conn.row_factory = sqlite3.Row
-            rows = conn.execute("SELECT * FROM workspaces ORDER BY id ASC").fetchall()
-            for row in rows:
-                d = dict(row)
-                try:
-                    d["apps"] = json.loads(d.get("apps") or "[]")
-                except Exception:
-                    d["apps"] = []
-                export["workspaces"].append(d)
-            conn.close()
-    except Exception as _e:
-        export["workspaces_error"] = str(_e)
-
-    # 7. Telemetry / Usage
-    try:
-        db_path = os.path.join(
-            os.environ.get("APPDATA", ""), "SEVEN", "data", "telemetry.db"
-        )
-        if os.path.exists(db_path):
-            conn = sqlite3.connect(db_path)
-            c    = conn.cursor()
-            c.execute("SELECT active_hours, last_seen FROM stats LIMIT 1")
-            row = c.fetchone()
-            if row:
-                mins = int((row[0] or 0) * 60)
-                export["usage"] = {
-                    "total_minutes": mins,
-                    "last_seen":     row[1]
-                }
-            conn.close()
-    except Exception:
-        pass
-
-    return export
-
-@router.delete("/api/memory/clear", summary="Clear all facts and conversations",
-               description="Permanently deletes all stored facts and conversation history from ChromaDB and resets brain session state.")
+@router.delete("/api/memory/clear", summary="Clear all memory",
+               description="Permanently deletes every fact, conversation, goal, learned preference and the command history, "
+                           "and resets the brain's short-term state. Each store is cleared on its own, so one failing "
+                           "never stops the others; the answer says exactly what was and was not cleared.")
 def clear_all_memory():
-    """
-    Clear everything Seven remembers: facts and their semantic index, every
-    conversation, learned goals and preferences, and the legacy ChromaDB data.
-    Never returns 500.
-    """
-    cleared = {}
-    try:
-        from memory import conversation_store, fact_service, learning_store
-        cleared["facts"] = fact_service.forget_all()
-        cleared["conversations"] = conversation_store.delete_everything()
-        learning_store.clear_speaker(_speaker_key())
-    except Exception as e:
-        _log.error(f"[API] Clear memory error: {e}")
-        return {"success": False, "error": str(e)}
-    try:
+    """Forget everything Seven remembers about you. Never returns 500."""
+    cleared, failed = {}, []
+
+    def step(name, fn):
+        try:
+            cleared[name] = fn()
+        except Exception as e:
+            _log.error(f"[API] Clear memory ({name}) failed: {e}")
+            failed.append(name)
+
+    from memory import conversation_store, fact_service, learning_store
+    from memory.command_log import command_log
+    step("facts", fact_service.forget_all)
+    step("conversations", conversation_store.delete_everything)
+    step("learning", learning_store.clear_all)
+    step("history", command_log.clear)
+
+    def legacy():
         from memory import seven_memory
         if seven_memory:
             seven_memory.clear_all()
+    try:
+        legacy()
     except Exception as e:
         _log.warning(f"[API] Legacy memory clear skipped: {e}")
 
@@ -543,298 +382,30 @@ def clear_all_memory():
     except Exception:
         pass
 
-    return {"success": True, "cleared": cleared,
-            "message": f"Cleared {cleared.get('facts', 0)} facts and {cleared.get('conversations', 0)} conversations."}
+    msg = f"Cleared {cleared.get('facts', 0)} facts and {cleared.get('conversations', 0)} conversations."
+    if failed:
+        return {"success": False, "cleared": cleared, "failed": failed,
+                "error": f"{msg} These could not be cleared: {', '.join(failed)}. Try again."}
+    return {"success": True, "cleared": cleared, "message": msg}
 
 
-@router.post("/api/memory/import")
+@router.post("/api/memory/import", summary="Restore a backup",
+             description="Adds a backup (from Download backup) to what is already here: nothing is replaced and anything "
+                         "already present is skipped, so it is safe to import the same file twice. Reminders and triggers "
+                         "beyond the plan's limit are not switched on.")
 async def import_memory(request: Request):
-    """Import ALL user data from backup JSON. Auto-patches DB schema on the fly."""
+    from backend import backup
     try:
-        import json
-        import sqlite3
-        import uuid
-        import datetime
-
         data = await request.json()
-
-        # Ensure ChromaDB memory system is ready
-        import time as _t
-        _deadline = _t.time() + 10
-        seven_memory = None
-        while _t.time() < _deadline:
-            try:
-                from memory import seven_memory as _sm
-                if _sm is not None:
-                    _sm.user_facts.count()
-                    seven_memory = _sm
-                    break
-            except Exception:
-                pass
-            _t.sleep(0.3)
-
-        imported = {
-            "facts": 0, "conversations": 0, "schedules": 0,
-            "tasks": 0, "triggers": 0, "workspaces": 0
-        }
-
-        # ── 1. FACTS ──
-        raw_facts = data.get("facts") or data.get("user_facts") or []
-        if seven_memory and isinstance(raw_facts, list):
-            for item in raw_facts:
-                text = ""
-                cat = "imported"
-                if isinstance(item, str):
-                    text = item.strip()
-                elif isinstance(item, dict):
-                    text = (item.get("text") or item.get("fact") or item.get("document") or "").strip()
-                    cat = item.get("category", "imported")
-                if text:
-                    try:
-                        seven_memory.user_facts.add(
-                            documents=[text],
-                            metadatas=[{
-                                "category":  cat,
-                                "timestamp": item.get("timestamp") or datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                                "user_id":   "default",
-                                "type":      "fact"
-                            }],
-                            ids=[f"fact_import_{uuid.uuid4().hex}"]
-                        )
-                        imported["facts"] += 1
-                    except Exception as e:
-                        print(f"[IMPORT] Fact import error: {e}")
-
-        # ── 2. CONVERSATIONS ──
-        raw_convos = data.get("conversations") or data.get("history") or []
-        if seven_memory and isinstance(raw_convos, list):
-            for item in raw_convos:
-                user_txt = ""
-                seven_txt = ""
-                if isinstance(item, dict):
-                    user_txt = (item.get("user") or item.get("user_input") or item.get("prompt") or item.get("input") or "").strip()
-                    seven_txt = (item.get("seven") or item.get("seven_response") or item.get("response") or item.get("output") or "").strip()
-                if user_txt and seven_txt:
-                    try:
-                        combined = f"User said: {user_txt} | Seven replied: {seven_txt}"
-                        seven_memory.conversations.add(
-                            documents=[combined],
-                            metadatas=[{
-                                "user_input": user_txt,
-                                "seven_response": seven_txt,
-                                "timestamp": item.get("timestamp") or datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                                "user_id": item.get("speaker") or "default",
-                                "type": "conversation",
-                                "source": item.get("source") or "import"
-                            }],
-                            ids=[f"conv_import_{uuid.uuid4().hex}"]
-                        )
-                        imported["conversations"] += 1
-                    except Exception as e:
-                        print(f"[IMPORT] Convo import error: {e}")
-
-        # ── 3. SCHEDULES ──
-        raw_scheds = data.get("schedules") or data.get("reminders") or []
-        if isinstance(raw_scheds, list) and raw_scheds:
-            try:
-                _appdata = os.environ.get('APPDATA', '')
-                _sched_path = os.path.join(_appdata, 'SEVEN', 'schedules.json')
-                os.makedirs(os.path.dirname(_sched_path), exist_ok=True)
-                _existing = []
-                if os.path.exists(_sched_path):
-                    try:
-                        with open(_sched_path, 'r', encoding='utf-8') as _f:
-                            _existing = json.load(_f)
-                    except Exception:
-                        _existing = []
-
-                _existing_ids = {s.get('id') for s in _existing if isinstance(s, dict)}
-                _max_id = max([_id for _id in _existing_ids if isinstance(_id, int)] or [0])
-
-                for item in raw_scheds:
-                    if isinstance(item, dict) and item.get("message"):
-                        _max_id += 1
-                        item["id"] = _max_id
-                        _existing.append(item)
-                        imported["schedules"] += 1
-
-                with open(_sched_path, 'w', encoding='utf-8') as _f:
-                    json.dump(_existing, _f, indent=2)
-            except Exception as e:
-                print(f"[IMPORT] Schedules error: {e}")
-
-        # Helper to dynamically patch missing schema columns
-        def _ensure_column(conn, table, column, definition):
-            try:
-                conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
-                print(f"[IMPORT] Patched schema: Added {column} to {table}")
-            except Exception:
-                pass  # Column already exists
-
-        # ── 4. TASKS ──
-        raw_tasks = data.get("tasks") or data.get("todos") or []
-        if isinstance(raw_tasks, list) and raw_tasks:
-            try:
-                from backend.routes.tasks import TASKS_DB, init_db as init_tasks_db
-                init_tasks_db()
-                if os.path.exists(TASKS_DB):
-                    conn = sqlite3.connect(TASKS_DB, timeout=10)
-                    conn.execute("PRAGMA journal_mode=WAL")
-                    
-                    # Auto-patch missing columns for older databases
-                    _ensure_column(conn, "tasks", "description", "TEXT")
-                    _ensure_column(conn, "tasks", "subtasks", "TEXT DEFAULT '[]'")
-                    _ensure_column(conn, "tasks", "tags", "TEXT")
-
-                    for item in raw_tasks:
-                        if isinstance(item, dict) and item.get("text"):
-                            try:
-                                subtasks_data = item.get("subtasks") or []
-                                subtasks_str = json.dumps(subtasks_data if isinstance(subtasks_data, list) else [])
-                                tags_raw = item.get("tags")
-                                tags_str = ",".join(tags_raw) if isinstance(tags_raw, list) else (tags_raw or "")
-                                conn.execute(
-                                    "INSERT INTO tasks (text, due_date, due_time, priority, "
-                                    "completed, created_at, completed_at, tags, description, subtasks) "
-                                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                                    (
-                                        str(item.get("text", "")).strip(),
-                                        item.get("due_date"),
-                                        item.get("due_time"),
-                                        item.get("priority", "medium"),
-                                        1 if item.get("completed") else 0,
-                                        item.get("created_at") or datetime.datetime.now().isoformat(),
-                                        item.get("completed_at"),
-                                        tags_str,
-                                        item.get("description"),
-                                        subtasks_str
-                                    )
-                                )
-                                imported["tasks"] += 1
-                            except Exception as te:
-                                print(f"[IMPORT] Single task error: {te}")
-                    conn.commit()
-                    conn.close()
-            except Exception as e:
-                print(f"[IMPORT] Tasks error: {e}")
-
-        # ── 5. TRIGGERS ──
-        raw_trigs = data.get("triggers") or []
-        if isinstance(raw_trigs, list) and raw_trigs:
-            try:
-                from backend.routes.triggers import TRIGGERS_DB, init_db as init_trig_db
-                init_trig_db()
-                if os.path.exists(TRIGGERS_DB):
-                    conn = sqlite3.connect(TRIGGERS_DB, timeout=10)
-                    conn.execute("PRAGMA journal_mode=WAL")
-                    
-                    # Auto-patch missing columns for older databases
-                    _ensure_column(conn, "triggers", "audio_pattern", "TEXT")
-                    _ensure_column(conn, "triggers", "silent", "INTEGER DEFAULT 0")
-                    _ensure_column(conn, "triggers", "icon", "TEXT")
-                    _ensure_column(conn, "triggers", "last_fired", "TEXT")
-                    _ensure_column(conn, "triggers", "fire_count", "INTEGER DEFAULT 0")
-
-                    now_iso = datetime.datetime.now().isoformat()
-                    for item in raw_trigs:
-                        if isinstance(item, dict) and item.get("name") and item.get("action_type"):
-                            try:
-                                action_data = item.get("action_data") or {}
-                                action_data_str = json.dumps(action_data if isinstance(action_data, dict) else {})
-                                conn.execute(
-                                    "INSERT INTO triggers (name, action_type, action_data, hotkey, "
-                                    "voice_phrase, audio_pattern, enabled, silent, icon, created_at, updated_at) "
-                                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                                    (
-                                        str(item.get("name", "")).strip(),
-                                        str(item.get("action_type")),
-                                        action_data_str,
-                                        item.get("hotkey"),
-                                        item.get("voice_phrase"),
-                                        item.get("audio_pattern"),
-                                        1 if item.get("enabled", True) else 0,
-                                        1 if item.get("silent", False) else 0,
-                                        item.get("icon"),
-                                        item.get("created_at", now_iso),
-                                        item.get("updated_at", now_iso)
-                                    )
-                                )
-                                imported["triggers"] += 1
-                            except Exception as tre:
-                                print(f"[IMPORT] Single trigger error: {tre}")
-                    conn.commit()
-                    conn.close()
-                    try:
-                        from backend.routes.triggers import _signal_daemon_reload
-                        _signal_daemon_reload()
-                    except Exception:
-                        pass
-            except Exception as e:
-                print(f"[IMPORT] Triggers error: {e}")
-
-        # ── 6. WORKSPACES ──
-        raw_ws = data.get("workspaces") or []
-        if isinstance(raw_ws, list) and raw_ws:
-            try:
-                from backend.routes.triggers import TRIGGERS_DB, init_db as init_trig_db
-                init_trig_db()
-                if os.path.exists(TRIGGERS_DB):
-                    conn = sqlite3.connect(TRIGGERS_DB, timeout=10)
-                    conn.execute("PRAGMA journal_mode=WAL")
-                    
-                    # Auto-patch missing columns for older databases
-                    _ensure_column(conn, "workspaces", "description", "TEXT")
-                    _ensure_column(conn, "workspaces", "icon", "TEXT")
-                    _ensure_column(conn, "workspaces", "last_used", "TEXT")
-                    _ensure_column(conn, "workspaces", "use_count", "INTEGER DEFAULT 0")
-
-                    now_iso = datetime.datetime.now().isoformat()
-                    for item in raw_ws:
-                        if isinstance(item, dict) and item.get("name"):
-                            try:
-                                apps_data = item.get("apps") or []
-                                apps_str = json.dumps(apps_data if isinstance(apps_data, list) else [])
-                                conn.execute(
-                                    "INSERT INTO workspaces (name, description, apps, icon, created_at, updated_at) "
-                                    "VALUES (?, ?, ?, ?, ?, ?)",
-                                    (
-                                        str(item.get("name", "")).strip(),
-                                        item.get("description"),
-                                        apps_str,
-                                        item.get("icon"),
-                                        item.get("created_at", now_iso),
-                                        item.get("updated_at", now_iso)
-                                    )
-                                )
-                                imported["workspaces"] += 1
-                            except Exception as wse:
-                                print(f"[IMPORT] Single workspace error: {wse}")
-                    conn.commit()
-                    conn.close()
-            except Exception as e:
-                print(f"[IMPORT] Workspaces error: {e}")
-
-        total = sum(imported.values())
-        return {
-            "success": True,
-            "imported_facts":         imported["facts"],
-            "imported_conversations": imported["conversations"],
-            "imported_schedules":     imported["schedules"],
-            "imported_tasks":         imported["tasks"],
-            "imported_triggers":      imported["triggers"],
-            "imported_workspaces":    imported["workspaces"],
-            "message": f"Imported {total} items: "
-                       f"{imported['facts']} facts, "
-                       f"{imported['conversations']} convos, "
-                       f"{imported['schedules']} schedules, "
-                       f"{imported['tasks']} tasks, "
-                       f"{imported['triggers']} triggers, "
-                       f"{imported['workspaces']} workspaces"
-        }
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
+    except Exception:
+        raise HTTPException(status_code=400, detail="That file is not a Seven backup.")
+    try:
+        return backup.import_all(data)
+    except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        _log.error(f"[API] Import failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Could not restore the backup ({e})")
 
 
 @router.get("/api/memory/facts/structured",

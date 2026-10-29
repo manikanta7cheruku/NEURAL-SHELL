@@ -346,10 +346,10 @@ def activate_license(license_key: str, email: str = None) -> Tuple[bool, str, Op
         except Exception:
             reason = str(e)
         print(f"[LICENSE] Server rejected key: {reason}")
-        # Don't fall back to local for these — key genuinely invalid
-        if e.code in (400, 404):
-            # Still try local as last resort (developer machine)
-            pass
+        # The server's answer is the truth for a revoked, expired or over-limit key: say so, do not fall through
+        # to "not found". Only a 404 (unknown key) falls back to the local database (developer machines).
+        if e.code in (400, 409):
+            return False, reason, None
 
     except Exception as e:
         print(f"[LICENSE] Server unreachable, trying local: {e}")
@@ -374,7 +374,7 @@ def activate_license(license_key: str, email: str = None) -> Tuple[bool, str, Op
 
     if not row:
         conn.close()
-        return False, "License key not found. Make sure you are connected to the internet.", None
+        return False, "That license key was not found. Check it for typos and make sure you are online.", None
 
     tier, device_ids_json, max_devices, is_active, expires_at = row
 
