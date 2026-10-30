@@ -18,6 +18,12 @@ project uses [semantic versioning](docs/development/release-process.md#versions)
 - `/api/chat` returns action receipts in non-streaming responses.
 
 ### Fixed
+- Setup step 4 showed "Downloading 1%" for minutes for speech recognition. The download engine wrote the big file only
+  when it finished, so watching the folder grow told nothing. Speech and search models now use the plain download,
+  which grows its file as it goes (same speed measured), and the step shows real progress ("340 of 1500 MB").
+- The speech download now starts when the setup wizard opens (`POST /api/setup/speech-install`), not at step 4, so the
+  biggest download is under way or finished by the time it is needed. The size label says 600 MB to 1.5 GB (a PC with a
+  graphics card downloads the larger, more accurate model).
 - Opening Seven no longer waits on a speech-model download. The setup wizard now fetches it (with progress) when it is
   missing, and if it is still missing at launch the app opens anyway and the home screen says it is getting speech
   recognition ready. Before, a first launch could sit on the loading screen for minutes.

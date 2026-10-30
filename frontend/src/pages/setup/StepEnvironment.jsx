@@ -27,7 +27,7 @@ const ITEMS = [
     why: 'It runs on this PC, so Seven can talk to you even with no internet, and nothing you hear comes from a server.',
   },
   {
-    key: 'speech_model', name: 'Speech recognition', size: 'About 600 MB',
+    key: 'speech_model', name: 'Speech recognition', size: '600 MB to 1.5 GB',
     what: 'What turns your voice into words, tuned for this PC (a faster model on PCs without a graphics card).',
     why: 'Your voice is understood here on the computer and is never uploaded anywhere.',
   },
@@ -75,7 +75,9 @@ function Row({ item, b, open }) {
             <span className={`shrink-0 text-[11.5px] tabular-nums ${st.tone === 'done' ? 'text-white/60' : st.tone === 'ask' ? 'text-[#e2b25b]'
                               : st.tone === 'error' ? 'text-[#ef6b62]' : 'text-white/45'}`}>{st.word}</span>
           </div>
-          <div className="mt-0.5 text-[11.5px] text-white/45">{item.what}</div>
+          <div className="mt-0.5 text-[11.5px] text-white/45">
+            {item.key === 'speech_model' && st.tone === 'busy' && b.speech_model?.current ? b.speech_model.current : item.what}
+          </div>
         </div>
         <span className="hidden w-24 shrink-0 text-right text-[11px] text-white/30 sm:block">{item.size}</span>
       </div>

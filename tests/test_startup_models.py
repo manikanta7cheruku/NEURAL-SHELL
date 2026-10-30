@@ -3,6 +3,7 @@ Starting Seven never waits on a download. The setup wizard fetches the speech mo
 PC before Seven first starts), and if it is ever missing the app opens anyway and says what is happening.
 """
 import os
+import time
 import tempfile
 import unittest
 from unittest import mock
@@ -78,3 +79,109 @@ class WhileTheSpeechModelDownloads(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SpeechDownload(unittest.TestCase):
+    """Step 4's biggest download: real progress (not 1% for minutes), one at a time, and it can start early."""
+
+    def setUp(self):
+        self.ready = False
+        for patcher in (mock.patch.object(bootstrap, "speech_model_ready", lambda: self.ready),
+                        mock.patch.object(bootstrap, "_speech_models", lambda: (["base.en", "small.en"], 630))):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.seen = []
+
+    def state(self):
+        return dict(bootstrap._bootstrap_state["speech_model"])
+
+    def test_nothing_is_downloaded_when_it_is_already_there(self):
+        self.ready = True
+        with mock.patch.object(bootstrap, "_download_whisper") as dl:
+            self.assertTrue(bootstrap.ensure_speech_model())
+        dl.assert_not_called()
+        self.assertEqual(self.state()["status"], "done")
+
+    def test_progress_moves_through_the_models_and_ends_done(self):
+        def fake(name, on_progress, cache_dir=None):
+            for frac in (0.25, 0.5, 1.0):
+                on_progress(int(frac * 100), 100)
+                self.seen.append((name, self.state()["progress"], self.state()["current"]))
+        with mock.patch.object(bootstrap, "_download_whisper", fake):
+            self.assertTrue(bootstrap.ensure_speech_model())
+        base = [p for n, p, _ in self.seen if n == "base.en"]
+        small = [p for n, p, _ in self.seen if n == "small.en"]
+        self.assertEqual(base, sorted(base))
+        self.assertLess(max(base), min(small) + 1)                       # the second model continues from where the first ended
+        self.assertEqual(small, sorted(small))
+        self.assertGreater(small[0], 20)
+        self.assertIn("MB", self.seen[0][2])                             # says how much, in words a person understands
+        self.assertEqual((self.state()["status"], self.state()["progress"]), ("done", 100))
+
+    def test_a_failed_download_says_what_to_do(self):
+        with mock.patch.object(bootstrap, "_download_whisper", side_effect=RuntimeError("offline")), \
+                mock.patch("faster_whisper.download_model", side_effect=RuntimeError("offline")):
+            self.assertFalse(bootstrap.ensure_speech_model())
+        self.assertEqual(self.state()["status"], "error")
+        self.assertIn("internet", self.state()["error"])
+
+    def test_if_the_progress_download_fails_the_plain_one_is_tried(self):
+        with mock.patch.object(bootstrap, "_download_whisper", side_effect=RuntimeError("no progress")), \
+                mock.patch("faster_whisper.download_model") as plain:
+            self.assertTrue(bootstrap.ensure_speech_model())
+        self.assertEqual([c.args[0] for c in plain.call_args_list], ["base.en", "small.en"])
+
+    def test_two_requests_never_download_twice_at_once(self):
+        import threading
+        gate, started, calls = threading.Event(), threading.Event(), []
+
+        def slow(name, on_progress, cache_dir=None):
+            calls.append(name)
+            started.set()
+            gate.wait(3)
+        with mock.patch.object(bootstrap, "_download_whisper", slow):
+            first = threading.Thread(target=bootstrap.ensure_speech_model)
+            first.start()
+            started.wait(2)
+            self.ready = False
+            second = threading.Thread(target=bootstrap.ensure_speech_model)
+            second.start()
+            self.ready = True                                            # the first one finishes and the model is there
+            gate.set()
+            first.join(5)
+            second.join(5)
+        self.assertEqual(calls, ["base.en", "small.en"])                 # one pass, not two
+
+    def test_the_plain_download_mode_is_used_and_put_back(self):
+        from huggingface_hub import constants
+        before = (os.environ.get("HF_HUB_DISABLE_XET"), constants.HF_HUB_DISABLE_XET)
+        with bootstrap._classic_downloads():
+            self.assertEqual(os.environ["HF_HUB_DISABLE_XET"], "1")
+            self.assertTrue(constants.HF_HUB_DISABLE_XET)
+        self.assertEqual((os.environ.get("HF_HUB_DISABLE_XET"), constants.HF_HUB_DISABLE_XET), before)
+
+    def test_the_wizard_can_start_it_early_and_only_once(self):
+        try:
+            from fastapi import FastAPI
+            from fastapi.testclient import TestClient
+            from backend.routes import setup as setup_routes
+        except Exception:
+            self.skipTest("needs fastapi")
+        import threading
+        app = FastAPI()
+        app.include_router(setup_routes.router)
+        client = TestClient(app)
+        gate, runs = threading.Event(), []
+
+        def slow():
+            runs.append(1)
+            gate.wait(3)
+        setup_routes._speech_thread = None
+        with mock.patch.object(bootstrap, "ensure_speech_model", slow):
+            self.assertEqual(client.post("/api/setup/speech-install").json()["status"], "running")
+            time.sleep(0.1)
+            client.post("/api/setup/speech-install")
+            gate.set()
+        self.assertEqual(len(runs), 1)
+        self.ready = True
+        self.assertEqual(client.post("/api/setup/speech-install").json()["status"], "done")

@@ -195,31 +195,21 @@ def _set_model_state(**changes):
 def _download_missing(missing: list):
     """Fetch speech models in the background, with progress, so starting Seven never waits on a 1.5 GB download."""
     from seven_utils import hf_offline
-    total_mb = sum(_SIZE_MB.get(n, 1500) for n in missing)
-    done = threading.Event()
+    from backend.bootstrap import _download_whisper
+    total_mb = float(sum(_SIZE_MB.get(n, 1500) for n in missing))
+    finished = [0.0]
 
-    def _watch():
-        while not done.is_set():
-            size = 0
-            for n in missing:
-                for root, _dirs, files in os.walk(_hub_folder(n)):
-                    for f in files:
-                        try:
-                            size += os.path.getsize(os.path.join(root, f))
-                        except OSError:
-                            pass
-            _set_model_state(state="downloading", progress=max(1, min(97, int(size / (total_mb * 1024 * 1024) * 100))),
+    for n in missing:
+        weight = _SIZE_MB.get(n, 1500)
+
+        def on_progress(done, size, weight=weight):
+            share = weight * (done / size if size else 0)
+            _set_model_state(state="downloading", progress=max(1, min(97, int((finished[0] + share) / total_mb * 100))),
                              detail="Downloading speech recognition (one time)")
-            done.wait(1.0)
 
-    threading.Thread(target=_watch, daemon=True, name="WhisperProgress").start()
-    try:
-        from faster_whisper import download_model
         with hf_offline.allow_downloads():
-            for n in missing:
-                download_model(n)
-    finally:
-        done.set()
+            _download_whisper(n, on_progress)
+        finished[0] += weight
 
 
 def _load_models():
