@@ -457,16 +457,16 @@ WHISPER_MODELS = [
         "accuracy": "Fair, occasional mistranscriptions",
     },
     {
-        "id": "small.en", "label": "Small", "tag": "BALANCED",
+        "id": "small.en", "label": "Small", "tag": "RECOMMENDED",
         "size_mb": 484, "param": "244M",
-        "headline": "Solid accuracy without a GPU",
+        "headline": "Seven's default: quick to download, fast, accurate",
         "cpu_speed": "Moderate", "gpu_speed": "Fast",
-        "accuracy": "Good, recommended for most CPU-only users",
+        "accuracy": "Good, and Seven double-checks anything it is unsure of",
     },
     {
-        "id": "medium.en", "label": "Medium", "tag": "RECOMMENDED",
+        "id": "medium.en", "label": "Medium", "tag": "BETTER ACCURACY",
         "size_mb": 1500, "param": "769M",
-        "headline": "Seven's current default, strong accuracy",
+        "headline": "A little more accurate, a 1.5 GB download",
         "cpu_speed": "Slow without a GPU", "gpu_speed": "Fast",
         "accuracy": "Very good, fewer hallucinations on silence",
     },
@@ -527,14 +527,15 @@ def get_whisper_models():
     cfg_path = os.path.join(
         os.environ.get("APPDATA", os.path.expanduser("~")), "SEVEN", "config.json"
     )
-    current = "medium.en"
+    from backend.bootstrap import default_speech_model
+    current = default_speech_model()
     
     # ALWAYS read from file, never from config.KEY (which can be stale)
     try:
         # Force fresh read with no caching
         with open(cfg_path, "r", encoding="utf-8") as _f:
             cfg_data = _json.load(_f)
-            current = cfg_data.get("brain", {}).get("whisper_model", "medium.en")
+            current = cfg_data.get("brain", {}).get("whisper_model") or current
             _log_config_change("GET /whisper-models", current)
             print(f"[WHISPER] GET models - read from file: {current}")
             
@@ -692,7 +693,8 @@ def set_whisper_model(data: dict):
             # this is a one-time cache warm-up, not how the model runs later.
             # ears/core.py loads the real model with GPU if available.
             from seven_utils import hf_offline
-            with hf_offline.allow_downloads():
+            from backend.bootstrap import _classic_downloads
+            with hf_offline.allow_downloads(), _classic_downloads():
                 WhisperModel(model_id, device="cpu", compute_type="int8")
             stop_flag["done"] = True
             print(f"[WHISPER] Download completed for {model_id}")

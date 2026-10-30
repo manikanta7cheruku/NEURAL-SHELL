@@ -185,3 +185,39 @@ class SpeechDownload(unittest.TestCase):
         self.assertEqual(len(runs), 1)
         self.ready = True
         self.assertEqual(client.post("/api/setup/speech-install").json()["status"], "done")
+
+
+class DefaultSpeechModel(unittest.TestCase):
+    """The default is small.en (about 480 MB). A PC that already has medium.en and not small.en keeps medium: no new download."""
+
+    def cached(self, *names):
+        return mock.patch.object(bootstrap, "_speech_cached", lambda n: n in names)
+
+    def test_small_unless_only_medium_is_on_the_pc(self):
+        with self.cached():
+            self.assertEqual(bootstrap.default_speech_model(), "small.en")
+        with self.cached("small.en"):
+            self.assertEqual(bootstrap.default_speech_model(), "small.en")
+        with self.cached("small.en", "medium.en"):
+            self.assertEqual(bootstrap.default_speech_model(), "small.en")
+        with self.cached("medium.en"):
+            self.assertEqual(bootstrap.default_speech_model(), "medium.en")
+
+    def test_a_pc_with_a_graphics_card_downloads_the_small_model_not_1_5_gb(self):
+        import sys
+        import types
+        import config
+        fake = types.SimpleNamespace(get_cuda_device_count=lambda: 1)
+        with mock.patch.dict(sys.modules, {"ctranslate2": fake}), mock.patch.dict(config.KEY, {"brain": {"whisper_model": ""}}),                 self.cached():
+            self.assertEqual(bootstrap._speech_models(), (["small.en"], 480))
+        with mock.patch.dict(sys.modules, {"ctranslate2": fake}), mock.patch.dict(config.KEY, {"brain": {"whisper_model": ""}}),                 self.cached("medium.en"):
+            self.assertEqual(bootstrap._speech_models(), (["medium.en"], 1500))
+
+    def test_settings_offers_medium_as_the_upgrade(self):
+        try:
+            from backend.routes import setup as setup_routes
+        except Exception:
+            self.skipTest("needs fastapi")
+        tags = {m["id"]: m["tag"] for m in setup_routes.WHISPER_MODELS}
+        self.assertEqual(tags["small.en"], "RECOMMENDED")
+        self.assertEqual(tags["medium.en"], "BETTER ACCURACY")

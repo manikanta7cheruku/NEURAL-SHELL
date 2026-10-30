@@ -1279,8 +1279,8 @@ def ensure_voice_model():
 
 
 def _speech_models():
-    """The Whisper models the ears load on this PC (ears/core.py): the one chosen in settings, else medium.en on a
-    GPU, else base.en + small.en."""
+    """The Whisper models the ears load on this PC (ears/core.py): the one chosen in settings, else small.en on a
+    PC with a graphics card, else base.en + small.en (a fast first pass, re-checked by the accurate one)."""
     sizes = {"base.en": 150, "small.en": 480, "medium.en": 1500}
     try:
         import config as _cfg
@@ -1292,10 +1292,24 @@ def _speech_models():
     try:
         import ctranslate2
         if ctranslate2.get_cuda_device_count() > 0:
-            return ["medium.en"], 1500
+            return [default_speech_model()], sizes[default_speech_model()]
     except Exception:
         pass
     return ["base.en", "small.en"], 620
+
+
+def _speech_cached(name: str) -> bool:
+    hub = os.path.join(os.path.expanduser("~"), ".cache", "huggingface", "hub")
+    try:
+        snaps = os.path.join(hub, f"models--Systran--faster-whisper-{name}", "snapshots")
+        return any(os.path.isfile(os.path.join(snaps, d, "model.bin")) for d in os.listdir(snaps))
+    except OSError:
+        return False
+
+
+def default_speech_model() -> str:
+    """small.en (about 480 MB), unless this PC already has medium.en and not small.en: then it keeps medium."""
+    return "medium.en" if (not _speech_cached("small.en") and _speech_cached("medium.en")) else "small.en"
 
 
 def speech_model_ready() -> bool:

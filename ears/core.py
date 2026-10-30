@@ -56,12 +56,29 @@ def _config() -> dict:
         return {}
 
 
+def _hub_folder(name: str) -> str:
+    return os.path.join(os.path.expanduser("~"), ".cache", "huggingface", "hub", f"models--Systran--faster-whisper-{name}")
+
+
+def model_cached(name: str) -> bool:
+    """Is this speech model already on the PC? (A download is never needed to start Seven when it is.)"""
+    try:
+        snaps = os.path.join(_hub_folder(name), "snapshots")
+        return any(os.path.isfile(os.path.join(snaps, d, "model.bin")) for d in os.listdir(snaps))
+    except OSError:
+        return False
+
+
 def _get_configured_model() -> str:
     model = os.environ.get('SEVEN_WHISPER_MODEL') or _config().get('brain', {}).get('whisper_model', '').strip()
     if model:
         return model
-    # Default by hardware: medium on a GPU, small on a CPU (medium on a CPU made the whole PC lag).
-    return "medium.en" if _gpu_available() else "small.en"
+    # small.en for everyone: about 480 MB, quick to download and fast, and accurate enough that Seven's own checks catch
+    # the rest. Medium (1.5 GB, a little better) is one click away in Settings, Voice. A PC that already has medium and
+    # not small keeps using it, so an upgrade never starts a new download.
+    if _gpu_available() and not model_cached("small.en") and model_cached("medium.en"):
+        return "medium.en"
+    return "small.en"
 
 
 def _gpu_available() -> bool:
@@ -156,19 +173,6 @@ def _needed_models() -> list:
 
 
 _SIZE_MB = {"base.en": 150, "small.en": 480, "medium.en": 1500, "large-v3": 3000}
-
-
-def _hub_folder(name: str) -> str:
-    return os.path.join(os.path.expanduser("~"), ".cache", "huggingface", "hub", f"models--Systran--faster-whisper-{name}")
-
-
-def model_cached(name: str) -> bool:
-    """Is this speech model already on the PC? (A download is never needed to start Seven when it is.)"""
-    try:
-        snaps = os.path.join(_hub_folder(name), "snapshots")
-        return any(os.path.isfile(os.path.join(snaps, d, "model.bin")) for d in os.listdir(snaps))
-    except OSError:
-        return False
 
 
 # What the app shows while Seven cannot hear yet: loading, downloading (with a percentage), ready or error.
