@@ -145,6 +145,12 @@ export default function ModelPicker({ value, onChange }) {
 
   useEffect(() => { load(); return () => clearInterval(poll.current); }, [load]);
 
+  // A download that was started earlier (or from another screen) keeps updating here too.
+  useEffect(() => {
+    if (pull?.status === 'running' && !poll.current) watchPull(pull.label || pull.model);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pull?.status]);
+
   const watchPull = name => {
     clearInterval(poll.current);
     poll.current = setInterval(async () => {
@@ -201,6 +207,25 @@ export default function ModelPicker({ value, onChange }) {
         <Toggle checked={auto} onChange={on => use(on ? 'auto' : (data?.active || data?.recommended?.id || 'llama3.2:1b'))}
                 label="Choose automatically" />
       </Row>
+
+      {pulling && (
+        <div className="mx-4 my-3 rounded-lg border border-s-border bg-s-card px-4 py-3" role="status" aria-live="polite">
+          <div className="flex items-baseline justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-[11px] text-s-text-4">Downloading</div>
+              <div className="truncate text-[13px] font-medium text-s-text">
+                {pulling.label || pulling.model}
+                {pulling.total_gb ? <span className="ml-2 text-[11.5px] font-normal text-s-text-4">{pulling.total_gb} GB</span> : null}
+              </div>
+            </div>
+            <span className="font-mono text-[12px] tabular-nums text-s-accent-h">{pulling.progress || 0}%</span>
+          </div>
+          <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-s-card-h">
+            <div className="h-full rounded-full bg-s-accent transition-[width] duration-500" style={{ width: `${pulling.progress || 0}%` }} />
+          </div>
+          <p className="mt-1.5 truncate text-[11px] tabular-nums text-s-text-4">{pulling.current || 'Starting the download'}</p>
+        </div>
+      )}
 
       {data && !data.ollama_running && (
         <Body className="text-[12px] text-s-yellow">Ollama isn't running, so models can't be listed or downloaded. Start Ollama, then come back.</Body>

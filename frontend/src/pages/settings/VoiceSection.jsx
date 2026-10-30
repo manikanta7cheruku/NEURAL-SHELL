@@ -315,20 +315,19 @@ function ControlWords() {
 function SpeechRecognition() {
   const [models, setModels] = useState(null);
   const [current, setCurrent] = useState(null);
-  const [hasGpu, setHasGpu] = useState(false);
-  const [download, setDownload] = useState(null);        // { id, progress }
+  const [hw, setHw] = useState(null);                  // what this PC can run (from the backend, with the models)
+  const [download, setDownload] = useState(null);        // { id, label, progress }
   const [restart, setRestart] = useState(false);
   const poll = useRef(null);
 
   const load = useCallback(() => {
     api.get(`/setup/whisper-models?t=${Date.now()}`, { headers: { 'Cache-Control': 'no-cache' } })
-       .then(r => { setModels(r.data.models || []); setCurrent(r.data.current); })
+       .then(r => { setModels(r.data.models || []); setCurrent(r.data.current); setHw(r.data.hardware || null); })
        .catch(() => setModels([]));
   }, []);
 
   useEffect(() => {
     load();
-    api.get('/hardware').then(r => setHasGpu(!!r.data?.gpu?.available)).catch(() => {});
     return () => poll.current && clearInterval(poll.current);
   }, [load]);
 
@@ -340,7 +339,7 @@ function SpeechRecognition() {
     if (!r) { setCurrent(previous); return; }
     setRestart(true);
     if (!r.data.installed) {
-      setDownload({ id: m.id, progress: 5 });
+      setDownload({ id: m.id, label: m.label, progress: 5 });
       poll.current = setInterval(async () => {
         try {
           const s = await api.get(`/setup/whisper-download-status?t=${Date.now()}`);
@@ -361,11 +360,17 @@ function SpeechRecognition() {
   const size = mb => (mb >= 1000 ? `${(mb / 1000).toFixed(1)} GB` : `${mb} MB`);
 
   return (
-    <Section title="Speech recognition" description="How Seven turns your voice into text. Separate from the model that writes replies. Larger models make fewer mistakes but are slower without a graphics card.">
+    <Section title="Speech recognition" description="How Seven turns your voice into text. Separate from the model that writes replies. Larger models make fewer mistakes but are slower without an NVIDIA graphics card.">
+      {hw && (
+        <Body className="text-[12px] text-s-text-3">
+          Your PC: <span className="text-s-text-2">{hw.cuda ? `${hw.gpu || 'NVIDIA graphics'}${hw.vram_gb ? `, ${hw.vram_gb} GB` : ''}` : 'no NVIDIA graphics card, so the processor does the listening'}</span>
+          {hw.ram_gb ? <> · <span className="text-s-text-2">{Math.round(hw.ram_gb)} GB memory</span></> : null}
+        </Body>
+      )}
       {models === null ? <Body><LoadingRows rows={3} /></Body> : models.map(m => {
         const active = current === m.id;
         const downloading = download?.id === m.id;
-        const slow = !hasGpu && (m.id === 'medium.en' || m.id === 'large-v3');
+        const advice = m.advice;
         return (
           <div key={m.id} role="radio" aria-checked={active} tabIndex={0}
                onClick={() => select(m)} onKeyDown={e => e.key === 'Enter' && select(m)}
@@ -379,7 +384,7 @@ function SpeechRecognition() {
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <span className="text-[13px] font-medium text-s-text">{m.label}</span>
-                  {m.tag && <Badge>{m.tag}</Badge>}
+                  {m.recommended ? <Badge tone="accent">Recommended for this PC</Badge> : m.tag && <Badge>{m.tag}</Badge>}
                   {m.installed && !active && <span className="text-[12px] text-s-text-4">Downloaded</span>}
                 </div>
                 <div className="text-[12px] text-s-text-3">{m.headline}</div>
@@ -393,14 +398,15 @@ function SpeechRecognition() {
                 {m.accuracy && <span>Accuracy: <span className="text-s-text-2">{m.accuracy}</span></span>}
               </div>
             )}
-            {slow && (
-              <p className="mt-2 ml-7 flex items-center gap-1.5 text-[12px] text-s-yellow">
-                <AlertTriangle size={13} /> No graphics card detected, so this model adds a noticeable delay.
+            {advice?.note && (
+              <p className={cx('mt-2 ml-7 flex items-start gap-1.5 text-[12px] leading-snug', advice.level === 'caution' ? 'text-s-yellow' : 'text-s-text-3')}>
+                {advice.level === 'caution' && <AlertTriangle size={13} className="mt-px shrink-0" />}
+                <span>{advice.note}</span>
               </p>
             )}
             {downloading && (
               <div className="mt-2.5 ml-7">
-                <div className="flex justify-between text-[12px] text-s-text-3"><span>Downloading</span><span className="tabular-nums">{download.progress}%</span></div>
+                <div className="flex justify-between text-[12px] text-s-text-3"><span>Downloading the {download.label} speech model</span><span className="tabular-nums">{download.progress}%</span></div>
                 <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-s-card-h">
                   <div className="h-full rounded-full bg-s-accent transition-[width] duration-500" style={{ width: `${download.progress}%` }} />
                 </div>

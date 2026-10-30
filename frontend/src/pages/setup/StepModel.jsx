@@ -29,7 +29,7 @@ export default function StepModel() {
   const [installedModels, setInstalledModels] = useState([]);
   const [pulling, setPulling] = useState(false);
   const [pct, setPct] = useState(0);
-  const [eta, setEta] = useState('');
+  const [pull, setPull] = useState(null);          // what the backend reports: which model, GB done, speed, time left
   const [error, setError] = useState('');
   const [expandedTier, setExpandedTier] = useState(null);
   const [MODELS, setModels] = useState([]);
@@ -79,6 +79,7 @@ export default function StepModel() {
     if (!data.modelName || pulling) return;
     if (isModelInstalled(data.modelName)) { goNext(); return; }
     setPulling(true);
+    setPull({ status: 'running', model: data.modelName, label: MODELS.find(m => m.ollama === data.modelName)?.name || data.modelName, current: 'Starting the download' });
     setError('');
 
     try {
@@ -98,7 +99,7 @@ export default function StepModel() {
           if (rawPct > maxPctSeen) maxPctSeen = rawPct;
           setPct(maxPctSeen);
 
-          if (st.model_pull?.current) setEta(st.model_pull.current);
+          if (st.model_pull) setPull(st.model_pull);
 
           if (st.model_pull?.status === 'done') {
             clearInterval(pollRef.current);
@@ -108,7 +109,7 @@ export default function StepModel() {
           if (st.model_pull?.status === 'error') {
             clearInterval(pollRef.current);
             setPulling(false);
-            setError('Download failed. Check your internet connection and try again.');
+            setError(st.model_pull?.error || 'Download failed. Check your internet connection and try again.');
           }
         } catch (e) {}
       }, 1000);
@@ -176,6 +177,11 @@ export default function StepModel() {
                 {isRecommended && !installed && (
                   <span className="px-2 py-0.5 bg-white text-black text-[9px] font-bold uppercase tracking-wider rounded-sm">
                     Recommended
+                  </span>
+                )}
+                {pulling && isSelected && (
+                  <span className="px-2 py-0.5 bg-white text-black text-[9px] font-bold uppercase tracking-wider rounded-sm tabular-nums">
+                    Downloading {pct}%
                   </span>
                 )}
                 {installed && (
@@ -254,16 +260,23 @@ export default function StepModel() {
 
       {/* Download progress */}
       {pulling && (
-        <div className="space-y-2 pt-2">
-          <div className="flex justify-between text-[11px] font-medium text-white/70">
-            <span>{eta || 'Downloading model weights...'}</span>
-            <span className="font-mono text-white">{pct}%</span>
+        <div className="space-y-3 rounded-xl border border-white/[0.08] bg-white/[0.03] px-4 py-3.5" role="status" aria-live="polite">
+          <div className="flex items-baseline justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-[10px] font-medium uppercase tracking-[0.2em] text-white/40">Downloading</div>
+              <div className="mt-0.5 truncate text-[14px] font-medium text-white">
+                {pull?.label || data.modelName}
+                {pull?.total_gb ? <span className="ml-2 text-[11px] font-normal text-white/40">{pull.total_gb} GB</span> : null}
+              </div>
+            </div>
+            <span className="shrink-0 font-mono text-[15px] tabular-nums text-white">{pct}%</span>
           </div>
-          <div className="h-1 w-full bg-white/[0.05] rounded-full overflow-hidden">
-            <div className="h-full bg-white transition-all duration-500" style={{ width: `${pct}%` }} />
+          <div className="h-1 w-full overflow-hidden rounded-full bg-white/[0.06]">
+            <div className="h-full rounded-full bg-white transition-all duration-500" style={{ width: `${pct}%` }} />
           </div>
-          <div className="text-[10px] text-white/40 font-light">
-            The download happens once; after that the model starts instantly. You can leave this window open while it downloads.
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-[11px] text-white/50">
+            <span className="tabular-nums">{pull?.current || 'Starting the download'}</span>
+            <span className="text-white/35">It downloads once, and you can leave this window open.</span>
           </div>
         </div>
       )}
@@ -299,10 +312,12 @@ export default function StepModel() {
           className="flex-1 py-3.5 bg-white text-black text-[12px] font-semibold rounded-lg hover:bg-white/90 transition-colors disabled:opacity-30"
         >
           {pulling
-            ? 'Downloading Model...'
-            : isModelInstalled(data.modelName)
-              ? 'Continue with Selected Model'
-              : 'Download and Continue'}
+            ? `Downloading ${pull?.label || 'model'}...`
+            : error
+              ? 'Try again'
+              : isModelInstalled(data.modelName)
+                ? 'Continue with Selected Model'
+                : `Download ${MODELS.find(m => m.ollama === data.modelName)?.name || 'model'} and continue`}
         </button>
       </div>
     </div>

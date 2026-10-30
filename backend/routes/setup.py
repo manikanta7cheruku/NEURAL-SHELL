@@ -457,7 +457,7 @@ WHISPER_MODELS = [
         "accuracy": "Fair, occasional mistranscriptions",
     },
     {
-        "id": "small.en", "label": "Small", "tag": "RECOMMENDED",
+        "id": "small.en", "label": "Small", "tag": "BALANCED",
         "size_mb": 484, "param": "244M",
         "headline": "Seven's default: quick to download, fast, accurate",
         "cpu_speed": "Moderate", "gpu_speed": "Fast",
@@ -520,6 +520,22 @@ def _is_whisper_model_installed(model_id: str) -> bool:
     return False
 
 
+def _speech_hardware() -> dict:
+    """What decides which speech model suits this PC: an NVIDIA (CUDA) card, its memory, and the PC's memory."""
+    cuda = False
+    try:
+        import ctranslate2
+        cuda = ctranslate2.get_cuda_device_count() > 0
+    except Exception:
+        pass
+    try:
+        from backend.routes.models import _hardware
+        hw = _hardware()
+    except Exception:
+        hw = {"gpu": None, "vram_gb": 0.0, "ram_gb": 0.0}
+    return {"cuda": cuda, "gpu": hw.get("gpu"), "vram_gb": hw.get("vram_gb", 0.0), "ram_gb": hw.get("ram_gb", 0.0)}
+
+
 @router.get("/api/setup/whisper-models")
 def get_whisper_models():
     """List available Whisper STT model sizes with install status."""
@@ -553,16 +569,20 @@ def get_whisper_models():
         print(f"[WHISPER] GET models - config read error: {e}, using default: {current}")
         pass
     
+    from ears import whisper_advice
+    hw = _speech_hardware()
     result = []
     for m in WHISPER_MODELS:
         result.append({
             **m,
             "installed": _is_whisper_model_installed(m["id"]),
             "active":    m["id"] == current,
+            **{"advice": whisper_advice.advise(m["id"], hw)},
+            "recommended": m["id"] == whisper_advice.recommended_id(hw),
         })
     
     print(f"[WHISPER] GET models - returning current: {current}")
-    return {"models": result, "current": current}
+    return {"models": result, "current": current, "hardware": hw}
 
 
 @router.post("/api/setup/whisper-model")
