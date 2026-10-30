@@ -63,6 +63,7 @@ _bootstrap_state = {
     "model_pull": {
         "status": "pending",
         "model": "",
+        "label": "",
         "progress": 0,
         "downloaded_gb": 0.0,
         "total_gb": 0.0,
@@ -1119,8 +1120,15 @@ def pull_model(model_name: str):
     pull_model._max_completed = 0
     pull_model._max_pct = 0
 
-    _set('model_pull', status='running', model=model_name,
-         progress=0, current="", downloaded_gb=0.0, total_gb=0.0, error=None)
+    try:
+        from brain_modules import model_catalog
+        entry = model_catalog.get(model_name)
+    except Exception:
+        entry = None
+    label = entry["name"] if entry else model_name
+    _set('model_pull', status='running', model=model_name, label=label,
+         progress=0, current="Starting the download", downloaded_gb=0.0, total_gb=0.0, speed_mb_s=0.0,
+         eta_seconds=0, error=None)
 
     print(f"[BOOTSTRAP] Pulling model via API: {model_name}")
 
@@ -1136,7 +1144,8 @@ def pull_model(model_name: str):
             if line:
                 try:
                     data = json.loads(line)
-                    
+                    now = time.time()
+
                     if 'total' in data and data['total'] > 0:
                         completed = data.get('completed', 0)
                         total = data['total']
@@ -1175,11 +1184,14 @@ def pull_model(model_name: str):
                             
                             current_str = f"{dl_gb}/{tot_gb} GB  ·  {speed_mb_s} MB/s  ·  {eta_str}"
                             
-                            _set('model_pull', progress=pct, current=current_str, downloaded_gb=dl_gb, total_gb=tot_gb)
+                            _set('model_pull', progress=pct, current=current_str, downloaded_gb=dl_gb, total_gb=tot_gb,
+                                 speed_mb_s=speed_mb_s, eta_seconds=int(eta_seconds))
                             last_update = now
                     elif 'status' in data and not ('total' in data):
                         if now - last_update > 0.5:
-                            _set('model_pull', current=data['status'])
+                            words = {"pulling manifest": "Contacting the model library", "verifying sha256 digest": "Checking the download",
+                                     "writing manifest": "Finishing up", "success": "Done"}
+                            _set('model_pull', current=words.get(str(data['status']).lower(), str(data['status']).capitalize()))
                             last_update = now
                 except Exception:
                     pass
@@ -1190,7 +1202,7 @@ def pull_model(model_name: str):
 
     except Exception as e:
         print(f"[BOOTSTRAP] Pull failed: {e}")
-        _set('model_pull', status='error', error=str(e))
+        _set('model_pull', status='error', error=f"{label} could not be downloaded ({str(e)[:120]})")
         return False
 
 
@@ -1411,6 +1423,7 @@ def ensure_speech_model():
         weights = {n: _SPEECH_MB.get(n, 1500) for n in names}
         total = float(sum(weights.values()))
         finished = [0.0]
+        what = " and ".join(n.split(".")[0].capitalize() for n in names)          # "Small", "Base and Small"
 
         def progress_for(name):
             def on_progress(done, size):
@@ -1418,7 +1431,7 @@ def ensure_speech_model():
                 pct = int((finished[0] + share) / total * 100)
                 got = int(finished[0] + share)
                 _set('speech_model', progress=max(1, min(99, pct)),
-                     current=f'Downloading speech recognition, {got} of {int(total)} MB')
+                     current=f'Downloading the {what} speech model, {got} of {int(total)} MB')
             return on_progress
 
         try:

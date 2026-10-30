@@ -87,7 +87,7 @@ opens and closes streams through `audio.open_stream()` and `audio.close_stream()
 `listen()` waits up to half a second for an utterance, so the voice loop stays responsive, then:
 
 1. **Own voice.** Ignored if it began while Seven was talking, or within 0.35 s after Seven stopped (the room's echo).
-2. **Speech to text.** faster-whisper, English, greedy decoding, no Whisper VAD (the audio is already trimmed), no
+2. **Speech to text** (which model suits the PC is `ears/whisper_advice.py`, shown in Settings, Voice). faster-whisper, English, greedy decoding, no Whisper VAD (the audio is already trimmed), no
    conditioning on previous text.
    - **GPU:** `small.en` (float16) by default, about 480 MB to download. `medium.en` (1.5 GB, a little more accurate)
      is one click away in Settings, Voice, and a PC that already has `medium.en` and not `small.en` keeps it.

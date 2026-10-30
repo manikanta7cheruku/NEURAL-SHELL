@@ -6,6 +6,14 @@ project uses [semantic versioning](docs/development/release-process.md#versions)
 ## [Unreleased]
 
 ### Added
+- Settings, Voice, Speech recognition knows this PC (NVIDIA card and its memory, PC memory) and says so beside every
+  model: one is marked "Recommended for this PC", and the others carry a plain caution when they would be slow or
+  would not fit ("Slow without an NVIDIA graphics card: several seconds to understand you"). The same idea as the
+  language-model list in Settings, Brain. (`ears/whisper_advice.py`)
+- Downloads say which model they are: the setup wizard's brain step shows a card ("Downloading Qwen 2.5 7B, 4.7 GB,
+  42%, speed and time left"), the chosen model's card shows the percentage, and Settings, Brain shows the same card at
+  the top while a model downloads, even after its window is closed or the page is reopened. The speech row in step 4
+  names its model too ("Downloading the Small speech model, 340 of 480 MB").
 - Setup loads Seven while its last page waits. As soon as the AI model has downloaded, Seven starts loading its brain,
   ears and voice (silently); the last page shows the three steps with progress and keeps Launch Seven off until they are
   done, so Launch opens the app straight away with no restart. If loading cannot start or takes over four minutes,
@@ -18,6 +26,8 @@ project uses [semantic versioning](docs/development/release-process.md#versions)
 - `/api/chat` returns action receipts in non-streaming responses.
 
 ### Fixed
+- A language-model download could silently lose its status text (a variable used before it existed). It now reports
+  plain words for each phase and names the model in any error ("Llama 3.1 8B could not be downloaded ...").
 - Speech recognition now defaults to `small.en` (about 480 MB) on every PC instead of `medium.en` (1.5 GB) on PCs with a
   graphics card, so setup and a first launch are about three times quicker to download. Medium is the optional upgrade in
   Settings, Voice, with real download progress. A PC that already has medium and not small keeps medium.

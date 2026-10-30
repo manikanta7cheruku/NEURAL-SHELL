@@ -219,5 +219,5 @@ class DefaultSpeechModel(unittest.TestCase):
         except Exception:
             self.skipTest("needs fastapi")
         tags = {m["id"]: m["tag"] for m in setup_routes.WHISPER_MODELS}
-        self.assertEqual(tags["small.en"], "RECOMMENDED")
+        self.assertEqual(tags["small.en"], "BALANCED")          # the recommendation itself is worked out per PC (test_model_advice)
         self.assertEqual(tags["medium.en"], "BETTER ACCURACY")
