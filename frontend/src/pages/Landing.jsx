@@ -229,12 +229,19 @@ function MicTest({ mode }) {
   );
 }
 
+const DEMO_AT = Date.now();
+
 /** The last seven things Seven heard or ignored, newest first, one short line each, under the clock. */
-function VoiceLog({ entries }) {
-  const rows = [...entries].reverse().slice(0, FADE.length);
+function VoiceLog({ entries, demo }) {
+  // While the tour points at it and nothing has been said yet, two example lines show what it looks like.
+  const sample = demo && !entries.length ? [
+    { id: 'demo1', at: DEMO_AT - 6000, kind: 'ignored', text: '', reason: 'no wake word' },
+    { id: 'demo2', at: DEMO_AT, kind: 'heard', text: 'open my notes' },
+  ] : entries;
+  const rows = [...sample].reverse().slice(0, FADE.length);
   if (!rows.length) return null;
   return (
-    <ul aria-label="What Seven heard" className="pointer-events-none absolute right-6 top-[60px] z-10 w-[300px] space-y-0.5">
+    <ul aria-label="What Seven heard" data-tour="voicelog" className="pointer-events-none absolute right-6 top-[60px] z-10 w-[300px] space-y-0.5">
       {rows.map((e, i) => (
         <li key={e.id} className="page-in flex items-center justify-end gap-2 text-[11.5px] leading-5 text-s-text transition-opacity duration-500"
             style={{ opacity: FADE[i] }}>
@@ -260,6 +267,11 @@ export default function Landing() {
   const [scheds, setScheds] = useState([]);
   const [memory, setMemory] = useState(null);
   const friendUnread = useCompanion(s => s.unread);
+  const [version, setVersion] = useState('');
+
+  useEffect(() => {
+    api.get('/version').then(r => setVersion(r.data?.version || '')).catch(() => {});
+  }, []);
 
   useEffect(() => {
     useCompanion.getState().fetch();
@@ -319,7 +331,10 @@ export default function Landing() {
            style={{ background: `radial-gradient(circle, color-mix(in oklab, var(--color-s-${state === 'thinking' ? 'yellow' : 'accent'}) ${hearing ? 14 : 7}%, transparent), transparent 62%)` }} />
 
       <header className="relative z-10 flex h-12 shrink-0 items-center justify-between px-6">
-        <Wordmark size={15} />
+        <div className="flex items-baseline gap-2">
+          <Wordmark size={15} />
+          {version && <span title="Seven version" className="text-[11px] tabular-nums text-s-text-4">v{version}</span>}
+        </div>
         <div className="flex items-center gap-5 text-[12px] text-s-text-3">
           {st.connected && <ListenMode mode={mode} />}
           {st.connected && <MicTest mode={mode} />}
@@ -340,7 +355,7 @@ export default function Landing() {
           </button>
         </div>
       </header>
-      <VoiceLog entries={st.voiceLog} />
+      <VoiceLog entries={st.voiceLog} demo={st.tour?.step === 'log'} />
 
       <main className="relative z-10 flex min-h-0 flex-1 flex-col items-center justify-center overflow-hidden px-6">
         <AttentionStrip />

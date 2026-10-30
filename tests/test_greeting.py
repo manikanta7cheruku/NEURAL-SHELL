@@ -75,6 +75,11 @@ class Greeting(unittest.TestCase):
         self.assertEqual(steps[-1], "about")               # the card opens, shows Feedback while Seven explains, then About
         for step in ("nav-1", "nav-2", "nav-3", "nav-4", "nav-5", "search", "welcome-link"):
             self.assertIn(step, steps)                     # every link along the bottom gets its own moment
+        self.assertLess(steps.index("mic"), steps.index("log"))
+        self.assertLess(steps.index("log"), steps.index("bar"))      # the voice log, then the voice bar, then the pages
+        self.assertLess(steps.index("bar"), steps.index("pages"))
+        for word in ("voice log", "voice bar", "Right click"):
+            self.assertIn(word, text)
         for word in ("feedback", "read", "Send feedback", "replay"):
             self.assertIn(word, text)
         self.assertTrue(greeting.welcome_state()["tour_done"])

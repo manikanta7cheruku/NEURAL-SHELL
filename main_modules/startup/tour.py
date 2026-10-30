@@ -8,6 +8,8 @@ and opens a welcome card, while the screen highlights each thing as Seven mentio
     intro     who Seven is                                 highlights the orb
     listen    "Hey Seven" and the listening switch         highlights the switch
     mic       the Test mic button                          highlights the button
+    log       the voice log under the clock                highlights it (example lines if nothing was said yet)
+    bar       the voice bar at the top of the screen       nothing to highlight: it is its own window
     pages     each page along the bottom, one by one       highlights each link, then Search, then Welcome guide
     card      the welcome card opens; Seven says why feedback matters (the card shows its Feedback tab), then
               points to Replay the tour on the About tab
@@ -70,6 +72,10 @@ def script(name: str) -> list:
         ("listen", "You can change how I listen up here: wake word, always on, or push to talk."),
         ("mic", "Not sure I can hear you?"),
         ("mic", "Press Test mic and say anything, and I'll show you exactly what I heard."),
+        ("log", "Whenever you speak, the lines under the clock show what I heard, or why I ignored it."),
+        ("log", "That's your voice log, so you can always see what I picked up."),
+        ("bar", "At the very top of your screen is my voice bar, with live captions of you and me."),
+        ("bar", "Right click it to open any page or put it back in the middle, and in Settings you can set it to show while talking, always, or off."),
         ("pages", "Along the bottom are your everyday pages."),
         ("nav-1", "Overview shows how Seven and your PC are doing."),
         ("nav-2", "Chat is where you type to me and see every conversation."),
