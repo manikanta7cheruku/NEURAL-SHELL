@@ -6,6 +6,10 @@ project uses [semantic versioning](docs/development/release-process.md#versions)
 ## [Unreleased]
 
 ### Added
+- Setup loads Seven while its last page waits. As soon as the AI model has downloaded, Seven starts loading its brain,
+  ears and voice (silently); the last page shows the three steps with progress and keeps Launch Seven off until they are
+  done, so Launch opens the app straight away with no restart. If loading cannot start or takes over four minutes,
+  Launch works the old way. (`POST /api/setup/prepare`, `GET /api/setup/prepare-status`.)
 - Guide page rebuilt: live "Try it now" commands, every ability with phrases that work today, a setup checklist,
   privacy facts, questions, shortcuts and what is coming next. Every phrase is checked by `tests/test_guide_commands.py`.
 - Professional documentation in `docs/`: product overview, PRD, roadmap, architecture, decision records, component

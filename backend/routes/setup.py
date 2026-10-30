@@ -64,9 +64,8 @@ def welcome_greeting():
         return {"success": False, "error": str(e)}
 
 
-@router.post("/api/setup/complete")
-def complete_setup(req: SetupCompleteRequest):
-    """Called when user finishes setup wizard."""
+def _choice_updates(req: SetupCompleteRequest, complete: bool) -> dict:
+    """The settings the wizard collected, as a config update. `complete` also marks setup as finished."""
     import config
 
     name  = req.name.strip()
@@ -78,13 +77,12 @@ def complete_setup(req: SetupCompleteRequest):
         raise HTTPException(status_code=400, detail="Valid email is required")
 
     wake    = req.wake_word.lower().strip() if req.wake_word else "seven"
-    
+
     # Map the selected onboarding voice configuration parameters cleanly
     voice_engine = req.voice_engine.strip() if req.voice_engine else "kokoro"
     voice_id_val = req.voice_id.strip() if req.voice_id else ("af_heart" if voice_engine == "kokoro" else str(req.voice_index))
 
     updates = {
-        "setup_complete": True,
         "email":          email,
         "identity": {
             **config.KEY.get("identity", {}),
@@ -103,8 +101,49 @@ def complete_setup(req: SetupCompleteRequest):
 
     if req.model_name:
         updates["brain"] = {**config.KEY.get("brain", {}), "model_name": req.model_name}
+    if complete:
+        updates["setup_complete"] = True
+    return updates
 
-    success = config.update_config(updates)
+
+@router.post("/api/setup/prepare", summary="Start loading Seven while setup finishes",
+             description="Saves the choices made so far (without finishing setup) and starts loading Seven's brain, "
+                         "ears and voice in the background, so Launch Seven opens the app straight away. Safe to "
+                         "call again: it only starts once.")
+def prepare_setup(req: SetupCompleteRequest):
+    import config
+    from backend.api_server import _state, set_state
+
+    if not config.update_config(_choice_updates(req, complete=False)):
+        raise HTTPException(status_code=500, detail="Failed to save configuration")
+    already = bool(_state.get("prepare_requested"))
+    set_state("prepare_requested", True)
+    return {"success": True, "already": already}
+
+
+@router.get("/api/setup/prepare-status", summary="How far Seven's start-up has got during setup")
+def prepare_status():
+    from backend.api_server import _state
+
+    started = bool(_state.get("prepare_started"))
+    return {
+        "requested": bool(_state.get("prepare_requested")),
+        "started":   started,
+        "ready":     started and bool(_state.get("ready", False)),
+        "stage":     str(_state.get("ready_stage", "")),
+        "speech":    _state.get("speech_model") or None,
+    }
+
+
+@router.post("/api/setup/complete")
+def complete_setup(req: SetupCompleteRequest):
+    """Called when user finishes setup wizard."""
+    import config
+
+    name  = req.name.strip()
+    email = req.email.strip()
+
+    success = config.update_config(_choice_updates(req, complete=True))
     if not success:
         raise HTTPException(status_code=500, detail="Failed to save configuration")
 

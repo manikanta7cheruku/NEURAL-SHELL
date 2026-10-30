@@ -182,8 +182,14 @@ def run_voice_loop(ctx, config, app_ui, api_set_state, safe_mode_file):
     _last_topic_ref  = [None]
     try:
         from brain_modules.silence_watcher import SilenceWatcher
+        def _silence_speak(text):
+            held = getattr(ctx, "launch_event", None)       # while setup is open Seven loads silently
+            if held is not None and not held.is_set():
+                return True
+            return speak_with_interrupt(text)
+
         _silence_watcher = SilenceWatcher(
-            speak_fn=speak_with_interrupt,
+            speak_fn=_silence_speak,
             get_last_topic_fn=lambda: _last_topic_ref[0],
         )
         threading.Thread(target=_silence_watcher.start, daemon=True).start()
@@ -242,6 +248,17 @@ def run_voice_loop(ctx, config, app_ui, api_set_state, safe_mode_file):
     except Exception:
         pass
     api_set_state("ready", True)
+    # During setup Seven loads everything while the last wizard page waits (main.py, prepare). It stays silent until
+    # the person presses Launch Seven; whatever the microphone heard in the meantime is dropped.
+    hold = getattr(ctx, "launch_event", None)
+    if hold is not None and not hold.is_set():
+        print(Fore.CYAN + "[SYSTEM] Ready. Waiting for Launch Seven")
+        hold.wait()
+        try:
+            from ears.core import STREAM as _stream
+            _stream.drain()
+        except Exception:
+            pass
     time.sleep(0.8)                                      # the window fades in; the greeting starts as it does
     greeting.greet(ctx, config)
 
