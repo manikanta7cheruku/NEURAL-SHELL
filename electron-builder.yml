@@ -58,6 +58,7 @@ extraResources:
       - "LICENSE.txt"
       - "backend/**/*"
       - "brain_modules/**/*"
+      - "companion/**/*"
       - "ears/**/*"
       - "hands/**/*"
       - "knowledge/**/*"

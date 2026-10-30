@@ -95,6 +95,12 @@ class Thread(CompanionTest):
         self.assertTrue(engine.is_companion(cid))
         self.assertFalse(engine.is_companion(self.conv))
 
+    def test_the_thread_follows_the_owner_when_their_name_changed(self):
+        cid = engine.conversation_id()
+        cstore.set_speaker(cid, "an old name")                  # made under a name the owner no longer uses
+        self.assertEqual(engine.conversation_id(), cid)           # the same thread, not a second empty one
+        self.assertEqual(cstore.get_conversation(cid)["speaker_key"], engine.speaker_key())
+
     def test_a_posted_message_is_unread_until_the_thread_is_opened(self):
         engine.post(content.ABOUT_YOU[0])
         engine.post(content.FACTS[0])
