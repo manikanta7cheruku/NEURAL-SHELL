@@ -4,16 +4,18 @@
  * posts straight to the Google Form. Keep these in sync with FORM_URL and
  * FIELDS in backend/routes/feedback.py.
  */
-const FORM_ID = '1FAIpQLScbQrtJLGQR0fVB2PkG_7uM8xcrRMSF7D9184Fq0X-L1tKnoA';
-const FIELDS = { category: 'entry.1403735424', severity: 'entry.813819414', details: 'entry.2134832696', email: 'entry.1297852434' };
+const FORM_ID = '1FAIpQLSdwmjvMIDzJRGo2xTTqdcvUgzCiDzQV2wzsOBAZhd6Ea2lIuw';
+const FIELDS = { email: 'entry.1666026261', message: 'entry.480930978' };
+
+/** The form has only Email and Message, so the category and severity lead the message: "[Bug Report, Critical]". */
+export const composeMessage = ({ category, severity, details }) =>
+  `[${[category, severity && severity.toUpperCase() !== 'N/A' ? severity : ''].filter(Boolean).join(', ')}]\n\n${details}`;
 
 /** Resolves when the request left the app. The browser can't read Google's reply, so delivery isn't confirmed. */
 export async function sendDirect({ category, severity, details, email }) {
   const body = new URLSearchParams({
-    [FIELDS.category]: category,
-    [FIELDS.severity]: severity || 'N/A',
-    [FIELDS.details]: details,
     [FIELDS.email]: email || 'anonymous',
+    [FIELDS.message]: composeMessage({ category, severity, details }),
   });
   await fetch(`https://docs.google.com/forms/d/e/${FORM_ID}/formResponse`, { method: 'POST', mode: 'no-cors', body });
 }
