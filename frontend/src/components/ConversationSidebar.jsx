@@ -8,6 +8,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { Plus, Search, Trash2, Pencil, X, MessageSquare } from 'lucide-react';
 import useChatSessions from '../stores/useChatSessions';
+import useCompanion from '../stores/useCompanion';
+import Mark from './Mark';
 import { Dialog } from './ui';
 import { cx } from '../lib/cx';
 
@@ -50,6 +52,7 @@ function Item({ active, onClick, children, className }) {
 
 export default function ConversationSidebar({ open }) {
   const { conversations, conversationId, searchResults, newChat, openChat, deleteChat, renameChat, search } = useChatSessions();
+  const friend = useCompanion();
   const [q, setQ] = useState('');
   const [editing, setEditing] = useState(null);
   const [title, setTitle] = useState('');
@@ -90,6 +93,29 @@ export default function ConversationSidebar({ open }) {
       <div className={cx('flex h-full flex-col transition-opacity duration-200', open ? 'opacity-100' : 'opacity-0')}
            style={{ width }}>
         <div className="space-y-2 px-2.5 pt-3 pb-2">
+          {friend.conversationId && (
+            <button onClick={() => openChat(friend.conversationId)} aria-label={`Seven, your companion${friend.unread ? `, ${friend.unread} new` : ''}`}
+                    className={cx('group/friend flex h-12 w-full items-center gap-2.5 rounded-lg border px-2.5 text-left transition-colors duration-200',
+                                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-s-accent/50',
+                                  conversationId === friend.conversationId ? 'border-s-border-l bg-s-card-h' : 'border-s-border bg-s-card/50 hover:bg-s-card')}>
+              <span className="relative shrink-0">
+                <Mark size={28} />
+                <span aria-hidden className={cx('absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full border border-s-surface',
+                                                friend.settings?.enabled && !friend.snoozedUntil && !friend.quietNow ? 'bg-s-green' : 'bg-s-text-4')} />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-[12.5px] font-medium text-s-text">Seven</span>
+                <span className="block truncate text-[11px] text-s-text-4">
+                  {friend.unread > 0 ? `${friend.unread} new ${friend.unread === 1 ? 'message' : 'messages'}`
+                    : friend.snoozedUntil ? 'Giving you space' : friend.quietNow ? 'Quiet hours' : 'Your companion'}
+                </span>
+              </span>
+              {friend.unread > 0 && (
+                <span className="min-w-[18px] rounded-full bg-s-accent px-1.5 text-center text-[10.5px] font-semibold leading-[18px] text-s-on-accent tabular-nums">
+                  {friend.unread > 9 ? '9+' : friend.unread}
+                </span>)}
+            </button>
+          )}
           <Item onClick={newChat} className="font-medium">
             <Plus size={14} className="shrink-0 text-s-text-3 transition-colors group-hover/item:text-s-accent-h" />
             <span className="text-[12.5px]">New chat</span>
@@ -119,7 +145,7 @@ export default function ConversationSidebar({ open }) {
                   <div className="truncate text-[12px] font-medium text-s-text">{r.title || 'Untitled chat'}</div>
                   <div className="mt-0.5 line-clamp-2 text-[11.5px] text-s-text-3">{r.content}</div>
                 </div>))
-          ) : group(conversations).map(([label, items]) => (
+          ) : group(conversations.filter(c => c.kind !== 'companion')).map(([label, items]) => (
             <div key={label} className="mt-3 first:mt-1">
               <div className="px-3 pb-1 text-[11px] font-medium text-s-text-4">{label}</div>
               <div className="space-y-px">
@@ -147,7 +173,7 @@ export default function ConversationSidebar({ open }) {
               </div>
             </div>
           ))}
-          {!searchResults && conversations.length === 0 && (
+          {!searchResults && conversations.filter(c => c.kind !== 'companion').length === 0 && (
             <div className="flex flex-col items-center px-4 pt-10 text-center">
               <MessageSquare size={18} className="text-s-text-4" />
               <p className="mt-2 text-[12px] text-s-text-3">Your chats appear here, saved on this computer.</p>

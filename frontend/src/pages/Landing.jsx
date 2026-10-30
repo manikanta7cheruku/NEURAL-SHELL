@@ -30,17 +30,18 @@ import useConfig from '../stores/useConfig';
 import OrbGL from '../components/OrbGL';
 import AttentionStrip from '../components/AttentionStrip';
 import WelcomeHint from '../components/WelcomeHint';
-import { GearSix, MagnifyingGlass } from '@phosphor-icons/react';
+import { GearSix, MagnifyingGlass, ChatCircleText } from '@phosphor-icons/react';
+import useCompanion from '../stores/useCompanion';
 import { Wordmark } from '../components/Mark';
 import { cx } from '../lib/cx';
 
 // The pages used every day, numbered for the keyboard. Everything else: the gear (Settings), "," and Ctrl+K.
 const NAV = [
-  { key: '1', to: '/dashboard', label: 'Overview' },
-  { key: '2', to: '/console', label: 'Chat' },
-  { key: '3', to: '/tasks', label: 'Tasks' },
-  { key: '4', to: '/schedules', label: 'Reminders' },
-  { key: '5', to: '/memory', label: 'Memory' },
+  { key: '1', to: '/dashboard', label: 'Overview', hint: 'How Seven and your PC are doing' },
+  { key: '2', to: '/console', label: 'Chat', hint: 'Type to Seven and see every conversation' },
+  { key: '3', to: '/tasks', label: 'Tasks', hint: 'Your to-do list' },
+  { key: '4', to: '/schedules', label: 'Reminders', hint: 'Alarms, timers and reminders' },
+  { key: '5', to: '/memory', label: 'Memory', hint: 'Everything Seven remembers about you' },
 ];
 const MODES = [
   { id: 'wake', label: 'Wake word', hint: 'Say "Hey Seven" first' },
@@ -228,12 +229,19 @@ function MicTest({ mode }) {
   );
 }
 
+const DEMO_AT = Date.now();
+
 /** The last seven things Seven heard or ignored, newest first, one short line each, under the clock. */
-function VoiceLog({ entries }) {
-  const rows = [...entries].reverse().slice(0, FADE.length);
+function VoiceLog({ entries, demo }) {
+  // While the tour points at it and nothing has been said yet, two example lines show what it looks like.
+  const sample = demo && !entries.length ? [
+    { id: 'demo1', at: DEMO_AT - 6000, kind: 'ignored', text: '', reason: 'no wake word' },
+    { id: 'demo2', at: DEMO_AT, kind: 'heard', text: 'open my notes' },
+  ] : entries;
+  const rows = [...sample].reverse().slice(0, FADE.length);
   if (!rows.length) return null;
   return (
-    <ul aria-label="What Seven heard" className="pointer-events-none absolute right-6 top-[60px] z-10 w-[300px] space-y-0.5">
+    <ul aria-label="What Seven heard" data-tour="voicelog" className="pointer-events-none absolute right-6 top-[60px] z-10 w-[300px] space-y-0.5">
       {rows.map((e, i) => (
         <li key={e.id} className="page-in flex items-center justify-end gap-2 text-[11.5px] leading-5 text-s-text transition-opacity duration-500"
             style={{ opacity: FADE[i] }}>
@@ -258,6 +266,18 @@ export default function Landing() {
   const usage = useUsage();
   const [scheds, setScheds] = useState([]);
   const [memory, setMemory] = useState(null);
+  const friendUnread = useCompanion(s => s.unread);
+  const [version, setVersion] = useState('');
+
+  useEffect(() => {
+    api.get('/version').then(r => setVersion(r.data?.version || '')).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    useCompanion.getState().fetch();
+    const id = setInterval(() => { if (!document.hidden) useCompanion.getState().fetch(); }, 20000);
+    return () => clearInterval(id);
+  }, []);
 
   useEffect(() => {
     const load = () => {
@@ -311,7 +331,10 @@ export default function Landing() {
            style={{ background: `radial-gradient(circle, color-mix(in oklab, var(--color-s-${state === 'thinking' ? 'yellow' : 'accent'}) ${hearing ? 14 : 7}%, transparent), transparent 62%)` }} />
 
       <header className="relative z-10 flex h-12 shrink-0 items-center justify-between px-6">
-        <Wordmark size={15} />
+        <div className="flex items-baseline gap-2">
+          <Wordmark size={15} />
+          {version && <span title="Seven version" className="text-[11px] tabular-nums text-s-text-4">v{version}</span>}
+        </div>
         <div className="flex items-center gap-5 text-[12px] text-s-text-3">
           {st.connected && <ListenMode mode={mode} />}
           {st.connected && <MicTest mode={mode} />}
@@ -319,6 +342,12 @@ export default function Landing() {
             <span className={cx('h-1.5 w-1.5 rounded-full', badge[1])} />
             <span className="text-s-text-2">{badge[0]}</span>
           </span>
+          {friendUnread > 0 && (
+            <button onClick={() => navigate('/console')} title="Seven wrote to you"
+                    className="flex h-6 items-center gap-1.5 rounded-full bg-s-accent/10 px-2.5 text-[11.5px] text-s-accent-h transition-colors duration-200 hover:bg-s-accent/15">
+              <ChatCircleText size={13} weight="fill" aria-hidden />
+              {friendUnread} new from Seven
+            </button>)}
           <span className="tabular-nums text-s-text-2">{clock(now)}</span>
           <button onClick={() => navigate('/settings')} aria-label="Settings" title="Settings  ,"
                   className="-mr-1.5 flex h-8 w-8 items-center justify-center rounded-lg text-s-text-3 transition-colors duration-200 hover:bg-s-surface hover:text-s-text">
@@ -326,7 +355,7 @@ export default function Landing() {
           </button>
         </div>
       </header>
-      <VoiceLog entries={st.voiceLog} />
+      <VoiceLog entries={st.voiceLog} demo={st.tour?.step === 'log'} />
 
       <main className="relative z-10 flex min-h-0 flex-1 flex-col items-center justify-center overflow-hidden px-6">
         <AttentionStrip />
@@ -372,19 +401,19 @@ export default function Landing() {
       </section>
 
       <footer data-tour="footer" className="relative z-10 flex shrink-0 items-center justify-center border-t border-s-border/50 px-5 py-1.5">
-        <button onClick={() => window.dispatchEvent(new Event('seven:welcome'))} title="Welcome guide, feedback and roadmap"
+        <button data-tour="welcome-link" onClick={() => window.dispatchEvent(new Event('seven:welcome'))} title="Welcome guide: what Seven is becoming, how to send feedback, and the tour again"
                 className="absolute left-5 flex h-7 items-center rounded-md px-2 text-[12px] text-s-text-4 transition-colors duration-200 hover:bg-s-surface/80 hover:text-s-text-2">
           Welcome guide
         </button>
         <nav aria-label="Pages" className="flex items-center gap-0.5">
           {NAV.map(n => (
-            <button key={n.key} onClick={() => navigate(n.to)}
+            <button key={n.key} data-tour={`nav-${n.key}`} onClick={() => navigate(n.to)} title={`${n.label}: ${n.hint}  (${n.key})`}
                     className="group/n flex h-7 items-center gap-1.5 rounded-md px-2.5 text-[12px] text-s-text-3 transition-colors duration-200 hover:bg-s-surface/80 hover:text-s-text">
               {n.label}
               <kbd className="font-sans text-[10.5px] text-s-text-4 opacity-0 transition-opacity duration-200 group-hover/n:opacity-100 group-focus-visible/n:opacity-100">{n.key}</kbd>
             </button>))}
         </nav>
-        <button onClick={() => window.dispatchEvent(new Event('seven:palette'))} title="Search pages and actions"
+        <button data-tour="search" onClick={() => window.dispatchEvent(new Event('seven:palette'))} title="Search: find any page or action (Ctrl K)"
                 className="absolute right-5 flex h-7 items-center gap-2 rounded-md px-2 text-[12px] text-s-text-4 transition-colors duration-200 hover:bg-s-surface/80 hover:text-s-text-2">
           <MagnifyingGlass size={13} aria-hidden />
           Search

@@ -4,6 +4,7 @@ thing (overdue, due today, next reminder, pending, or a clear day), never two gr
 """
 import os
 import tempfile
+import time
 import unittest
 from datetime import datetime, timedelta
 from unittest import mock
@@ -70,7 +71,17 @@ class Greeting(unittest.TestCase):
         for word in ("Hey Seven", "Test mic", "Control K"):
             self.assertIn(word, text)
         self.assertEqual([s for s in steps if s in ("intro", "listen", "mic", "pages")][:1], ["intro"])
-        self.assertEqual(steps[-1], "card")                # the screen opens the welcome card at the end
+        self.assertEqual([s for s in steps if s in ("card", "feedback", "about")], ["card", "feedback", "about"])
+        self.assertEqual(steps[-1], "about")               # the card opens, shows Feedback while Seven explains, then About
+        for step in ("nav-1", "nav-2", "nav-3", "nav-4", "nav-5", "search", "welcome-link"):
+            self.assertIn(step, steps)                     # every link along the bottom gets its own moment
+        self.assertLess(steps.index("mic"), steps.index("log"))
+        self.assertLess(steps.index("log"), steps.index("bar"))      # the voice log, then the voice bar, then the pages
+        self.assertLess(steps.index("bar"), steps.index("pages"))
+        for word in ("voice log", "voice bar", "Right click"):
+            self.assertIn(word, text)
+        for word in ("feedback", "read", "Send feedback", "replay"):
+            self.assertIn(word, text)
         self.assertTrue(greeting.welcome_state()["tour_done"])
 
     def test_skipping_goes_straight_to_the_card(self):
@@ -124,6 +135,72 @@ class Greeting(unittest.TestCase):
         said, calls = run(10, True)
         self.assertEqual(calls, [("unmute",), ("set", 60)])
         self.assertEqual(tour.ensure_audible(_Ctx()), "")                # no audio control: nothing happens
+
+    def test_every_bottom_link_is_named_and_explained(self):
+        text = " ".join(t for _, t in tour.script("Manikanta"))
+        for label, what in (("Overview", "how Seven and your PC"), ("Chat", "type to me"), ("Tasks", "to-do list"),
+                            ("Reminders", "alarms"), ("Memory", "remember about you"), ("Search", "Control K"),
+                            ("Welcome guide", "tour")):
+            self.assertIn(label, text)
+            self.assertIn(what, text)
+
+    def test_a_sentence_the_voice_splits_keeps_its_own_step(self):
+        steps = tour.script("Manikanta")
+        self.assertEqual(tour.step_for("Press Test mic and say anything, and I'll show you exactly what I heard.", steps), "mic")
+        self.assertEqual(tour.step_for("Press Test mic and say anything,", steps), "mic")             # split at the comma
+        self.assertEqual(tour.step_for("and I'll show you exactly what I heard.", steps), "mic")
+        self.assertEqual(tour.step_for("Not sure I can hear you?", steps), "mic")
+        self.assertEqual(tour.step_for("Search, or Control K,", steps), "search")
+        self.assertEqual(tour.step_for("something unscripted", steps, fallback="listen"), "listen")   # nothing matches: stay put
+
+    def test_the_screen_is_brightened_only_when_it_is_dim(self):
+        class Sys:
+            def __init__(self):
+                self.calls = []
+
+            def _brightness_set(self, n):
+                self.calls.append(n)
+                return True, "ok"
+
+        def run(level):
+            ctx = _Ctx()
+            ctx.system_mod = Sys()
+            with mock.patch.object(tour, "_screen_brightness", lambda: level):
+                return tour.ensure_visible(ctx), ctx.system_mod.calls
+
+        self.assertEqual(run(80), ("", []))
+        self.assertEqual(run(60), ("", []))
+        said, calls = run(25)
+        self.assertEqual(calls, [60])
+        self.assertIn("60 percent", said)
+        self.assertEqual(run(None), ("", []))                              # a desktop monitor that cannot say: untouched
+        ctx = _Ctx()
+        ctx.system_mod = type("S", (), {"_brightness_set": lambda self, n: (False, "no")})()
+        with mock.patch.object(tour, "_screen_brightness", lambda: 10):
+            self.assertEqual(tour.ensure_visible(ctx), "")                 # it could not: it does not claim it did
+
+    def test_opening_the_card_by_hand_has_seven_say_why_feedback_matters(self):
+        said = []
+
+        class Mouth:
+            def speak(self, text):
+                said.append(text)
+
+        ctx = _Ctx()
+        ctx.mouth = Mouth()
+        tour.attach(ctx, _Cfg())
+        try:
+            self.assertTrue(tour.speak_welcome())
+            for _ in range(100):
+                if len(said) >= 4 and not tour._busy.locked():
+                    break
+                time.sleep(0.02)
+        finally:
+            tour.attach(None, None)
+        spoken = " ".join(said)
+        self.assertIn("feedback", spoken)
+        self.assertIn("what we build next", spoken)
+        self.assertFalse(tour.speak_welcome())                             # nothing attached: nothing to say
 
     def test_after_the_welcome_it_is_a_daily_greeting(self):
         with self._tasks():

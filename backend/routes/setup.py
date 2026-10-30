@@ -64,9 +64,8 @@ def welcome_greeting():
         return {"success": False, "error": str(e)}
 
 
-@router.post("/api/setup/complete")
-def complete_setup(req: SetupCompleteRequest):
-    """Called when user finishes setup wizard."""
+def _choice_updates(req: SetupCompleteRequest, complete: bool) -> dict:
+    """The settings the wizard collected, as a config update. `complete` also marks setup as finished."""
     import config
 
     name  = req.name.strip()
@@ -78,13 +77,12 @@ def complete_setup(req: SetupCompleteRequest):
         raise HTTPException(status_code=400, detail="Valid email is required")
 
     wake    = req.wake_word.lower().strip() if req.wake_word else "seven"
-    
+
     # Map the selected onboarding voice configuration parameters cleanly
     voice_engine = req.voice_engine.strip() if req.voice_engine else "kokoro"
     voice_id_val = req.voice_id.strip() if req.voice_id else ("af_heart" if voice_engine == "kokoro" else str(req.voice_index))
 
     updates = {
-        "setup_complete": True,
         "email":          email,
         "identity": {
             **config.KEY.get("identity", {}),
@@ -103,8 +101,66 @@ def complete_setup(req: SetupCompleteRequest):
 
     if req.model_name:
         updates["brain"] = {**config.KEY.get("brain", {}), "model_name": req.model_name}
+    if complete:
+        updates["setup_complete"] = True
+    return updates
 
-    success = config.update_config(updates)
+
+@router.post("/api/setup/speech-install", summary="Start downloading speech recognition",
+             description="Called when the wizard opens, so the biggest download is under way (or finished) long before "
+                         "the 'Getting this PC ready' step needs it. Safe to call again; progress is in /api/bootstrap/status.")
+def start_speech_install():
+    global _speech_thread
+    from backend.bootstrap import ensure_speech_model, speech_model_ready
+    if speech_model_ready():
+        return {"status": "done"}
+    if _speech_thread is None or not _speech_thread.is_alive():
+        _speech_thread = threading.Thread(target=ensure_speech_model, daemon=True, name="SpeechInstall")
+        _speech_thread.start()
+    return {"status": "running"}
+
+
+_speech_thread = None
+
+
+@router.post("/api/setup/prepare", summary="Start loading Seven while setup finishes",
+             description="Saves the choices made so far (without finishing setup) and starts loading Seven's brain, "
+                         "ears and voice in the background, so Launch Seven opens the app straight away. Safe to "
+                         "call again: it only starts once.")
+def prepare_setup(req: SetupCompleteRequest):
+    import config
+    from backend.api_server import _state, set_state
+
+    if not config.update_config(_choice_updates(req, complete=False)):
+        raise HTTPException(status_code=500, detail="Failed to save configuration")
+    already = bool(_state.get("prepare_requested"))
+    set_state("prepare_requested", True)
+    return {"success": True, "already": already}
+
+
+@router.get("/api/setup/prepare-status", summary="How far Seven's start-up has got during setup")
+def prepare_status():
+    from backend.api_server import _state
+
+    started = bool(_state.get("prepare_started"))
+    return {
+        "requested": bool(_state.get("prepare_requested")),
+        "started":   started,
+        "ready":     started and bool(_state.get("ready", False)),
+        "stage":     str(_state.get("ready_stage", "")),
+        "speech":    _state.get("speech_model") or None,
+    }
+
+
+@router.post("/api/setup/complete")
+def complete_setup(req: SetupCompleteRequest):
+    """Called when user finishes setup wizard."""
+    import config
+
+    name  = req.name.strip()
+    email = req.email.strip()
+
+    success = config.update_config(_choice_updates(req, complete=True))
     if not success:
         raise HTTPException(status_code=500, detail="Failed to save configuration")
 
@@ -403,14 +459,14 @@ WHISPER_MODELS = [
     {
         "id": "small.en", "label": "Small", "tag": "BALANCED",
         "size_mb": 484, "param": "244M",
-        "headline": "Solid accuracy without a GPU",
+        "headline": "Seven's default: quick to download, fast, accurate",
         "cpu_speed": "Moderate", "gpu_speed": "Fast",
-        "accuracy": "Good, recommended for most CPU-only users",
+        "accuracy": "Good, and Seven double-checks anything it is unsure of",
     },
     {
-        "id": "medium.en", "label": "Medium", "tag": "RECOMMENDED",
+        "id": "medium.en", "label": "Medium", "tag": "BETTER ACCURACY",
         "size_mb": 1500, "param": "769M",
-        "headline": "Seven's current default, strong accuracy",
+        "headline": "A little more accurate, a 1.5 GB download",
         "cpu_speed": "Slow without a GPU", "gpu_speed": "Fast",
         "accuracy": "Very good, fewer hallucinations on silence",
     },
@@ -464,6 +520,22 @@ def _is_whisper_model_installed(model_id: str) -> bool:
     return False
 
 
+def _speech_hardware() -> dict:
+    """What decides which speech model suits this PC: an NVIDIA (CUDA) card, its memory, and the PC's memory."""
+    cuda = False
+    try:
+        import ctranslate2
+        cuda = ctranslate2.get_cuda_device_count() > 0
+    except Exception:
+        pass
+    try:
+        from backend.routes.models import _hardware
+        hw = _hardware()
+    except Exception:
+        hw = {"gpu": None, "vram_gb": 0.0, "ram_gb": 0.0}
+    return {"cuda": cuda, "gpu": hw.get("gpu"), "vram_gb": hw.get("vram_gb", 0.0), "ram_gb": hw.get("ram_gb", 0.0)}
+
+
 @router.get("/api/setup/whisper-models")
 def get_whisper_models():
     """List available Whisper STT model sizes with install status."""
@@ -471,14 +543,15 @@ def get_whisper_models():
     cfg_path = os.path.join(
         os.environ.get("APPDATA", os.path.expanduser("~")), "SEVEN", "config.json"
     )
-    current = "medium.en"
+    from backend.bootstrap import default_speech_model
+    current = default_speech_model()
     
     # ALWAYS read from file, never from config.KEY (which can be stale)
     try:
         # Force fresh read with no caching
         with open(cfg_path, "r", encoding="utf-8") as _f:
             cfg_data = _json.load(_f)
-            current = cfg_data.get("brain", {}).get("whisper_model", "medium.en")
+            current = cfg_data.get("brain", {}).get("whisper_model") or current
             _log_config_change("GET /whisper-models", current)
             print(f"[WHISPER] GET models - read from file: {current}")
             
@@ -496,16 +569,20 @@ def get_whisper_models():
         print(f"[WHISPER] GET models - config read error: {e}, using default: {current}")
         pass
     
+    from ears import whisper_advice
+    hw = _speech_hardware()
     result = []
     for m in WHISPER_MODELS:
         result.append({
             **m,
             "installed": _is_whisper_model_installed(m["id"]),
             "active":    m["id"] == current,
+            **{"advice": whisper_advice.advise(m["id"], hw)},
+            "recommended": m["id"] == whisper_advice.recommended_id(hw),
         })
     
     print(f"[WHISPER] GET models - returning current: {current}")
-    return {"models": result, "current": current}
+    return {"models": result, "current": current, "hardware": hw}
 
 
 @router.post("/api/setup/whisper-model")
@@ -636,7 +713,8 @@ def set_whisper_model(data: dict):
             # this is a one-time cache warm-up, not how the model runs later.
             # ears/core.py loads the real model with GPU if available.
             from seven_utils import hf_offline
-            with hf_offline.allow_downloads():
+            from backend.bootstrap import _classic_downloads
+            with hf_offline.allow_downloads(), _classic_downloads():
                 WhisperModel(model_id, device="cpu", compute_type="int8")
             stop_flag["done"] = True
             print(f"[WHISPER] Download completed for {model_id}")
@@ -772,12 +850,19 @@ def check_environment():
     except Exception:
         voice_ready = False
 
+    try:
+        from backend.bootstrap import speech_model_ready
+        speech_ready = speech_model_ready()
+    except Exception:
+        speech_ready = True                      # cannot tell: never send someone back through setup for it
+
     return {
         "packages_installed": packages_ok,
         "ollama_installed":   ollama_installed,
         "ollama_running":     ollama_running,
         "voice_ready":        voice_ready,
-        "needs_setup":        not (packages_ok and ollama_installed and voice_ready)
+        "speech_ready":       speech_ready,
+        "needs_setup":        not (packages_ok and ollama_installed and voice_ready and speech_ready)
     }
 
 

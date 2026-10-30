@@ -177,20 +177,12 @@ def run_voice_loop(ctx, config, app_ui, api_set_state, safe_mode_file):
         except Exception:
             pass
 
-    # ── Silence watcher ──────────────────────────────────────────────
+    # ── Silence ──────────────────────────────────────────────────────
+    # Seven no longer says a canned line after a quiet spell (brain_modules/silence_watcher.py is not started). Reaching
+    # out is the companion's job (companion/): it asks about you, tells you about itself, and follows up, in a thread of
+    # its own, and says it aloud only when you are idle. It starts after the greeting, below.
     _silence_watcher = None
     _last_topic_ref  = [None]
-    try:
-        from brain_modules.silence_watcher import SilenceWatcher
-        _silence_watcher = SilenceWatcher(
-            speak_fn=speak_with_interrupt,
-            get_last_topic_fn=lambda: _last_topic_ref[0],
-        )
-        threading.Thread(target=_silence_watcher.start, daemon=True).start()
-        ctx.silence_watcher = _silence_watcher
-        print(Fore.CYAN + "[SYSTEM] Silence watcher started")
-    except Exception as _sw_err:
-        print(Fore.YELLOW + f"[SYSTEM] Silence watcher skipped: {_sw_err}")
 
     # ── Scheduler ────────────────────────────────────────────────────
     try:
@@ -242,8 +234,30 @@ def run_voice_loop(ctx, config, app_ui, api_set_state, safe_mode_file):
     except Exception:
         pass
     api_set_state("ready", True)
+    # During setup Seven loads everything while the last wizard page waits (main.py, prepare). It stays silent until
+    # the person presses Launch Seven; whatever the microphone heard in the meantime is dropped.
+    hold = getattr(ctx, "launch_event", None)
+    if hold is not None and not hold.is_set():
+        print(Fore.CYAN + "[SYSTEM] Ready. Waiting for Launch Seven")
+        hold.wait()
+        try:
+            from ears.core import STREAM as _stream
+            _stream.drain()
+        except Exception:
+            pass
     time.sleep(0.8)                                      # the window fades in; the greeting starts as it does
     greeting.greet(ctx, config)
+
+    # ── Seven the friend ─────────────────────────────────────────────
+    # Starts once the greeting is done. Anything it wrote while you were away (or while you were busy) and has not said
+    # yet is said now, right after the greeting; after that it reaches out at a human pace, only when you are idle.
+    try:
+        from companion import scheduler as _companion
+        _friend = _companion.start(speak=ctx.mouth.speak, busy=lambda: bool(ctx.is_speaking and ctx.is_speaking()))
+        _friend.deliver(launch=True)
+        print(Fore.CYAN + "[SYSTEM] Companion started")
+    except Exception as _cp_err:
+        print(Fore.YELLOW + f"[SYSTEM] Companion skipped: {_cp_err}")
 
     # ── Register handlers ────────────────────────────────────────────
     try:
@@ -333,6 +347,11 @@ def run_voice_loop(ctx, config, app_ui, api_set_state, safe_mode_file):
             if _silence_watcher:
                 _silence_watcher.on_user_spoke()
             _last_topic_ref[0] = user_input
+            try:                                         # you are talking to Seven: it will not interrupt, and a spoken
+                from companion import engine as _friend_engine      # answer to its last question is learned from
+                _friend_engine.note_voice_message(user_input)
+            except Exception:
+                pass
 
             text_lower = user_input.lower().strip()
             _hallucinations = {

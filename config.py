@@ -144,8 +144,11 @@ def get_defaults():
         "commands": {},
         "file_search_roots": [],
         "license": {"key": "", "tier": "free", "verified": False, "expires_at": None},
+        "companion": {"enabled": True, "pace": "auto", "voice": True,
+                      "quiet": {"enabled": True, "start": "22:00", "end": "08:00"},
+                      "topics": {"you": True, "seven": True, "facts": True}},
         "setup_complete": False,
-        "version": "1.3.3",
+        "version": "1.3.2",
     }
 
 

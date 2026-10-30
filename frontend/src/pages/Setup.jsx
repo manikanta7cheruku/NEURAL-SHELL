@@ -44,6 +44,9 @@ export default function Setup({ onComplete }) {
     const t = setTimeout(() => setVisible(true), 50);
     // Start downloading the natural voice now, so it's ready to preview by the voice step.
     fetch('http://127.0.0.1:7777/api/voice/install', { method: 'POST' }).catch(() => {});
+    // The biggest download (speech recognition, up to 1.5 GB) starts now too, so it is well under way, or finished,
+    // by the time "Getting this PC ready" needs it.
+    fetch('http://127.0.0.1:7777/api/setup/speech-install', { method: 'POST' }).catch(() => {});
     return () => clearTimeout(t);
   }, []);
 

@@ -42,6 +42,7 @@ docs/
     workspaces.md               complete: capture, browser tabs, restore without duplicates
     knowledge.md                complete: documents, how Seven reads them
     voice.md                    complete: one spoken request end to end, greeting, voice bar, home vitals
+    companion.md                complete: Seven as a friend, its own chat thread, questions, pace, quiet hours
     ears.md                     complete: speech detector, Whisper, wake word, push to talk, snaps
     mouth.md                    complete: natural voice, streaming speech, tone, interrupt
     memory.md,

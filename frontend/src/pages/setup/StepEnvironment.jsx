@@ -27,8 +27,8 @@ const ITEMS = [
     why: 'It runs on this PC, so Seven can talk to you even with no internet, and nothing you hear comes from a server.',
   },
   {
-    key: 'speech_model', name: 'Speech recognition', size: 'About 600 MB',
-    what: 'What turns your voice into words, tuned for this PC (a faster model on PCs without a graphics card).',
+    key: 'speech_model', name: 'Speech recognition', size: 'About 500 MB',
+    what: 'What turns your voice into words. A compact, accurate model; a bigger one is a click away in Settings.',
     why: 'Your voice is understood here on the computer and is never uploaded anywhere.',
   },
   {
@@ -75,7 +75,9 @@ function Row({ item, b, open }) {
             <span className={`shrink-0 text-[11.5px] tabular-nums ${st.tone === 'done' ? 'text-white/60' : st.tone === 'ask' ? 'text-[#e2b25b]'
                               : st.tone === 'error' ? 'text-[#ef6b62]' : 'text-white/45'}`}>{st.word}</span>
           </div>
-          <div className="mt-0.5 text-[11.5px] text-white/45">{item.what}</div>
+          <div className="mt-0.5 text-[11.5px] text-white/45">
+            {item.key === 'speech_model' && st.tone === 'busy' && b.speech_model?.current ? b.speech_model.current : item.what}
+          </div>
         </div>
         <span className="hidden w-24 shrink-0 text-right text-[11px] text-white/30 sm:block">{item.size}</span>
       </div>
@@ -117,7 +119,7 @@ export default function StepEnvironment() {
       .then(r => r.json())
       .then(d => {
         setChecking(false);
-        if (d.packages_installed && d.ollama_installed && d.voice_ready) { setStarted(true); setDone(true); }
+        if (d.packages_installed && d.ollama_installed && d.voice_ready && d.speech_ready !== false) { setStarted(true); setDone(true); }
       })
       .catch(() => { if (++tries < 10) setTimeout(check, 2000); else setChecking(false); });
     check();

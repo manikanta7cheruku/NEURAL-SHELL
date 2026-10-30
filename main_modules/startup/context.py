@@ -30,7 +30,8 @@ class SevenContext:
         self.get_enrolled_speakers = None
         self.listen_for_interrupt = None
 
-        # Set by main.py
+        # Set by main.py. launch_event: while setup is still open Seven loads everything but stays silent until it is set
+        self.launch_event = None
         self.app_ui = None
         self.api_set_state = None
         self.config = None

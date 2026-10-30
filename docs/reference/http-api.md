@@ -6,7 +6,7 @@ The backend listens on `http://127.0.0.1:7777` only (never on the network). The 
 the overlay and the Chrome extension are its only clients. There is no authentication because nothing outside
 this computer can reach it.
 
-214 endpoints in 29 files.
+222 endpoints in 30 files.
 
 ## `backend/admin_server.py`
 
@@ -66,6 +66,15 @@ this computer can reach it.
 | POST | `/api/chrome/tabs` | Receive tab data from Chrome extension. |
 | POST | `/api/chrome/tabs/clear` | Clear all stored tab data. Called when user disables Tab Sync. |
 | GET | `/api/chrome/tabs/status` | Check Chrome extension status across ALL profiles. |
+
+## `backend/routes/companion.py`
+
+| Method | Path | What it does |
+|---|---|---|
+| POST | `/api/companion/nudge` | Ask me something |
+| POST | `/api/companion/read` | The thread was opened |
+| POST | `/api/companion/snooze` | No messages for a while |
+| GET | `/api/companion/state` | Seven's thread: unread, settings, today |
 
 ## `backend/routes/config_routes.py`
 
@@ -225,7 +234,10 @@ this computer can reach it.
 | GET | `/api/bootstrap/status` | Poll for live environment setup progress. |
 | POST | `/api/setup/complete` | Called when user finishes setup wizard. |
 | GET | `/api/setup/existing-identity` | An earlier Seven account on this PC, if any |
+| POST | `/api/setup/prepare` | Start loading Seven while setup finishes |
+| GET | `/api/setup/prepare-status` | How far Seven's start-up has got during setup |
 | POST | `/api/setup/preview-voice` | Preview a voice. Interrupts any currently playing preview first. |
+| POST | `/api/setup/speech-install` | Start downloading speech recognition |
 | POST | `/api/setup/start-fresh` | Back up and clear this PC's Seven data for a new person |
 | GET | `/api/setup/voices` | Returns Piper TTS voices + Windows SAPI voices. |
 | POST | `/api/setup/welcome-greeting` | Trigger Seven's first-time welcome greeting after setup completes. |
@@ -328,6 +340,7 @@ this computer can reach it.
 | GET | `/api/welcome` | First-run welcome state |
 | POST | `/api/welcome/hint/hide` | Hide the getting-started hint |
 | POST | `/api/welcome/hint/show` | Show the getting-started hint again |
+| POST | `/api/welcome/speak` | Seven says the welcome message |
 
 ## `backend/routes/workspaces.py`
 
