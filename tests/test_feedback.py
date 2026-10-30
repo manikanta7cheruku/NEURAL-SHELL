@@ -52,6 +52,18 @@ class Feedback(unittest.TestCase):
         sent = post.call_args.kwargs["data"]
         self.assertEqual(sent, {"entry.1666026261": "a@b.co", "entry.480930978": "[Bug Report, Critical]\n\nThe orb froze"})
 
+    def test_the_name_travels_with_the_report_and_gets_its_own_column_when_the_form_has_one(self):
+        entry = {"category": "Other", "severity": "", "details": "Hello there", "email": "a@b.co", "name": "Asha"}
+        self.assertEqual(self.f.compose_message(entry), "[Other]\nFrom: Asha\n\nHello there")
+        with mock.patch("requests.post") as post:
+            post.return_value = mock.Mock(status_code=200, text="Your response has been recorded")
+            self.f._post(entry)
+            self.assertEqual(set(post.call_args.kwargs["data"]), {"entry.1666026261", "entry.480930978"})
+            with mock.patch.dict(os.environ, {"SEVEN_FEEDBACK_FIELDS": '{"name": "entry.5", "category": "entry.6", "severity": "entry.7"}'}):
+                self.f._post(entry)
+        sent = post.call_args.kwargs["data"]
+        self.assertEqual((sent["entry.5"], sent["entry.6"], sent["entry.7"]), ("Asha", "Other", "N/A"))
+
     def test_app_info_is_appended_only_when_allowed(self):
         with mock.patch.object(self.f, "_post", return_value=True) as post:
             self.f.send_feedback(self.f.FeedbackIn(category="Other", details="Hello there", include_app_info=True))

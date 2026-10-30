@@ -8,14 +8,14 @@ const FORM_ID = '1FAIpQLSdwmjvMIDzJRGo2xTTqdcvUgzCiDzQV2wzsOBAZhd6Ea2lIuw';
 const FIELDS = { email: 'entry.1666026261', message: 'entry.480930978' };
 
 /** The form has only Email and Message, so the category and severity lead the message: "[Bug Report, Critical]". */
-export const composeMessage = ({ category, severity, details }) =>
-  `[${[category, severity && severity.toUpperCase() !== 'N/A' ? severity : ''].filter(Boolean).join(', ')}]\n\n${details}`;
+export const composeMessage = ({ category, severity, details, name }) =>
+  `[${[category, severity && severity.toUpperCase() !== 'N/A' ? severity : ''].filter(Boolean).join(', ')}]${name ? `\nFrom: ${name}` : ''}\n\n${details}`;
 
 /** Resolves when the request left the app. The browser can't read Google's reply, so delivery isn't confirmed. */
-export async function sendDirect({ category, severity, details, email }) {
+export async function sendDirect({ category, severity, details, email, name }) {
   const body = new URLSearchParams({
     [FIELDS.email]: email || 'anonymous',
-    [FIELDS.message]: composeMessage({ category, severity, details }),
+    [FIELDS.message]: composeMessage({ category, severity, details, name }),
   });
   await fetch(`https://docs.google.com/forms/d/e/${FORM_ID}/formResponse`, { method: 'POST', mode: 'no-cors', body });
 }

@@ -50,7 +50,9 @@ def compose_message(entry: dict) -> str:
     """The form has only Email and Message, so the category and severity lead the message: "[Bug Report, Critical]"."""
     severity = (entry.get("severity") or "").strip()
     tags = [entry["category"].strip()] + ([severity] if severity and severity.upper() != "N/A" else [])
-    return f"[{', '.join(tags)}]\n\n{entry['details']}"
+    name = (entry.get("name") or "").strip()
+    head = f"[{', '.join(tags)}]" + (f"\nFrom: {name}" if name else "")
+    return f"{head}\n\n{entry['details']}"
 
 
 _lock = threading.Lock()
@@ -109,6 +111,9 @@ def _post(entry: dict) -> bool:
     import requests
     f = _fields()
     data = {f["email"]: entry.get("email") or "anonymous", f["message"]: compose_message(entry)}
+    # Questions added to the form later get their own columns: list them in FIELDS (or SEVEN_FEEDBACK_FIELDS).
+    extra = {"name": entry.get("name") or "anonymous", "category": entry["category"], "severity": entry.get("severity") or "N/A"}
+    data.update({f[key]: value for key, value in extra.items() if f.get(key)})
     try:
         r = requests.post(_form_url(), data=data, timeout=8,
                           headers={"User-Agent": "Seven feedback", "Referer": _form_url().replace("formResponse", "viewform")})
@@ -154,6 +159,7 @@ class FeedbackIn(BaseModel):
     severity: str = ""
     details: str
     email: str = ""
+    name: str = ""
     include_app_info: bool = True
 
 
@@ -167,7 +173,8 @@ def send_feedback(req: FeedbackIn):
     if req.include_app_info:
         details = f"{details}\n\n[{_app_info()}]"
     entry = {"id": uuid.uuid4().hex, "at": time.strftime("%Y-%m-%d %H:%M:%S"), "category": req.category.strip(),
-             "severity": req.severity.strip(), "details": details[:8000], "email": req.email.strip()[:200]}
+             "severity": req.severity.strip(), "details": details[:8000], "email": req.email.strip()[:200],
+             "name": req.name.strip()[:100]}
     sent = _post(entry)
     with _lock:
         queue = _load_queue()
