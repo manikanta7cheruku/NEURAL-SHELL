@@ -13,6 +13,20 @@ from backend import bootstrap
 from backend.routes.attention import collect
 
 
+def fake_whisper(**kw):
+    """A stand-in for faster_whisper.download_model: CI does not install the speech package (it is large)."""
+    import contextlib
+    import sys
+    import types
+
+    @contextlib.contextmanager
+    def _patched():
+        download = mock.Mock(**kw)
+        with mock.patch.dict(sys.modules, {"faster_whisper": types.SimpleNamespace(download_model=download)}):
+            yield download
+    return _patched()
+
+
 def _probes(**kw):
     p = dict(mic_error=lambda: "", voice=lambda: {"ready": True, "status": "done", "progress": 100},
              ollama_up=lambda: True, uptime=lambda: 600, setup_done=lambda: True, speech=lambda: {"state": "ready", "progress": 100})
@@ -120,14 +134,14 @@ class SpeechDownload(unittest.TestCase):
 
     def test_a_failed_download_says_what_to_do(self):
         with mock.patch.object(bootstrap, "_download_whisper", side_effect=RuntimeError("offline")), \
-                mock.patch("faster_whisper.download_model", side_effect=RuntimeError("offline")):
+                fake_whisper(side_effect=RuntimeError("offline")):
             self.assertFalse(bootstrap.ensure_speech_model())
         self.assertEqual(self.state()["status"], "error")
         self.assertIn("internet", self.state()["error"])
 
     def test_if_the_progress_download_fails_the_plain_one_is_tried(self):
         with mock.patch.object(bootstrap, "_download_whisper", side_effect=RuntimeError("no progress")), \
-                mock.patch("faster_whisper.download_model") as plain:
+                fake_whisper() as plain:
             self.assertTrue(bootstrap.ensure_speech_model())
         self.assertEqual([c.args[0] for c in plain.call_args_list], ["base.en", "small.en"])
 

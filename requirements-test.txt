@@ -6,6 +6,7 @@ requests
 colorama
 psutil
 fastapi
+python-multipart
 uvicorn
 pydantic
 chromadb==1.5.8
