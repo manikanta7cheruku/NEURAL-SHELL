@@ -1,6 +1,17 @@
 import { create } from 'zustand';
 import api from '../api';
 
+const payload = data => ({
+  name:          data.name.trim(),
+  email:         data.email.trim(),
+  referral_code: data.referralCode.trim(),
+  wake_word:     data.wakeWord.trim() || 'seven',
+  voice_index:   data.voiceIndex,
+  voice_id:      data.voiceId || '',
+  voice_engine:  data.voiceEngine || 'kokoro',
+  model_name:    data.modelName,
+});
+
 const useSetup = create((set, get) => ({
   // ── Step tracking — 6 steps now (Environment added as Step 4) ──
   step:  1,
@@ -67,21 +78,21 @@ const useSetup = create((set, get) => ({
     setTimeout(() => set({ voicePreviewPlaying: false }), 3500);
   },
 
+  // ── Start loading Seven while the wizard finishes (StepModel when the AI model is ready, StepDone) ──
+  // Saves the choices made so far without finishing setup. The backend only starts once, so this is safe to repeat.
+  prepare: async () => {
+    const { data } = get();
+    try {
+      await api.post('/setup/prepare', payload(data));
+    } catch { /* Launch Seven then falls back to the slower restart */ }
+  },
+
   // ── Final save (called from StepDone) ──
   completeSetup: async () => {
     set({ loading: true, error: null });
     const { data } = get();
     try {
-      const r = await api.post('/setup/complete', {
-        name:          data.name.trim(),
-        email:         data.email.trim(),
-        referral_code: data.referralCode.trim(),
-        wake_word:     data.wakeWord.trim() || 'seven',
-        voice_index:   data.voiceIndex,
-        voice_id:      data.voiceId || '',
-        voice_engine:  data.voiceEngine || 'kokoro',
-        model_name:    data.modelName,
-      });
+      const r = await api.post('/setup/complete', payload(data));
       set({ loading: false });
       return r.data?.success !== false;
     } catch (e) {

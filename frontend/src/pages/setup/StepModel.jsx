@@ -23,7 +23,9 @@ const toCard = m => ({
 });
 
 export default function StepModel() {
-  const { data, setField, next, back, fetchHardware, hardwareInfo } = useSetup();
+  const { data, setField, next, back, fetchHardware, hardwareInfo, prepare } = useSetup();
+  // Seven starts loading the moment the AI model is ready, so the last page is already well on its way.
+  const goNext = () => { prepare(); next(); };
   const [installedModels, setInstalledModels] = useState([]);
   const [pulling, setPulling] = useState(false);
   const [pct, setPct] = useState(0);
@@ -75,7 +77,7 @@ export default function StepModel() {
 
   const handleDownload = async () => {
     if (!data.modelName || pulling) return;
-    if (isModelInstalled(data.modelName)) { next(); return; }
+    if (isModelInstalled(data.modelName)) { goNext(); return; }
     setPulling(true);
     setError('');
 
@@ -101,7 +103,7 @@ export default function StepModel() {
           if (st.model_pull?.status === 'done') {
             clearInterval(pollRef.current);
             setPct(100);
-            next();
+            goNext();
           }
           if (st.model_pull?.status === 'error') {
             clearInterval(pollRef.current);
@@ -118,7 +120,7 @@ export default function StepModel() {
 
   const handleSkip = () => {
     if (pulling || !hasAnyModelInstalled) return;
-    next();
+    goNext();
   };
 
   return (

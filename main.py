@@ -161,50 +161,51 @@ if not _startup_ok:
     os._exit(1)
 
 # ── App entry ────────────────────────────────────────────────────────
-def start_app():
-    import json as _json
+_appdata = os.environ.get('APPDATA', os.path.expanduser('~'))
+_cfg_file = os.path.join(_appdata, 'SEVEN', 'config.json')
+_safe_mode_file = os.path.join(_appdata, 'SEVEN', 'safe_mode.flag')
 
-    # Check setup status
-    _appdata = os.environ.get('APPDATA', os.path.expanduser('~'))
-    _cfg_file = os.path.join(_appdata, 'SEVEN', 'config.json')
-    _is_setup_done = False
+
+def _setup_done():
+    import json as _json
     try:
         if os.path.exists(_cfg_file):
             with open(_cfg_file, 'r', encoding='utf-8') as _f:
-                _is_setup_done = _json.load(_f).get('setup_complete', False)
+                return bool(_json.load(_f).get('setup_complete', False))
     except Exception:
         pass
+    return False
 
-    if not _is_setup_done:
-        print(Fore.CYAN + "[SYSTEM] Setup not complete — onboarding mode")
-        try:
-            while True:
-                time.sleep(1)
-                try:
-                    with open(_cfg_file, 'r', encoding='utf-8') as _f:
-                        if _json.load(_f).get('setup_complete', False):
-                            os._exit(0)
-                except Exception:
-                    pass
-        except KeyboardInterrupt:
-            os._exit(0)
-        return
 
-    # Full mode
-    print(Fore.GREEN + "[SYSTEM] Setup complete. Starting full Seven...")
+def _prepare_requested():
+    """The setup wizard asked Seven to load now (backend/routes/setup.py, /api/setup/prepare)."""
+    try:
+        from backend.api_server import _state
+        return bool(_state.get("prepare_requested"))
+    except Exception:
+        return False
 
+
+def _start_services():
+    """What starts once setup is finished: usage telemetry and the local admin page."""
     try:
         import telemetry
         telemetry.start_telemetry()
     except Exception:
         pass
-
     try:
         from backend.admin_server import start_admin_server
         start_admin_server()
     except Exception:
         pass
 
+
+def _begin_full(hold):
+    """
+    Load Seven (brain, ears, voice) and run its voice loop on a thread. With hold, everything loads but Seven stays
+    silent until ctx.launch_event is set: that is how the setup wizard's last page loads Seven while it waits, so
+    Launch Seven opens the app straight away.
+    """
     import config
 
     class DummyUI:
@@ -222,33 +223,62 @@ def start_app():
     ctx.app_ui = DummyUI()
     ctx.api_set_state = api_set_state
     ctx.config = config
+    ctx.launch_event = threading.Event()
+    if not hold:
+        ctx.launch_event.set()
 
     from main_modules.startup.voice_loop import run_voice_loop
-    _safe_mode_file = os.path.join(_appdata, 'SEVEN', 'safe_mode.flag')
-
-    logic_thread = threading.Thread(
-        target=run_voice_loop,
-        args=(ctx, config, ctx.app_ui, api_set_state, _safe_mode_file),
-        daemon=True
-    )
+    args = (ctx, config, ctx.app_ui, api_set_state, _safe_mode_file)
+    logic_thread = threading.Thread(target=run_voice_loop, args=args, daemon=True)
     logic_thread.start()
 
     from main_modules.startup.battery_monitor import start_battery_monitor
     start_battery_monitor()
+    return ctx, logic_thread, args
 
+
+def start_app():
+    started = None                                      # (ctx, thread, args) once Seven has been loaded
+
+    if not _setup_done():
+        print(Fore.CYAN + "[SYSTEM] Setup not complete — onboarding mode")
+        try:
+            while True:
+                time.sleep(1)
+                if _setup_done():
+                    if started is None:
+                        os._exit(0)                     # not loaded yet: restart into full mode
+                    break
+                if started is None and _prepare_requested():
+                    print(Fore.CYAN + "[SYSTEM] Setup is nearly done: loading Seven now, silently, until Launch")
+                    started = _begin_full(hold=True)
+                    api_set_state("prepare_started", True)
+        except KeyboardInterrupt:
+            os._exit(0)
+        # Setup finished while Seven was already loaded: no restart. The screen reloads, then Seven starts talking.
+        print(Fore.GREEN + "[SYSTEM] Setup complete. Launching the Seven that is already loaded...")
+        _start_services()
+        threading.Timer(2.5, started[0].launch_event.set).start()
+    else:
+        print(Fore.GREEN + "[SYSTEM] Setup complete. Starting full Seven...")
+        _start_services()
+        started = _begin_full(hold=False)
+
+    ctx, logic_thread, args = started
     try:
         while True:
             time.sleep(5)
             if not logic_thread.is_alive():
                 logger.critical("Voice loop crashed. Restarting.")
-                logic_thread = threading.Thread(
-                    target=run_voice_loop,
-                    args=(ctx, config, ctx.app_ui, api_set_state, _safe_mode_file),
-                    daemon=True
-                )
+                logic_thread = threading.Thread(target=run_voice_loop_again, args=args, daemon=True)
                 logic_thread.start()
     except KeyboardInterrupt:
         os._exit(0)
+
+
+def run_voice_loop_again(*args):
+    from main_modules.startup.voice_loop import run_voice_loop
+    run_voice_loop(*args)
 
 
 if __name__ == "__main__":
