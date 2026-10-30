@@ -27,8 +27,8 @@ const ITEMS = [
     why: 'It runs on this PC, so Seven can talk to you even with no internet, and nothing you hear comes from a server.',
   },
   {
-    key: 'speech_model', name: 'Speech recognition', size: '600 MB to 1.5 GB',
-    what: 'What turns your voice into words, tuned for this PC (a faster model on PCs without a graphics card).',
+    key: 'speech_model', name: 'Speech recognition', size: 'About 500 MB',
+    what: 'What turns your voice into words. A compact, accurate model; a bigger one is a click away in Settings.',
     why: 'Your voice is understood here on the computer and is never uploaded anywhere.',
   },
   {

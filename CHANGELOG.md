@@ -18,6 +18,9 @@ project uses [semantic versioning](docs/development/release-process.md#versions)
 - `/api/chat` returns action receipts in non-streaming responses.
 
 ### Fixed
+- Speech recognition now defaults to `small.en` (about 480 MB) on every PC instead of `medium.en` (1.5 GB) on PCs with a
+  graphics card, so setup and a first launch are about three times quicker to download. Medium is the optional upgrade in
+  Settings, Voice, with real download progress. A PC that already has medium and not small keeps medium.
 - Setup step 4 showed "Downloading 1%" for minutes for speech recognition. The download engine wrote the big file only
   when it finished, so watching the folder grow told nothing. Speech and search models now use the plain download,
   which grows its file as it goes (same speed measured), and the step shows real progress ("340 of 1500 MB").
