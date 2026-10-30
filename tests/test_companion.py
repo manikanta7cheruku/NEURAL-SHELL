@@ -251,6 +251,46 @@ class Learning(CompanionTest):
         engine.note_voice_message("a nurse")
         self.assertEqual(self.facts(), [])
 
+    def test_a_one_word_answer_gets_a_friend_s_reply_not_the_brain(self):
+        self.ask("you.pet")
+        conv = engine.conversation_id()
+        reply = engine.acknowledge(conv, "Couple", self.rng)
+        self.assertIn(reply, engine._THANKS)
+        self.assertNotIn("?", reply)
+
+    def test_a_question_a_long_message_or_nothing_asked_goes_to_the_brain(self):
+        conv = engine.conversation_id()
+        self.assertIsNone(engine.acknowledge(conv, "Couple", self.rng))            # nothing was asked yet
+        self.ask("you.music")
+        self.assertIsNone(engine.acknowledge(conv, "why do you ask?", self.rng))
+        self.assertIsNone(engine.acknowledge(conv, "what can you do for me on this computer today please", self.rng))
+        self.assertIsNone(engine.acknowledge(self.conv, "Couple", self.rng))        # another chat
+        engine.note_user_message(conv, "jazz")                                       # answered once: no longer waiting
+        self.assertIsNone(engine.acknowledge(conv, "Couple", self.rng))
+
+    def test_no_and_not_now_are_met_kindly(self):
+        self.ask("you.music")
+        conv = engine.conversation_id()
+        self.assertIn(engine.acknowledge(conv, "no", self.rng), engine._SKIP)
+        self.assertEqual(engine.acknowledge(conv, "not now", self.rng), engine._SPACE)
+
+    def test_the_route_saves_both_messages_and_asks_the_next_thing(self):
+        try:
+            from fastapi import FastAPI
+            from fastapi.testclient import TestClient
+            from backend.routes import chat as routes
+        except Exception:
+            self.skipTest("needs fastapi")
+        self.ask("you.pet")
+        conv = engine.conversation_id()
+        app = FastAPI()
+        app.include_router(routes.router)
+        with mock.patch.object(brain, "think", side_effect=AssertionError("the brain must not answer")):
+            body = TestClient(app).post("/api/chat", json={"text": "Couple", "conversation_id": conv}).json()
+        self.assertIn(body["response"], engine._THANKS)
+        texts = [m["content"] for m in cstore.get_messages(conv)]
+        self.assertEqual(texts[-2:], ["Couple", body["response"]])
+
     def test_the_answers_are_cleaned_up(self):
         for raw, want in (("I'm a teacher.", "teacher"), ("It's jazz!", "jazz"), ("probably rock", "rock"), ("I love ramen", "ramen")):
             self.assertEqual(engine.clean_answer(raw), want)
