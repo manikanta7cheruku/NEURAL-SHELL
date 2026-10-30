@@ -6,7 +6,7 @@ The backend listens on `http://127.0.0.1:7777` only (never on the network). The 
 the overlay and the Chrome extension are its only clients. There is no authentication because nothing outside
 this computer can reach it.
 
-217 endpoints in 29 files.
+218 endpoints in 29 files.
 
 ## `backend/admin_server.py`
 
@@ -228,6 +228,7 @@ this computer can reach it.
 | POST | `/api/setup/prepare` | Start loading Seven while setup finishes |
 | GET | `/api/setup/prepare-status` | How far Seven's start-up has got during setup |
 | POST | `/api/setup/preview-voice` | Preview a voice. Interrupts any currently playing preview first. |
+| POST | `/api/setup/speech-install` | Start downloading speech recognition |
 | POST | `/api/setup/start-fresh` | Back up and clear this PC's Seven data for a new person |
 | GET | `/api/setup/voices` | Returns Piper TTS voices + Windows SAPI voices. |
 | POST | `/api/setup/welcome-greeting` | Trigger Seven's first-time welcome greeting after setup completes. |

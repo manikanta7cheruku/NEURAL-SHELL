@@ -1229,7 +1229,7 @@ def ensure_search_model():
     threading.Thread(target=_watch, daemon=True).start()
     try:
         from huggingface_hub import snapshot_download
-        with hf_offline.allow_downloads():
+        with hf_offline.allow_downloads(), _classic_downloads():
             snapshot_download(SEARCH_MODEL_REPO, allow_patterns=["*.json", "*.txt", "*.safetensors", "1_Pooling/*",
                                                                  "tokenizer*", "vocab.txt", "modules.json"])
         _set('search_model', status='done', progress=100, current='Ready')
@@ -1313,40 +1313,116 @@ def speech_model_ready() -> bool:
     return True
 
 
-def ensure_speech_model():
-    """Speech recognition (Whisper), downloaded here with progress instead of silently the first time you speak."""
-    from seven_utils import hf_offline
-    names, total_mb = _speech_models()
-    _set('speech_model', status='running', progress=1, current='Downloading speech recognition', error=None)
-    hub = os.path.join(os.path.expanduser("~"), ".cache", "huggingface", "hub")
+_SPEECH_MB = {"base.en": 150, "small.en": 480, "medium.en": 1500}
+_WHISPER_FILES = ["config.json", "preprocessor_config.json", "model.bin", "tokenizer.json", "vocabulary.*"]
+_speech_lock = threading.Lock()      # one speech download at a time: the wizard starts it early and step 4 joins it
+
+
+class _classic_downloads:
+    """
+    Use the plain HTTP download for one deliberate download. The newer Xet engine writes a big file only when it is
+    complete, so a progress bar that watches the folder sat at 1% for minutes; the plain download grows its file as
+    it goes, and measured the same speed on this PC.
+    """
+
+    def __enter__(self):
+        self._env = os.environ.get("HF_HUB_DISABLE_XET")
+        os.environ["HF_HUB_DISABLE_XET"] = "1"
+        self._const = None
+        try:
+            from huggingface_hub import constants
+            self._const, constants.HF_HUB_DISABLE_XET = getattr(constants, "HF_HUB_DISABLE_XET", False), True
+        except Exception:
+            pass
+        return self
+
+    def __exit__(self, *exc):
+        if self._env is None:
+            os.environ.pop("HF_HUB_DISABLE_XET", None)
+        else:
+            os.environ["HF_HUB_DISABLE_XET"] = self._env
+        if self._const is not None:
+            try:
+                from huggingface_hub import constants
+                constants.HF_HUB_DISABLE_XET = self._const
+            except Exception:
+                pass
+
+
+def _folder_bytes(folder):
+    size = 0
+    for root, _dirs, files in os.walk(folder):
+        for f in files:
+            try:
+                size += os.path.getsize(os.path.join(root, f))
+            except OSError:
+                pass
+    return size
+
+
+def _download_whisper(name, on_progress, cache_dir=None):
+    """Fetch one speech model, reporting (bytes done, bytes expected) about twice a second."""
+    from huggingface_hub import snapshot_download
+
+    root = cache_dir or os.path.join(os.path.expanduser("~"), ".cache", "huggingface", "hub")
+    folder = os.path.join(root, f"models--Systran--faster-whisper-{name}")
+    expected = _SPEECH_MB.get(name, 1500) * 1024 * 1024
     done = threading.Event()
 
-    def _watch():
+    def watch():
         while not done.is_set():
-            size = 0
-            for n in names:
-                for root, _dirs, files in os.walk(os.path.join(hub, f"models--Systran--faster-whisper-{n}")):
-                    for f in files:
-                        try:
-                            size += os.path.getsize(os.path.join(root, f))
-                        except OSError:
-                            pass
-            _set('speech_model', progress=max(1, min(97, int(size / (total_mb * 1024 * 1024) * 100))))
+            try:
+                on_progress(min(_folder_bytes(folder), expected), expected)
+            except Exception:
+                pass
             done.wait(0.5)
-    threading.Thread(target=_watch, daemon=True).start()
+
+    threading.Thread(target=watch, daemon=True, name="WhisperProgress").start()
     try:
-        from faster_whisper import download_model
-        with hf_offline.allow_downloads():
-            for n in names:
-                download_model(n)
-        _set('speech_model', status='done', progress=100, current='Ready')
-        return True
-    except Exception as e:
-        _set('speech_model', status='error', progress=0,
-             error=f'Speech recognition download failed ({str(e)[:120]}). Seven will fetch it the first time you speak.')
-        return False
+        with _classic_downloads():
+            return snapshot_download(f"Systran/faster-whisper-{name}", allow_patterns=_WHISPER_FILES, cache_dir=cache_dir)
     finally:
         done.set()
+
+
+def ensure_speech_model():
+    """Speech recognition (Whisper), downloaded here with real progress instead of silently the first time Seven starts."""
+    from seven_utils import hf_offline
+    names, total_mb = _speech_models()
+    with _speech_lock:
+        if speech_model_ready():
+            _set('speech_model', status='done', progress=100, current='Ready', error=None)
+            return True
+        _set('speech_model', status='running', progress=1, current='Starting the download', error=None)
+        weights = {n: _SPEECH_MB.get(n, 1500) for n in names}
+        total = float(sum(weights.values()))
+        finished = [0.0]
+
+        def progress_for(name):
+            def on_progress(done, size):
+                share = weights[name] * (done / size if size else 0)
+                pct = int((finished[0] + share) / total * 100)
+                got = int(finished[0] + share)
+                _set('speech_model', progress=max(1, min(99, pct)),
+                     current=f'Downloading speech recognition, {got} of {int(total)} MB')
+            return on_progress
+
+        try:
+            with hf_offline.allow_downloads():
+                for n in names:
+                    try:
+                        _download_whisper(n, progress_for(n))
+                    except Exception as first:
+                        print(f"[BOOTSTRAP] Speech download with progress failed ({first}); trying the plain download")
+                        from faster_whisper import download_model
+                        download_model(n)
+                    finished[0] += weights[n]
+            _set('speech_model', status='done', progress=100, current='Ready')
+            return True
+        except Exception as e:
+            _set('speech_model', status='error', progress=0,
+                 error=f'Speech recognition download failed ({str(e)[:120]}). Check your internet connection and try again.')
+            return False
 
 
 def run_environment_setup(on_complete=None):

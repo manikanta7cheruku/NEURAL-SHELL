@@ -106,6 +106,23 @@ def _choice_updates(req: SetupCompleteRequest, complete: bool) -> dict:
     return updates
 
 
+@router.post("/api/setup/speech-install", summary="Start downloading speech recognition",
+             description="Called when the wizard opens, so the biggest download is under way (or finished) long before "
+                         "the 'Getting this PC ready' step needs it. Safe to call again; progress is in /api/bootstrap/status.")
+def start_speech_install():
+    global _speech_thread
+    from backend.bootstrap import ensure_speech_model, speech_model_ready
+    if speech_model_ready():
+        return {"status": "done"}
+    if _speech_thread is None or not _speech_thread.is_alive():
+        _speech_thread = threading.Thread(target=ensure_speech_model, daemon=True, name="SpeechInstall")
+        _speech_thread.start()
+    return {"status": "running"}
+
+
+_speech_thread = None
+
+
 @router.post("/api/setup/prepare", summary="Start loading Seven while setup finishes",
              description="Saves the choices made so far (without finishing setup) and starts loading Seven's brain, "
                          "ears and voice in the background, so Launch Seven opens the app straight away. Safe to "
