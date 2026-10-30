@@ -326,6 +326,35 @@ function startPython() {
   });
 }
 
+// ============================================================================
+// QUIT
+// One way out for the voice bar menu, the tray menu and the app itself. Quitting from inside a menu's click handler
+// while destroying the very window that owns the menu is unreliable on Windows, so: everything disappears at once, the
+// real shutdown runs on the next turn of the event loop, and if Electron has not exited after a few seconds it is
+// ended anyway. The detached helpers (hotkeys, reminders) are meant to keep running, as before.
+// ============================================================================
+let _quitting = false;
+function quitSeven() {
+  if (_quitting) return;
+  _quitting = true;
+  app.isQuitting = true;
+  for (const win of [statusWindow, mainWindow]) {
+    try { if (win && !win.isDestroyed()) win.hide(); } catch {}
+  }
+  try { if (tray) { tray.destroy(); tray = null; } } catch {}
+  setTimeout(() => {
+    try { globalShortcut.unregisterAll(); } catch {}
+    for (const win of [statusWindow, mainWindow]) {
+      try { if (win && !win.isDestroyed()) win.destroy(); } catch {}
+    }
+    statusWindow = null;
+    mainWindow = null;
+    try { stopPython(); } catch {}
+    app.quit();
+  }, 0);
+  setTimeout(() => app.exit(0), 4000).unref();
+}
+
 function stopPython() {
   if (!pythonProcess) return;
   try {
@@ -535,13 +564,7 @@ function showOrbContextMenu() {
     { type: 'separator' },
     {
       label: 'Quit SEVEN',
-      click: () => {
-        app.isQuitting = true;
-        if (statusWindow) { statusWindow.destroy(); statusWindow = null; }
-        if (mainWindow)   { mainWindow.destroy();   mainWindow = null;   }
-        stopPython();
-        app.quit();
-      }
+      click: () => quitSeven()
     }
   ];
   Menu.buildFromTemplate(menuTemplate).popup({ window: statusWindow });
@@ -596,13 +619,7 @@ function createTray() {
     { label: 'Chat',  click: () => navigateTo('/console') },
     { label: 'Settings', click: () => navigateTo('/settings') },
     { type: 'separator' },
-    { label: 'Quit SEVEN', click: () => {
-        app.isQuitting = true;
-        if (statusWindow) { statusWindow.destroy(); statusWindow = null; }
-        if (mainWindow)   { mainWindow.destroy();   mainWindow = null;   }
-        stopPython();
-        app.quit();
-      }
+    { label: 'Quit SEVEN', click: () => quitSeven()
     }
   ]);
 
@@ -704,13 +721,7 @@ ipcMain.on('close-window', (event) => {
 ipcMain.on('show-main-window',  () => navigateTo('/'));
 ipcMain.on('show-orb-menu',     () => showOrbContextMenu());
 ipcMain.on('navigate-to',       (_, route) => navigateTo(route));
-ipcMain.on('quit-app', () => { 
-  app.isQuitting = true; 
-  if (statusWindow) { statusWindow.destroy(); statusWindow = null; }
-  if (mainWindow)   { mainWindow.destroy();   mainWindow = null;   }
-  stopPython(); 
-  app.quit(); 
-});
+ipcMain.on('quit-app', () => quitSeven());
 
 ipcMain.on('toggle-dashboard', () => {
   if (!mainWindow) { createMainWindow(); return; }

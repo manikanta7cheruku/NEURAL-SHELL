@@ -403,6 +403,18 @@ def unsummarized(min_idle_s: int = 1800, limit: int = 20) -> List[Dict[str, Any]
                  "AND updated_at<=? ORDER BY updated_at LIMIT ?", (cutoff, limit))
 
 
+def set_speaker(conv_id: str, speaker_key: str) -> bool:
+    """Hand one conversation to another speaker key (the owner's name changed since it was made)."""
+    _init()
+    c = _conn()
+    try:
+        cur = c.execute("UPDATE conversations SET speaker_key=? WHERE id=?", (speaker_key, conv_id))
+        c.commit()
+        return cur.rowcount > 0
+    finally:
+        c.close()
+
+
 def rename_speaker(old: str, new: str) -> int:
     if not old or not new or old == new:
         return 0

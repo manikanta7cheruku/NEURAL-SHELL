@@ -19,6 +19,7 @@ feedback written while offline is queued on disk and sent automatically later.
  2. FIELDS: each question has an id like "entry.123456789". In the form,
     open the three-dot menu > Get pre-filled link, fill every question, click
     Get link, copy it. The link contains entry.NNN=value for each question.
+    The form has two questions, Email and Message; the page's category and severity are written at the start of the message.
  You can also set SEVEN_FEEDBACK_FORM_URL and SEVEN_FEEDBACK_FIELDS (a JSON
  object of the same shape) as environment variables instead of editing code.
 """
@@ -38,13 +39,21 @@ from pydantic import BaseModel
 _log = logging.getLogger("seven.feedback")
 router = APIRouter()
 
-FORM_URL = "https://docs.google.com/forms/d/e/1FAIpQLScbQrtJLGQR0fVB2PkG_7uM8xcrRMSF7D9184Fq0X-L1tKnoA/viewform"
+FORM_URL = "https://docs.google.com/forms/d/e/1FAIpQLSdwmjvMIDzJRGo2xTTqdcvUgzCiDzQV2wzsOBAZhd6Ea2lIuw/viewform"
 FIELDS = {
-    "category": "entry.1403735424",    # Short answer or multiple choice: Bug Report, Feature Request, UI/UX, Performance, Other
-    "severity": "entry.813819414",     # Low, Medium, High, Critical, or N/A
-    "details": "entry.2134832696",     # Paragraph: the description (plus app info if the user allowed it)
-    "email": "entry.1297852434",       # Short answer: email or "anonymous"
+    "email": "entry.1666026261",       # Short answer: email or "anonymous"
+    "message": "entry.480930978",      # Paragraph: the category and severity, the description, app info if allowed
 }
+
+
+def compose_message(entry: dict) -> str:
+    """The form has only Email and Message, so the category and severity lead the message: "[Bug Report, Critical]"."""
+    severity = (entry.get("severity") or "").strip()
+    tags = [entry["category"].strip()] + ([severity] if severity and severity.upper() != "N/A" else [])
+    name = (entry.get("name") or "").strip()
+    head = f"[{', '.join(tags)}]" + (f"\nFrom: {name}" if name else "")
+    return f"{head}\n\n{entry['details']}"
+
 
 _lock = threading.Lock()
 
@@ -101,8 +110,10 @@ def _post(entry: dict) -> bool:
     """True only when Google accepted the response."""
     import requests
     f = _fields()
-    data = {f["category"]: entry["category"], f["severity"]: entry.get("severity") or "N/A",
-            f["details"]: entry["details"], f["email"]: entry.get("email") or "anonymous"}
+    data = {f["email"]: entry.get("email") or "anonymous", f["message"]: compose_message(entry)}
+    # Questions added to the form later get their own columns: list them in FIELDS (or SEVEN_FEEDBACK_FIELDS).
+    extra = {"name": entry.get("name") or "anonymous", "category": entry["category"], "severity": entry.get("severity") or "N/A"}
+    data.update({f[key]: value for key, value in extra.items() if f.get(key)})
     try:
         r = requests.post(_form_url(), data=data, timeout=8,
                           headers={"User-Agent": "Seven feedback", "Referer": _form_url().replace("formResponse", "viewform")})
@@ -148,6 +159,7 @@ class FeedbackIn(BaseModel):
     severity: str = ""
     details: str
     email: str = ""
+    name: str = ""
     include_app_info: bool = True
 
 
@@ -161,7 +173,8 @@ def send_feedback(req: FeedbackIn):
     if req.include_app_info:
         details = f"{details}\n\n[{_app_info()}]"
     entry = {"id": uuid.uuid4().hex, "at": time.strftime("%Y-%m-%d %H:%M:%S"), "category": req.category.strip(),
-             "severity": req.severity.strip(), "details": details[:8000], "email": req.email.strip()[:200]}
+             "severity": req.severity.strip(), "details": details[:8000], "email": req.email.strip()[:200],
+             "name": req.name.strip()[:100]}
     sent = _post(entry)
     with _lock:
         queue = _load_queue()

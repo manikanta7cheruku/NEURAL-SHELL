@@ -29,11 +29,17 @@ export default function Feedback() {
   const [category, setCategory] = useState('');
   const [severity, setSeverity] = useState('Medium');
   const [details, setDetails] = useState('');
+  const [name, setName] = useState((config?.identity?.user_name || '').trim());
   const [email, setEmail] = useState(config?.email || '');
   const [appInfo, setAppInfo] = useState(true);
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState(null);         // 'sent' | 'queued'
   const [status, setStatus] = useState(null);
+
+  useEffect(() => {                               // the profile may arrive after the page opens
+    setName(n => n || (config?.identity?.user_name || '').trim());
+    setEmail(e => e || config?.email || '');
+  }, [config]);
 
   useEffect(() => {
     api.post('/feedback/retry').then(r => setStatus(r.data)).catch(() => {});
@@ -47,7 +53,7 @@ export default function Feedback() {
     setSending(true);
     try {
       const r = await api.post('/feedback', { category, severity: bug ? severity : '', details: details.trim(),
-                                              email: email.trim(), include_app_info: appInfo });
+                                              email: email.trim(), name: name.trim(), include_app_info: appInfo });
       setResult(r.data.sent ? 'sent' : 'queued');
       setStatus(s => ({ ...(s || {}), queued: r.data.queued }));
       setDetails('');
@@ -57,7 +63,7 @@ export default function Feedback() {
       const reason = e?.response?.status;
       if (!e?.response || reason === 404 || reason === 405) {
         try {
-          await sendDirect({ category, severity: bug ? severity : '', details: details.trim(), email: email.trim() });
+          await sendDirect({ category, severity: bug ? severity : '', details: details.trim(), email: email.trim(), name: name.trim() });
           setResult('direct');
           setDetails('');
           setCategory('');
@@ -130,7 +136,10 @@ export default function Feedback() {
                           className="w-full resize-y rounded-md border border-s-border bg-s-bg px-3 py-2 text-[13px] leading-relaxed text-s-text
                                      placeholder:text-s-text-4 focus:border-s-accent focus:ring-2 focus:ring-s-accent/20" />
               </Body>
-              <Row label="Email" description="Optional. Only if you'd like a reply.">
+              <Row label="Your name" description="Filled in from your Seven profile so the team knows who it is from. Clear it to stay anonymous.">
+                <Input value={name} onChange={e => setName(e.target.value)} placeholder="Anonymous" className="w-64" aria-label="Name" />
+              </Row>
+              <Row label="Email" description="Filled in from your profile. Only used to reply to you; clear it if you would rather not.">
                 <Input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@example.com" className="w-64" aria-label="Email" />
               </Row>
               <Row label="Include app details" description="Adds your Seven version and Windows version so bugs are easier to reproduce. Nothing else is sent.">

@@ -49,10 +49,13 @@ def speaker_key() -> str:
 def conversation_id(create: bool = True) -> Optional[str]:
     """Seven's own chat thread. Created the first time it is needed; always called Seven."""
     from memory import conversation_store as cstore
-    cid = store.get_state("conversation_id")
-    if cid and cstore.get_conversation(cid):
-        return cid
     key = speaker_key()
+    cid = store.get_state("conversation_id")
+    conv = cstore.get_conversation(cid) if cid else None
+    if conv:
+        if conv["speaker_key"] != key:                   # the owner's name changed: the thread is still theirs
+            cstore.set_speaker(cid, key)
+        return cid
     for conv in cstore._rows("SELECT id FROM conversations WHERE speaker_key=? AND kind='companion' LIMIT 1", (key,)):
         store.set_state("conversation_id", conv["id"])
         return conv["id"]
