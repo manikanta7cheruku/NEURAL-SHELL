@@ -164,6 +164,29 @@ def clean_answer(text: str) -> str:
     return out.strip(" ,;")
 
 
+_THANKS = ("Good to know, thank you.", "Nice. I like knowing that about you.", "Got it, I'll remember that.",
+           "Thanks, that helps me know you better.", "Ha, I like that.", "Good to hear.")
+_SKIP = ("That's fine, no pressure.", "No problem, we can skip that one.", "All good, there's no wrong answer.")
+_SPACE = "Okay, I'll give you some space."
+
+
+def acknowledge(conv_id: Optional[str], text: str, rng: Optional[random.Random] = None) -> Optional[str]:
+    """A short answer to something Seven just asked is a reply from a friend, not a prompt for the brain: on one word the
+    brain guesses ("Couple" became an introduction of Seven). Returns Seven's reply, or None when the brain should answer
+    (a question, a longer message, or nothing was asked). Call it before note_user_message, which marks the question answered."""
+    if not is_companion(conv_id):
+        return None
+    last = store.last_sent_topic()
+    if not last or last.get("answered"):
+        return None
+    rng = rng or random.Random()
+    if len((text or "").split()) <= 12 and _STOP.search(text or ""):
+        return _SPACE
+    if (text or "").strip().lower().strip(".! ") in _NO:
+        return rng.choice(_SKIP)
+    return rng.choice(_THANKS) if _is_answer(text) else None
+
+
 def note_user_message(conv_id: Optional[str], text: str, now: Optional[datetime.datetime] = None) -> None:
     """The person wrote in Seven's thread. Learn from it, and respect a "not now"."""
     if not is_companion(conv_id):
@@ -254,9 +277,13 @@ def follow_up(now: Optional[datetime.datetime] = None, rng: Optional[random.Rand
     return post(cand, spoken=True, read=True, rng=rng, as_followup=True, now=now)   # the person is in the chat: written, not said
 
 
-def after_reply(conv_id: Optional[str], user_text: str = "", delay: Optional[float] = None, reply: str = "") -> bool:
-    """Schedule the follow-up a moment after Seven answers, so it reads like a second text and not part of the answer."""
-    if not is_companion(conv_id) or len((user_text or "").split()) < 2 or _STOP.search(user_text or ""):
+def after_reply(conv_id: Optional[str], user_text: str = "", delay: Optional[float] = None, reply: str = "",
+                answered: bool = False) -> bool:
+    """Schedule the follow-up a moment after Seven answers, so it reads like a second text and not part of the answer.
+    `answered`: the person was answering a question, so even one word deserves the next one."""
+    if not is_companion(conv_id) or _STOP.search(user_text or ""):
+        return False
+    if not answered and len((user_text or "").split()) < 2:
         return False
     wait = delay if delay is not None else random.uniform(1.6, 3.4)
     timer = threading.Timer(wait, lambda: _safe(lambda: follow_up(reply=reply)))

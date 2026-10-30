@@ -140,7 +140,7 @@ def unanswered_streak() -> int:
 
 
 def last_sent_topic() -> Optional[dict]:
-    rows = _rows("SELECT msg_id, topic, kind, created_at FROM sent ORDER BY msg_id DESC LIMIT 1")
+    rows = _rows("SELECT msg_id, topic, kind, created_at, answered FROM sent ORDER BY msg_id DESC LIMIT 1")
     return dict(rows[0]) if rows else None
 
 

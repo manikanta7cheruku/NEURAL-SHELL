@@ -68,13 +68,31 @@ def _companion_note(conv_id: str, text: str) -> None:
         _log.debug("companion note failed: %s", exc)
 
 
-def _companion_after(conv_id: str, text: str, reply: str = "") -> None:
+def _companion_after(conv_id: str, text: str, reply: str = "", answered: bool = False) -> None:
     """Seven's own thread: a moment after answering, ask one thing back, as a second message."""
     try:
         from companion import engine
-        engine.after_reply(conv_id, text, reply=reply)
+        engine.after_reply(conv_id, text, reply=reply, answered=answered)
     except Exception as exc:
         _log.debug("companion follow-up failed: %s", exc)
+
+
+def _companion_ack(conv_id: str, text: str) -> Optional[str]:
+    """Seven's own thread: a short answer to what Seven just asked gets a friend's reply, not a guess from the brain.
+    Saves both messages (the brain would have) and returns the reply, or None when the brain should answer."""
+    try:
+        from companion import engine
+        reply = engine.acknowledge(conv_id, text)
+        if reply is None:
+            return None
+        from memory import conversation_store as cstore
+        cstore.add_message(conv_id, "user", text, source="chat")
+        cstore.add_message(conv_id, "assistant", reply, source="chat")
+        engine.note_user_message(conv_id, text)
+        return reply
+    except Exception as exc:
+        _log.debug("companion acknowledge failed: %s", exc)
+        return None
 
 
 def _params(param_str: str) -> dict:
@@ -383,6 +401,13 @@ def chat(req: ChatRequest):
     try:
         speaker = req.speaker_id or "default"
         conv_id = brain.resolve_conversation(speaker, req.conversation_id)
+        ack = _companion_ack(conv_id, text)
+        if ack is not None:
+            _companion_after(conv_id, text, ack, answered=True)
+            if req.stream:
+                streaming_started = True
+                return StreamingResponse(_stream_text(ack, {}, conv_id), media_type="text/event-stream", headers=_SSE_HEADERS)
+            return ChatResponse(response=ack, conversation_id=conv_id)
         _companion_note(conv_id, text)
         response = brain.think(text, speaker_id=speaker, stream_mode="token" if req.stream else "text",
                                conversation_id=conv_id, documents=req.documents)
