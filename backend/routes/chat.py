@@ -59,6 +59,24 @@ def _sse(obj) -> str:
     return f"data: {json.dumps(obj)}\n\n"
 
 
+def _companion_note(conv_id: str, text: str) -> None:
+    """Seven's own thread: remember a short answer, honour a "not now" (companion/engine.py). Never blocks a reply."""
+    try:
+        from companion import engine
+        engine.note_user_message(conv_id, text)
+    except Exception as exc:
+        _log.debug("companion note failed: %s", exc)
+
+
+def _companion_after(conv_id: str, text: str, reply: str = "") -> None:
+    """Seven's own thread: a moment after answering, ask one thing back, as a second message."""
+    try:
+        from companion import engine
+        engine.after_reply(conv_id, text, reply=reply)
+    except Exception as exc:
+        _log.debug("companion follow-up failed: %s", exc)
+
+
 def _params(param_str: str) -> dict:
     out = {}
     for pair in param_str.strip().split():
@@ -306,14 +324,15 @@ def _finish_string(response, req, conv_id):
     return clean, action_list, files, tasks, [r.to_dict() for r in receipts], trace
 
 
-def _stream_tokens(gen, conv_id, speaker):
+def _stream_tokens(gen, conv_id, speaker, user_text=""):
     import brain
-    started, first_ms = time.time(), None
+    started, first_ms, said = time.time(), None, []
     try:
         yield _sse({"conversation_id": conv_id})
         for token in gen:
             if first_ms is None:
                 first_ms = int((time.time() - started) * 1000)
+            said.append(token)
             yield _sse({"token": token})
         trace = brain.get_trace(speaker, conv_id)
         if trace.get("storage_error"):
@@ -321,6 +340,7 @@ def _stream_tokens(gen, conv_id, speaker):
         trace.setdefault("first_token_ms", first_ms)
         yield _sse({"done": True, "meta": trace})
         yield "data: [DONE]\n\n"
+        _companion_after(conv_id, user_text, "".join(said))
     except Exception as exc:
         _log.error("stream failed: %s", exc, exc_info=True)
         yield _sse({"error": str(exc)})
@@ -363,13 +383,14 @@ def chat(req: ChatRequest):
     try:
         speaker = req.speaker_id or "default"
         conv_id = brain.resolve_conversation(speaker, req.conversation_id)
+        _companion_note(conv_id, text)
         response = brain.think(text, speaker_id=speaker, stream_mode="token" if req.stream else "text",
                                conversation_id=conv_id, documents=req.documents)
         if isinstance(response, tuple) and len(response) == 2 and response[0] == "__STREAM__":
             _, gen = response
             if req.stream:
                 streaming_started = True
-                return StreamingResponse(_stream_tokens(gen, conv_id, speaker), media_type="text/event-stream",
+                return StreamingResponse(_stream_tokens(gen, conv_id, speaker, text), media_type="text/event-stream",
                                          headers=_SSE_HEADERS)
             response = "".join(gen)
         if response == "":
@@ -380,8 +401,10 @@ def chat(req: ChatRequest):
             streaming_started = True
             meta = {"actions": actions, "file_results": files, "task_results": tasks,
                     "receipts": receipts, "trace": trace}
+            _companion_after(conv_id, text, clean)
             return StreamingResponse(_stream_text(clean, meta, conv_id), media_type="text/event-stream",
                                      headers=_SSE_HEADERS)
+        _companion_after(conv_id, text, clean)
         return ChatResponse(response=clean, actions=actions, file_results=files, task_results=tasks,
                             conversation_id=conv_id, meta=trace, receipts=receipts)
     except HTTPException:

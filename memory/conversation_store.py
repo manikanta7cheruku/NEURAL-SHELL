@@ -90,6 +90,10 @@ def _init() -> None:
                 conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
                 role TEXT NOT NULL, content TEXT NOT NULL, ts TEXT NOT NULL,
                 source TEXT, meta TEXT)""")
+            try:
+                c.execute("ALTER TABLE conversations ADD COLUMN kind TEXT")      # 'companion' for Seven's own thread
+            except sqlite3.OperationalError:
+                pass                                                              # already there
             c.execute("CREATE INDEX IF NOT EXISTS idx_msg_conv ON messages(conversation_id, id)")
             c.execute("CREATE INDEX IF NOT EXISTS idx_conv_speaker ON conversations(speaker_key, updated_at)")
             try:
@@ -122,13 +126,13 @@ def _rows(sql: str, params: tuple = ()) -> List[Dict[str, Any]]:
 # Sessions
 # --------------------------------------------------------------------------
 
-def create_conversation(speaker_key: str, title: Optional[str] = None) -> str:
+def create_conversation(speaker_key: str, title: Optional[str] = None, kind: Optional[str] = None) -> str:
     _init()
     cid, now = uuid.uuid4().hex[:12], _now()
     c = _conn()
     try:
-        c.execute("INSERT INTO conversations (id, speaker_key, title, created_at, updated_at) "
-                  "VALUES (?,?,?,?,?)", (cid, speaker_key, title, now, now))
+        c.execute("INSERT INTO conversations (id, speaker_key, title, created_at, updated_at, kind) "
+                  "VALUES (?,?,?,?,?,?)", (cid, speaker_key, title, now, now, kind))
         c.commit()
     finally:
         c.close()
@@ -143,7 +147,7 @@ def get_conversation(conv_id: str) -> Optional[Dict[str, Any]]:
 def current_conversation(speaker_key: str, max_idle_s: int = 6 * 3600) -> str:
     """Latest conversation for this speaker, or a new one if it has gone cold."""
     rows = _rows("SELECT id, updated_at FROM conversations WHERE speaker_key=? AND archived=0 "
-                 "ORDER BY updated_at DESC, rowid DESC LIMIT 1", (speaker_key,))
+                 "AND COALESCE(kind,'')<>'companion' ORDER BY updated_at DESC, rowid DESC LIMIT 1", (speaker_key,))
     if rows:
         try:
             age = (datetime.datetime.now() - datetime.datetime.strptime(
@@ -228,6 +232,17 @@ def add_message(conv_id: str, role: str, content: str, source: str = "chat",
         raise StorageUnavailable(f"could not save the message ({exc})")
 
 
+def set_message_meta(msg_id: int, meta: dict) -> None:
+    """Replace a message's meta (for example, once Seven has said a companion message aloud)."""
+    _init()
+    c = _conn()
+    try:
+        c.execute("UPDATE messages SET meta=? WHERE id=?", (json.dumps(meta), msg_id))
+        c.commit()
+    finally:
+        c.close()
+
+
 def get_messages(conv_id: str, limit: int = 200, before_id: Optional[int] = None) -> List[Dict[str, Any]]:
     if before_id:
         rows = _rows("SELECT * FROM messages WHERE conversation_id=? AND id<? ORDER BY id DESC LIMIT ?",
@@ -245,7 +260,7 @@ def get_message(msg_id: int) -> Optional[Dict[str, Any]]:
 
 def list_conversations(speaker_key: Optional[str], limit: int = 50, offset: int = 0) -> List[Dict[str, Any]]:
     """Conversations for one speaker, or for everyone when speaker_key is None (the Memory page)."""
-    cols = ("SELECT id, title, created_at, updated_at, message_count, summary, speaker_key, "
+    cols = ("SELECT id, title, created_at, updated_at, message_count, summary, speaker_key, kind, "
             "(SELECT COUNT(*) FROM messages m WHERE m.conversation_id=conversations.id AND m.source='voice') "
             "AS voice_count FROM conversations ")
     if speaker_key is None:

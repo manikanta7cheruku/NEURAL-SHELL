@@ -39,8 +39,8 @@ def maybe_retitle(conv_id: str, model: str) -> None:
         conv = conversation_store.get_conversation(conv_id)
     except Exception:
         return
-    if not conv or conv.get("message_count") not in _RETITLE_AT:
-        return
+    if not conv or conv.get("message_count") not in _RETITLE_AT or conv.get("kind") == "companion":
+        return                                            # Seven's own thread is always called "Seven"
     _running.add(conv_id)
     threading.Thread(target=_retitle, args=(conv_id, model), daemon=True, name="ChatTitle").start()
 

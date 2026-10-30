@@ -17,12 +17,13 @@ import Mark, { Wordmark } from './Mark';
 import useStatus from '../stores/useStatus';
 import useUpdate from '../stores/useUpdate';
 import useTasks from '../stores/useTasks';
+import useCompanion from '../stores/useCompanion';
 import { cx } from '../lib/cx';
 
 const SECTIONS = [
   { label: null, items: [
     { to: '/dashboard', label: 'Overview', icon: House },
-    { to: '/console', label: 'Chat', icon: ChatCircleText },
+    { to: '/console', label: 'Chat', icon: ChatCircleText, badge: 'friend' },
   ] },
   { label: 'Work', items: [
     { to: '/tasks', label: 'Tasks', icon: CheckSquareOffset, badge: 'tasks' },
@@ -53,7 +54,7 @@ function NavItem({ item, open, badges }) {
   const loc = useLocation();
   const Icon = item.icon;
   const active = loc.pathname === item.to;
-  const count = item.badge === 'tasks' ? badges.tasks : item.badge === 'triggers' ? badges.triggers : 0;
+  const count = item.badge === 'tasks' ? badges.tasks : item.badge === 'triggers' ? badges.triggers : item.badge === 'friend' ? badges.friend : 0;
   const dot = item.badge === 'update' && badges.update;
 
   return (
@@ -84,6 +85,7 @@ export default function Sidebar() {
   const { updateAvailable, dismissed } = useUpdate();
   const { stats } = useTasks();
   const [triggers, setTriggers] = useState(0);
+  const friendUnread = useCompanion(s => s.unread);
 
   const open = !collapsed || peek;
 
@@ -133,7 +135,14 @@ export default function Sidebar() {
     return () => clearInterval(id);
   }, []);
 
-  const badges = { tasks: stats?.pending ?? 0, triggers, update: updateAvailable && !dismissed };
+  // Seven writes to you now and then: the Chat link shows how many messages are new.
+  useEffect(() => {
+    useCompanion.getState().fetch();
+    const id = setInterval(() => { if (!document.hidden) useCompanion.getState().fetch(); }, 20_000);
+    return () => clearInterval(id);
+  }, []);
+
+  const badges = { tasks: stats?.pending ?? 0, triggers, friend: friendUnread, update: updateAvailable && !dismissed };
   const state = connected ? label() : 'Offline';
   const stateDot = !connected ? 'bg-s-red' : state === 'Listening' ? 'bg-s-green' : state === 'Thinking' || state === 'Starting' ? 'bg-s-yellow'
     : state === 'Speaking' ? 'bg-s-accent' : 'bg-s-text-4';

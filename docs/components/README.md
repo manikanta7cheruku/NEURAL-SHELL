@@ -7,6 +7,7 @@ is for, how it works, the data it keeps, how it fails and how it is tested.
 | Component | What it does | Code | Document |
 |---|---|---|---|
 | [Brain](brain.md) | Understands each message and decides: act, answer from evidence, or ask the model | `brain.py`, `brain_modules/` | **Complete** |
+| [Companion](companion.md) | Seven as a friend: it writes to you in its own chat thread, asks about you and itself, and speaks only when you are idle | `companion/` | **Complete** |
 | [Voice](voice.md) | One spoken request end to end: the voice loop, greeting, voice bar, home screen readings, settings | `main_modules/startup/`, `electron/status.html` | **Complete** |
 | [Ears](ears.md) | Microphone to requests: speech detector, Whisper, wake word, push to talk, snaps and claps | `ears/` | **Complete** |
 | [Mouth](mouth.md) | A natural offline voice that starts at once and stops at once | `mouth/` | **Complete** |

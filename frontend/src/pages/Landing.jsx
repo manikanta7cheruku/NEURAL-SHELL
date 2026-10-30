@@ -30,7 +30,8 @@ import useConfig from '../stores/useConfig';
 import OrbGL from '../components/OrbGL';
 import AttentionStrip from '../components/AttentionStrip';
 import WelcomeHint from '../components/WelcomeHint';
-import { GearSix, MagnifyingGlass } from '@phosphor-icons/react';
+import { GearSix, MagnifyingGlass, ChatCircleText } from '@phosphor-icons/react';
+import useCompanion from '../stores/useCompanion';
 import { Wordmark } from '../components/Mark';
 import { cx } from '../lib/cx';
 
@@ -258,6 +259,13 @@ export default function Landing() {
   const usage = useUsage();
   const [scheds, setScheds] = useState([]);
   const [memory, setMemory] = useState(null);
+  const friendUnread = useCompanion(s => s.unread);
+
+  useEffect(() => {
+    useCompanion.getState().fetch();
+    const id = setInterval(() => { if (!document.hidden) useCompanion.getState().fetch(); }, 20000);
+    return () => clearInterval(id);
+  }, []);
 
   useEffect(() => {
     const load = () => {
@@ -319,6 +327,12 @@ export default function Landing() {
             <span className={cx('h-1.5 w-1.5 rounded-full', badge[1])} />
             <span className="text-s-text-2">{badge[0]}</span>
           </span>
+          {friendUnread > 0 && (
+            <button onClick={() => navigate('/console')} title="Seven wrote to you"
+                    className="flex h-6 items-center gap-1.5 rounded-full bg-s-accent/10 px-2.5 text-[11.5px] text-s-accent-h transition-colors duration-200 hover:bg-s-accent/15">
+              <ChatCircleText size={13} weight="fill" aria-hidden />
+              {friendUnread} new from Seven
+            </button>)}
           <span className="tabular-nums text-s-text-2">{clock(now)}</span>
           <button onClick={() => navigate('/settings')} aria-label="Settings" title="Settings  ,"
                   className="-mr-1.5 flex h-8 w-8 items-center justify-center rounded-lg text-s-text-3 transition-colors duration-200 hover:bg-s-surface hover:text-s-text">
