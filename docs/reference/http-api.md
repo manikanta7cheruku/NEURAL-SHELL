@@ -6,7 +6,7 @@ The backend listens on `http://127.0.0.1:7777` only (never on the network). The 
 the overlay and the Chrome extension are its only clients. There is no authentication because nothing outside
 this computer can reach it.
 
-218 endpoints in 29 files.
+222 endpoints in 30 files.
 
 ## `backend/admin_server.py`
 
@@ -66,6 +66,15 @@ this computer can reach it.
 | POST | `/api/chrome/tabs` | Receive tab data from Chrome extension. |
 | POST | `/api/chrome/tabs/clear` | Clear all stored tab data. Called when user disables Tab Sync. |
 | GET | `/api/chrome/tabs/status` | Check Chrome extension status across ALL profiles. |
+
+## `backend/routes/companion.py`
+
+| Method | Path | What it does |
+|---|---|---|
+| POST | `/api/companion/nudge` | Ask me something |
+| POST | `/api/companion/read` | The thread was opened |
+| POST | `/api/companion/snooze` | No messages for a while |
+| GET | `/api/companion/state` | Seven's thread: unread, settings, today |
 
 ## `backend/routes/config_routes.py`
 

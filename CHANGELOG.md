@@ -6,6 +6,14 @@ project uses [semantic versioning](docs/development/release-process.md#versions)
 ## [Unreleased]
 
 ### Added
+- **Seven the friend (companion).** Seven now reaches out the way a new friend does, instead of saying a canned line after
+  a silence: it asks about you, tells you what it is becoming and how it works, shares a small fact, checks in when you
+  seem down and follows up on your goals. Everything is written into Seven's own chat thread (pinned at the top of Chat,
+  with an unread count) and said aloud only when you are idle. A different number each day (3, 5 or 7), 7 to 17 minutes
+  apart, none in quiet hours, none while you type or talk to Seven, more space if you do not answer. Your answers are
+  remembered, Seven asks one thing back after replying in the thread, and what it wrote while you were away is said after
+  the greeting. Pace, quiet hours, voice and topics are set only in the thread's settings. See
+  `docs/components/companion.md`.
 - Settings, Voice, Speech recognition knows this PC (NVIDIA card and its memory, PC memory) and says so beside every
   model: one is marked "Recommended for this PC", and the others carry a plain caution when they would be slow or
   would not fit ("Slow without an NVIDIA graphics card: several seconds to understand you"). The same idea as the

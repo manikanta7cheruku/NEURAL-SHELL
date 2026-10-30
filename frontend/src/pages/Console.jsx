@@ -10,12 +10,16 @@ import useChatSessions from '../stores/useChatSessions';
 import api from '../api';
 import {
   ArrowUp, Paperclip, X, FileText, AlertCircle, Upload, Square, RotateCcw, ThumbsUp, ThumbsDown, Copy, Check,
-  PanelLeftClose, PanelLeftOpen, Brain, ArrowDown, Globe, Database, FileSearch, Plus, Sparkles,
+  PanelLeftClose, PanelLeftOpen, Brain, ArrowDown, Globe, Database, FileSearch, Plus, Sparkles, Volume2, SlidersHorizontal,
 } from 'lucide-react';
 import FileResultCards from '../components/FileResultCards';
 import TaskResultCard from '../components/TaskResultCard';
 import MessageContent from '../components/MessageContent';
 import ConversationSidebar from '../components/ConversationSidebar';
+import CompanionSettings from '../components/CompanionSettings';
+import CompanionIntro from '../components/CompanionIntro';
+import useCompanion from '../stores/useCompanion';
+import useConfig from '../stores/useConfig';
 import KnowledgePanel from '../components/KnowledgePanel';
 import { Button } from '../components/ui';
 import Mark from '../components/Mark';
@@ -195,6 +199,7 @@ function Message({ msg, canRetry, onRetry, onRate, since, prompt }) {
         <div className="mb-1 flex items-center gap-2 text-[12px]">
           <span className="font-medium text-s-text">Seven</span>
           {!waiting && <span className="text-s-text-4">{time}</span>}
+          {msg.spoken && <Volume2 size={12} className="text-s-text-4" aria-label="Seven said this aloud" />}
         </div>
         {waiting ? <Thinking since={since || Date.now()} prompt={prompt} /> : msg.isCommand ? (
           <pre className="overflow-x-auto whitespace-pre-wrap rounded-lg border border-s-border bg-s-surface p-3 font-mono text-[12px] leading-relaxed text-s-text-2">{msg.text}</pre>
@@ -257,6 +262,10 @@ function Empty({ onPick }) {
 export default function Console() {
   const s = useChatSessions();
   const { messages, sending, phase, sentAt, warning, init, send, stop, retry, rate, newChat, conversations, conversationId } = s;
+  const friend = useCompanion();
+  const myName = (useConfig.getState().config?.identity?.user_name || '').trim().split(/\s+/)[0];
+  const isFriend = !!conversationId && conversationId === friend.conversationId;
+  const [friendSettings, setFriendSettings] = useState(false);
   const [draft, setDraft] = useState('');
   const [panel, setPanel] = useState(readOpen);
   const [showKnowledge, setShowKnowledge] = useState(false);
@@ -278,6 +287,18 @@ export default function Console() {
   }, []);
 
   useEffect(() => { init(); }, [init]);
+
+  // Seven's own thread: pick up what Seven writes on its own while you watch. The Chat link shows when something is new.
+  useEffect(() => {
+    if (!isFriend) return undefined;
+    const id = setInterval(() => { if (!document.hidden) s.pollCompanion(); }, 4000);
+    return () => clearInterval(id);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isFriend]);
+  const askMe = async () => {
+    const ok = await friend.nudge();
+    if (ok) s.pollCompanion();
+  };
   useEffect(() => {
     const onChats = e => setPanelOpen(e.detail);
     const onKey = e => {
@@ -424,6 +445,7 @@ export default function Console() {
       </div>
 
       <ConversationSidebar open={panel} />
+      <CompanionSettings open={friendSettings} onClose={() => setFriendSettings(false)} />
 
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-s-border px-4">
@@ -432,9 +454,27 @@ export default function Console() {
                     className="flex h-7 w-7 items-center justify-center rounded-md text-s-text-3 transition-colors hover:bg-s-card hover:text-s-text">
               {panel ? <PanelLeftClose size={16} /> : <PanelLeftOpen size={16} />}
             </button>
-            <h1 className="truncate text-[13px] font-medium text-s-text">{title}</h1>
+            {isFriend ? (
+              <div className="flex min-w-0 items-center gap-2.5">
+                <Mark size={24} />
+                <div className="min-w-0 leading-tight">
+                  <h1 className="truncate text-[13px] font-medium text-s-text">Seven</h1>
+                  <p className="truncate text-[11px] text-s-text-4">
+                    {!friend.settings?.enabled ? 'Messages are off' : friend.snoozedUntil ? 'Giving you space' : friend.quietNow ? 'Quiet hours' : 'Your companion'}
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <h1 className="truncate text-[13px] font-medium text-s-text">{title}</h1>
+            )}
           </div>
           <div className="flex items-center gap-1.5">
+            {isFriend && (
+              <>
+                <Button size="sm" variant="ghost" icon={Sparkles} onClick={askMe} title="Seven asks you something">Ask me something</Button>
+                <Button size="sm" variant="ghost" icon={SlidersHorizontal} onClick={() => setFriendSettings(true)} aria-label="How Seven reaches out" title="How Seven reaches out" />
+              </>
+            )}
             <Button size="sm" variant={showKnowledge ? 'secondary' : 'ghost'} icon={Brain} onClick={() => { setKnowledgeSeen(true); setShowKnowledge(!showKnowledge); }}>What I know about you</Button>
             <Button size="sm" variant="ghost" icon={Plus} onClick={newChat} title="New chat (Ctrl+N)">New chat</Button>
           </div>
@@ -458,7 +498,7 @@ export default function Console() {
 
         <div ref={scroller} onScroll={onScroll} className="relative flex-1 overflow-y-auto">
           <div className="mx-auto w-full max-w-[760px] px-6 py-6">
-            {messages.length === 0 ? <Empty onPick={send} /> : (
+            {messages.length === 0 ? (isFriend ? <CompanionIntro name={myName} onAsk={askMe} onSettings={() => setFriendSettings(true)} /> : <Empty onPick={send} />) : (
               <div className="space-y-6">
                 {messages.map((m, i) => (
                   <div key={m.id} style={settled.has(m.id) ? undefined : { animation: 'sevenRise .28s cubic-bezier(0.32,0.72,0,1)' }}>

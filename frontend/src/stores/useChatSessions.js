@@ -12,8 +12,14 @@
 import { create } from 'zustand';
 import api from '../api';
 import useChat from './useChat';
+import useCompanion from './useCompanion';
 
 const CHAT_URL = 'http://127.0.0.1:7777/api/chat';
+
+const metaOf = (m) => {
+  if (m.meta && typeof m.meta === 'object') return m.meta;
+  try { return JSON.parse(m.meta || '{}') || {}; } catch { return {}; }
+};
 
 const toMsg = (m) => ({
   id: m.id,
@@ -21,6 +27,8 @@ const toMsg = (m) => ({
   text: m.content,
   time: new Date((m.ts || '').replace(' ', 'T') || Date.now()),
   status: 'done',
+  source: m.source,
+  spoken: !!metaOf(m).spoken,          // Seven said this aloud (a message from Seven's own thread)
 });
 
 const useChatSessions = create((set, get) => ({
@@ -57,6 +65,13 @@ const useChatSessions = create((set, get) => ({
       if (prompt) await get().send(prompt.text, prompt.name);
       return;
     }
+    // A friend who has texted you: open Seven's thread first when there is something unread in it.
+    const friend = await useCompanion.getState().fetch();
+    if (friend?.unread > 0 && friend.conversation_id) {
+      await get().openChat(friend.conversation_id);
+      await get().refreshList();
+      return;
+    }
     try {
       const cur = await api.get('/conversations/current');
       await get().openChat(cur.data.conversation_id, { silent: true });
@@ -78,6 +93,7 @@ const useChatSessions = create((set, get) => ({
     try {
       const r = await api.get(`/conversations/${id}`);
       set({ conversationId: id, messages: (r.data.messages || []).map(toMsg), warning: '', phase: 'idle' });
+      if (id === useCompanion.getState().conversationId) useCompanion.getState().markRead();
     } catch {
       set({ warning: 'Could not open that conversation.' });
     }
@@ -191,6 +207,28 @@ const useChatSessions = create((set, get) => ({
       get().refreshList();
       setTimeout(() => get().refreshList(), 2500);    // Seven names the chat in the background after a reply
     }
+  },
+
+  /**
+   * Seven's own thread is open: pick up what Seven wrote on its own (a question, or one asked back after an answer) and
+   * whether it has been said aloud. Only Seven's messages are added, so nothing you sent is ever duplicated.
+   */
+  pollCompanion: async () => {
+    const id = get().conversationId;
+    if (!id || id !== useCompanion.getState().conversationId || get().sending) return;
+    try {
+      const r = await api.get(`/conversations/${id}?limit=8`);
+      const server = r.data.messages || [];
+      set((s) => {
+        const known = new Set(s.messages.map((m) => m.serverId ?? m.id));
+        const fresh = server.filter((m) => m.role === 'assistant' && m.source === 'companion' && !known.has(m.id)).map(toMsg);
+        const spoken = new Map(server.filter((m) => metaOf(m).spoken).map((m) => [m.id, true]));
+        const updated = s.messages.map((m) => (spoken.has(m.id) && !m.spoken ? { ...m, spoken: true } : m));
+        if (!fresh.length && updated.every((m, i) => m === s.messages[i])) return s;
+        return { messages: [...updated, ...fresh] };
+      });
+      useCompanion.getState().markRead();
+    } catch { /* the next poll tries again */ }
   },
 
   // Message ids from the server enable ratings; fetch them after a turn completes.
