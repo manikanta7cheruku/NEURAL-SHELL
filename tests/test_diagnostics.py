@@ -140,6 +140,22 @@ class Report(unittest.TestCase):
         self.assertLess(text.index("no microphone"), text.index("== Broken =="))   # problems come before the detail
         self.assertIn("works", text)
 
+    def test_the_log_shows_warnings_once_with_a_count_and_leaves_out_the_usual_noise(self):
+        from backend import diagnostics
+        path = os.path.join(tempfile.mkdtemp(), "seven.log")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(os.linesep.join([
+                "2026-11-02 10:00:01 [INFO    ] seven.events: response_latency",
+                "2026-11-02 10:00:02 [WARNING ] phonemizer: words count mismatch on 100.0% of the lines (1/1)",
+                "2026-11-02 10:00:03 [ERROR   ] mouth: voice failed to load",
+                "2026-11-02 10:00:04 [ERROR   ] mouth: voice failed to load",
+                "2026-11-02 10:00:05 [ERROR   ] mouth: voice failed to load"]))
+        text = diagnostics._useful(path, 10)
+        self.assertEqual(text.count("voice failed to load"), 1)
+        self.assertIn("(x3)", text)
+        self.assertNotIn("phonemizer", text)
+        self.assertNotIn("response_latency", text)
+
     def test_the_windows_user_name_is_not_in_the_report(self):
         from backend import diagnostics
         report = {"at": "now", "problems": 0, "warnings": 0, "sections": [
