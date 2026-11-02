@@ -5,6 +5,8 @@ project uses [semantic versioning](docs/development/release-process.md#versions)
 
 ## [Unreleased]
 
+Version 1.3.3: the fixes for the first friends' test (see Fixed). The public launch stays 1.3.4.
+
 ### Added
 - **Diagnostics.** One plain-text health report for any PC: microphone and Windows privacy switches, speech models, each native
   library imported in a child process, the AI model, internet and server, registration, and the last log warnings. Settings,
