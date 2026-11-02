@@ -48,6 +48,7 @@ def load_all_modules(ctx):
     except Exception as e:
         print(Fore.RED + f"[SYSTEM] Ears failed: {e}")
         import traceback; traceback.print_exc()
+        ctx.load_error = f"Seven's hearing failed to load ({type(e).__name__}: {str(e)[:140]})"
         if ctx.app_ui:
             ctx.app_ui.update_status("EARS ERROR", "#ff0000")
         return False
@@ -61,6 +62,7 @@ def load_all_modules(ctx):
     except Exception as e:
         print(Fore.RED + f"[SYSTEM] Brain failed: {e}")
         import traceback; traceback.print_exc()
+        ctx.load_error = f"Seven's brain failed to load ({type(e).__name__}: {str(e)[:140]})"
         if ctx.app_ui:
             ctx.app_ui.update_status("BRAIN ERROR", "#ff0000")
         return False

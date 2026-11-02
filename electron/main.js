@@ -96,6 +96,15 @@ function getPythonExecutable() {
 // ============================================================================
 // DAEMON SPAWNERS (With Correct Argument Order)
 // ============================================================================
+function isPortOpen(port, done) {
+  const sock = net.connect({ port, host: '127.0.0.1' });
+  let finished = false;
+  const end = open => { if (!finished) { finished = true; sock.destroy(); done(open); } };
+  sock.setTimeout(800, () => end(false));
+  sock.on('connect', () => end(true));
+  sock.on('error', () => end(false));
+}
+
 function launchPanelHost() {
   const electronExe = process.execPath;
   const appSource = getAppSourcePath();
@@ -331,8 +340,26 @@ function startPython() {
 // One way out for the voice bar menu, the tray menu and the app itself. Quitting from inside a menu's click handler
 // while destroying the very window that owns the menu is unreliable on Windows, so: everything disappears at once, the
 // real shutdown runs on the next turn of the event loop, and if Electron has not exited after a few seconds it is
-// ended anyway. The detached helpers (hotkeys, reminders) are meant to keep running, as before.
+// ended anyway. The helpers Seven started (the panel host and the overlay, each a whole Electron app of 3 to 5 processes
+// and ~400 MB) are closed with it; they used to outlive Seven, so "Quit" left over a gigabyte of idle memory behind.
+// Reminders still fire: they are Windows notifications sent by a small Python scheduler that is not touched here.
 // ============================================================================
+function stopHelpers() {
+  if (process.platform !== 'win32') return;
+  const script = "Get-CimInstance Win32_Process -Filter \"Name='SEVEN.exe'\" | " +
+    "Where-Object { $_.CommandLine -match 'overlay_user_data|panel_user_data' -and $_.CommandLine -notmatch '--type=' } | " +
+    "ForEach-Object { & taskkill.exe /PID $_.ProcessId /T /F | Out-Null }";
+  try {
+    spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command', script],
+          { detached: true, windowsHide: true, stdio: 'ignore' }).unref();
+  } catch {}
+}
+
+// A plain-text health report (backend/diagnostics.py) in the browser: copy it and send it to the Seven team.
+function openDiagnostics() {
+  shell.openExternal('http://127.0.0.1:7777/api/diagnostics/report');
+}
+
 let _quitting = false;
 function quitSeven() {
   if (_quitting) return;
@@ -350,6 +377,7 @@ function quitSeven() {
     statusWindow = null;
     mainWindow = null;
     try { stopPython(); } catch {}
+    stopHelpers();
     app.quit();
   }, 0);
   setTimeout(() => app.exit(0), 4000).unref();
@@ -561,6 +589,7 @@ function showOrbContextMenu() {
     { label: 'Guide',     click: () => navigateTo('/guide') },
     { type: 'separator' },
     { label: 'Re-centre voice bar', click: () => resetOrbPosition() },
+    { label: 'Diagnostics report', click: () => openDiagnostics() },
     { type: 'separator' },
     {
       label: 'Quit SEVEN',
@@ -618,6 +647,7 @@ function createTray() {
     { type: 'separator' },
     { label: 'Chat',  click: () => navigateTo('/console') },
     { label: 'Settings', click: () => navigateTo('/settings') },
+    { label: 'Diagnostics report', click: () => openDiagnostics() },
     { type: 'separator' },
     { label: 'Quit SEVEN', click: () => quitSeven()
     }
@@ -861,11 +891,12 @@ if (!gotTheLock) {
       }
     });
 
-    // Launch Background Daemons
+    // Launch the helpers (panel hotkey, overlay) once Seven has finished opening: starting two more Electron apps in
+    // the first seconds competed with the window and the backend for the same cores and made opening feel slow.
     setTimeout(() => {
       launchPanelHost();
-      launchOverlayDaemon();
-    }, 2000);
+      isPortOpen(7891, open => { if (!open) launchOverlayDaemon(); });   // one overlay is enough
+    }, 25000);
 
     // Poll nav_trigger.json
     setInterval(() => {

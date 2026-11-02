@@ -164,41 +164,13 @@ def complete_setup(req: SetupCompleteRequest):
     if not success:
         raise HTTPException(status_code=500, detail="Failed to save configuration")
 
-    # Force Registration to Render Backend
-    # Force Registration/Update to Render Backend
+    # Tell the server who this is. The server may be asleep or the PC offline, so this keeps trying in the background
+    # (telemetry.register_in_background) instead of making one attempt that setup then forgets.
     try:
-        import requests
         import telemetry
-        device_id = telemetry.get_device_id()
-        
-        # 1. Register or update the device record
-        resp = requests.post(
-            "https://seven-server-a825.onrender.com/api/register",
-            json={
-                "device_id": device_id,
-                "email": email,
-                "name": name,
-                "country": "Unknown",
-                "referral_code": req.referral_code.strip() if req.referral_code else None
-            },
-            timeout=10
-        )
-        
-        # 2. If the API returned a conflict (already registered), we explicitly update the profile
-        if resp.status_code == 409 or resp.status_code == 200:
-            requests.post(
-                "https://seven-server-a825.onrender.com/api/device/update",
-                json={
-                    "device_id": device_id,
-                    "email": email,
-                    "name": name
-                },
-                timeout=10
-            )
-            
-        print(f"[SETUP] Render backend sync successful for {email}")
+        telemetry.register_in_background(req.referral_code.strip() if req.referral_code else None)
     except Exception as e:
-        print(f"[SETUP] Render backend sync failed (non-fatal): {e}")
+        print(f"[SETUP] Could not start registration (non-fatal): {e}")
 
     return {"success": True, "message": f"Welcome to Seven, {name}."}
 

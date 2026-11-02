@@ -86,6 +86,8 @@ def _nvidia_read() -> Optional[Dict[str, Any]]:
         if not out:
             return None
         name, total, used, util, temp = [p.strip() for p in out.splitlines()[0].split(",")]
+        if float(total) <= 0:                            # a driver that reports no graphics memory: nothing to show
+            return None
         return {"name": name, "vram_gb": round(float(total) / 1024, 1), "vram_used_gb": round(float(used) / 1024, 1),
                 "load": int(float(util)), "temp_c": int(float(temp))}
     except Exception:
