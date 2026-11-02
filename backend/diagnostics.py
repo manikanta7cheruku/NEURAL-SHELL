@@ -181,7 +181,9 @@ def voice_section():
     out = [_c("Natural voice", OK if ready else WARN, "installed" if ready else "not installed: Seven answers in a basic voice")]
     try:
         from backend.bootstrap import _bootstrap_state
-        out.append(_c("Voice download", INFO, json.dumps(_bootstrap_state.get("voice_model", {}))[:160]))
+        dl = _bootstrap_state.get("voice_model", {})
+        if dl.get("status") in ("running", "error"):
+            out.append(_c("Voice download", WARN if dl.get("status") == "error" else INFO, json.dumps(dl)[:160]))
     except Exception:
         pass
     return out
@@ -291,27 +293,57 @@ def processes_section():
     out = []
     try:
         import psutil
-        rows = []
-        for p in psutil.process_iter(["name", "memory_info", "cpu_percent"]):
+        summary, overlays, panels = {}, 0, 0
+        for p in psutil.process_iter(["name", "memory_info", "cmdline"]):
             name = (p.info["name"] or "").lower()
-            if name in ("seven.exe", "ollama.exe", "ollama app.exe", "pythonw.exe", "python.exe"):
-                rows.append((name, (p.info["memory_info"].rss if p.info["memory_info"] else 0) / 1024 ** 2))
-        summary = {}
-        for name, mb in rows:
+            if name not in ("seven.exe", "electron.exe", "ollama.exe", "ollama app.exe", "pythonw.exe", "python.exe"):
+                continue
+            mb = (p.info["memory_info"].rss if p.info["memory_info"] else 0) / 1024 ** 2
             n, total = summary.get(name, (0, 0))
             summary[name] = (n + 1, total + mb)
+            cmd = " ".join(p.info["cmdline"] or [])
+            if "--type=" not in cmd:
+                overlays += "overlay_user_data" in cmd
+                panels += "panel_user_data" in cmd
         out.append(_c("Seven-related processes", INFO, "; ".join(f"{n} x {k} ({v:.0f} MB)" for k, (n, v) in sorted(summary.items())) or "none"))
+        out.append(_c("Overlay helpers", OK if overlays <= 1 else WARN,
+                      f"{overlays} running" + ("" if overlays <= 1 else " (should be 1: quit Seven fully, then start it again)")))
+        out.append(_c("Panel hosts", OK if panels <= 1 else WARN, f"{panels} running"))
     except Exception as exc:
         out.append(_c("Processes", WARN, f"unreadable ({type(exc).__name__})"))
     return out
 
 
+# Log lines that are expected on every healthy PC and would only distract.
+_NOISE = ("phonemizer", "unauthenticated requests to the HF Hub", "screen_brightness_control", "filelock", "response_latency",
+          "background worker started", "warmed")
+
+
+def _useful(path, lines):
+    """The last warnings and errors of a log, repeats folded into one line with a count, benign noise left out."""
+    text = _tail(path, 400, skip="[DEBUG")
+    kept = []
+    for ln in text.splitlines():
+        if not ln.strip() or "[INFO" in ln or any(n in ln for n in _NOISE):
+            continue
+        key = ln.split("]", 2)[-1].strip()[:140]               # without the time, so repeats fold together
+        if kept and kept[-1][0] == key:
+            kept[-1][2] += 1
+        else:
+            kept.append([key, ln, 1])
+    return "\n".join(f"{ln}" + (f"  (x{n})" if n > 1 else "") for _, ln, n in kept[-lines:])
+
+
 def logs_section():
     out = []
-    for label, name, lines in (("Seven log (last lines)", "seven.log", 30), ("Native crash log (last lines)", "native_crash.log", 20),
-                               ("Backend errors (last lines)", "python_crash.log", 20)):
-        text = _tail(os.path.join(_DATA, "logs", name), lines, skip="[DEBUG")
-        out.append(_c(label, INFO if text else OK, text or "empty"))
+    base = os.path.join(_DATA, "logs")
+    text = _useful(os.path.join(base, "seven.log"), 25)
+    out.append(_c("Seven log: warnings and errors", WARN if text else OK, text or "none"))
+    crash = [ln for ln in _tail(os.path.join(base, "native_crash.log"), 60).splitlines()
+             if ln.strip() and not ln.startswith("--- Seven started")]
+    out.append(_c("Native crashes", FAIL if crash else OK, "\n".join(crash[-20:]) if crash else "none recorded"))
+    errors = _useful(os.path.join(base, "python_crash.log"), 15)
+    out.append(_c("Backend error output", WARN if errors else OK, errors or "none"))
     return out
 
 

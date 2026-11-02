@@ -51,6 +51,8 @@ Version 1.3.3: the fixes for the first friends' test (see Fixed). The public lau
 - Quit SEVEN also closes the panel host and overlay helpers (about 400 MB each) that used to stay behind, and these helpers
   start 25 seconds after Seven opens instead of competing with it during the first seconds. Only one overlay is started.
 - The invisible spot at the top of the screen that opened Seven when clicked (the hidden voice bar) no longer takes clicks.
+- A second overlay helper no longer stays alive forever when one is already running (each held ~400 MB). Diagnostics
+  flags duplicate helpers, folds repeated log lines and leaves out harmless noise (phonemizer, brightness, filelock).
 - `/api/panel/get-hotkey` answered 404 for the Settings page.
 - Graphics shows "No dedicated GPU" instead of zeros on PCs without an NVIDIA card.
 - A language-model download could silently lose its status text (a variable used before it existed). It now reports

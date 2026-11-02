@@ -360,6 +360,31 @@ function startTCPServer() {
 
   server.on('error', (err) => {
     if (err.code === 'EADDRINUSE') {
+      // A healthy overlay already owns the port: this copy is a duplicate, so it leaves. It used to wait and retry
+      // forever, and each duplicate kept a whole Electron app (~400 MB) alive for nothing.
+      const probe = net.connect({ port: IPC_PORT, host: '127.0.0.1' });
+      let answered = false;
+      probe.setTimeout(1500, () => probe.destroy());
+      probe.on('connect', () => probe.write('{"type":"ping"}\n'));
+      probe.on('data', d => { answered = /"ok":\s*true/.test(d.toString()); probe.destroy(); });
+      probe.on('error', () => {});
+      probe.on('close', () => {
+        if (answered) {
+          console.log('[OVERLAY DAEMON] Another overlay is already running: exiting this copy');
+          app.exit(0);
+          return;
+        }
+        takeOverPort();
+      });
+      return;
+    }
+    if (err.code !== 'EADDRINUSE') {
+      console.error('[OVERLAY DAEMON] Server error:', err.message);
+    }
+  });
+
+  function takeOverPort() {
+    {
       console.log('[OVERLAY DAEMON] Port ' + IPC_PORT + ' in use — checking ownership...');
       try {
         const { execSync } = require('node:child_process');
@@ -374,10 +399,8 @@ function startTCPServer() {
         }
       } catch (e) {}
       setTimeout(startTCPServer, 1200);
-    } else {
-      console.error('[OVERLAY DAEMON] Server error:', err.message);
     }
-  });
+  }
 
   server.listen(IPC_PORT, '127.0.0.1', () => {
     console.log('[OVERLAY DAEMON] Listening on 127.0.0.1:' + IPC_PORT);
