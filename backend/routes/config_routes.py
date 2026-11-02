@@ -127,6 +127,7 @@ def set_panel_hotkey(body: PanelHotkeyUpdate):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/api/panel/get-hotkey")   # the Settings page asks /api/...; the panel itself uses the short path
 @router.get("/panel/get-hotkey")
 def get_panel_hotkey():
     """Return the currently configured panel hotkey."""

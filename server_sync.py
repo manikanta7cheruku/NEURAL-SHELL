@@ -36,6 +36,36 @@ def _async_post(endpoint, data):
     threading.Thread(target=_post, args=(endpoint, data), daemon=True).start()
 
 
+last_error = ""            # why the last server call failed, in words (shown by diagnostics)
+
+
+def wake(timeout=75) -> bool:
+    """The server sleeps when nobody has used it for a while and takes up to a minute to wake: ask it to, and wait."""
+    global last_error
+    try:
+        r = requests.get(f"{SERVER_URL}/ping", timeout=timeout)
+        return r.status_code == 200
+    except Exception as exc:
+        last_error = f"server did not answer: {type(exc).__name__}"
+        return False
+
+
+def register(payload, timeout=30):
+    """Tell the server who this PC is. True only when the server says it was recorded; otherwise the reason is in last_error."""
+    global last_error
+    if not ENABLED:
+        return False
+    try:
+        r = requests.post(f"{SERVER_URL}/api/register", json=payload, timeout=timeout)
+        if r.status_code == 200 and (r.json() or {}).get("success"):
+            last_error = ""
+            return True
+        last_error = f"server refused the registration (HTTP {r.status_code}): {r.text[:120]}"
+    except Exception as exc:
+        last_error = f"could not reach the server: {type(exc).__name__}"
+    return False
+
+
 def register_device(device_id, email=None, name=None, country=None, referral_code=None):
     """Register or update device on server. Includes name for admin dashboard."""
     _async_post("/api/register", {

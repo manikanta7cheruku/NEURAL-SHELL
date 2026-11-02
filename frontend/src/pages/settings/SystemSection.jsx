@@ -166,6 +166,40 @@ function PanelShortcut() {
   );
 }
 
+function Diagnostics() {
+  const [report, setReport] = useState('');
+  const [busy, setBusy] = useState(false);
+  const run = async () => {
+    setBusy(true);
+    try {
+      const r = await api.get('/diagnostics/report', { timeout: 120000, responseType: 'text', transformResponse: x => x });
+      setReport(r.data);
+    } catch {
+      toast.error('Could not run the check', 'Restart Seven and try again.');
+    }
+    setBusy(false);
+  };
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(report); toast.success('Report copied', 'Paste it to the Seven team.'); }
+    catch { toast.error('Could not copy', 'Select the text and copy it by hand.'); }
+  };
+  const summary = report.split('\n')[1];
+  return (
+    <Section title="Diagnostics" description="Checks the microphone, speech recognition, voice, AI model, internet and server, and lists anything that is wrong. If Seven is not working for you, run it and send the report to the Seven team.">
+      <Row label="Health check" description={busy ? 'Checking. This takes up to half a minute.' : summary || 'Nothing personal is included: no name, email, files or conversations.'}>
+        <div className="flex items-center gap-2">
+          {report && <Button variant="secondary" onClick={copy}>Copy report</Button>}
+          <Button onClick={run} loading={busy}>{report ? 'Run again' : 'Run diagnostics'}</Button>
+        </div>
+      </Row>
+      {report && (
+        <Body>
+          <pre className="max-h-72 overflow-auto rounded-md border border-s-border bg-s-bg p-3 text-[11.5px] leading-relaxed text-s-text-2">{report}</pre>
+        </Body>)}
+    </Section>
+  );
+}
+
 function Repair() {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -260,6 +294,7 @@ export default function SystemSection({ config }) {
       <Hardware />
       <VoiceBar config={config} />
       <PanelShortcut />
+      <Diagnostics />
       <Repair />
       <Appearance />
     </>
