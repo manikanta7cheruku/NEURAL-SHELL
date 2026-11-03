@@ -5,7 +5,13 @@ project uses [semantic versioning](docs/development/release-process.md#versions)
 
 ## [Unreleased]
 
+Version 1.3.3: the fixes for the first friends' test (see Fixed). The public launch stays 1.3.4.
+
 ### Added
+- **Diagnostics.** One plain-text health report for any PC: microphone and Windows privacy switches, speech models, each native
+  library imported in a child process, the AI model, internet and server, registration, and the last log warnings. Settings,
+  System, Diagnostics (Copy report); `http://127.0.0.1:7777/api/diagnostics/report`; right click the voice bar or tray icon;
+  Start menu, SEVEN Diagnostics when Seven will not start. See `docs/operations/diagnostics.md`.
 - **Seven the friend (companion).** Seven now reaches out the way a new friend does, instead of saying a canned line after
   a silence: it asks about you, tells you what it is becoming and how it works, shares a small fact, checks in when you
   seem down and follows up on your goals. Everything is written into Seven's own chat thread (pinned at the top of Chat,
@@ -34,6 +40,21 @@ project uses [semantic versioning](docs/development/release-process.md#versions)
 - `/api/chat` returns action receipts in non-streaming responses.
 
 ### Fixed
+- **Seven could be stuck on "Getting ready" forever.** One failed load wrote a safe mode flag that nothing deleted, so every
+  later start skipped the speech and brain (no listening, test mic "not listening", no error). Safe mode now needs three
+  failed starts in a row, an update clears it, a good start clears it, the reason is shown, and there is a Try again button.
+- **New users did not reach the admin dashboard.** Registration was one attempt with a 5 to 10 second limit, which a sleeping
+  server misses, and it read a name that was stale right after setup. It now wakes the server and retries until confirmed.
+- The test mic says why it cannot hear (speech model still downloading, microphone cannot open, Windows blocking the
+  microphone) instead of a bare conflict, and tries to reopen a stopped microphone.
+- Seven now says when it could not start its hearing or when Windows blocks the microphone.
+- Quit SEVEN also closes the panel host and overlay helpers (about 400 MB each) that used to stay behind, and these helpers
+  start 25 seconds after Seven opens instead of competing with it during the first seconds. Only one overlay is started.
+- The invisible spot at the top of the screen that opened Seven when clicked (the hidden voice bar) no longer takes clicks.
+- A second overlay helper no longer stays alive forever when one is already running (each held ~400 MB). Diagnostics
+  flags duplicate helpers, folds repeated log lines and leaves out harmless noise (phonemizer, brightness, filelock).
+- `/api/panel/get-hotkey` answered 404 for the Settings page.
+- Graphics shows "No dedicated GPU" instead of zeros on PCs without an NVIDIA card.
 - A language-model download could silently lose its status text (a variable used before it existed). It now reports
   plain words for each phase and names the model in any error ("Llama 3.1 8B could not be downloaded ...").
 - Speech recognition now defaults to `small.en` (about 480 MB) on every PC instead of `medium.en` (1.5 GB) on PCs with a

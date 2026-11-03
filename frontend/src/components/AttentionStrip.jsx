@@ -10,6 +10,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { X } from '@phosphor-icons/react';
 import api from '../api';
+import { toast } from '../lib/toast';
 import useUpdate from '../stores/useUpdate';
 import useLicense from '../stores/useLicense';
 import { cx } from '../lib/cx';
@@ -51,6 +52,10 @@ export default function AttentionStrip() {
     return list.filter(i => i.level === 'error' || !dismissed.has(i.id)).sort((a, b) => ORDER[a.level] - ORDER[b.level]);
   }, [server, update.updateAvailable, update.dismissed, update.info, license.tier, license.daysUntilExpiry, dismissed]);
 
+  const retrySafeMode = () => {
+    api.post('/safe-mode/retry').then(() => toast.success('Restarting Seven', 'It will try to load everything again.')).catch(() => {});
+  };
+
   const dismiss = useCallback(id => {
     setDismissed(prev => {
       const next = new Set(prev).add(id);
@@ -71,7 +76,7 @@ export default function AttentionStrip() {
             <span className={cx('h-1.5 w-1.5 shrink-0 rounded-full', DOT[i.level])} />
             <span className="min-w-0 flex-1 leading-snug text-s-text-2">{i.message}</span>
             {i.action && (
-              <button onClick={() => navigate(i.action.to)}
+              <button onClick={() => (i.action.retry ? retrySafeMode() : navigate(i.action.to))}
                       className="shrink-0 rounded-md px-2 py-0.5 text-s-text underline decoration-s-border-l underline-offset-4 transition-colors hover:decoration-s-text-3">
                 {i.action.label}
               </button>)}

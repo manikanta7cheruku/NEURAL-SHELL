@@ -136,13 +136,32 @@ def mics():
 
 @router.post("/api/voice/test", summary="What does Seven hear?")
 def hearing_test():
-    """Wait up to 10 seconds for one thing said; return what Seven heard, without acting on it."""
-    try:
-        import ears.core as ears
-    except Exception:
-        raise HTTPException(status_code=409, detail="Seven's hearing hasn't started yet.")
+    """Wait up to 10 seconds for one thing said; return what Seven heard, without acting on it. When Seven cannot hear
+    at all, the 409 says why in words (and Diagnostics has the detail), instead of a bare "not listening"."""
+    import sys
+    ears = sys.modules.get("ears.core")                  # importing it here would load the speech model inside a request
+    if ears is None:
+        raise HTTPException(status_code=409, detail="Seven's hearing hasn't started yet. If this stays, open Settings, "
+                                                    "System, Diagnostics and send the report.")
+    speech = ears.models_status() if hasattr(ears, "models_status") else {}
+    if speech.get("state") in ("downloading", "loading"):
+        raise HTTPException(status_code=409, detail="Seven is still getting its speech recognition ready"
+                                                    f"{', ' + str(speech.get('progress')) + '%' if speech.get('progress', 0) > 1 else ''}.")
+    if speech.get("state") == "error":
+        raise HTTPException(status_code=409, detail=speech.get("detail") or "Speech recognition could not start.")
     if not ears.listening():
-        raise HTTPException(status_code=409, detail="Seven isn't listening right now.")
+        try:
+            ears.start()                                 # the microphone stream stopped: try to open it again
+            import time
+            time.sleep(0.6)
+        except Exception:
+            pass
+    if not ears.listening():
+        why = getattr(getattr(sys.modules.get("ears.stream"), "STREAM", None), "last_error", "")
+        raise HTTPException(status_code=409, detail="Seven can't open your microphone"
+                                                    f"{': ' + why[:140] if why else '.'} Check that it is plugged in, that "
+                                                    "Windows lets desktop apps use it (Settings, Privacy, Microphone), "
+                                                    "and that no other app has it.")
     result = ears.hearing_test()
     if result is None:
         return {"heard": "", "ignored": "Nothing was said in 10 seconds.", "raw": ""}

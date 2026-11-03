@@ -51,6 +51,9 @@
                   border-radius 0.3s var(--ease), opacity 0.25s var(--ease), transform 0.35s var(--ease);
     }
     body.open #pill { opacity: 1; transform: none; }
+    /* While nothing is shown the pill is invisible, so it must not take clicks either: it used to, and a click on
+       the empty spot at the top of the screen opened Seven. */
+    body:not(.open):not(.rest) #pill { pointer-events: none; }
 
     /* "Always": a small light at the top edge while Seven listens */
     body.rest #pill { opacity: 1; transform: none; margin-top: 4px; height: 12px; width: 40px; border-radius: 6px; padding: 0; justify-content: center; }

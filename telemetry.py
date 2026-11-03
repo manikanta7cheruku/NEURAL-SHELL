@@ -491,6 +491,112 @@ def send_ping(force_server=False):
     _session["last_save_time"]      = now
 
 
+# =============================================================================
+# REGISTRATION
+# The admin dashboard lists a person once the server has their name and email. The server may be asleep (a free host
+# sleeps when idle and takes up to a minute to wake), the PC may be offline, and the name may be typed after Seven started.
+# So registration is a background job that reads the identity as it is on disk now, wakes the server, and keeps trying
+# with growing pauses until the server confirms. What was confirmed is remembered, so it is sent again only when the
+# name or email changes.
+# =============================================================================
+REGISTERED_FILE = os.path.join(DATA_DIR, "registered.json")
+_RETRY_PAUSES = (5, 15, 45, 120, 300, 600)      # seconds between attempts, then every 10 minutes
+_reg = {"thread": None, "referral_code": None, "last": ""}
+
+
+def _identity():
+    """(name, email, setup_done) as written on disk now. config.KEY is read when Seven starts, so right after setup it is stale."""
+    name = email = None
+    done = False
+    try:
+        import json
+        with open(os.path.join(os.path.dirname(DATA_DIR), "config.json"), encoding="utf-8") as f:
+            cfg = json.load(f)
+        name = (cfg.get("identity", {}).get("user_name") or "").strip() or None
+        email = (cfg.get("email") or "").strip() or None
+        done = bool(cfg.get("setup_complete"))
+    except Exception:
+        pass
+    return name, email or get_email(), done
+
+
+def _registered_key():
+    try:
+        import json
+        with open(REGISTERED_FILE, encoding="utf-8") as f:
+            return json.load(f).get("key")
+    except Exception:
+        return None
+
+
+def registration_status() -> dict:
+    """For diagnostics: is this PC on the server's list, and if not, why."""
+    name, email, done = _identity()
+    key = f"{get_device_id()}|{name}|{email}"
+    return {"registered": bool(done and (name or email) and _registered_key() == key), "setup_done": done,
+            "has_identity": bool(name or email), "last_error": _reg["last"]}
+
+
+def register_now(force=False) -> bool:
+    """One attempt. True when the server has this PC's current name and email."""
+    import json
+    name, email, done = _identity()
+    if not done or not (name or email):
+        _reg["last"] = "setup is not finished or there is no name or email yet"
+        return False
+    device_id = get_device_id()
+    key = f"{device_id}|{name}|{email}"
+    if not force and _registered_key() == key:
+        return True
+    import server_sync
+    server_sync.wake()
+    country = get_country_from_ip()
+    try:
+        country.encode("ascii")
+    except UnicodeError:
+        country = "Unknown"
+    ok = server_sync.register({"device_id": device_id, "email": email, "name": name, "country": country,
+                               "referral_code": _reg["referral_code"]})
+    if ok:
+        try:
+            with open(REGISTERED_FILE, "w", encoding="utf-8") as f:
+                json.dump({"key": key, "at": datetime.now().isoformat()}, f)
+        except OSError:
+            pass
+        _reg["last"] = ""
+        print(f"[TELEMETRY] Registered on the server: {name or email}")
+    else:
+        _reg["last"] = server_sync.last_error
+        print(f"[TELEMETRY] Not registered yet: {server_sync.last_error}")
+    return ok
+
+
+def register_in_background(referral_code=None) -> None:
+    """Keep trying to register until the server confirms; then watch for a changed name or email. One worker at a time."""
+    if referral_code:
+        _reg["referral_code"] = referral_code
+    t = _reg["thread"]
+    if t is not None and t.is_alive():
+        return
+    import threading
+
+    def work():
+        attempt = 0
+        while True:
+            try:
+                if register_now():
+                    attempt = 0
+                    time.sleep(1800)                    # confirmed: look again for a changed name or email later
+                    continue
+            except Exception as exc:
+                _reg["last"] = f"{type(exc).__name__}: {exc}"
+            time.sleep(_RETRY_PAUSES[min(attempt, len(_RETRY_PAUSES) - 1)])
+            attempt += 1
+
+    _reg["thread"] = threading.Thread(target=work, daemon=True, name="TelemetryRegister")
+    _reg["thread"].start()
+
+
 def _telemetry_enabled():
     try:
         import config as _cfg
@@ -547,57 +653,7 @@ def _start_telemetry_impl():
     except Exception:
         pass
 
-    # Only register on server if setup is complete AND we have identity
-    # This prevents ghost rows from pre-setup pings
-    def _register(_name=user_name, _email=email, _device_id=device_id,
-                  _setup=setup_complete):
-        try:
-            # Skip if setup not done or no identity at all
-            if not _setup:
-                print("[TELEMETRY] Setup not complete — skipping server register")
-                return
-            if not _name and not _email:
-                print("[TELEMETRY] No name or email — skipping server register")
-                return
-
-            import server_sync
-
-            # Get country with fallback
-            country = "Unknown"
-            try:
-                country = get_country_from_ip()
-                # Validate country is ASCII-safe
-                country.encode('ascii')
-            except (UnicodeEncodeError, UnicodeDecodeError):
-                country = "Unknown"
-            except Exception:
-                country = "Unknown"
-
-            print(f"[TELEMETRY] Registering — "
-                  f"name={_name} email={_email} country={country}")
-
-            result = server_sync._post("/api/register", {
-                "device_id":    _device_id,
-                "email":        _email,
-                "name":         _name,
-                "country":      country,
-                "referral_code": None
-            })
-
-            if result and result.get("success"):
-                print(f"[TELEMETRY] Registered on server ✓ "
-                      f"name={_name} country={country}")
-            else:
-                print(f"[TELEMETRY] Register returned: {result}")
-
-        except Exception as e:
-            import traceback
-            print(f"[TELEMETRY] Register failed: {e}")
-            traceback.print_exc()
-
-    threading.Thread(
-        target=_register, daemon=True, name="TelemetryRegister"
-    ).start()
+    register_in_background()                      # tells the server who this PC is; keeps trying until it does
 
     total_min = _get_total_minutes()
     print(f"[TELEMETRY] Device: {device_id[:8]}... | "

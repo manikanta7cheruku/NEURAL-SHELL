@@ -6,7 +6,7 @@ The backend listens on `http://127.0.0.1:7777` only (never on the network). The 
 the overlay and the Chrome extension are its only clients. There is no authentication because nothing outside
 this computer can reach it.
 
-222 endpoints in 30 files.
+226 endpoints in 31 files.
 
 ## `backend/admin_server.py`
 
@@ -85,6 +85,7 @@ this computer can reach it.
 | GET | `/api/config/brain` | Every brain setting with its effective value (defaults filled in, bad values clamped). |
 | PATCH | `/api/config/brain` | Update brain settings. Allowed keys and bounds come from brain_settings, the |
 | GET | `/api/config/brain/available-models` | Return installed Ollama models grouped by parameter size tier. |
+| GET | `/api/panel/get-hotkey` | Return the currently configured panel hotkey. |
 | GET | `/api/voice-control/words` | Get current wake/pause/shutdown words. |
 | PUT | `/api/voice-control/words` | Update wake/pause/shutdown words (Pro only). |
 | GET | `/panel/get-hotkey` | Return the currently configured panel hotkey. |
@@ -102,6 +103,14 @@ this computer can reach it.
 | PATCH | `/api/conversations/{conv_id}` | _Not documented yet_ |
 | GET | `/api/conversations/{conv_id}/export` | _Not documented yet_ |
 | POST | `/api/messages/{msg_id}/feedback` | Thumbs up/down. Recorded as an outcome; it never creates a fact about the user. |
+
+## `backend/routes/diagnostics.py`
+
+| Method | Path | What it does |
+|---|---|---|
+| GET | `/api/diagnostics` | Health report as data |
+| GET | `/api/diagnostics/report` | Health report as text |
+| POST | `/api/safe-mode/retry` | Leave safe mode and start again |
 
 ## `backend/routes/feedback.py`
 

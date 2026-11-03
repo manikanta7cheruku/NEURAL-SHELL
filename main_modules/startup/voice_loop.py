@@ -13,18 +13,27 @@ import threading
 from colorama import Fore
 
 
+_failed_this_start = []                                 # set once this process has recorded a failed load
+
+
 def run_voice_loop(ctx, config, app_ui, api_set_state, safe_mode_file):
     """
     Main voice loop. Extracted verbatim from main.py seven_logic().
     Runs on a daemon thread.
     """
     # ── Safe mode check ──────────────────────────────────────────────
-    _safe_mode = os.path.exists(safe_mode_file)
+    # Only after several failed starts in a row (main_modules/startup/safe_mode.py): one failure just tries again.
+    from main_modules.startup import safe_mode
+    from seven_utils.version import get_version
+    _version = get_version()
+    _safe_mode = safe_mode.should_enter(safe_mode_file, _version)
 
     if _safe_mode:
-        print(Fore.YELLOW + "[SYSTEM] Safe mode active — ML modules not loaded")
+        _why = safe_mode.state(safe_mode_file, _version).get("reason") or "Seven could not load its speech and brain."
+        print(Fore.YELLOW + f"[SYSTEM] Safe mode active — ML modules not loaded: {_why}")
         api_set_state("status_text", "SAFE MODE — AI offline")
         api_set_state("status_color", "#ffaa00")
+        api_set_state("safe_mode", {"reason": _why})
         api_set_state("listening", False)
         api_set_state("ready", True)                     # nothing to wait for: the app must still open
 
@@ -64,17 +73,29 @@ def run_voice_loop(ctx, config, app_ui, api_set_state, safe_mode_file):
 
     from main_modules.startup.module_loader import load_all_modules
     if not load_all_modules(ctx):
-        print(Fore.RED + "[SYSTEM] ML loading failed.")
+        _reason = getattr(ctx, "load_error", "") or "A core module failed to load."
+        print(Fore.RED + f"[SYSTEM] ML loading failed: {_reason}")
         try:
+            # The voice loop is restarted every few seconds when it ends, so a start counts once however many times
+            # it retries inside this process; those retries wait, so a slow download can finish in between.
+            if not _failed_this_start:
+                _failed_this_start.append(True)
+                _fails = safe_mode.record_failure(safe_mode_file, _reason, _version)
+            else:
+                _fails = safe_mode.state(safe_mode_file, _version).get("fails", 1)
             api_set_state("status_text", "ERROR: AI modules failed to load")
             api_set_state("status_color", "#ff0000")
+            api_set_state("voice_problem", _reason)
             api_set_state("listening", False)
             api_set_state("ready", True)
-            with open(safe_mode_file, 'w') as _sf:
-                _sf.write(str(time.time()))
+            print(Fore.YELLOW + f"[SYSTEM] Failed start {_fails} of {safe_mode.MAX_FAILS}"
+                  f"{'; the next start is safe mode' if _fails >= safe_mode.MAX_FAILS else '; the next start tries again'}")
         except Exception:
             pass
+        time.sleep(30)
         return
+    safe_mode.clear(safe_mode_file)                      # everything loaded: earlier failures are forgotten
+    api_set_state("voice_problem", "")
 
     api_set_state("ready_stage", "Starting the ears")
     # ── Wire the ears to the mouth and to the app ────────────────────
@@ -94,6 +115,7 @@ def run_voice_loop(ctx, config, app_ui, api_set_state, safe_mode_file):
         print(Fore.CYAN + "[SYSTEM] Ears listening (speech detector), wired to the mouth")
     except Exception as _sg_err:
         print(Fore.YELLOW + f"[SYSTEM] Ears wiring failed: {_sg_err}")
+        api_set_state("voice_problem", f"Seven's hearing could not start: {str(_sg_err)[:160]}")
 
     # ── Voice loop config ────────────────────────────────────────────
     is_active = True

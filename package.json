@@ -1,7 +1,7 @@
 {
     "name": "vii-desktop",
-    "version": "1.3.2",
-    "description": "SEVEN — Private AI Voice Assistant",
+    "version": "1.3.3",
+    "description": "SEVEN \u2014 Private AI Voice Assistant",
     "productName": "SEVEN",
     "author": {
         "name": "Manikanta Cheruku",
@@ -22,7 +22,7 @@
         "dist": "npm run build:frontend && electron-builder --config frontend/electron-builder.yml",
         "dist:full": "node scripts/build.js",
         "prepare-python": "node scripts/prepare-python.js",
-    "backend:dev": "node scripts/dev-backend.js"
+        "backend:dev": "node scripts/dev-backend.js"
     },
     "devDependencies": {
         "concurrently": "^9.1.0",

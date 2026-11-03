@@ -56,6 +56,7 @@ docs/
     installer-and-fresh-install-testing.md   build the installer, test as a new user, device ID
   operations/
     troubleshooting.md          common problems and where to look
+    diagnostics.md              the health report, safe mode, finding out what is wrong on a friend's PC
   reference/
     http-api.md                 every backend endpoint (generated)
     configuration.md            config.json sections and what they control

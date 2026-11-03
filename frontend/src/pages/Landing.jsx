@@ -101,7 +101,7 @@ function Ring({ total, seven }) {
   );
 }
 
-function Vital({ label, value, of, seven, total, share, children }) {
+function Vital({ label, value, of, seven, note, total, share, children }) {
   return (
     <div className="group/v relative flex min-w-0 items-center gap-3.5 px-5 py-1">
       {children || <Ring total={total} seven={share} />}
@@ -113,6 +113,7 @@ function Vital({ label, value, of, seven, total, share, children }) {
         </div>
         <div className="mt-1 flex items-center gap-1.5 whitespace-nowrap text-[11.5px] tabular-nums text-s-text-3">
           {seven != null && <><span className="h-1.5 w-1.5 rounded-full bg-s-accent" />Seven {seven}</>}
+          {note && <span>{note}</span>}
         </div>
       </div>
     </div>
@@ -376,11 +377,11 @@ export default function Landing() {
           <Vital label="Processor" value={pct(t?.cpu)} seven={pct(s?.cpu)} total={t?.cpu} share={s?.cpu} />
           <Vital label="Memory" value={t ? t.ram_used_gb.toFixed(1) : '–'} of={t ? `/ ${Math.round(t.ram_total_gb)} GB` : ''}
                  seven={size(s?.ram_gb)} total={t?.ram_percent} share={s?.ram_percent} />
-          {gpu ? (
+          {gpu && gpu.vram_gb > 0 ? (
             <Vital label="Graphics" value={gpu.vram_used_gb.toFixed(1)} of={`/ ${Math.round(gpu.vram_gb)} GB`} seven={size(s?.vram_gb)}
                    total={(gpu.vram_used_gb / gpu.vram_gb) * 100} share={(s?.vram_gb / gpu.vram_gb) * 100} />
           ) : (
-            <Vital label="Graphics" value="–" total={0} share={0} />
+            <Vital label="Graphics" value="–" note="No dedicated GPU" total={0} share={0} />
           )}
           <Heaviest usage={usage} />
         </div>

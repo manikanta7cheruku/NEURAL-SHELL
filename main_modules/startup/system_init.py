@@ -139,7 +139,8 @@ def setup_logging():
 
     for noisy in [
         'tensorflow', 'tensorflow.python', 'torch', 'torch._dynamo',
-        'nv_one_logger', 'graphviz', 'datasets', 'huggingface_hub',
+        'nv_one_logger', 'graphviz', 'datasets', 'huggingface_hub', 'filelock', 'phonemizer',
+        'screen_brightness_control',
         'transformers', 'sentence_transformers', 'chromadb',
         'urllib3', 'httpx', 'httpcore', 'uvicorn.access',
         'sentry_sdk', 'faster_whisper', 'PIL', 'pyttsx3',

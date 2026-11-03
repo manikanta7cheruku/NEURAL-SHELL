@@ -68,12 +68,59 @@ def _setup_done() -> bool:
         return False
 
 
+def _problem() -> dict:
+    """What the voice loop reported when Seven could not load or start its hearing, and safe mode if it is on."""
+    try:
+        from backend.api_server import _state
+        return {"problem": _state.get("voice_problem") or "", "safe_mode": (_state.get("safe_mode") or {}).get("reason", "")}
+    except Exception:
+        return {"problem": "", "safe_mode": ""}
+
+
+def _mic_blocked() -> bool:
+    """Windows' privacy switch for desktop apps and the microphone: when it is off, Seven hears silence and says nothing."""
+    try:
+        import winreg
+        sub = r"Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\microphone"
+        for key_path in (sub, sub + r"\NonPackaged"):
+            try:
+                with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path) as key:
+                    if winreg.QueryValueEx(key, "Value")[0] == "Deny":
+                        return True
+            except OSError:
+                continue
+    except Exception:
+        pass
+    return False
+
+
+_FIX = {"label": "Run diagnostics", "to": "/settings?section=system"}
+
+
 def collect(mic_error=_mic_error, voice=_voice, ollama_up=_ollama_up, uptime=_uptime, setup_done=_setup_done,
-            speech=_speech) -> list:
+            speech=_speech, problem=_problem, mic_blocked=_mic_blocked) -> list:
     """The problems, most important first. The probes are parameters so tests can supply them."""
     if not setup_done():
         return []
     out = []
+    try:
+        p = problem()
+        if p["safe_mode"]:
+            out.append({"id": "safe-mode", "level": "error",
+                        "message": f"Seven is in safe mode, so it can't hear or think. {p['safe_mode']}",
+                        "action": {"label": "Try again", "to": "/settings?section=system", "retry": "safe-mode"}})
+        elif p["problem"]:
+            out.append({"id": "hearing-failed", "level": "error",
+                        "message": f"Seven couldn't start. {p['problem']}", "action": _FIX})
+    except Exception:
+        pass
+    try:
+        if mic_blocked():
+            out.append({"id": "mic-blocked", "level": "error",
+                        "message": "Windows is blocking microphone access for desktop apps. Turn on Settings, Privacy and security, "
+                                   "Microphone, Let desktop apps access your microphone."})
+    except Exception:
+        pass
     try:
         if mic_error():
             out.append({"id": "mic", "level": "error",
