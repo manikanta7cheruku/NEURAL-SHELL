@@ -56,6 +56,7 @@ docs/
     installer-and-fresh-install-testing.md   build the installer, test as a new user, device ID
   operations/
     troubleshooting.md          common problems and where to look
+    updates.md                  how an update reaches a PC: patch or full, install, result, troubleshooting
     diagnostics.md              the health report, safe mode, finding out what is wrong on a friend's PC
   reference/
     http-api.md                 every backend endpoint (generated)

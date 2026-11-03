@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import useUpdate from '../stores/useUpdate';
 import useLicense from '../stores/useLicense';
+import { bytes, timeLeft } from '../lib/format';
 
 export default function UpdateBanner() {
   const navigate = useNavigate();
@@ -9,6 +10,7 @@ export default function UpdateBanner() {
     updateAvailable, dismissed, info,
     fetchStatus, dismiss, startDownload, installUpdate,
     downloading, downloadProgress, downloadPath,
+    downloadBytes, downloadTotal, downloadSpeed, downloadEta,
   } = useUpdate();
 
   // Poll every 3 seconds — catches update quickly after check
@@ -57,6 +59,10 @@ export default function UpdateBanner() {
             <span className="text-[10px] text-s-accent font-mono">
               {downloadProgress}%
             </span>
+            {downloadTotal > 0 && (
+              <span className="hidden text-[10.5px] tabular-nums text-s-text-4 md:inline">
+                {[`${bytes(downloadBytes)} of ${bytes(downloadTotal)}`, downloadSpeed > 0 && `${bytes(downloadSpeed)}/s`, timeLeft(downloadEta)].filter(Boolean).join(' · ')}
+              </span>)}
           </div>
         ) : downloadReady ? (
           <span className="text-[11px] text-s-green font-medium">

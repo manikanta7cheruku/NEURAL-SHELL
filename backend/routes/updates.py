@@ -78,104 +78,27 @@ def trigger_download():
 @router.post("/api/update/install")
 def trigger_install():
     """
-    Professional silent update flow.
-    
-    Creates a detached launcher script that:
-      1. Waits for Electron and Python to fully exit
-      2. Kills any remaining processes (safety net)
-      3. Runs the NSIS installer silently (/S flag, no UI)
-      4. Relaunches the updated app automatically
-      5. Cleans up the installer and itself
-    
-    The user sees: click -> app closes instantly -> new version opens.
-    No install wizard, no progress bars, no file-lock errors.
+    Install the downloaded update. Seven cannot replace its own files while it runs, so this starts a script that outlives it
+    (backend/update_install.py): it waits for Seven to exit, installs (the whole installer, or only the changed files),
+    checks the version on disk, records the result, and starts Seven again. The app is told to quit.
     """
     try:
-        import subprocess
-        import tempfile
-
         updater = _get_updater()
-        state   = updater.get_state()
-        installer_path = state.get("download_path")
-
-        if not installer_path:
+        if not updater.get_state().get("download_path"):
             raise HTTPException(status_code=400, detail="No download in progress")
-        if not os.path.exists(installer_path):
-            raise HTTPException(status_code=400, detail="Downloaded file not found. Please download again.")
-
-        # Never run an installer that is not the file that was published.
-        verified, why = updater.verify_downloaded()
-        if not verified:
-            updater._discard_download()
-            updater._state["error"] = why
-            raise HTTPException(status_code=400, detail=why)
-
-        # ── Build the silent update launcher script ──
-        # This .bat runs completely independently after the app exits.
-        bat_lines = [
-            "@echo off",
-            "title Seven Update",
-            "",
-            ":: Wait for Electron and Python to fully exit",
-            "timeout /t 2 /nobreak >nul",
-            "",
-            ":: Safety net: kill any remaining Seven processes",
-            "taskkill /f /im SEVEN.exe 2>nul",
-            "",
-            ":: Wait for file handles to release (prevents 'Failed to uninstall' error)",
-            "timeout /t 2 /nobreak >nul",
-            "",
-            ":: Run the Inno Setup installer silently: no wizard, no prompts, no reboot.",
-            ":: It installs over the existing copy (same AppId), user data is untouched.",
-            '"' + installer_path + '" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-',
-            "",
-            ":: Wait for installer to finish writing files",
-            "timeout /t 3 /nobreak >nul",
-            "",
-            ":: Relaunch the updated app",
-            'if exist "%LOCALAPPDATA%\\Programs\\SEVEN\\SEVEN.exe" (',
-            '    start "" "%LOCALAPPDATA%\\Programs\\SEVEN\\SEVEN.exe"',
-            ') else if exist "%PROGRAMFILES%\\SEVEN\\SEVEN.exe" (',
-            '    start "" "%PROGRAMFILES%\\SEVEN\\SEVEN.exe"',
-            ')',
-            "",
-            ":: Clean up installer and this script",
-            'del /f /q "' + installer_path + '" 2>nul',
-            'del /f /q "%~f0" 2>nul',
-        ]
-
-        bat_path = os.path.join(tempfile.gettempdir(), "seven_update_launcher.bat")
-        with open(bat_path, "w", encoding="utf-8") as f:
-            f.write("\r\n".join(bat_lines))
-
-        print("[UPDATER] Launcher script created: " + bat_path)
-
-        # Launch the bat script as a fully detached process.
-        # It survives after Electron and Python exit.
-        CREATE_NEW_PROCESS_GROUP = 0x00000200
-        DETACHED_PROCESS         = 0x00000008
-
-        subprocess.Popen(
-            ["cmd.exe", "/c", bat_path],
-            creationflags=CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS,
-            close_fds=True,
-            shell=False,
-            cwd=tempfile.gettempdir(),
-        )
-        print("[UPDATER] Silent update launcher started")
-
-        # Clear pending state
         try:
-            updater._clear_pending_download()
-            updater._state["download_path"]     = None
-            updater._state["download_progress"] = 0
-            updater._state["update_available"]  = False
-            updater._state["info"]              = None
-        except Exception:
-            pass
-
-        return {"success": True, "installer_path": installer_path, "quit": True}
+            started = updater.install_update()
+        except ValueError as why:
+            raise HTTPException(status_code=400, detail=str(why))
+        return {"success": True, **started}
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/update/result/dismiss")
+def dismiss_install_result():
+    """The person has read what the last install did (the message on the Updates page)."""
+    _get_updater().dismiss_result()
+    return {"success": True}

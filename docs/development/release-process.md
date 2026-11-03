@@ -41,8 +41,12 @@ feature branch  ->  pull request  ->  CI green  ->  merge to main  ->  bump vers
    newer (`winget install --id JRSoftware.InnoSetup -e`).
 6. **Test the installer** as a brand-new user: install, first-run setup, update from the previous version,
    uninstall. Follow [installer and fresh-install testing](installer-and-fresh-install-testing.md).
-7. **Publish.** Create a release tagged `vX.Y.Z` in `manikanta7cheruku/seven-releases` and upload only
-   `SEVEN-Setup-<version>.exe`. Paste the changelog into the release notes.
+   `npm run build:installer` also records `release-manifests\manifest-<version>.json.gz`: keep it and commit it.
+7. **Build the changed-files update** for the previous version: `npm run build:update -- --prev <previous version>`. It writes
+   `dist-installer\SEVEN-Patch-<previous>-to-<version>.zip` (a few MB instead of the whole installer) and prints its checksum.
+8. **Publish.** Create a release tagged `vX.Y.Z` in `manikanta7cheruku/seven-releases` and upload `SEVEN-Setup-<version>.exe`
+   and the patch zip. Paste the changelog into the release notes. Then publish in the dashboard, filling "Changed files only"
+   with the patch link, checksum and size. See [Updates](../operations/updates.md).
 
 ## How users receive it
 
@@ -57,11 +61,14 @@ automatic checking off; "Check now" always works), in this order:
    cannot be reached at all**. A server answer of "no update" is trusted. The release description is read for a summary,
    `### New` / `### Improved` / `### Fixed` bullets, a `SHA256:` line and a `[critical]` marker.
 
-The user sees a strip at the top of every screen and the Updates page with the notes. "Download" saves the installer
-to `%TEMP%`; Seven checks it (a real installer, and the published checksum) and refuses anything that does not match. "Restart and install" writes a
-small batch script that waits for Seven to exit, runs the installer with
-`/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-`, relaunches `SEVEN.exe` and deletes itself. Everything under
-`%APPDATA%\SEVEN` (settings, memory, tasks, licence) is preserved.
+The user sees a strip at the top of every screen and the Updates page with the notes, the size, and while downloading how much,
+how fast and how long is left. "Download" fetches either the changed files only (when the release has a package for exactly the
+version installed) or the whole installer, resuming if the connection drops; Seven checks it (checksum, a real installer of the
+announced version, or every file of the package) and refuses anything that does not match. "Restart and install" starts a
+PowerShell script that waits for Seven to exit, stops every helper running from the install folder, installs, checks the
+version on disk, records the result and only then starts Seven again. The Updates page then says "Seven is now X", or why
+it did not work and where the log is. Everything under `%APPDATA%\SEVEN` (settings, memory, tasks, licence) is preserved.
+The whole mechanism, the files it writes and a troubleshooting table are in [Updates](../operations/updates.md).
 
 ## Hotfixes
 

@@ -16,6 +16,12 @@ AppId={{B7D2F0E4-5C3A-4E8B-9F16-7A1C2D3E4F50}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppPublisher=Seven Labs
+; The version is stamped into the installer file itself, so Seven can refuse an installer whose version is not the one the
+; update announces (backend/updater.py, check_installer_version).
+VersionInfoVersion={#AppVersion}
+VersionInfoProductVersion={#AppVersion}
+VersionInfoProductName=SEVEN
+VersionInfoDescription=SEVEN setup
 AppCopyright=Copyright (C) 2025 Seven Labs
 DefaultDirName={autopf}\{#AppName}
 DisableProgramGroupPage=yes

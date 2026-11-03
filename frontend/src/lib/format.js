@@ -41,3 +41,21 @@ export function dayLabel(ts) {
   if (diff === 1) return 'Yesterday';
   return d.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });
 }
+
+/** 1536000 -> "1.5 MB" */
+export function bytes(n) {
+  if (n == null || Number.isNaN(n)) return '';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let v = n, i = 0;
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i += 1; }
+  return `${v >= 100 || i === 0 ? Math.round(v) : v.toFixed(1)} ${units[i]}`;
+}
+
+/** Seconds left -> "about 3 minutes left" */
+export function timeLeft(s) {
+  if (s == null) return '';
+  if (s < 5) return 'a few seconds left';
+  if (s < 60) return `${Math.round(s)} seconds left`;
+  const m = Math.round(s / 60);
+  return m <= 1 ? 'about 1 minute left' : `about ${m} minutes left`;
+}
