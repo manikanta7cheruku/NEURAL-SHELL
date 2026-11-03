@@ -64,3 +64,9 @@ if ($LASTEXITCODE -ne 0) { throw "Inno Setup compile failed" }
 $exe = Get-Item "dist-installer\SEVEN-Setup-$version.exe"
 Write-Host ("Done: {0}  ({1:N0} MB)" -f $exe.FullName, ($exe.Length / 1MB)) -ForegroundColor Green
 Write-Host ("SHA256: " + (Get-FileHash $exe.FullName).Hash)
+# 6. Record what this release contains (release-manifests\manifest-<version>.json.gz). The next release's small
+#    "changed files only" update is built by comparing against it: keep it and commit it.
+$py = if (Test-Path "venv\Scripts\python.exe") { "venv\Scripts\python.exe" } else { "python" }
+& $py scripts\build_update_package.py
+if ($LASTEXITCODE -ne 0) { throw "Recording the release manifest failed" }
+Write-Host "Changed-files update for the previous version: npm run build:update -- --prev <previous version>" -ForegroundColor Cyan

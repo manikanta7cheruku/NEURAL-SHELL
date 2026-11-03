@@ -4,7 +4,15 @@ Dual-Pathway Update Verification & Delivery Subsystem.
 
 Primary: the Render server decides what each user is offered (staged and tier releases, withdrawing a bad release).
 Fallback: GitHub Releases, only when the Render server cannot be reached at all.
-Every download is checked (a real installer, and the published SHA-256 when there is one) before it can be installed.
+Every download is checked (a real installer of the right version, and the published SHA-256 when there is one) before it
+can be installed.
+
+Two kinds of update (see docs/operations/updates.md):
+    patch   only the files that changed since the version this PC has (a few MB), when the release offers one for exactly
+            this version; checked file by file and applied with a backup that is put back if anything fails
+    full    the whole installer, for every other case
+Installing is backend/update_install.py: it waits for Seven to exit, installs, checks the version on disk and records the
+result, which the next start reads (get_state()["last_result"]).
 """
 
 import os
@@ -16,6 +24,7 @@ import json
 import threading
 import requests
 import tempfile
+import shutil
 
 TIMEOUT        = 10
 CHECK_DELAY    = 15       # First check after 15 seconds
@@ -32,6 +41,12 @@ _state = {
     "info":              None,
     "last_checked":      None,
     "check_failed":      False,    # the last check could not reach any update service
+    "download_bytes":    0,        # what is on this PC so far, and what the whole download is, in bytes
+    "download_total":    0,
+    "download_speed":    0,        # bytes per second, smoothed
+    "download_eta":      None,     # seconds left, or None while it is still being worked out
+    "update_kind":       "full",   # "patch" (changed files only) or "full" (the whole installer)
+    "last_result":       None,     # what the last install did: {status: ok|failed, from, to, detail, log}
 }
 
 
@@ -47,8 +62,20 @@ def _get_cache_file():
     return os.path.join(here, "pending_update.json")
 
 
+def _newer(candidate, current):
+    try:
+        from packaging import version as pv
+        return pv.parse(str(candidate)) > pv.parse(str(current))
+    except Exception:
+        return str(candidate) != str(current)
+
+
+def _stage_dir(version):
+    return os.path.join(tempfile.gettempdir(), "seven-update", "stage-" + str(version))
+
+
 def _load_pending_download():
-    """On startup — check if a download was completed before restart."""
+    """On startup: pick up a download that finished before the restart, unless Seven has since been updated."""
     try:
         cache_file = _get_cache_file()
         if not os.path.exists(cache_file):
@@ -57,19 +84,34 @@ def _load_pending_download():
             data = json.load(f)
         path = data.get("download_path", "")
         info = data.get("info") or {}
-        if path and os.path.exists(path) and not _verify_pending(path, info):
-            os.remove(path)
-            path = ""
-        if path and os.path.exists(path):
-            _state["download_path"]     = path
-            _state["download_progress"] = 100
-            _state["update_available"]  = True
-            _state["info"]              = data.get("info")
+        kind = data.get("kind", "full")
+        if not _newer(info.get("version", "0"), _read_current_version()):       # already installed: nothing is pending
+            _forget_files(path, kind, info)
+            os.remove(cache_file)
+            return
+        if kind == "patch":
+            ok = bool(path) and os.path.isfile(os.path.join(_stage_dir(info.get("version", "")), "patch.json"))
+        else:
+            ok = bool(path) and os.path.exists(path) and _verify_pending(path, info)
+            if path and os.path.exists(path) and not ok:
+                os.remove(path)
+        if ok:
+            _state.update(download_path=path, download_progress=100, update_available=True, info=info, update_kind=kind)
             print("[UPDATER] Pending download restored: " + path)
         else:
             os.remove(cache_file)
     except Exception as e:
         print("[UPDATER] Load pending error: " + str(e))
+
+
+def _forget_files(path, kind, info):
+    try:
+        if path and os.path.exists(path):
+            os.remove(path)
+        if kind == "patch":
+            shutil.rmtree(_stage_dir(info.get("version", "")), ignore_errors=True)
+    except OSError:
+        pass
 
 
 def _verify_pending(path, info):
@@ -84,7 +126,7 @@ def _save_pending_download(path, info):
     try:
         cache_file = _get_cache_file()
         with open(cache_file, "w", encoding="utf-8") as f:
-            json.dump({"download_path": path, "info": info}, f, indent=2)
+            json.dump({"download_path": path, "info": info, "kind": _state.get("update_kind", "full")}, f, indent=2)
         print("[UPDATER] Saved pending download: " + cache_file)
     except Exception as e:
         print("[UPDATER] Save pending error: " + str(e))
@@ -101,10 +143,14 @@ def _clear_pending_download():
         print("[UPDATER] Clear pending error: " + str(e))
 
 
-
-
 def get_state():
-    return dict(_state)
+    """The state for the Updates page, plus what Download would fetch for this PC ("patch" or "full") and how big that is."""
+    state = dict(_state)
+    info = state.get("info") or {}
+    kind = state["update_kind"] if state.get("download_path") or state.get("downloading") else plan(info) if info else "full"
+    state["plan"] = kind
+    state["download_size_mb"] = (info.get("patch") or {}).get("size_mb") if kind == "patch" else info.get("size_mb", 0)
+    return state
 
 
 def _read_current_version():
@@ -267,13 +313,65 @@ def verify_file(path, sha256=""):
         return False, f"Could not read the downloaded file: {e}"
 
 
+def installer_version(path):
+    """The version stamped into an installer (Windows file properties), or "" when it has none. An installer built without
+    bumping the version says 1.3.2 while the dashboard says 1.3.3: Seven would install it, still be 1.3.2, and offer the
+    update again for ever."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+        size = ctypes.windll.version.GetFileVersionInfoSizeW(path, None)
+        if not size:
+            return ""
+        buf = ctypes.create_string_buffer(size)
+        if not ctypes.windll.version.GetFileVersionInfoW(path, 0, size, buf):
+            return ""
+        ptr, length = ctypes.c_void_p(), wintypes.UINT()
+        if not ctypes.windll.version.VerQueryValueW(buf, "\\", ctypes.byref(ptr), ctypes.byref(length)) or length.value < 52:
+            return ""
+        fixed = ctypes.cast(ptr, ctypes.POINTER(ctypes.c_uint32 * 13)).contents
+        ms, ls = fixed[4], fixed[5]                                             # dwProductVersionMS / LS
+        v = f"{ms >> 16}.{ms & 0xFFFF}.{ls >> 16}"
+        return "" if v == "0.0.0" else v
+    except Exception:
+        return ""
+
+
+def check_installer_version(path, expected):
+    """(ok, message). An installer that carries no version is trusted (older builds); one that carries another version is not."""
+    found = installer_version(path)
+    if found and expected and found != str(expected):
+        return False, (f"This installer is version {found}, but the update says {expected}. It was probably built before "
+                       "the version number was changed. Seven will not install it.")
+    return True, ""
+
+
+def plan(info):
+    """"patch" when the release has changed-files-only package for exactly the version installed here, and this is an
+    installed Seven that can take it; "full" otherwise."""
+    patch = (info or {}).get("patch") or {}
+    if patch.get("url") and patch.get("from") == _read_current_version():
+        try:
+            from backend import update_install
+            if update_install.install_dir():
+                return "patch"
+        except Exception:
+            pass
+    return "full"
+
+
 def verify_downloaded():
     """Called just before installing. Returns (ok, message)."""
     path = _state.get("download_path")
     info = _state.get("info") or {}
+    if _state.get("update_kind") == "patch":
+        if not path or not os.path.isfile(os.path.join(_stage_dir(info.get("version", "")), "patch.json")):
+            return False, "The downloaded update is missing. Please download it again."
+        return True, ""
     if not path or not os.path.exists(path):
         return False, "The downloaded file is missing. Please download the update again."
-    return verify_file(path, info.get("sha256", ""))
+    ok, why = verify_file(path, info.get("sha256", ""))
+    return (ok, why) if not ok else check_installer_version(path, info.get("version", ""))
 
 
 def _discard_download():
@@ -284,6 +382,8 @@ def _discard_download():
                 os.remove(p)
         except OSError:
             pass
+    if _state.get("update_kind") == "patch":
+        shutil.rmtree(_stage_dir((_state.get("info") or {}).get("version", "")), ignore_errors=True)
     _state["download_path"] = None
     _state["download_progress"] = 0
     _clear_pending_download()
@@ -321,6 +421,17 @@ def _fetch_render(tier, current):
     return None
 
 
+def _patch_info(raw):
+    """The changed-files-only package the server offers, or None: {from, url, sha256, size_mb}."""
+    if not isinstance(raw, dict) or not raw.get("url") or not raw.get("from"):
+        return None
+    url = str(raw["url"])
+    if not url.lower().startswith("https://"):
+        return None
+    return {"from": str(raw["from"]).strip().lstrip("vV"), "url": url, "sha256": str(raw.get("sha256", "") or "").strip().lower(),
+            "size_mb": raw.get("size_mb", 0)}
+
+
 def _info_from_server(data):
     notes = _clean_notes(data.get("notes"))
     loose = _lines(data.get("changelog"))
@@ -338,6 +449,7 @@ def _info_from_server(data):
         "published_at":  data.get("published_at", ""),
         "is_critical":   bool(data.get("is_critical", False)),
         "sha256":        str(data.get("sha256", "") or "").strip().lower(),
+        "patch":         _patch_info(data.get("patch")),
         "source":        "server",
     }
 
@@ -502,23 +614,62 @@ def start_auto_check():
 
 # ── Downloading ───────────────────────────────────────────────────────────
 
+def _progress(done, total, started, base):
+    """Bytes, percentage, a smoothed speed and the time left, for the Updates page."""
+    now = time.time()
+    elapsed = max(now - started, 0.001)
+    speed = (done - base) / elapsed
+    old = _state.get("download_speed") or 0
+    speed = speed if not old else old * 0.7 + speed * 0.3
+    _state.update(download_bytes=done, download_total=total, download_speed=int(speed),
+                  download_eta=int((total - done) / speed) if total and speed > 1024 else None)
+    if total > 0:
+        _state["download_progress"] = min(99, int(done * 100 / total))
+
+
 def _stream_to(url, part_path, progress_callback):
-    r = requests.get(url, stream=True, timeout=60)
+    """Download to part_path, continuing from what is already there when the server allows it (a connection that drops
+    at 90% of a large file costs seconds, not minutes)."""
+    have = os.path.getsize(part_path) if os.path.exists(part_path) else 0
+    headers = {"Range": f"bytes={have}-"} if have else {}
+    r = requests.get(url, stream=True, timeout=60, headers=headers)
+    if r.status_code == 416:                                       # asked for more than exists: the file is complete
+        r.close()
+        return
     r.raise_for_status()
-    total      = int(r.headers.get("content-length", 0))
-    downloaded = 0
-    with open(part_path, "wb") as f:
+    resumed = r.status_code == 206 and have > 0
+    if not resumed:
+        have = 0
+    length = int(r.headers.get("content-length", 0) or 0)
+    total = have + length
+    done, started = have, time.time()
+    with open(part_path, "ab" if resumed else "wb") as f:
         for chunk in r.iter_content(chunk_size=65536):
             if chunk:
                 f.write(chunk)
-                downloaded += len(chunk)
-                if total > 0:
-                    pct = min(99, int((downloaded / total) * 100))
-                    _state["download_progress"] = pct
-                    if progress_callback:
-                        progress_callback(pct)
-    if total and downloaded != total:
-        raise IOError(f"incomplete download ({downloaded} of {total} bytes)")
+                done += len(chunk)
+                _progress(done, total, started, have)
+                if progress_callback and total > 0:
+                    progress_callback(_state["download_progress"])
+    if total and done != total:
+        raise IOError(f"incomplete download ({done} of {total} bytes)")
+
+
+def _download_target(info):
+    """(kind, url, dest, sha256): what to fetch for this release on this PC."""
+    ver = str(info.get("version", "unknown"))
+    kind = plan(info)
+    if kind == "patch":
+        patch = info["patch"]
+        dest = os.path.join(tempfile.gettempdir(), "seven-update", f"SEVEN-Patch-{patch['from']}-to-{ver}.zip")
+        return kind, patch["url"], dest, patch.get("sha256", "")
+    return kind, info.get("download_url"), os.path.join(tempfile.gettempdir(), "SEVEN-Setup-" + ver + ".exe"), info.get("sha256", "")
+
+
+def _finish_patch(zip_path, info, sha256):
+    """Unpack and prove the changed files before anything is installed."""
+    from backend import update_package
+    update_package.extract_and_verify(zip_path, _stage_dir(info["version"]), sha256)
 
 
 def download_update(progress_callback=None):
@@ -526,20 +677,18 @@ def download_update(progress_callback=None):
     if not info:
         return False, None, "No update info"
 
-    url = info.get("download_url")
+    kind, url, dest, sha256 = _download_target(info)
     if not url:
         return False, None, "No download URL"
     if not str(url).lower().startswith("https://"):
         _state["error"] = "This update's download link is not secure, so Seven will not use it."
         return False, None, _state["error"]
-
-    ver      = str(info.get("version", "unknown"))
-    dest     = os.path.join(tempfile.gettempdir(), "SEVEN-Setup-" + ver + ".exe")
-    part     = dest + ".part"
-    sha256   = info.get("sha256", "")
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    part = dest + ".part"
+    _state.update(update_kind=kind, download_bytes=0, download_total=0, download_speed=0, download_eta=None)
 
     # Already downloaded (for instance before a restart) and proven to be the right file: nothing to do.
-    if sha256 and os.path.exists(dest) and verify_file(dest, sha256)[0]:
+    if kind == "full" and sha256 and os.path.exists(dest) and verify_file(dest, sha256)[0]:
         _state.update(download_path=dest, download_progress=100, downloading=False, error=None)
         _save_pending_download(dest, info)
         return True, dest, None
@@ -552,33 +701,44 @@ def download_update(progress_callback=None):
     for attempt in range(1, DOWNLOAD_ATTEMPTS + 1):
         try:
             _stream_to(url, part, progress_callback)
-            ok, why = verify_file(part, sha256)
-            if not ok:
-                raise IOError(why)
+            if kind == "patch":
+                _finish_patch(part, info, sha256)
+            else:
+                ok, why = verify_file(part, sha256)
+                if ok:
+                    ok, why = check_installer_version(part, info.get("version", ""))
+                if not ok:
+                    raise IOError(why)
             os.replace(part, dest)
             _state["download_progress"] = 100
             _state["download_path"]     = dest
             _state["downloading"]       = False
+            _state["download_eta"]      = 0
             _save_pending_download(dest, info)
             return True, dest, None
         except Exception as e:
             reason = str(e)
             print(f"[UPDATER] Download attempt {attempt} failed: {reason}")
-            try:
-                if os.path.exists(part):
-                    os.remove(part)
-            except OSError:
-                pass
+            if _bad_file(reason):                                   # resuming would only repeat the mistake
+                try:
+                    if os.path.exists(part):
+                        os.remove(part)
+                except OSError:
+                    pass
             if attempt < DOWNLOAD_ATTEMPTS:
                 time.sleep(2 * attempt)
 
     _state["downloading"]       = False
     _state["download_progress"] = 0
-    if "checksum" in reason or "not a Windows" in reason or "too small" in reason:
+    if _bad_file(reason):
         _state["error"] = reason
     else:
         _state["error"] = "The download did not finish. Check your connection and press Download to try again."
     return False, None, reason
+
+
+def _bad_file(reason):
+    return any(k in reason for k in ("checksum", "not a Windows", "too small", "damaged", "does not match", "installer is version"))
 
 
 def start_download_thread(progress_callback=None):
@@ -589,5 +749,60 @@ def start_download_thread(progress_callback=None):
     t.start()
 
 
+def install_update():
+    """Hand over to the script that installs the downloaded update after Seven exits. Returns {"quit": True} when it has
+    started; raises ValueError with a sentence for the person when it cannot."""
+    from backend import update_install
+    ok, why = verify_downloaded()
+    if not ok:
+        _discard_download()
+        _state["error"] = why
+        raise ValueError(why)
+    info = _state.get("info") or {}
+    install = update_install.install_dir()
+    if not install:
+        raise ValueError("Updates install into the installed Seven. This copy runs from source.")
+    current, target = _read_current_version(), str(info.get("version", ""))
+    pids = [os.getpid(), os.getppid()]
+    update_install.clear_result()
+    if _state.get("update_kind") == "patch":
+        script = update_install.patch_script(_stage_dir(target), _state["download_path"], install, current, target, pids)
+    else:
+        script = update_install.installer_script(_state["download_path"], install, current, target, pids)
+    path = update_install.launch(script)
+    print("[UPDATER] Update script started: " + path)
+    return {"quit": True, "kind": _state.get("update_kind", "full"), "script": path}
+
+
+def _load_result():
+    """At start: what the last install did. A success is told once; a failure stays until it is dismissed."""
+    try:
+        from backend import update_install
+        result = update_install.read_result()
+        if not result:
+            return
+        current = _read_current_version()
+        if result.get("status") == "ok" and result.get("to") == current:
+            _state["last_result"] = {**result, "status": "ok"}
+            _clear_pending_download()
+        elif result.get("status") == "ok":
+            _state["last_result"] = {**result, "status": "failed",
+                                     "detail": f"Seven reports {current}, not {result.get('to')}, after the update."}
+        else:
+            _state["last_result"] = result
+    except Exception as e:
+        print("[UPDATER] Result read error: " + str(e))
+
+
+def dismiss_result():
+    try:
+        from backend import update_install
+        update_install.clear_result()
+    except Exception:
+        pass
+    _state["last_result"] = None
+
+
 # Load pending download state on startup (after everything it uses is defined)
 _load_pending_download()
+_load_result()

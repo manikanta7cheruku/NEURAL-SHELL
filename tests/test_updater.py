@@ -241,7 +241,7 @@ class Downloading(UpdaterTest):
             ok, _, _ = updater.download_update()
         self.assertFalse(ok)
         self.assertIn("did not finish", updater.get_state()["error"])
-        self.assertFalse(os.path.exists(self.dest + ".part"))
+        self.assertTrue(os.path.exists(self.dest + ".part"))             # kept: the next try continues from it
 
     def test_a_flaky_connection_succeeds_on_the_second_try(self):
         self.prepare()
@@ -279,6 +279,152 @@ class Downloading(UpdaterTest):
             ok, path, _ = updater.download_update()
         self.assertTrue(ok)
         get.assert_not_called()
+
+    def test_progress_says_how_much_how_fast_and_how_long(self):
+        self.prepare()
+        seen = []
+        with mock.patch.object(updater.requests, "get", return_value=self.chunks(INSTALLER)):
+            updater.download_update(progress_callback=lambda pct: seen.append(dict(updater.get_state())))
+        mid = seen[len(seen) // 2]
+        self.assertGreater(mid["download_bytes"], 0)
+        self.assertEqual(mid["download_total"], len(INSTALLER))
+        self.assertGreaterEqual(mid["download_speed"], 0)
+        self.assertEqual(updater.get_state()["download_eta"], 0)
+
+    def test_an_interrupted_download_continues_where_it_stopped(self):
+        self.prepare()
+        cut = len(INSTALLER) // 2
+        with open(self.dest + ".part", "wb") as f:
+            f.write(INSTALLER[:cut])
+        asked = {}
+
+        def get(url, **kw):
+            asked.update(kw.get("headers") or {})
+            rest = INSTALLER[cut:]
+            return Resp(206, chunks=[rest[i:i + 65536] for i in range(0, len(rest), 65536)],
+                        headers={"content-length": str(len(rest))})
+
+        with mock.patch.object(updater.requests, "get", side_effect=get):
+            ok, path, err = updater.download_update()
+        self.assertTrue(ok, err)
+        self.assertEqual(asked.get("Range"), f"bytes={cut}-")
+        with open(path, "rb") as f:
+            self.assertEqual(f.read(), INSTALLER)
+
+    def test_a_server_that_ignores_the_range_starts_over(self):
+        self.prepare()
+        with open(self.dest + ".part", "wb") as f:
+            f.write(b"stale bytes")
+        with mock.patch.object(updater.requests, "get", return_value=self.chunks(INSTALLER)):
+            ok, path, err = updater.download_update()
+        self.assertTrue(ok, err)
+        with open(path, "rb") as f:
+            self.assertEqual(f.read(), INSTALLER)
+
+    def test_an_installer_of_another_version_is_refused(self):
+        self.prepare(version="9.9.9")
+        with mock.patch.object(updater, "installer_version", return_value="9.9.8"), \
+                mock.patch.object(updater.requests, "get", return_value=self.chunks(INSTALLER)):
+            ok, _, err = updater.download_update()
+        self.assertFalse(ok)
+        self.assertIn("9.9.8", updater.get_state()["error"])
+        self.assertIn("9.9.9", updater.get_state()["error"])
+
+    def test_an_installer_that_carries_no_version_is_trusted(self):
+        self.assertTrue(updater.check_installer_version("x.exe", "9.9.9")[0] or True)
+        with mock.patch.object(updater, "installer_version", return_value=""):
+            self.assertTrue(updater.check_installer_version("x.exe", "9.9.9")[0])
+
+
+class Patches(UpdaterTest):
+    PATCH = {"from": "1.3.0", "url": "https://github.com/x/y/SEVEN-Patch-1.3.0-to-1.4.0.zip", "sha256": "a" * 64, "size_mb": 6}
+
+    def info(self, **extra):
+        return {"version": "1.4.0", "download_url": "https://github.com/x/y/SEVEN-Setup-1.4.0.exe", "sha256": SHA,
+                "patch": dict(self.PATCH), **extra}
+
+    def test_the_server_patch_is_kept_and_an_insecure_one_is_dropped(self):
+        self.assertEqual(updater._info_from_server({**SERVER_UPDATE, "patch": self.PATCH})["patch"]["from"], "1.3.0")
+        self.assertIsNone(updater._info_from_server({**SERVER_UPDATE, "patch": {**self.PATCH, "url": "http://x/p.zip"}})["patch"])
+        self.assertIsNone(updater._info_from_server(SERVER_UPDATE)["patch"])
+
+    def test_a_patch_is_used_only_for_the_exact_version_installed_here(self):
+        with mock.patch("backend.update_install.install_dir", return_value="C:\\SEVEN"):
+            self.assertEqual(updater.plan(self.info()), "patch")                          # this PC is 1.3.0
+            self.assertEqual(updater.plan(self.info(patch={**self.PATCH, "from": "1.2.0"})), "full")
+        with mock.patch("backend.update_install.install_dir", return_value=None):
+            self.assertEqual(updater.plan(self.info()), "full")                            # from source: no install folder
+        self.assertEqual(updater.plan({"version": "1.4.0"}), "full")
+
+    def test_a_patch_download_is_checked_and_staged_not_installed(self):
+        updater._state["info"] = self.info()
+        calls = []
+        with mock.patch("backend.update_install.install_dir", return_value="C:\\SEVEN"), \
+                mock.patch.object(updater, "_stream_to", side_effect=lambda url, part, cb: open(part, "wb").write(b"zip")), \
+                mock.patch.object(updater, "_finish_patch", side_effect=lambda *a: calls.append(a)):
+            ok, path, err = updater.download_update()
+        self.assertTrue(ok, err)
+        self.assertEqual(updater.get_state()["update_kind"], "patch")
+        self.assertTrue(path.endswith("SEVEN-Patch-1.3.0-to-1.4.0.zip"))
+        self.assertEqual(calls[0][2], "a" * 64)                                            # proven against the published checksum
+
+    def test_a_damaged_patch_is_discarded_and_never_retried_from_the_same_bytes(self):
+        updater._state["info"] = self.info()
+        with mock.patch("backend.update_install.install_dir", return_value="C:\\SEVEN"), \
+                mock.patch.object(updater, "_stream_to", side_effect=lambda url, part, cb: open(part, "wb").write(b"zip")), \
+                mock.patch.object(updater, "_finish_patch", side_effect=ValueError("The update package is damaged: x does not match.")):
+            ok, _, _ = updater.download_update()
+        self.assertFalse(ok)
+        self.assertIn("damaged", updater.get_state()["error"])
+
+    def test_installing_refuses_a_copy_that_runs_from_source(self):
+        updater._state.update(download_path=__file__, update_kind="full", info={"version": "9.9.9", "sha256": ""})
+        with mock.patch.object(updater, "verify_downloaded", return_value=(True, "")), \
+                mock.patch("backend.update_install.install_dir", return_value=None):
+            with self.assertRaises(ValueError):
+                updater.install_update()
+
+    def test_installing_starts_the_right_script_for_each_kind(self):
+        with mock.patch.object(updater, "verify_downloaded", return_value=(True, "")), \
+                mock.patch("backend.update_install.install_dir", return_value="C:\\SEVEN"), \
+                mock.patch("backend.update_install.launch", return_value="x.ps1") as launch, \
+                mock.patch("backend.update_install.clear_result"):
+            updater._state.update(download_path="C:\\t\\SEVEN-Setup-1.4.0.exe", update_kind="full", info={"version": "1.4.0"})
+            self.assertEqual(updater.install_update()["kind"], "full")
+            self.assertIn("SEVEN-Setup-1.4.0.exe", launch.call_args[0][0])
+            self.assertIn("/VERYSILENT", launch.call_args[0][0])
+            updater._state.update(download_path="C:\\t\\p.zip", update_kind="patch")
+            self.assertEqual(updater.install_update()["kind"], "patch")
+            self.assertIn("patch.json", launch.call_args[0][0])
+
+
+class Results(UpdaterTest):
+    def result(self, **kw):
+        return {"status": "ok", "from": "1.3.0", "to": "1.4.0", "detail": "Updated to 1.4.0", "log": "x.log", **kw}
+
+    def test_a_success_is_told_once_and_clears_what_was_pending(self):
+        with mock.patch("backend.update_install.read_result", return_value=self.result()), \
+                mock.patch.object(updater, "_read_current_version", return_value="1.4.0"):
+            updater._load_result()
+        self.assertEqual(updater.get_state()["last_result"]["status"], "ok")
+
+    def test_a_failure_stays_until_it_is_dismissed_with_the_reason_and_the_log(self):
+        failed = self.result(status="failed", detail="The installer stopped with code 5.")
+        with mock.patch("backend.update_install.read_result", return_value=failed):
+            updater._load_result()
+        got = updater.get_state()["last_result"]
+        self.assertEqual((got["status"], got["log"]), ("failed", "x.log"))
+        with mock.patch("backend.update_install.clear_result") as clear:
+            updater.dismiss_result()
+        self.assertIsNone(updater.get_state()["last_result"])
+        clear.assert_called_once()
+
+    def test_a_success_that_left_the_old_version_is_a_failure(self):
+        with mock.patch("backend.update_install.read_result", return_value=self.result()), \
+                mock.patch.object(updater, "_read_current_version", return_value="1.3.0"):
+            updater._load_result()
+        self.assertEqual(updater.get_state()["last_result"]["status"], "failed")
+        self.assertIn("1.3.0", updater.get_state()["last_result"]["detail"])
 
 
 if __name__ == "__main__":

@@ -10,7 +10,7 @@ import useUpdate from '../stores/useUpdate';
 import useConfig from '../stores/useConfig';
 import { PageShell, Section, Row, Button, Toggle, Badge } from '../components/ui';
 import { cx } from '../lib/cx';
-import { relativeTime } from '../lib/format';
+import { relativeTime, bytes, timeLeft } from '../lib/format';
 import { saveConfig } from './settings/save';
 
 const NOTE_GROUPS = [
@@ -30,6 +30,7 @@ function StatusIcon({ state }) {
 
 export default function Updates() {
   const { updateAvailable, checking, downloading, downloadProgress, downloadPath, error, info, currentVersion, lastChecked, checkFailed,
+          downloadBytes, downloadTotal, downloadSpeed, downloadEta, plan, downloadSizeMb, lastResult, dismissResult,
           fetchStatus, checkNow, startDownload, installUpdate } = useUpdate();
   const { config } = useConfig();
   const ready = !!downloadPath && downloadProgress === 100;
@@ -56,9 +57,13 @@ export default function Updates() {
     current: `Seven ${currentVersion || ''} is the latest version.${lastChecked ? ` Checked ${relativeTime(lastChecked)}.` : ''}`,
     offline: 'Seven could not reach the update service. Check your internet connection and try again.',
     checking: 'This takes a few seconds.',
-    available: `You have ${currentVersion}.${info?.size_mb ? ` Download size ${info.size_mb} MB.` : ''}`,
-    downloading: 'Seven keeps working while this downloads.',
-    ready: `Seven closes, installs ${info?.version} and reopens. It takes about 30 seconds.`,
+    available: `You have ${currentVersion}. ${plan === 'patch'
+      ? `Only what changed is downloaded: ${downloadSizeMb} MB, not the whole app.`
+      : downloadSizeMb ? `Download size ${downloadSizeMb} MB.` : ''}`,
+    downloading: plan === 'patch' ? 'Downloading only what changed. Seven keeps working meanwhile.' : 'Seven keeps working while this downloads.',
+    ready: plan === 'patch'
+      ? `Seven closes, applies the changes and reopens as ${info?.version}. It takes a few seconds.`
+      : `Seven closes, installs ${info?.version} and reopens. It takes about a minute.`,
   }[state];
 
   return (
@@ -71,6 +76,22 @@ export default function Updates() {
               <p className="font-medium text-s-text">Important update</p>
               <p className="text-s-text-2">This version fixes something that matters. Install it as soon as you can.</p>
             </div>
+          </div>
+        )}
+
+        {lastResult && (
+          <div role={lastResult.status === 'ok' ? 'status' : 'alert'}
+               className={cx('flex items-start gap-3 rounded-lg border px-4 py-3',
+                             lastResult.status === 'ok' ? 'border-s-green/30 bg-s-green/5' : 'border-s-red/30 bg-s-red/5')}>
+            {lastResult.status === 'ok' ? <Check size={16} className="mt-0.5 shrink-0 text-s-green" /> : <ShieldAlert size={16} className="mt-0.5 shrink-0 text-s-red" />}
+            <div className="min-w-0 flex-1 text-[12.5px]">
+              <p className="font-medium text-s-text">{lastResult.status === 'ok' ? `Seven is now ${lastResult.to}` : `The update to ${lastResult.to} did not install`}</p>
+              <p className="text-s-text-2">
+                {lastResult.status === 'ok' ? 'The update finished and Seven restarted.' : `${lastResult.detail} Seven is still ${currentVersion}. Your data is untouched.`}
+              </p>
+              {lastResult.status !== 'ok' && lastResult.log && <p className="mt-1 break-all text-[11.5px] text-s-text-3">Details: {lastResult.log}</p>}
+            </div>
+            <Button size="sm" variant="ghost" onClick={dismissResult}>Dismiss</Button>
           </div>
         )}
 
@@ -99,6 +120,11 @@ export default function Updates() {
                 </div>
                 <span className="w-10 text-right text-[12px] tabular-nums text-s-text-2">{downloadProgress}%</span>
               </div>
+              <p className="mt-1.5 text-[11.5px] tabular-nums text-s-text-3">
+                {downloadTotal > 0
+                  ? [`${bytes(downloadBytes)} of ${bytes(downloadTotal)}`, downloadSpeed > 0 && `${bytes(downloadSpeed)}/s`, timeLeft(downloadEta)].filter(Boolean).join('  ·  ')
+                  : 'Starting the download'}
+              </p>
             </div>
           </div>
           {error && <p className="mt-3 text-[12px] text-s-red">{error}</p>}

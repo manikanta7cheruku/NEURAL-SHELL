@@ -5,9 +5,17 @@ project uses [semantic versioning](docs/development/release-process.md#versions)
 
 ## [Unreleased]
 
-Version 1.3.3: the fixes for the first friends' test (see Fixed). The public launch stays 1.3.4.
+Version 1.3.2 is the build for the friends' test, 1.3.3 the update that tests the new update flow, and the public launch stays 1.3.4.
 
 ### Added
+- **Updates carry only what changed.** A release can publish a small package with just the files that differ from the previous
+  version (a few MB instead of about 670 MB); people on exactly that version download it, everyone else the full installer. The
+  package is checked as a whole and file by file, applied with a backup, and rolled back if anything fails.
+  `npm run build:update -- --prev <version>`; the dashboard's Releases form has a "Changed files only" section. See
+  `docs/operations/updates.md`.
+- The download shows how much is done, how fast it is going and how long is left, and continues from where it stopped when the
+  connection drops.
+- After an update the Updates page says "Seven is now X", or why the update did not install and where the log is.
 - **Diagnostics.** One plain-text health report for any PC: microphone and Windows privacy switches, speech models, each native
   library imported in a child process, the AI model, internet and server, registration, and the last log warnings. Settings,
   System, Diagnostics (Copy report); `http://127.0.0.1:7777/api/diagnostics/report`; right click the voice bar or tray icon;
@@ -40,6 +48,10 @@ Version 1.3.3: the fixes for the first friends' test (see Fixed). The public lau
 - `/api/chat` returns action receipts in non-streaming responses.
 
 ### Fixed
+- **Updates could download and then not install.** The launcher started Seven again a few seconds after starting the installer,
+  without waiting for it, and said nothing when it failed, so the old version kept running and the update was offered again. The
+  installer now runs to the end, the version on disk is checked, the result is recorded and shown, and Seven starts only
+  afterwards. An installer built before the version was bumped is refused with a clear message.
 - **Seven could be stuck on "Getting ready" forever.** One failed load wrote a safe mode flag that nothing deleted, so every
   later start skipped the speech and brain (no listening, test mic "not listening", no error). Safe mode now needs three
   failed starts in a row, an update clears it, a good start clears it, the reason is shown, and there is a Try again button.

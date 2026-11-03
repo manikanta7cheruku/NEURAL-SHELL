@@ -10,6 +10,13 @@ const useUpdate = create((set, get) => ({
   downloadPath:     null,
   error:            null,
   info:             null,          // full update object from server
+  downloadBytes:    0,
+  downloadTotal:    0,
+  downloadSpeed:    0,             // bytes per second
+  downloadEta:      null,          // seconds left
+  plan:             'full',        // "patch" (only the changed files) or "full" (the whole installer)
+  downloadSizeMb:   0,
+  lastResult:       null,          // what the last install did: {status: ok|failed, to, detail, log}
   currentVersion:   '',
   checkFailed:      false,         // the last check could not reach any update service
   dismissed:        false,         // user dismissed the banner this session
@@ -27,6 +34,13 @@ const useUpdate = create((set, get) => ({
         downloadPath:     d.download_path     ?? null,
         error:            d.error             ?? null,
         info:             d.info              ?? null,
+        downloadBytes:    d.download_bytes    ?? 0,
+        downloadTotal:    d.download_total    ?? 0,
+        downloadSpeed:    d.download_speed    ?? 0,
+        downloadEta:      d.download_eta      ?? null,
+        plan:             d.plan              ?? 'full',
+        downloadSizeMb:   d.download_size_mb  ?? 0,
+        lastResult:       d.last_result       ?? null,
         currentVersion:   d.current_version   ?? get().currentVersion,
         checkFailed:      d.check_failed      ?? false,
         lastChecked:      d.last_check || d.last_checked || get().lastChecked,
@@ -90,6 +104,12 @@ const useUpdate = create((set, get) => ({
   },
 
   dismiss: () => set({ dismissed: true }),
+
+  // The person has read what the last install did.
+  dismissResult: async () => {
+    set({ lastResult: null });
+    try { await api.post('/update/result/dismiss'); } catch { /* it will be offered again next start */ }
+  },
 }));
 
 export default useUpdate;

@@ -148,7 +148,7 @@ def get_defaults():
                       "quiet": {"enabled": True, "start": "22:00", "end": "08:00"},
                       "topics": {"you": True, "seven": True, "facts": True}},
         "setup_complete": False,
-        "version": "1.3.3",
+        "version": "1.3.2",
     }
 
 
