@@ -122,7 +122,7 @@ class Scripts(unittest.TestCase):
     def test_a_patch_replaces_adds_and_removes_checks_and_reports(self):
         stage, zip_path = self.build_patch()
         result = self.run_script(update_install.patch_script(stage, zip_path, self.install, "1.3.3", "1.3.4"))
-        self.assertEqual((result["status"], result["to"]), ("ok", "1.3.4"))
+        self.assertEqual((result["status"], result["to"]), ("ok", "1.3.4"), result)
         self.assertEqual(self.read("resources/app/version.txt"), "1.3.4")
         self.assertEqual(self.read("resources/app/backend/changed.py"), "new code")
         self.assertEqual(self.read("resources/app/backend/added.py"), "hello")
@@ -148,7 +148,7 @@ class Scripts(unittest.TestCase):
     def test_a_full_update_waits_for_the_installer_and_checks_the_version_on_disk(self):
         installer = self.fake_installer("1.3.4")
         result = self.run_script(update_install.installer_script(installer, self.install, "1.3.3", "1.3.4"))
-        self.assertEqual((result["status"], result["to"]), ("ok", "1.3.4"))
+        self.assertEqual((result["status"], result["to"]), ("ok", "1.3.4"), result)
         self.assertFalse(os.path.exists(installer))                            # removed only after it worked
 
     def test_an_installer_that_leaves_the_old_version_is_reported_as_failed_and_kept_for_a_retry(self):

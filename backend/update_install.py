@@ -102,7 +102,7 @@ Relaunch
 _PATCH = r'''
 $stage = @@STAGE@@
 $backup = @@BACKUP@@
-$patch = Get-Content -Raw -Path (Join-Path $stage 'patch.json') | ConvertFrom-Json
+$patch = Get-Content -Raw -Encoding UTF8 -Path (Join-Path $stage 'patch.json') | ConvertFrom-Json
 if (Test-Path $backup) { Remove-Item -Recurse -Force $backup }
 New-Item -ItemType Directory -Force -Path $backup | Out-Null
 $touched = New-Object System.Collections.ArrayList
@@ -123,6 +123,17 @@ function Keep($rel) {
   }
   [void]$touched.Add($rel)
 }
+# A file that was just written can be held for a moment by antivirus: try again a few times before giving up.
+function Try-Run([scriptblock]$action) {
+  for ($i = 1; $i -le 6; $i++) {
+    try { & $action; return } catch { if ($i -eq 6) { throw }; Start-Sleep -Milliseconds (300 * $i) }
+  }
+}
+function Hash-Of($path) {
+  for ($i = 1; $i -le 6; $i++) {
+    try { return (Get-FileHash -LiteralPath $path -Algorithm SHA256 -ErrorAction Stop).Hash.ToLower() } catch { if ($i -eq 6) { throw }; Start-Sleep -Milliseconds (300 * $i) }
+  }
+}
 $ok = $true; $why = ''
 try {
   foreach ($prop in $patch.files.PSObject.Properties) {
@@ -131,17 +142,17 @@ try {
     $dst = Join-Path $installDir $rel
     Keep $rel
     New-Item -ItemType Directory -Force -Path (Split-Path $dst) | Out-Null
-    Copy-Item -LiteralPath $src -Destination $dst -Force -ErrorAction Stop
-    $h = (Get-FileHash -LiteralPath $dst -Algorithm SHA256).Hash.ToLower()
-    if ($h -ne $prop.Value[0]) { throw ("checksum mismatch after copying " + $rel) }
+    Try-Run { Copy-Item -LiteralPath $src -Destination $dst -Force -ErrorAction Stop }
+    $h = Hash-Of $dst
+    if ($h -ne @($prop.Value)[0]) { throw ("checksum mismatch after copying " + $rel) }
   }
   foreach ($gone in @($patch.delete)) {
     if (-not $gone) { continue }
     $rel = $gone.Replace('/', '\')
     Keep $rel
-    Remove-Item -LiteralPath (Join-Path $installDir $rel) -Force -ErrorAction SilentlyContinue
+    if (Test-Path -LiteralPath (Join-Path $installDir $rel)) { Try-Run { Remove-Item -LiteralPath (Join-Path $installDir $rel) -Force -ErrorAction Stop } }
   }
-} catch { $ok = $false; $why = $_.Exception.Message }
+} catch { $ok = $false; $why = $_.Exception.Message; Log ("failed: " + $why) }
 $now = Installed-Version
 if ($ok -and $now -eq $toVersion) {
   try { Set-ItemProperty -Path ('HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\@@APP_ID@@_is1') -Name DisplayVersion -Value $toVersion -ErrorAction Stop } catch {}
