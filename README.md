@@ -13,7 +13,7 @@
   <a href="https://github.com/manikanta7cheruku/NEURAL-SHELL/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/manikanta7cheruku/NEURAL-SHELL/actions/workflows/ci.yml/badge.svg" /></a>
   <img alt="Platform" src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0b5cad" />
   <img alt="Runs locally" src="https://img.shields.io/badge/runs-100%25%20on%20device-2e7d32" />
-  <img alt="Version" src="https://img.shields.io/badge/version-1.3.3-6366f1" />
+  <img alt="Version" src="https://img.shields.io/badge/version-1.3.2-6366f1" />
 </p>
 
 ---

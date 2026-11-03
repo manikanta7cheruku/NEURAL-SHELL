@@ -5,7 +5,7 @@ project uses [semantic versioning](docs/development/release-process.md#versions)
 
 ## [Unreleased]
 
-Version 1.3.3: the fixes for the first friends' test (see Fixed). The public launch stays 1.3.4.
+Version 1.3.2 is the build for the friends' test, 1.3.3 the update that tests the new update flow, and the public launch stays 1.3.4.
 
 ### Added
 - **Updates carry only what changed.** A release can publish a small package with just the files that differ from the previous

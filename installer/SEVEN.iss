@@ -5,7 +5,7 @@
 ; =============================================================================
 
 #ifndef AppVersion
-  #define AppVersion "1.3.3"
+  #define AppVersion "1.3.2"
 #endif
 #define AppName    "SEVEN"
 #define AppExeName "SEVEN.exe"
