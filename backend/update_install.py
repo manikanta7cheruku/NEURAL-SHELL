@@ -75,8 +75,14 @@ function Relaunch {
 Log ("update " + $fromVersion + " -> " + $toVersion + " begins")
 foreach ($id in @(@@PIDS@@)) { try { Wait-Process -Id $id -Timeout 45 -ErrorAction Stop } catch {} }
 $prefix = $installDir.TrimEnd('\') + '\'
-Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase) -and $_.ProcessId -ne $PID } |
-  ForEach-Object { Log ("stopping " + $_.Name + " " + $_.ProcessId); Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+foreach ($proc in [System.Diagnostics.Process]::GetProcesses()) {
+  $path = $null
+  try { $path = $proc.MainModule.FileName } catch { continue }
+  if ($path -and $path.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase) -and $proc.Id -ne $PID) {
+    Log ("stopping " + $proc.ProcessName + " " + $proc.Id)
+    try { $proc.Kill() } catch {}
+  }
+}
 Start-Sleep -Seconds 2
 '''
 
@@ -130,8 +136,16 @@ function Try-Run([scriptblock]$action) {
   }
 }
 function Hash-Of($path) {
+  # .NET, not Get-FileHash: that cmdlet is missing in some PowerShell setups (a runner or PC whose module path points at
+  # PowerShell 7), and a missing cmdlet must not be what stops an update.
   for ($i = 1; $i -le 6; $i++) {
-    try { return (Get-FileHash -LiteralPath $path -Algorithm SHA256 -ErrorAction Stop).Hash.ToLower() } catch { if ($i -eq 6) { throw }; Start-Sleep -Milliseconds (300 * $i) }
+    $sha = $null; $fs = $null
+    try {
+      $sha = [System.Security.Cryptography.SHA256]::Create()
+      $fs = [System.IO.File]::OpenRead($path)
+      return ([BitConverter]::ToString($sha.ComputeHash($fs)) -replace '-', '').ToLower()
+    } catch { if ($i -eq 6) { throw }; Start-Sleep -Milliseconds (300 * $i) }
+    finally { if ($fs) { $fs.Dispose() }; if ($sha) { $sha.Dispose() } }
   }
 }
 $ok = $true; $why = ''

@@ -139,6 +139,16 @@ class Scripts(unittest.TestCase):
         self.assertEqual(self.read("resources/app/backend/gone.py"), "bye")
         self.assertFalse(os.path.exists(os.path.join(self.install, "resources", "app", "backend", "added.py")))
 
+    def test_anything_still_running_from_the_install_folder_is_stopped_first(self):
+        helper = os.path.join(self.install, "helper.exe")                      # like the overlay or a Python daemon
+        shutil.copy(os.path.join(os.environ["SystemRoot"], "System32", "ping.exe"), helper)
+        proc = subprocess.Popen([helper, "-n", "120", "127.0.0.1"], stdout=subprocess.DEVNULL)
+        self.addCleanup(lambda: proc.poll() is None and proc.kill())
+        stage, zip_path = self.build_patch()
+        result = self.run_script(update_install.patch_script(stage, zip_path, self.install, "1.3.3", "1.3.4"))
+        self.assertEqual(result["status"], "ok", result)
+        self.assertIsNotNone(proc.poll())                                      # it would have held files open
+
     def fake_installer(self, version):
         path = os.path.join(self.tmp, "SEVEN-Setup.cmd")
         with open(path, "w") as f:
