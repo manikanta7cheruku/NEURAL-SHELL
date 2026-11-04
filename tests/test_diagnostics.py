@@ -72,6 +72,13 @@ class Attention(unittest.TestCase):
         self.assertEqual(items[0]["id"], "safe-mode")
         self.assertEqual(items[0]["action"]["retry"], "safe-mode")
 
+    def test_the_home_screen_shows_only_what_is_broken_and_only_its_title(self):
+        issue = lambda id_, level="warn": {"id": id_, "level": level, "title": id_.replace("_", " ").title(), "detail": "d", "fix": "A long fix"}
+        shown = self.collect(hearing=lambda: [issue("no_words"), issue("wake_word"), issue("noise"), issue("own_voice"),
+                                              issue("loop_stuck", "error")])
+        self.assertEqual([i["id"] for i in shown], ["hearing-loop_stuck"])           # ignored sounds belong in Settings, Hearing
+        self.assertEqual(shown[0]["message"], "Loop Stuck.")                            # the title, not a paragraph under the header
+
     def test_windows_blocking_the_microphone_is_named(self):
         items = self.collect(mic_blocked=lambda: True)
         self.assertEqual(items[0]["id"], "mic-blocked")

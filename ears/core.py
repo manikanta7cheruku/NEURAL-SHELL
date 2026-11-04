@@ -306,7 +306,7 @@ def hearing_stats() -> dict:
     """What the ears are doing right now: the settings in effect, the microphone's recent level, and what happened to the last
     things it heard (a count per reason). Read by backend/diagnostics.py."""
     settings = voice_settings()
-    outcomes = collections.Counter(o for _, o in RECENT)
+    outcomes = collections.Counter(o for t, o in RECENT if time.time() - t <= 120)    # the last two minutes, not ancient noise
     speaking_for = round(time.time() - _speak_watch["since"], 1) if _speak_watch["since"] else 0
     ptt_listener = None
     try:

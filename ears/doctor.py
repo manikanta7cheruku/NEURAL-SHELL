@@ -13,7 +13,11 @@ import json
 import os
 import time
 
-LOOP_STUCK_S = 15           # the voice loop beats about twice a second
+# The voice loop beats about twice a second while it waits for you, but not while it is busy with you: thinking about an answer and
+# speaking it can take a minute or more with no pass at all. So "stuck" means a long silence when idle, and a very long one when
+# it is answering. (This used to be 15 s for both and cried wolf at the end of every long answer.)
+LOOP_STUCK_S = 60
+LOOP_STUCK_BUSY_S = 600
 SPEAKING_STUCK_S = 120      # no answer of Seven's lasts this long
 SILENT_DB = -80             # below this a microphone is delivering nothing (a quiet room's own noise is -60 to -75)
 MIN_EVENTS = 5              # fewer than this many ignored sounds in a row says nothing yet
@@ -25,6 +29,12 @@ ORDER = {ERROR: 0, WARN: 1, INFO: 2}
 _SILENCE_FIX = ("unmute it (many laptops have a mute key), choose the right microphone in Windows Settings, System, Sound, Input, "
                 "and turn off its Audio enhancements or noise suppression (some laptop microphone arrays send silence with them on). "
                 "Or choose another microphone in Seven, Settings, Voice.")
+
+
+def loop_limit(state):
+    """How long the voice loop may go without a pass before it counts as stuck."""
+    busy = state.get("thinking") or state.get("speaking") or state.get("voice_state") in ("processing", "hearing")
+    return LOOP_STUCK_BUSY_S if busy else LOOP_STUCK_S
 
 
 def _issue(id_, level, title, detail, fix):
@@ -53,7 +63,7 @@ def assess(stats, state, now=None):
         out.append(_issue("speech_model", INFO, "Speech recognition is still getting ready", f"{sm.get('state')} {sm.get('progress', 0)}%",
                           "Seven cannot hear you until this finishes. Typing works."))
     beat = state.get("voice_loop_beat")
-    if beat and now - float(beat) > LOOP_STUCK_S:
+    if beat and now - float(beat) > loop_limit(state):
         out.append(_issue("loop_stuck", ERROR, "Seven stopped acting on what it hears", f"its main loop has not run for {now - float(beat):.0f} s",
                           "Restart Seven, then send the Diagnostics report: it shows the line the loop is stuck at."))
     if stats is None:

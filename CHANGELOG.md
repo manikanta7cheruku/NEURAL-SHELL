@@ -63,6 +63,11 @@ Version 1.3.2 is the build for the friends' test, 1.3.3 the update that tests th
 - `/api/chat` returns action receipts in non-streaming responses.
 
 ### Fixed
+- **False alarms on the home screen.** "Seven stopped acting on what it hears" appeared at the end of every long answer (the voice loop does not
+  pass while it is thinking and speaking; it is now stuck only after a minute idle or ten minutes answering), and "Seven hears sound
+  but cannot find words" appeared after a few ambient noises. The home screen now shows only what is plainly broken, as one short line; the
+  ignored-sound explanations stay in Settings, System, Hearing, and count only the last two minutes. The home content no longer slides
+  up behind the header when it is taller than the window.
 - **"Restart and install" closed Seven and did nothing.** The update script was started as a detached process, and PowerShell, a console
   program, exits at once without one, so no line of it ran. It now starts in its own process group with a hidden console and breaks
   away from Seven's job, and a test starts it the way the app does.

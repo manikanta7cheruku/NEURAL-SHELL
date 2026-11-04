@@ -74,7 +74,7 @@ export default function AttentionStrip() {
           <li key={i.id} role={i.level === 'error' ? 'alert' : 'status'}
               className={cx('flex items-center gap-3 px-3.5 py-2 text-[12.5px]', n > 0 && 'border-t border-s-border/70')}>
             <span className={cx('h-1.5 w-1.5 shrink-0 rounded-full', DOT[i.level])} />
-            <span className="min-w-0 flex-1 leading-snug text-s-text-2">{i.message}</span>
+            <span className="min-w-0 flex-1 line-clamp-2 leading-snug text-s-text-2" title={i.message}>{i.message}</span>
             {i.action && (
               <button onClick={() => (i.action.retry ? retrySafeMode() : navigate(i.action.to))}
                       className="shrink-0 rounded-md px-2 py-0.5 text-s-text underline decoration-s-border-l underline-offset-4 transition-colors hover:decoration-s-text-3">

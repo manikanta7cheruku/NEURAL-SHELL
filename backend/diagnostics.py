@@ -261,11 +261,13 @@ def voice_loop_section():
     """Is the loop that turns what the ears hear into actions still running? It beats about twice a second; when it stops, the
     ears keep filling a queue nobody empties and Seven looks 'listening' while acting on nothing. The report then shows where
     that thread is stuck."""
-    beat = _state().get("voice_loop_beat")
+    from ears import doctor
+    state = _state()
+    beat = state.get("voice_loop_beat")
     if not beat:
         return [_c("Voice loop", INFO, "has not started its main loop yet (still loading, or running without the backend)")]
     age = time.time() - float(beat)
-    if age < 15:
+    if age < doctor.loop_limit(state):
         return [_c("Voice loop", OK, f"running (last pass {age:.1f} s ago)")]
     import threading
     import traceback
