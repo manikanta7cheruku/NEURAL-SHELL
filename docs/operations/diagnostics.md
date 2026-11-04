@@ -47,10 +47,12 @@ need more.
 **Microphone check** (`backend/ear_check.py`, Start menu, "SEVEN Microphone Check") works without Seven: quit Seven, run it,
 and say "Hey Seven, what time is it" when it asks. It records six seconds, then prints the level per second, the voice
 detector's score, what the speech model transcribed and the reason Seven would give for ignoring it, and saves
-`Seven-Mic-Check.txt` on the Desktop (and copies it). On a PC that has an older Seven installed, send the file and run:
+`Seven-Mic-Check.txt` on the Desktop (and copies it). On a PC that has an older Seven installed (no Start menu entry), send two files, `backend\ear_check.py` and
+`scripts\Seven-Mic-Check.bat`, and have the person put them in one folder, quit Seven (tray icon, right click, Quit SEVEN) and
+double-click the `.bat`. Or in PowerShell (not Command Prompt: `%VAR%` does not work there), from the folder holding the file:
 
 ```
-"%LOCALAPPDATA%\Programs\SEVEN\resources\app\python\python.exe" ear_check.py
+& "$env:LOCALAPPDATA\Programs\SEVEN\resources\app\python\python.exe" .\ear_check.py
 ```
 
 ## Safe mode

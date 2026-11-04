@@ -6,7 +6,7 @@ it, and what the speech model would transcribe, with the reason Seven would give
 It is for the case Diagnostics cannot settle: Seven says it is listening, the microphone is open, and still nothing is acted on.
 Quit Seven first, then run it with Seven's own Python and speak when it asks:
 
-    "%LOCALAPPDATA%\\Programs\\SEVEN\\resources\\app\\python\\python.exe" ear_check.py
+    & "$env:LOCALAPPDATA\Programs\SEVEN\resources\app\python\python.exe" .\ear_check.py      (PowerShell)
 
 (Start menu, "SEVEN Microphone Check", does the same.) The result is shown, saved to the Desktop as Seven-Mic-Check.txt and copied
 to the clipboard. It records for five seconds, keeps nothing but numbers and the transcript, and sends nothing anywhere.
