@@ -72,9 +72,10 @@ def _problem() -> dict:
     """What the voice loop reported when Seven could not load or start its hearing, and safe mode if it is on."""
     try:
         from backend.api_server import _state
-        return {"problem": _state.get("voice_problem") or "", "safe_mode": (_state.get("safe_mode") or {}).get("reason", "")}
+        return {"problem": _state.get("voice_problem") or "", "safe_mode": (_state.get("safe_mode") or {}).get("reason", ""),
+                "mic_problem": _state.get("mic_problem") or "", "mic_notice": _state.get("mic_notice") or ""}
     except Exception:
-        return {"problem": "", "safe_mode": ""}
+        return {"problem": "", "safe_mode": "", "mic_problem": "", "mic_notice": ""}
 
 
 def _mic_blocked() -> bool:
@@ -95,10 +96,21 @@ def _mic_blocked() -> bool:
 
 
 _FIX = {"label": "Run diagnostics", "to": "/settings?section=system"}
+# What ears/doctor.py finds that the home screen should show. The others (start-up failures, safe mode, a silent or switched
+# microphone) have their own messages above, and a microphone that is merely quiet is shown only in Settings, System, Hearing.
+_HOME = {"loop_stuck", "mic_stream", "speaking_stuck", "ptt", "wake_word", "own_voice", "noise", "no_words", "speech_model"}
+
+
+def _hearing_issues() -> list:
+    try:
+        from backend.routes import hearing
+        return hearing.snapshot()[0]
+    except Exception:
+        return []
 
 
 def collect(mic_error=_mic_error, voice=_voice, ollama_up=_ollama_up, uptime=_uptime, setup_done=_setup_done,
-            speech=_speech, problem=_problem, mic_blocked=_mic_blocked) -> list:
+            speech=_speech, problem=_problem, mic_blocked=_mic_blocked, hearing=_hearing_issues) -> list:
     """The problems, most important first. The probes are parameters so tests can supply them."""
     if not setup_done():
         return []
@@ -112,6 +124,22 @@ def collect(mic_error=_mic_error, voice=_voice, ollama_up=_ollama_up, uptime=_up
         elif p["problem"]:
             out.append({"id": "hearing-failed", "level": "error",
                         "message": f"Seven couldn't start. {p['problem']}", "action": _FIX})
+    except Exception:
+        pass
+    try:
+        p = problem()
+        if p.get("mic_problem"):
+            out.append({"id": "mic-silent", "level": "warn", "message": p["mic_problem"], "action": _FIX})
+        elif p.get("mic_notice"):
+            out.append({"id": "mic-switched", "level": "info", "message": p["mic_notice"],
+                        "action": {"label": "Choose microphone", "to": "/settings?section=voice"}})
+    except Exception:
+        pass
+    try:
+        for issue in hearing():
+            if issue["id"] in _HOME and issue["level"] in ("error", "warn"):
+                out.append({"id": "hearing-" + issue["id"], "level": issue["level"], "message": f"{issue['title']}. {issue['fix']}",
+                            "action": {"label": "See why", "to": "/settings?section=system"}})
     except Exception:
         pass
     try:

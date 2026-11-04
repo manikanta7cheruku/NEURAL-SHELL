@@ -108,9 +108,9 @@ class Scripts(unittest.TestCase):
         write(new, "resources/app/version.txt", "1.3.4")
         write(new, "resources/app/backend/changed.py", "new code")
         write(new, "resources/app/backend/added.py", "hello")
-        old = {"version": "1.3.3", "files": {"resources/app/backend/changed.py": ["x", 1], "resources/app/backend/gone.py": ["y", 1],
-                                             "resources/app/version.txt": ["z", 1]}}
+        old = update_package.build_manifest(self.install, "1.3.3")                 # what this PC really has
         manifest = update_package.build_manifest(new, "1.3.4")
+        manifest["files"]["SEVEN.exe"] = old["files"]["SEVEN.exe"]                   # the new build has the same program
         zip_path = os.path.join(self.tmp, "p.zip")
         update_package.build_patch(new, old, manifest, zip_path)
         stage = os.path.join(self.tmp, "stage")
@@ -118,6 +118,39 @@ class Scripts(unittest.TestCase):
         if tamper:                                                              # damaged after it was proven, before it was copied
             write(stage, "files/resources/app/backend/added.py", "corrupted")
         return stage, zip_path
+
+    def test_a_patch_is_refused_on_a_build_it_was_not_made_from(self):
+        stage, zip_path = self.build_patch()
+        with open(os.path.join(stage, "patch.json"), encoding="utf-8") as fh:
+            meta = json.load(fh)
+        meta["base"] = {"resources/app/backend/other.py": "0" * 64}                 # a file this PC does not have the right copy of
+        write(self.install, "resources/app/backend/other.py", "a rebuilt copy")
+        with open(os.path.join(stage, "patch.json"), "w", encoding="utf-8") as f:
+            json.dump(meta, f)
+        result = self.run_script(update_install.patch_script(stage, zip_path, self.install, "1.3.3", "1.3.4"))
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("[base-mismatch]", result["detail"])
+        self.assertEqual(self.read("resources/app/version.txt"), "1.3.3")             # nothing was touched
+        self.assertEqual(self.read("resources/app/backend/changed.py"), "old")
+
+    def test_a_patch_is_applied_when_the_pc_has_exactly_the_build_it_was_made_from(self):
+        write(self.install, "resources/app/backend/same.py", "print('same')")
+        old = update_package.build_manifest(self.install, "1.3.3")                 # the build the PC really has
+        new = os.path.join(self.tmp, "new")
+        shutil.copytree(self.install, new)
+        write(new, "resources/app/version.txt", "1.3.4")
+        write(new, "resources/app/backend/changed.py", "new code")
+        os.remove(os.path.join(new, "resources", "app", "backend", "gone.py"))
+        zip_path = os.path.join(self.tmp, "p.zip")
+        update_package.build_patch(new, old, update_package.build_manifest(new, "1.3.4"), zip_path)
+        stage = os.path.join(self.tmp, "stage")
+        patch = update_package.extract_and_verify(zip_path, stage)
+        self.assertIn("resources/app/backend/same.py", patch["base"])               # checked, not sent
+        self.assertIn("SEVEN.exe", patch["base"])
+        self.assertIn("resources/app/backend/changed.py", patch["old"])             # its old copy is checked before it is replaced
+        result = self.run_script(update_install.patch_script(stage, zip_path, self.install, "1.3.3", "1.3.4"))
+        self.assertEqual(result["status"], "ok", result)
+        self.assertEqual(self.read("resources/app/backend/changed.py"), "new code")
 
     def test_a_patch_replaces_adds_and_removes_checks_and_reports(self):
         stage, zip_path = self.build_patch()

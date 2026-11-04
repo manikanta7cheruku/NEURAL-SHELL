@@ -183,5 +183,112 @@ class Report(unittest.TestCase):
         self.assertEqual(client.get("/api/panel/get-hotkey").status_code, 200)    # the Settings page asks this path
 
 
+class Hearing(unittest.TestCase):
+    """A PC where Seven is "listening", the microphone is open, and nothing is acted on: the report must say which of the
+    several reasons it is."""
+
+    def stats(self, **over):
+        mic = {"alive": True, "since_last_frame": 0.03, "frames": 5000, "device": "(Windows default)", "peak_db": -12.0,
+               "avg_db": -35.0, "best_speech_score": 0.9, "start_threshold": 0.55, "sensitivity": "balanced",
+               "utterances": 4, "too_short": 1}
+        base = {"mode": "always", "mic": "", "push_to_talk_listener": True, "speaking_for_s": 0, "outcomes": {}, "mic_stats": mic,
+                "sensitivity": "balanced", "wake_words": [], "model_state": {}}
+        mic.update(over.pop("mic", {}))
+        base.update(over)
+        return base
+
+    def run_section(self, stats, live="always"):
+        from backend import diagnostics
+        ears = types.SimpleNamespace(hearing_stats=lambda: stats)
+        with mock.patch.dict(sys.modules, {"ears.core": ears}), mock.patch.object(diagnostics, "_state", lambda: {"listen_mode": live}):
+            return {c["name"]: c for c in diagnostics.hearing_section()}
+
+    def test_a_silent_microphone_is_called_silent(self):
+        got = self.run_section(self.stats(mic={"peak_db": -90.0, "avg_db": -95.0, "best_speech_score": 0.0}))
+        self.assertEqual(got["Microphone level (last 10 s)"]["status"], "fail")
+        self.assertIn("SILENT", got["Microphone level (last 10 s)"]["detail"])
+
+    def test_a_very_quiet_microphone_is_a_warning_with_the_fix(self):
+        got = self.run_section(self.stats(mic={"peak_db": -48.0, "avg_db": -60.0, "best_speech_score": 0.03}))
+        self.assertEqual(got["Microphone level (last 10 s)"]["status"], "warn")
+        self.assertIn("Sound settings", got["Microphone level (last 10 s)"]["detail"])
+
+    def test_push_to_talk_without_its_key_listener_is_the_reason_nothing_is_heard(self):
+        got = self.run_section(self.stats(mode="ptt", push_to_talk_listener=False), live="ptt")
+        self.assertEqual(got["Push to talk"]["status"], "fail")
+        self.assertIn("NOT running", got["Push to talk"]["detail"])
+
+    def test_a_screen_that_disagrees_with_the_ears_means_the_voice_loop_is_stuck(self):
+        got = self.run_section(self.stats(mode="always"), live="ptt")
+        self.assertEqual(got["Mode on screen"]["status"], "warn")
+
+    def test_everything_ignored_because_of_the_wake_word_says_so(self):
+        got = self.run_section(self.stats(mode="wake", outcomes={"no wake word": 9, "too short": 1}))
+        key = next(k for k in got if k.startswith("Last "))
+        self.assertEqual(got[key]["status"], "warn")
+        self.assertIn("Always on", got["Most likely reason"]["detail"])
+
+    def test_a_seven_that_thinks_it_has_been_talking_for_minutes_is_flagged(self):
+        got = self.run_section(self.stats(speaking_for_s=400, outcomes={"Seven's own voice": 12}))
+        self.assertEqual(got["Seven speaking for"]["status"], "fail")
+        self.assertIn("own voice", got["Most likely reason"]["detail"])
+
+    def test_a_healthy_hearing_has_no_warnings(self):
+        got = self.run_section(self.stats(outcomes={"heard": 6, "no wake word": 1}))
+        self.assertFalse([c for c in got.values() if c["status"] in ("warn", "fail")])
+
+    def test_thinking_is_not_reported_as_not_listening(self):
+        from backend import diagnostics
+        with mock.patch.object(diagnostics, "_state", lambda: {"ready": True, "listening": False, "thinking": True}):
+            got = {c["name"]: c for c in diagnostics.state_section()}
+        self.assertEqual(got["Listening"]["status"], "info")
+
+
+class Logs(unittest.TestCase):
+    NOW = __import__("datetime").datetime(2026, 11, 3, 22, 0, 0)
+
+    def write(self, name, text):
+        path = os.path.join(tempfile.mkdtemp(), name)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(text)
+        return path
+
+    def test_a_multi_line_info_message_is_not_a_warning(self):
+        from backend import diagnostics
+        path = self.write("seven.log", "\n".join([
+            "2026-11-03 21:00:00 [INFO    ] dns.resolver: answer for grokipedia.com",
+            "; answers 2", "grokipedia.com. 300 IN A 104.18.19.2", "; authorities 0",
+            "2026-11-03 21:00:05 [WARNING ] mouth: the voice engine restarted"]))
+        text = diagnostics._useful(path, 20, now=self.NOW)
+        self.assertIn("the voice engine restarted", text)
+        self.assertNotIn("grokipedia", text)
+
+    def test_a_traceback_stays_with_its_error_and_old_entries_are_dropped(self):
+        from backend import diagnostics
+        path = self.write("python_crash.log", "\n".join([
+            "[2026-09-05T20:00:39.459Z] [ERROR] old: this was a long time ago", "Traceback (most recent call last):", "TypeError: old",
+            "[2026-11-03T20:00:39.459Z] [ERROR] new: the voice failed", "Traceback (most recent call last):", "TypeError: new"]))
+        text = diagnostics._useful(path, 20, now=self.NOW)
+        self.assertIn("TypeError: new", text)
+        self.assertNotIn("old", text)
+
+    def test_a_native_crash_says_when_and_shows_the_crashing_thread_only(self):
+        from backend import diagnostics
+        base = tempfile.mkdtemp()
+        with open(os.path.join(base, "native_crash.log"), "w", encoding="utf-8") as f:
+            f.write("\n".join(["--- Seven started 2026-10-01 10:00:00 (pid 1) ---", "Windows fatal exception: access violation", "",
+                                "--- Seven started 2026-11-03 20:00:00 (pid 2) ---", "Windows fatal exception: access violation", "",
+                                "Current thread 0x00001234 (most recent call first):", '  File "ctranslate2", line 1 in transcribe',
+                                "--- Seven started 2026-11-03 21:00:00 (pid 3) ---"]))
+        with open(os.path.join(base, "python_crash.log"), "w", encoding="utf-8") as f:
+            f.write("[2026-11-03T20:00:40.000Z] EXIT code=3221225477 signal=null crashCount=0\n")
+        with mock.patch.object(diagnostics, "_recent", lambda line, now=None: "2026-11-03" in line):
+            crashes, exits = diagnostics._crashes(base)
+        self.assertEqual(len(crashes), 1)                                      # the October one is too old
+        self.assertIn("2026-11-03 20:00:00", crashes[0])
+        self.assertIn("transcribe", crashes[0])
+        self.assertIn("access violation", exits[0])
+
+
 if __name__ == "__main__":
     unittest.main()

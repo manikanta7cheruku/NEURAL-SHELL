@@ -346,11 +346,37 @@ def check_installer_version(path, expected):
     return True, ""
 
 
+def _blocked_file():
+    return os.path.join(os.path.dirname(_get_cache_file()), "patch_blocked.json")
+
+
+def _patch_blocked(version):
+    """A changed-files update that this PC could not take (its files are not exactly the build the patch was made from) is not tried
+    again for that version: the full installer is used."""
+    try:
+        with open(_blocked_file(), encoding="utf-8") as f:
+            return str(version) in json.load(f).get("versions", [])
+    except (OSError, ValueError):
+        return False
+
+
+def _block_patch(version):
+    try:
+        with open(_blocked_file(), encoding="utf-8") as f:
+            versions = json.load(f).get("versions", [])
+    except (OSError, ValueError):
+        versions = []
+    if str(version) not in versions:
+        versions.append(str(version))
+    with open(_blocked_file(), "w", encoding="utf-8") as f:
+        json.dump({"versions": versions}, f)
+
+
 def plan(info):
     """"patch" when the release has changed-files-only package for exactly the version installed here, and this is an
     installed Seven that can take it; "full" otherwise."""
     patch = (info or {}).get("patch") or {}
-    if patch.get("url") and patch.get("from") == _read_current_version():
+    if patch.get("url") and patch.get("from") == _read_current_version() and not _patch_blocked((info or {}).get("version", "")):
         try:
             from backend import update_install
             if update_install.install_dir():
@@ -790,6 +816,10 @@ def _load_result():
                                      "detail": f"Seven reports {current}, not {result.get('to')}, after the update."}
         else:
             _state["last_result"] = result
+            if "[base-mismatch]" in str(result.get("detail", "")):
+                _block_patch(result.get("to", ""))                     # next time: the full installer
+                _discard_download()
+                _state["last_result"] = {**result, "detail": str(result["detail"]).replace("[base-mismatch] ", "")}
     except Exception as e:
         print("[UPDATER] Result read error: " + str(e))
 

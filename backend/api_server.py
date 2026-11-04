@@ -320,6 +320,7 @@ from backend.routes import conversations as conversation_routes
 from backend.routes import voice as voice_routes
 from backend.routes import attention as attention_routes
 from backend.routes import diagnostics as diagnostics_routes
+from backend.routes import hearing as hearing_routes
 from backend.routes import welcome as welcome_routes
 from backend.routes import companion as companion_routes
 
@@ -347,6 +348,7 @@ app.include_router(conversation_routes.router)
 app.include_router(voice_routes.router)
 app.include_router(attention_routes.router)
 app.include_router(diagnostics_routes.router)
+app.include_router(hearing_routes.router)
 app.include_router(welcome_routes.router)
 app.include_router(companion_routes.router)
 from backend.routes import feedback as feedback_routes

@@ -321,6 +321,7 @@ def run_voice_loop(ctx, config, app_ui, api_set_state, safe_mode_file):
             if handle_pending_enrollment(ctx, api_set_state):
                 continue
 
+            api_set_state("voice_loop_beat", time.time())    # Diagnostics: a loop that stops beating is stuck, and where
             _show("listening" if is_active else "paused")
             _vs = _ears_core.voice_settings()
             _ears_core.STREAM.set_push_to_talk(_ptt_held if _vs["listen_mode"] == "ptt" else None)
@@ -364,6 +365,7 @@ def run_voice_loop(ctx, config, app_ui, api_set_state, safe_mode_file):
                     _chime("wake")
                 elif not in_follow_up:
                     api_set_state("voice_ignored", {"reason": "no wake word", "text": user_input[:80], "at": time.time()})
+                    _ears_core.RECENT.append((time.time(), "no wake word"))
                     continue
 
             if _silence_watcher:

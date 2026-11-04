@@ -17,6 +17,7 @@ Returns ("text", "__voice__") for a valid utterance (or "temp_audio.wav" when vo
 =============================================================================
 """
 
+import collections
 import io
 import json
 import os
@@ -296,7 +297,30 @@ def start():
     STREAM.start()
 
 
+# The outcome of the last 40 things the microphone gave us, for Diagnostics: "heard" or the reason it was ignored.
+RECENT = collections.deque(maxlen=40)
+_speak_watch = {"since": None}
+
+
+def hearing_stats() -> dict:
+    """What the ears are doing right now: the settings in effect, the microphone's recent level, and what happened to the last
+    things it heard (a count per reason). Read by backend/diagnostics.py."""
+    settings = voice_settings()
+    outcomes = collections.Counter(o for _, o in RECENT)
+    speaking_for = round(time.time() - _speak_watch["since"], 1) if _speak_watch["since"] else 0
+    ptt_listener = None
+    try:
+        from ears import push_to_talk
+        ptt_listener = push_to_talk._listener is not None
+    except Exception:
+        pass
+    return {"mode": settings["listen_mode"], "sensitivity": settings["sensitivity"], "mic": settings["mic"],
+            "wake_words": settings["wake_words"], "push_to_talk_listener": ptt_listener, "speaking_for_s": speaking_for,
+            "outcomes": dict(outcomes), "mic_stats": STREAM.stats(), "model_state": dict(_model_state)}
+
+
 def _ignored(reason: str, text: str = ""):
+    RECENT.append((time.time(), reason))
     print(Fore.YELLOW + f"[EARS] Ignored: {reason}{f' ({text[:50]})' if text else ''}")
     if not _testing.is_set():                            # a hearing test reports its own result
         _publish("voice_ignored", {"reason": reason, "text": text[:80], "at": time.time()})
@@ -441,7 +465,9 @@ def _wav_bytes(audio: np.ndarray) -> bytes:
 def _understand(utt) -> tuple:
     """One utterance to (text or None, why it was ignored, the raw text). Used by listen() and the hearing test."""
     # Seven hearing itself: began while it was talking, or in the echo tail right after.
-    if utt.during_speech or _is_speaking_fn() or utt.started < _ended_at_fn() + 0.35:
+    speaking = bool(_is_speaking_fn())
+    _speak_watch["since"] = (_speak_watch["since"] or time.time()) if speaking else None
+    if utt.during_speech or speaking or utt.started < _ended_at_fn() + 0.35:
         _ignored("Seven's own voice")
         return None, "Seven's own voice", ""
     t = time.time()
@@ -459,6 +485,7 @@ def _understand(utt) -> tuple:
 
     final = normalize_wake(_autocorrect(text).strip())
     final = final[:1].upper() + final[1:]
+    RECENT.append((time.time(), "heard"))
     print(Fore.GREEN + f"[EARS] Heard: '{final}' ({utt.seconds:.1f}s audio, {time.time() - t:.2f}s to text)")
     STREAM._set_state("idle")
     return final, "", text

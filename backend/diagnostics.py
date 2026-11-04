@@ -101,8 +101,12 @@ def state_section():
     st = _state()
     if not st:
         return [_c("Live state", INFO, "unavailable: the backend is not running")]
+    busy = "thinking" if st.get("thinking") else "speaking" if st.get("speaking") else ""
+    listening = (_c("Listening", OK, "True") if st.get("listening")
+                 else _c("Listening", INFO, f"paused while it is {busy}: normal") if busy
+                 else _c("Listening", FAIL, "False"))
     out = [_c("Ready", OK if st.get("ready") else WARN, f"{st.get('ready')} (stage: {st.get('ready_stage') or '-'})"),
-           _c("Listening", OK if st.get("listening") else FAIL, str(st.get("listening"))),
+           listening,
            _c("Status line", INFO, st.get("status_text") or "-")]
     if st.get("voice_problem"):
         out.append(_c("Hearing problem", FAIL, st["voice_problem"]))
@@ -173,6 +177,101 @@ def speech_section():
     except Exception as exc:
         out.append(_c("Speech models", WARN, f"unreadable ({type(exc).__name__})"))
     return out
+
+
+_IGNORE_HINTS = {
+    "no wake word": "Seven is in wake-word mode and acts only after you say 'Hey Seven'. Try Always on.",
+    "Seven's own voice": "Seven thinks it is hearing itself, so it throws the audio away. Check 'speaking for' above; "
+                         "headphones stop it hearing its own voice.",
+    "too short": "short sounds only: clicks or background noise, no sustained speech reaches the detector.",
+    "no clear speech": "the speech model hears something but finds no words in it: very quiet or very noisy audio.",
+    "noise": "the speech model finds no words in what it hears.",
+}
+
+
+def _config_voice() -> dict:
+    return (_read_json(os.path.join(_DATA, "config.json")) or {}).get("voice", {}) or {}
+
+
+def hearing_section():
+    """What the ears are doing right now. The question this answers: Seven is 'listening' and the microphone is open, so why
+    does it act on nothing? It is hearing silence, hearing noise, hearing speech it then throws away, or waiting for a key."""
+    ears = sys.modules.get("ears.core")
+    if ears is None or not hasattr(ears, "hearing_stats"):
+        return [_c("Hearing right now", INFO, "the ears are not loaded in this process")]
+    h = ears.hearing_stats()
+    out = []
+    mode, live = h["mode"], (_state().get("listen_mode") or "")
+    saved = _config_voice().get("listen_mode", "(not set)")
+    out.append(_c("Listening mode in effect", OK, f"{mode} (saved setting: {saved}; shown on screen: {live or '?'})"))
+    if live and live != mode:
+        out.append(_c("Mode on screen", WARN, f"the screen shows '{live}' but the ears use '{mode}': the voice loop has not refreshed it, "
+                                              "which means it is busy or stuck"))
+    if mode == "ptt":
+        listener = h.get("push_to_talk_listener")
+        out.append(_c("Push to talk", FAIL if not listener else WARN,
+                      "Seven hears you only while Shift is held, and the keyboard listener is NOT running" if not listener
+                      else "Seven hears you only while Shift is held. Choose Always on or Wake word to talk without a key"))
+    if h["speaking_for_s"] > 120:
+        out.append(_c("Seven speaking for", FAIL, f"{h['speaking_for_s']:.0f} s: Seven believes it is talking, so it throws away everything it hears"))
+    mic = h["mic_stats"]
+    ok_stream = mic["alive"] and mic["since_last_frame"] is not None and mic["since_last_frame"] < 2
+    out.append(_c("Microphone frames arriving", OK if ok_stream else FAIL,
+                  f"{mic['frames']} so far; last one {mic['since_last_frame']} s ago; device: {mic['device']}" if mic["frames"]
+                  else "none yet: the microphone stream has not delivered any audio"))
+    peak, avg, best = mic["peak_db"], mic["avg_db"], mic["best_speech_score"]
+    if peak is not None:
+        level = (FAIL, "SILENT. The microphone delivers no sound: muted, the wrong device, or blocked by Windows") if peak < -60 else \
+                (WARN, "very quiet: raise the microphone volume in Windows Sound settings, Input") if peak < -40 else (OK, "good")
+        out.append(_c("Microphone level (last 10 s)", level[0], f"peak {peak} dBFS, average {avg} dBFS: {level[1]}"))
+        out.append(_c("Voice detector", WARN if peak > -45 and best is not None and best < 0.1 else INFO,
+                      f"best speech score {best} (needs {mic['start_threshold']} to start an utterance, sensitivity {mic['sensitivity']})"
+                      + (". Sound arrives but the detector finds no speech in it" if peak > -45 and best is not None and best < 0.1 else "")))
+    try:
+        from ears import doctor
+        issues = doctor.assess(h, _state())
+        for issue in issues:
+            out.append(_c("Problem: " + issue["title"], WARN if issue["level"] != "info" else INFO, f"{issue['detail']}. Do this: {issue['fix']}"))
+        if not [i for i in issues if i["level"] != "info"]:
+            out.append(_c("Hearing doctor", OK, "no problem found with hearing right now"))
+        history = doctor.recent_log(5)
+        if history:
+            out.append(_c("Hearing problems recorded earlier", INFO, chr(10).join(history)))
+    except Exception as exc:
+        out.append(_c("Hearing doctor", WARN, f"could not run ({type(exc).__name__})"))
+    out.append(_c("Utterances since start", INFO, f"{mic['utterances']} became requests, {mic['too_short']} were too short"))
+    outcomes = h["outcomes"]
+    total = sum(outcomes.values())
+    if total:
+        heard = outcomes.get("heard", 0)
+        ignored = {k: v for k, v in outcomes.items() if k != "heard"}
+        summary = f"{heard} heard; ignored: " + (", ".join(f"{k} x{v}" for k, v in sorted(ignored.items(), key=lambda kv: -kv[1])) or "none")
+        out.append(_c(f"Last {total} things it heard", WARN if total >= 5 and heard == 0 else INFO, summary))
+        if total >= 5 and heard == 0:
+            top = max(ignored, key=ignored.get)
+            hint = next((v for k, v in _IGNORE_HINTS.items() if k in top), "")
+            if hint:
+                out.append(_c("Most likely reason", WARN, f"'{top}': {hint}"))
+    else:
+        out.append(_c("Last things it heard", INFO, "nothing yet"))
+    return out
+
+
+def voice_loop_section():
+    """Is the loop that turns what the ears hear into actions still running? It beats about twice a second; when it stops, the
+    ears keep filling a queue nobody empties and Seven looks 'listening' while acting on nothing. The report then shows where
+    that thread is stuck."""
+    beat = _state().get("voice_loop_beat")
+    if not beat:
+        return [_c("Voice loop", INFO, "has not started its main loop yet (still loading, or running without the backend)")]
+    age = time.time() - float(beat)
+    if age < 15:
+        return [_c("Voice loop", OK, f"running (last pass {age:.1f} s ago)")]
+    import threading
+    import traceback
+    frame = next((sys._current_frames().get(t.ident) for t in threading.enumerate() if t.name == "VoiceLoop"), None)
+    where = "".join(traceback.format_stack(frame)[-6:]) if frame else "the thread is gone: it ended without restarting"
+    return [_c("Voice loop", FAIL, f"STUCK: no pass for {age:.0f} s. It is waiting here:" + chr(10) + where.rstrip())]
 
 
 def voice_section():
@@ -317,38 +416,92 @@ def processes_section():
 # Log lines that are expected on every healthy PC and would only distract.
 _NOISE = ("phonemizer", "unauthenticated requests to the HF Hub", "screen_brightness_control", "filelock", "response_latency",
           "background worker started", "warmed")
+_LEVEL = re.compile(r"\[(DEBUG|INFO|WARNING|ERROR|CRITICAL)\s*\]")
+_STAMP = re.compile(r"^\[?(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})")
+KEEP_DAYS = 7
+_EXIT_CODES = {3221225477: "0xC0000005: a native library crashed (access violation)", 3221225786: "0xC000013A: closed with Ctrl+C",
+               1073807364: "0x40010004: the process was ended from outside (Quit, Task Manager or an installer)",
+               3221226505: "0xC0000409: a native library crashed (stack buffer overrun)"}
 
 
-def _useful(path, lines):
-    """The last warnings and errors of a log, repeats folded into one line with a count, benign noise left out."""
-    text = _tail(path, 400, skip="[DEBUG")
-    kept = []
-    for ln in text.splitlines():
-        if not ln.strip() or "[INFO" in ln or any(n in ln for n in _NOISE):
+def _recent(stamp_line, now=None):
+    m = _STAMP.match(stamp_line)
+    if not m:
+        return True
+    try:
+        when = datetime.datetime.strptime(f"{m.group(1)} {m.group(2)}", "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return True
+    return (now or datetime.datetime.now()) - when <= datetime.timedelta(days=KEEP_DAYS)
+
+
+def _useful(path, lines, now=None):
+    """The warnings and errors of the last week from a log, with their continuation lines, repeats folded into one line with a
+    count, and benign noise left out. A multi-line INFO message (a DNS dump, say) is not a warning: its lines have no level of
+    their own and belong to the entry above them."""
+    entries = []                                  # [key, text, count]
+    keep = False
+    for ln in _tail(path, 1500, skip="[DEBUG").splitlines():
+        if not ln.strip():
             continue
-        key = ln.split("]", 2)[-1].strip()[:140]               # without the time, so repeats fold together
-        if kept and kept[-1][0] == key:
-            kept[-1][2] += 1
+        level = _LEVEL.search(ln)
+        if level or _STAMP.match(ln):
+            keep = bool(level) and level.group(1) in ("WARNING", "ERROR", "CRITICAL") and not any(n in ln for n in _NOISE) and _recent(ln, now)
+            if keep:
+                key = ln.split("]", 2)[-1].strip()[:140]
+                if entries and entries[-1][0] == key:
+                    entries[-1][2] += 1
+                else:
+                    entries.append([key, ln, 1])
+        elif keep and entries:
+            entries[-1][1] += "\n" + ln          # a traceback or other continuation of the entry above
+    return "\n".join(text + (f"  (x{n})" if n > 1 else "") for _, text, n in entries[-lines:])
+
+
+def _crashes(base):
+    """Native crashes of the last week: when, and what the crashing thread was doing. native_crash.log gets a marker line at every
+    start and Python's fault handler writes the thread dump under it when the process dies."""
+    text = _tail(os.path.join(base, "native_crash.log"), 4000)
+    found, marker, block = [], "", []
+    for ln in text.splitlines() + ["--- Seven started END (pid 0) ---"]:
+        if ln.startswith("--- Seven started"):
+            if marker and any(x.strip() for x in block):
+                found.append((marker, block))
+            marker, block = ln.replace("--- Seven started", "").replace("---", "").strip(), []
         else:
-            kept.append([key, ln, 1])
-    return "\n".join(f"{ln}" + (f"  (x{n})" if n > 1 else "") for _, ln, n in kept[-lines:])
+            block.append(ln)
+    out = []
+    for marker, block in found:
+        if not _recent(marker):
+            continue
+        body = [x for x in block if x.strip()]
+        start = next((i for i, x in enumerate(body) if "fatal exception" in x.lower()), 0)
+        out.append(f"after the start at {marker}:\n" + "\n".join("    " + x for x in body[start:start + 12]))
+    exits = []
+    for ln in _tail(os.path.join(base, "python_crash.log"), 400).splitlines():
+        m = re.search(r"EXIT code=(\d+)", ln)
+        if m and _recent(ln):
+            code = int(m.group(1))
+            exits.append(f"{ln.split(']')[0].lstrip('[')[:19]}: the backend exited with {_EXIT_CODES.get(code, 'code ' + str(code))}")
+    return out, exits
 
 
 def logs_section():
     out = []
     base = os.path.join(_DATA, "logs")
     text = _useful(os.path.join(base, "seven.log"), 25)
-    out.append(_c("Seven log: warnings and errors", WARN if text else OK, text or "none"))
-    crash = [ln for ln in _tail(os.path.join(base, "native_crash.log"), 60).splitlines()
-             if ln.strip() and not ln.startswith("--- Seven started")]
-    out.append(_c("Native crashes", FAIL if crash else OK, "\n".join(crash[-20:]) if crash else "none recorded"))
+    out.append(_c("Seven log: warnings and errors (last 7 days)", WARN if text else OK, text or "none"))
+    crashes, exits = _crashes(base)
+    out.append(_c("Native crashes (last 7 days)", FAIL if crashes else OK, "\n".join(crashes[-3:]) if crashes else "none recorded"))
+    out.append(_c("Backend exits (last 7 days)", WARN if exits else OK, "\n".join(exits[-6:]) if exits else "none"))
     errors = _useful(os.path.join(base, "python_crash.log"), 15)
-    out.append(_c("Backend error output", WARN if errors else OK, errors or "none"))
+    out.append(_c("Backend error output (last 7 days)", WARN if errors else OK, errors or "none"))
     return out
 
 
 SECTIONS = [("Seven", app_section), ("Live state", state_section), ("Safe mode", safe_mode_section),
-            ("Microphone", microphone_section), ("Speech recognition", speech_section), ("Voice", voice_section),
+            ("Microphone", microphone_section), ("Speech recognition", speech_section), ("Hearing right now", hearing_section), ("Voice loop", voice_loop_section),
+            ("Voice", voice_section),
             ("AI model", ai_section), ("Native libraries", libraries_section), ("Network and server", network_section),
             ("Data", data_section), ("Processes", processes_section), ("Logs", logs_section)]
 SLOW = {"Native libraries", "Network and server"}

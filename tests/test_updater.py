@@ -50,6 +50,8 @@ GITHUB_RELEASE = {"tag_name": "v1.4.0", "published_at": "2026-10-29T10:00:00", "
 
 class UpdaterTest(unittest.TestCase):
     def setUp(self):
+        if os.path.exists(updater._blocked_file()):                       # a patch blocked by an earlier test must not leak into this one
+            os.remove(updater._blocked_file())
         updater._state.update(update_available=False, checking=False, downloading=False, download_progress=0,
                               download_path=None, error=None, info=None, check_failed=False, last_checked=None)
         for name, value in (("_read_current_version", "1.3.0"), ("_get_tier", "free"), ("_check_local_override", None)):
@@ -396,6 +398,19 @@ class Patches(UpdaterTest):
             updater._state.update(download_path="C:\\t\\p.zip", update_kind="patch")
             self.assertEqual(updater.install_update()["kind"], "patch")
             self.assertIn("patch.json", launch.call_args[0][0])
+
+
+class BlockedPatch(UpdaterTest):
+    def test_a_patch_the_pc_could_not_take_is_not_tried_again_for_that_version(self):
+        info = {"version": "1.4.0", "download_url": "https://x/y.exe", "patch": {"from": "1.3.0", "url": "https://x/p.zip", "sha256": "a" * 64}}
+        failed = {"status": "failed", "from": "1.3.0", "to": "1.4.0", "log": "x.log",
+                  "detail": "[base-mismatch] This copy of Seven is not exactly the build the update was made from (a.py differs)."}
+        with mock.patch("backend.update_install.install_dir", return_value="C:\\SEVEN"):
+            self.assertEqual(updater.plan(info), "patch")
+            with mock.patch("backend.update_install.read_result", return_value=failed):
+                updater._load_result()
+            self.assertEqual(updater.plan(info), "full")
+        self.assertNotIn("[base-mismatch]", updater.get_state()["last_result"]["detail"])
 
 
 class Results(UpdaterTest):

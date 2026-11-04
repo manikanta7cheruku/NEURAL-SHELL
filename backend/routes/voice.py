@@ -164,5 +164,22 @@ def hearing_test():
                                                     "and that no other app has it.")
     result = ears.hearing_test()
     if result is None:
-        return {"heard": "", "ignored": "Nothing was said in 10 seconds.", "raw": ""}
+        return {"heard": "", "ignored": _nothing_heard(ears), "raw": ""}
     return result
+
+
+def _nothing_heard(ears) -> str:
+    """Why a test that heard nothing heard nothing: a key to hold, a silent microphone, or sound with no speech in it."""
+    try:
+        if ears.voice_settings()["listen_mode"] == "ptt":
+            return "Nothing was said in 10 seconds. Push to talk is on, so Seven hears you only while you hold Shift."
+        mic = ears.STREAM.stats()
+        if mic["peak_db"] is not None and mic["peak_db"] < -60:
+            return "Seven's microphone is silent (no sound at all arrived). Check that it is not muted and is the right device."
+        if mic["peak_db"] is not None and mic["peak_db"] < -40:
+            return "Seven's microphone is very quiet. Raise its volume in Windows Sound settings, Input, and try again."
+        if mic["best_speech_score"] is not None and mic["best_speech_score"] < 0.1:
+            return "Sound reached Seven but none of it sounded like speech. Speak closer to the microphone."
+    except Exception:
+        pass
+    return "Nothing was said in 10 seconds."
