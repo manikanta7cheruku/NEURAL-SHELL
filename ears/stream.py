@@ -290,6 +290,7 @@ class MicStream:
             return False                                 # it carried speech not long ago: it works, the room is just quiet
         self._last_search = now
         try:
+            pa = pa() if callable(pa) else pa                # PortAudio is only touched when a search is really needed
             current = self._force_index if self._force_index is not None else self._device_index(pa)
             if self._find_working_device(pa, current):
                 self._silent_since = None
@@ -326,7 +327,7 @@ class MicStream:
             self._recent.append((self.last_frame_at, rms, float(np.max(np.abs(frame))), p))
             if p >= 0.5:
                 self.last_speech_at = self.last_frame_at
-            if self._watch_silence(audio.pa(), float(np.max(np.abs(frame))), self.last_frame_at):
+            if self._watch_silence(audio.pa, float(np.max(np.abs(frame))), self.last_frame_at):
                 self._reopen = True
                 break
             self.level = max(0.0, min(1.0, (20 * np.log10(rms) + 60) / 50))   # -60 dBFS..-10 dBFS -> 0..1
