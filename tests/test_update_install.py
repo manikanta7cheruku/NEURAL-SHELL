@@ -182,6 +182,18 @@ class Scripts(unittest.TestCase):
         self.assertEqual(result["status"], "ok", result)
         self.assertIsNotNone(proc.poll())                                      # it would have held files open
 
+    def test_the_script_really_starts_when_launched_the_way_the_app_launches_it(self):
+        # The other tests run the script directly. The app starts it with launch(), and with DETACHED_PROCESS powershell.exe
+        # exited without running a line: "Restart and install" closed Seven and nothing happened. This starts it for real.
+        import time
+        marker = os.path.join(self.tmp, "started.txt")
+        update_install.launch("Set-Content -Path '" + marker + "' -Value 'started'", name="seven_launch_test.ps1")
+        for _ in range(100):
+            if os.path.exists(marker):
+                break
+            time.sleep(0.1)
+        self.assertTrue(os.path.exists(marker), "the update script did not start")
+
     def fake_installer(self, version):
         path = os.path.join(self.tmp, "SEVEN-Setup.cmd")
         with open(path, "w") as f:

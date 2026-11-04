@@ -63,6 +63,9 @@ Version 1.3.2 is the build for the friends' test, 1.3.3 the update that tests th
 - `/api/chat` returns action receipts in non-streaming responses.
 
 ### Fixed
+- **"Restart and install" closed Seven and did nothing.** The update script was started as a detached process, and PowerShell, a console
+  program, exits at once without one, so no line of it ran. It now starts in its own process group with a hidden console and breaks
+  away from Seven's job, and a test starts it the way the app does.
 - **Updates could download and then not install.** The launcher started Seven again a few seconds after starting the installer,
   without waiting for it, and said nothing when it failed, so the old version kept running and the update was offered again. The
   installer now runs to the end, the version on disk is checked, the result is recorded and shown, and Seven starts only
