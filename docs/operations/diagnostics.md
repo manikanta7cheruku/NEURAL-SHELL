@@ -29,6 +29,30 @@ The top lists everything that failed or looks wrong ("READ THESE FIRST"); the re
 | Network and server | the Seven server (and how long it took to wake), Hugging Face, GitHub, and whether the PC is on the server's user list |
 | Logs | the last warnings from `seven.log`, `native_crash.log` and `python_crash.log` |
 
+## "Listening" but nothing happens
+
+The report has two sections for this, **Hearing right now** and **Voice loop**, and there is a standalone check for when you
+need more.
+
+| The report says | It means | What to do |
+|---|---|---|
+| `Microphone level ... SILENT` | the microphone delivers no sound at all (muted at the hardware, a driver that gives nothing, the wrong device) | unmute (many laptops have a mute key), pick the right device in Windows Sound settings, Input. Seven also tries the other microphones itself after 8 seconds of digital silence and says which one it switched to |
+| `very quiet` | sound arrives, but too faintly for the voice detector | raise the microphone volume in Windows Sound settings, Input |
+| `Voice detector ... finds no speech` | the sound is noise, or heavy noise suppression flattens speech | speak closer, try sensitivity Relaxed, try another microphone |
+| `Last N things it heard: ... no wake word x9` | Wake word mode: Seven acts only after "Hey Seven" | say it, or choose Always on |
+| `Seven's own voice` many times, or `Seven speaking for 400 s` | Seven believes it is talking, so it throws away everything it hears | headphones; restart Seven; send the report |
+| `Push to talk` | Seven hears only while Shift is held | choose Always on or Wake word |
+| `Mode on screen ... differs` or `Voice loop STUCK` | the loop that acts on what is heard stopped; the report prints the line it is waiting at | send the report |
+
+**Microphone check** (`backend/ear_check.py`, Start menu, "SEVEN Microphone Check") works without Seven: quit Seven, run it,
+and say "Hey Seven, what time is it" when it asks. It records six seconds, then prints the level per second, the voice
+detector's score, what the speech model transcribed and the reason Seven would give for ignoring it, and saves
+`Seven-Mic-Check.txt` on the Desktop (and copies it). On a PC that has an older Seven installed, send the file and run:
+
+```
+"%LOCALAPPDATA%\Programs\SEVEN\resources\app\python\python.exe" ear_check.py
+```
+
 ## Safe mode
 
 Seven starts without its speech and brain only after **three failed starts in a row**. One failure just tries again on the

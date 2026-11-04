@@ -8,6 +8,15 @@ project uses [semantic versioning](docs/development/release-process.md#versions)
 Version 1.3.2 is the build for the friends' test, 1.3.3 the update that tests the new update flow, and the public launch stays 1.3.4.
 
 ### Added
+- **Hearing diagnostics.** The report now says what the microphone delivers (level in dBFS, the voice detector's best score),
+  the listening mode actually in effect, what happened to the last 40 things it heard (a count per reason, with the most
+  likely cause), and whether the voice loop is still running (it prints the line a stuck loop is waiting at). A standalone
+  Microphone Check (Start menu, or `backend/ear_check.py`) records six seconds and shows the level, the detector score and the
+  transcript, without Seven running. Logs show only the last 7 days, treat a multi-line message as one entry, and show native
+  crashes with their date and the crashing thread.
+- If the microphone delivers only digital silence for 8 seconds (muted at the hardware, a driver that gives nothing), Seven
+  tries the other microphones and switches to one that works, and says which; when none works it says so on the home screen.
+  The test mic says why it heard nothing: push to talk, a silent or very quiet microphone, or sound without speech.
 - **Updates carry only what changed.** A release can publish a small package with just the files that differ from the previous
   version (a few MB instead of about 670 MB); people on exactly that version download it, everyone else the full installer. The
   package is checked as a whole and file by file, applied with a backup, and rolled back if anything fails.

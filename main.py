@@ -229,7 +229,7 @@ def _begin_full(hold):
 
     from main_modules.startup.voice_loop import run_voice_loop
     args = (ctx, config, ctx.app_ui, api_set_state, _safe_mode_file)
-    logic_thread = threading.Thread(target=run_voice_loop, args=args, daemon=True)
+    logic_thread = threading.Thread(target=run_voice_loop, args=args, daemon=True, name="VoiceLoop")
     logic_thread.start()
 
     from main_modules.startup.battery_monitor import start_battery_monitor
@@ -270,7 +270,7 @@ def start_app():
             time.sleep(5)
             if not logic_thread.is_alive():
                 logger.critical("Voice loop crashed. Restarting.")
-                logic_thread = threading.Thread(target=run_voice_loop_again, args=args, daemon=True)
+                logic_thread = threading.Thread(target=run_voice_loop_again, args=args, daemon=True, name="VoiceLoop")
                 logic_thread.start()
     except KeyboardInterrupt:
         os._exit(0)

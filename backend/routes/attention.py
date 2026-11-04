@@ -72,9 +72,10 @@ def _problem() -> dict:
     """What the voice loop reported when Seven could not load or start its hearing, and safe mode if it is on."""
     try:
         from backend.api_server import _state
-        return {"problem": _state.get("voice_problem") or "", "safe_mode": (_state.get("safe_mode") or {}).get("reason", "")}
+        return {"problem": _state.get("voice_problem") or "", "safe_mode": (_state.get("safe_mode") or {}).get("reason", ""),
+                "mic_problem": _state.get("mic_problem") or "", "mic_notice": _state.get("mic_notice") or ""}
     except Exception:
-        return {"problem": "", "safe_mode": ""}
+        return {"problem": "", "safe_mode": "", "mic_problem": "", "mic_notice": ""}
 
 
 def _mic_blocked() -> bool:
@@ -112,6 +113,15 @@ def collect(mic_error=_mic_error, voice=_voice, ollama_up=_ollama_up, uptime=_up
         elif p["problem"]:
             out.append({"id": "hearing-failed", "level": "error",
                         "message": f"Seven couldn't start. {p['problem']}", "action": _FIX})
+    except Exception:
+        pass
+    try:
+        p = problem()
+        if p.get("mic_problem"):
+            out.append({"id": "mic-silent", "level": "error", "message": p["mic_problem"], "action": _FIX})
+        elif p.get("mic_notice"):
+            out.append({"id": "mic-switched", "level": "info", "message": p["mic_notice"],
+                        "action": {"label": "Choose microphone", "to": "/settings?section=voice"}})
     except Exception:
         pass
     try:

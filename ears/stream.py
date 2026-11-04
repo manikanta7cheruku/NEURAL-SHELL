@@ -33,6 +33,10 @@ import numpy as np
 
 RATE = 16000
 FRAME = 512                         # 32 ms: the frame size Silero expects at 16 kHz
+DEAD_PEAK = 1e-4                    # about -80 dBFS: a working microphone in a silent room still hears its own noise (-60 to -75)
+DEAD_AFTER_S = 8.0                  # this long of nothing but digital silence means the device is dead, not the room quiet
+RETRY_DEAD_S = 60.0                 # and it is looked at again after this long, so a plugged-in headset is found
+SKIP_DEVICES = ("stereo mix", "loopback", "what u hear", "sound mapper", "primary sound")
 
 # sensitivity -> (start probability, keep-going probability, silence that ends an utterance in seconds)
 SENSITIVITY = {
@@ -98,6 +102,17 @@ class MicStream:
         self.level = 0.0
         self.state = "idle"          # idle | hearing | processing
         self.last_error = ""
+        # What the microphone has actually been giving us, for Diagnostics: a PC that "ignores everything" is either
+        # hearing silence, hearing noise, or hearing speech it then rejects, and these numbers say which.
+        self._recent = collections.deque(maxlen=310)     # (time, rms, peak amplitude, speech probability), ~10 s
+        self.frames = 0
+        self.last_frame_at = 0.0
+        self.counts = {"utterances": 0, "too_short": 0}
+        self._force_index = None     # a microphone found by looking, when the chosen or default one delivers nothing
+        self._silent_since = None
+        self._last_search = 0.0
+        self.notice = ""             # "Switched to X because Y was silent"
+        self.problem = ""            # "No microphone is delivering any sound"
 
     # ── wiring ───────────────────────────────────────────────────────────
     def set_speaking_fn(self, fn):
@@ -115,6 +130,7 @@ class MicStream:
             self.sensitivity = sensitivity
         if device_name is not None and device_name != self.device_name:
             self.device_name = device_name
+            self._force_index = None                     # the person chose a microphone: that choice wins
             self._reopen = True
 
     def set_push_to_talk(self, held_fn):
@@ -167,8 +183,9 @@ class MicStream:
     def _open(self, pa):
         import pyaudio
         from seven_utils import audio
+        index = self._force_index if self._force_index is not None else self._device_index(pa)
         return audio.open_stream(format=pyaudio.paInt16, channels=1, rate=RATE, input=True, frames_per_buffer=FRAME,
-                                 input_device_index=self._device_index(pa))
+                                 input_device_index=index)
 
     def _run(self):
         from seven_utils import audio
@@ -197,7 +214,88 @@ class MicStream:
                 backoff = min(backoff * 2, 15.0)
         audio.close_stream(stream)
 
+    # ── a microphone that delivers nothing ───────────────────────────────────────────────────────────
+    def _candidates(self, pa):
+        """Input devices Seven can open at 16 kHz (the standard Windows audio system and DirectSound convert for us), without
+        the loopback and mapper entries that are not microphones."""
+        wanted = {pa.get_default_host_api_info().get("index")}
+        for i in range(pa.get_host_api_count()):
+            if "directsound" in pa.get_host_api_info_by_index(i).get("name", "").lower():
+                wanted.add(i)
+        out = []
+        for i in range(pa.get_device_count()):
+            info = pa.get_device_info_by_index(i)
+            name = info.get("name", "")
+            if info.get("maxInputChannels", 0) > 0 and info.get("hostApi") in wanted and not any(k in name.lower() for k in SKIP_DEVICES):
+                out.append((i, name))
+        return out
+
+    def _peak_of(self, index, seconds=0.7):
+        """The loudest sample from one device over a moment, or None when it cannot be opened."""
+        import pyaudio
+        from seven_utils import audio
+        stream = None
+        try:
+            stream = audio.open_stream(format=pyaudio.paInt16, channels=1, rate=RATE, input=True, frames_per_buffer=FRAME,
+                                       input_device_index=index)
+            peak = 0.0
+            for _ in range(max(1, int(seconds * RATE / FRAME))):
+                data = np.frombuffer(stream.read(FRAME, exception_on_overflow=False), dtype=np.int16).astype(np.float32) / 32768.0
+                peak = max(peak, float(np.max(np.abs(data))))
+            return peak
+        except Exception:
+            return None
+        finally:
+            audio.close_stream(stream)
+
+    def _find_working_device(self, pa, current):
+        """Try the other microphones for a moment each and use the first that has a sound floor. Returns True when it switched."""
+        best = None
+        for index, name in self._candidates(pa):
+            if index == current:
+                continue
+            peak = self._peak_of(index)
+            if peak is not None and peak > DEAD_PEAK * 1.3 and (best is None or peak > best[0]):
+                best = (peak, index, name)
+        if best is None:
+            return False
+        self._force_index = best[1]
+        self.notice = f"Seven's microphone was silent, so it switched to {best[2]}."
+        self.problem = ""
+        self._publish("mic_notice", self.notice)
+        self._publish("mic_problem", "")
+        print(f"[EARS] {self.notice}")
+        return True
+
+    def _watch_silence(self, pa, peak, now):
+        """Called for every frame. A device that has delivered only digital silence for a while is dead (muted at the
+        hardware, a driver that gives nothing): look for one that works instead of listening to nothing for ever."""
+        if peak > DEAD_PEAK:
+            if self.problem:
+                self.problem = ""
+                self._publish("mic_problem", "")
+            self._silent_since = None
+            return False
+        if self._silent_since is None:
+            self._silent_since = now
+            return False
+        if now - self._silent_since < DEAD_AFTER_S or now - self._last_search < RETRY_DEAD_S:
+            return False
+        self._last_search = now
+        try:
+            current = self._force_index if self._force_index is not None else self._device_index(pa)
+            if self._find_working_device(pa, current):
+                self._silent_since = None
+                return True
+        except Exception as exc:
+            print(f"[EARS] Looking for a working microphone failed: {exc}")
+        self.problem = ("No microphone is delivering any sound. Check that it is not muted (many laptops have a mute key), "
+                        "that it is the right device in Windows Sound settings, Input, and that Windows lets desktop apps use it.")
+        self._publish("mic_problem", self.problem)
+        return False
+
     def _listen(self, stream, vad):
+        from seven_utils import audio
         pre_roll = collections.deque(maxlen=10)          # ~320 ms kept from before speech starts
         frames, probs = [], []
         above = 0                                        # consecutive frames over the start threshold
@@ -215,6 +313,12 @@ class MicStream:
                     pass
             p = vad(frame)
             rms = float(np.sqrt(np.mean(frame ** 2)) + 1e-9)
+            self.frames += 1
+            self.last_frame_at = time.time()
+            self._recent.append((self.last_frame_at, rms, float(np.max(np.abs(frame))), p))
+            if self._watch_silence(audio.pa(), float(np.max(np.abs(frame))), self.last_frame_at):
+                self._reopen = True
+                break
             self.level = max(0.0, min(1.0, (20 * np.log10(rms) + 60) / 50))   # -60 dBFS..-10 dBFS -> 0..1
 
             now = time.time()
@@ -283,11 +387,13 @@ class MicStream:
         if trim:
             audio = audio[:-trim]
         if speech_s < 0.35:
+            self.counts["too_short"] += 1
             self._publish("voice_ignored", {"reason": "too short", "at": now})
             self._set_state("idle")
             return
         utt = Utterance(audio=audio, started=started, ended=now, during_speech=speaking_at_start,
                         peak=max(probs) if probs else 0.0, speech_seconds=speech_s, meta={"ptt": ptt})
+        self.counts["utterances"] += 1
         try:
             self.utterances.put_nowait(utt)
         except queue.Full:                               # nobody is listening (Seven is busy): keep the newest
@@ -297,6 +403,21 @@ class MicStream:
                 pass
             self.utterances.put_nowait(utt)
         self._set_state("processing")
+
+    def stats(self) -> dict:
+        """The microphone's last ten seconds in numbers: level in dBFS (0 is the loudest possible), the best speech score the
+        detector gave, and whether frames are arriving at all."""
+        recent = [r for r in list(self._recent) if time.time() - r[0] <= 10]
+        db = lambda v: round(20 * float(np.log10(max(v, 1e-6))), 1)
+        return {"frames": self.frames, "since_last_frame": round(time.time() - self.last_frame_at, 1) if self.last_frame_at else None,
+                "alive": bool(self._thread and self._thread.is_alive()), "last_error": self.last_error,
+                "avg_db": db(float(np.mean([r[1] for r in recent]))) if recent else None,
+                "peak_db": db(max(r[2] for r in recent)) if recent else None,
+                "best_speech_score": round(max(r[3] for r in recent), 2) if recent else None,
+                "start_threshold": SENSITIVITY[self.sensitivity][0], "sensitivity": self.sensitivity,
+                "push_to_talk": self._ptt is not None, "paused": self._paused.is_set(), "device": self.device_name or "(Windows default)",
+                "notice": self.notice, "problem": self.problem, "switched": self._force_index is not None,
+                **self.counts}
 
     def _set_state(self, state):
         if state != self.state:

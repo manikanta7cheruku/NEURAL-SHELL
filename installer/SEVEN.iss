@@ -60,6 +60,9 @@ Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs 
 [Icons]
 Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExeName}"; AppUserModelID: "com.sevenlabs.seven"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: desktopicon; AppUserModelID: "com.sevenlabs.seven"
+; Five seconds of recording that shows what the microphone delivers and what Seven would do with it: for "it says listening
+; but nothing happens".
+Name: "{autoprograms}\{#AppName} Microphone Check"; Filename: "{app}\resources\app\python\python.exe"; Parameters: """{app}\resources\app\backend\ear_check.py"""; WorkingDir: "{app}\resources\app"; IconFilename: "{app}\{#AppExeName}"
 ; Works even when Seven will not start: writes a health report to the Desktop, copies it, and opens it.
 Name: "{autoprograms}\{#AppName} Diagnostics"; Filename: "{app}\resources\app\python\python.exe"; Parameters: """{app}\resources\app\backend\diagnostics.py"" --open"; WorkingDir: "{app}\resources\app"; IconFilename: "{app}\{#AppExeName}"
 
