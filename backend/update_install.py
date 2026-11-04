@@ -115,22 +115,24 @@ _PATCH = r'''
 $stage = @@STAGE@@
 $backup = @@BACKUP@@
 $patch = Get-Content -Raw -Encoding UTF8 -Path (Join-Path $stage 'patch.json') | ConvertFrom-Json
-# A file that was just written can be held for a moment by antivirus: try again a few times before giving up.
+# A file can stay locked for a few seconds after the process that used it is gone (Windows closing its handles, antivirus scanning
+# a program that just ran: measured on SEVEN.exe, 150 MB, "being used by another process" two seconds after Seven was stopped).
+# Try again for up to about half a minute before giving up.
 function Try-Run([scriptblock]$action) {
-  for ($i = 1; $i -le 6; $i++) {
-    try { & $action; return } catch { if ($i -eq 6) { throw }; Start-Sleep -Milliseconds (300 * $i) }
+  for ($i = 1; $i -le 25; $i++) {
+    try { & $action; return } catch { if ($i -eq 25) { throw }; Start-Sleep -Milliseconds ([Math]::Min(300 * $i, 1500)) }
   }
 }
 function Hash-Of($path) {
   # .NET, not Get-FileHash: that cmdlet is missing in some PowerShell setups (a runner or PC whose module path points at
   # PowerShell 7), and a missing cmdlet must not be what stops an update.
-  for ($i = 1; $i -le 6; $i++) {
+  for ($i = 1; $i -le 25; $i++) {
     $sha = $null; $fs = $null
     try {
       $sha = [System.Security.Cryptography.SHA256]::Create()
       $fs = [System.IO.File]::OpenRead($path)
       return ([BitConverter]::ToString($sha.ComputeHash($fs)) -replace '-', '').ToLower()
-    } catch { if ($i -eq 6) { throw }; Start-Sleep -Milliseconds (300 * $i) }
+    } catch { if ($i -eq 25) { throw }; Start-Sleep -Milliseconds ([Math]::Min(300 * $i, 1500)) }
     finally { if ($fs) { $fs.Dispose() }; if ($sha) { $sha.Dispose() } }
   }
 }
