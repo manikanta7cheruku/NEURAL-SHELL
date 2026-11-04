@@ -52,9 +52,18 @@ class Assess(unittest.TestCase):
         self.assertEqual(ids(doctor.assess(None, state(), NOW)), ["ears_missing"])
 
     def test_a_voice_loop_that_stopped_beating_is_stuck(self):
-        got = doctor.assess(stats(), state(voice_loop_beat=NOW - 60), NOW)
+        got = doctor.assess(stats(), state(voice_loop_beat=NOW - 120), NOW)
         self.assertEqual((got[0]["id"], got[0]["level"]), ("loop_stuck", "error"))
-        self.assertIn("60 s", got[0]["detail"])
+        self.assertIn("120 s", got[0]["detail"])
+
+    def test_a_long_answer_is_not_a_stuck_loop(self):
+        # The loop does not pass while it is thinking and speaking: a minute-long answer is normal, and used to raise the alarm
+        # at its end ("Seven stopped acting on what it hears").
+        for busy in ({"thinking": True}, {"speaking": True}):
+            self.assertEqual(doctor.assess(stats(), state(voice_loop_beat=NOW - 150, **busy), NOW), [], busy)
+        self.assertEqual(doctor.assess(stats(), state(voice_loop_beat=NOW - 40), NOW), [])                 # idle, a short gap
+        stuck = doctor.assess(stats(), state(voice_loop_beat=NOW - 700, speaking=True), NOW)
+        self.assertEqual(stuck[0]["id"], "loop_stuck")                                                  # but not for ever
 
     def test_a_microphone_stream_that_died_is_an_error(self):
         got = doctor.assess(stats(mic={"alive": False, "last_error": "Invalid input device"}), state(), NOW)
@@ -93,7 +102,7 @@ class Assess(unittest.TestCase):
         self.assertEqual((got[0]["id"], got[0]["level"]), ("speech_model", "info"))
 
     def test_problems_are_ordered_errors_first(self):
-        got = doctor.assess(stats(mode="ptt", outcomes={"no wake word": 9}), state(voice_loop_beat=NOW - 99), NOW)
+        got = doctor.assess(stats(mode="ptt", outcomes={"no wake word": 9}), state(voice_loop_beat=NOW - 999), NOW)
         self.assertEqual([i["level"] for i in got], sorted((i["level"] for i in got), key=doctor.ORDER.get))
 
     def test_the_live_numbers_for_the_meter(self):

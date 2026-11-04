@@ -98,7 +98,9 @@ def _mic_blocked() -> bool:
 _FIX = {"label": "Run diagnostics", "to": "/settings?section=system"}
 # What ears/doctor.py finds that the home screen should show. The others (start-up failures, safe mode, a silent or switched
 # microphone) have their own messages above, and a microphone that is merely quiet is shown only in Settings, System, Hearing.
-_HOME = {"loop_stuck", "mic_stream", "speaking_stuck", "ptt", "wake_word", "own_voice", "noise", "no_words", "speech_model"}
+# Only what is plainly broken. "It ignored some sounds" (no wake word, noise, words not found) is shown in Settings, System, Hearing:
+# a TV or a keyboard produces those without anything being wrong, and on the home screen they read as an alarm.
+_HOME = {"loop_stuck", "mic_stream", "speaking_stuck", "speech_model"}
 
 
 def _hearing_issues() -> list:
@@ -138,7 +140,7 @@ def collect(mic_error=_mic_error, voice=_voice, ollama_up=_ollama_up, uptime=_up
     try:
         for issue in hearing():
             if issue["id"] in _HOME and issue["level"] in ("error", "warn"):
-                out.append({"id": "hearing-" + issue["id"], "level": issue["level"], "message": f"{issue['title']}. {issue['fix']}",
+                out.append({"id": "hearing-" + issue["id"], "level": issue["level"], "message": issue["title"] + ".",
                             "action": {"label": "See why", "to": "/settings?section=system"}})
     except Exception:
         pass

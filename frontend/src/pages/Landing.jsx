@@ -358,7 +358,7 @@ export default function Landing() {
       </header>
       <VoiceLog entries={st.voiceLog} demo={st.tour?.step === 'log'} />
 
-      <main className="relative z-10 flex min-h-0 flex-1 flex-col items-center justify-center overflow-hidden px-6">
+      <main className="relative z-10 flex min-h-0 flex-1 flex-col items-center justify-center-safe overflow-y-auto overflow-x-hidden px-6">
         <AttentionStrip />
         <WelcomeHint className="mb-3" />
         <h1 className="text-center text-[26px] font-light tracking-[-0.01em] text-s-text">
