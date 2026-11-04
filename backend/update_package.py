@@ -23,6 +23,7 @@ import zipfile
 SKIP_DIRS = {"__pycache__"}
 SKIP_SUFFIXES = (".pyc", ".pyo")
 PATCH_FILE = "patch.json"
+BASE_SKIP = ("resources/app/python/",)
 PAYLOAD = "files/"
 
 
@@ -72,8 +73,14 @@ def diff(old: dict, new: dict):
 def build_patch(root: str, old: dict, new: dict, out_zip: str) -> dict:
     """Write the patch zip for old -> new and return what to publish with it."""
     changed, removed = diff(old, new)
+    # What the old build looked like, so the PC can prove it has exactly that build before anything is touched: a patch applied
+    # on top of a different build of the same version number (rebuilt since) would mix two builds. The Python runtime is left
+    # out of the check (it is large and a patch that changes it carries its own files, each checked against "old").
+    unchanged = {p: m[0] for p, m in old["files"].items() if p not in changed and p not in removed and not p.startswith(BASE_SKIP)}
     meta = {"from": old["version"], "to": new["version"], "delete": removed,
-            "files": {p: new["files"][p] for p in changed}}
+            "files": {p: new["files"][p] for p in changed},
+            "old": {p: old["files"][p][0] for p in list(changed) + removed if p in old["files"]},
+            "base": unchanged}
     with zipfile.ZipFile(out_zip, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
         z.writestr(PATCH_FILE, json.dumps(meta, separators=(",", ":")))
         for p in changed:

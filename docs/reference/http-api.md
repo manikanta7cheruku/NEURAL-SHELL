@@ -6,7 +6,7 @@ The backend listens on `http://127.0.0.1:7777` only (never on the network). The 
 the overlay and the Chrome extension are its only clients. There is no authentication because nothing outside
 this computer can reach it.
 
-226 endpoints in 31 files.
+228 endpoints in 32 files.
 
 ## `backend/admin_server.py`
 
@@ -147,6 +147,12 @@ this computer can reach it.
 | GET | `/api/health/full` | Full system health check |
 | GET | `/api/health/production` | Full production diagnostic |
 | GET | `/api/health/telemetry` | Real-time system telemetry and layer performance |
+
+## `backend/routes/hearing.py`
+
+| Method | Path | What it does |
+|---|---|---|
+| GET | `/api/hearing` | Why isn't Seven hearing me? |
 
 ## `backend/routes/knowledge.py`
 
@@ -302,7 +308,8 @@ this computer can reach it.
 |---|---|---|
 | POST | `/api/update/check` | Force an immediate update check. |
 | POST | `/api/update/download` | Start downloading the update in background. |
-| POST | `/api/update/install` | Professional silent update flow. |
+| POST | `/api/update/install` | Install the downloaded update. Seven cannot replace its own files while it runs, so this starts a script that outlives it |
+| POST | `/api/update/result/dismiss` | The person has read what the last install did (the message on the Updates page). |
 | GET | `/api/update/status` | Current update state: polled by React every 3 seconds. |
 
 ## `backend/routes/usage.py`

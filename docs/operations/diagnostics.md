@@ -29,6 +29,24 @@ The top lists everything that failed or looks wrong ("READ THESE FIRST"); the re
 | Network and server | the Seven server (and how long it took to wake), Hugging Face, GitHub, and whether the PC is on the server's user list |
 | Logs | the last warnings from `seven.log`, `native_crash.log` and `python_crash.log` |
 
+## Seven tells you itself: Settings, System, Hearing
+
+Nobody has to run anything. When Seven is not hearing you the home screen says why and what to do ("Seven hears you but waits for
+'Hey Seven'. Say it first, or choose Always on"), and Settings, System, **Hearing** shows it live:
+
+- a **microphone level** bar and a **speech found** bar with a mark where the voice detector starts counting sound as you talking:
+  speak and watch. If the level does not move, Seven is not receiving your voice; if it moves and the speech bar crosses the mark,
+  it hears you and the list says what happens to it next;
+- the listening mode, and whether the voice loop is running or stuck;
+- the problems found, each with what was seen and what to do, and the last sounds it picked up and what became of them.
+
+The same findings are written to `%APPDATA%\SEVEN\logs\hearing_debug.log` whenever they change, with the numbers behind them, and
+the Diagnostics report includes them, so a report from a friend says what went wrong and when. The logic is `ears/doctor.py`.
+
+Some laptop microphone arrays (AMD's, among others) apply a noise gate and send exact silence until someone speaks, so silence
+alone is not called a fault; Seven looks for another microphone only after a minute of silence when the current one has not been
+heard carrying speech since it started.
+
 ## "Listening" but nothing happens
 
 The report has two sections for this, **Hearing right now** and **Voice loop**, and there is a standalone check for when you

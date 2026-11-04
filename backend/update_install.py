@@ -109,6 +109,41 @@ _PATCH = r'''
 $stage = @@STAGE@@
 $backup = @@BACKUP@@
 $patch = Get-Content -Raw -Encoding UTF8 -Path (Join-Path $stage 'patch.json') | ConvertFrom-Json
+# A file that was just written can be held for a moment by antivirus: try again a few times before giving up.
+function Try-Run([scriptblock]$action) {
+  for ($i = 1; $i -le 6; $i++) {
+    try { & $action; return } catch { if ($i -eq 6) { throw }; Start-Sleep -Milliseconds (300 * $i) }
+  }
+}
+function Hash-Of($path) {
+  # .NET, not Get-FileHash: that cmdlet is missing in some PowerShell setups (a runner or PC whose module path points at
+  # PowerShell 7), and a missing cmdlet must not be what stops an update.
+  for ($i = 1; $i -le 6; $i++) {
+    $sha = $null; $fs = $null
+    try {
+      $sha = [System.Security.Cryptography.SHA256]::Create()
+      $fs = [System.IO.File]::OpenRead($path)
+      return ([BitConverter]::ToString($sha.ComputeHash($fs)) -replace '-', '').ToLower()
+    } catch { if ($i -eq 6) { throw }; Start-Sleep -Milliseconds (300 * $i) }
+    finally { if ($fs) { $fs.Dispose() }; if ($sha) { $sha.Dispose() } }
+  }
+}
+# The PC must have exactly the build this patch was made from: every file the patch leaves alone, and the old copy of every file it
+# replaces. A build of the same version number that was made again since would otherwise be mixed with this one.
+function Matches($rel, $want) {
+  $p = Join-Path $installDir ($rel.Replace('/', '\'))
+  if (-not (Test-Path -LiteralPath $p)) { return $false }
+  return ((Hash-Of $p) -eq $want)
+}
+$mismatch = $null
+foreach ($prop in @($patch.base.PSObject.Properties) + @($patch.old.PSObject.Properties)) {
+  if ($prop.Name -and -not (Matches $prop.Name $prop.Value)) { $mismatch = $prop.Name; break }
+}
+if ($mismatch) {
+  Finish 'failed' ("[base-mismatch] This copy of Seven is not exactly the build the update was made from (" + $mismatch + " differs). Nothing was changed; the full installer will be used instead.")
+  Relaunch
+  exit 0
+}
 if (Test-Path $backup) { Remove-Item -Recurse -Force $backup }
 New-Item -ItemType Directory -Force -Path $backup | Out-Null
 $touched = New-Object System.Collections.ArrayList
@@ -128,25 +163,6 @@ function Keep($rel) {
     Copy-Item -LiteralPath $d -Destination $b -Force
   }
   [void]$touched.Add($rel)
-}
-# A file that was just written can be held for a moment by antivirus: try again a few times before giving up.
-function Try-Run([scriptblock]$action) {
-  for ($i = 1; $i -le 6; $i++) {
-    try { & $action; return } catch { if ($i -eq 6) { throw }; Start-Sleep -Milliseconds (300 * $i) }
-  }
-}
-function Hash-Of($path) {
-  # .NET, not Get-FileHash: that cmdlet is missing in some PowerShell setups (a runner or PC whose module path points at
-  # PowerShell 7), and a missing cmdlet must not be what stops an update.
-  for ($i = 1; $i -le 6; $i++) {
-    $sha = $null; $fs = $null
-    try {
-      $sha = [System.Security.Cryptography.SHA256]::Create()
-      $fs = [System.IO.File]::OpenRead($path)
-      return ([BitConverter]::ToString($sha.ComputeHash($fs)) -replace '-', '').ToLower()
-    } catch { if ($i -eq 6) { throw }; Start-Sleep -Milliseconds (300 * $i) }
-    finally { if ($fs) { $fs.Dispose() }; if ($sha) { $sha.Dispose() } }
-  }
 }
 $ok = $true; $why = ''
 try {

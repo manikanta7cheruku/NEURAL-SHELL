@@ -227,6 +227,18 @@ def hearing_section():
         out.append(_c("Voice detector", WARN if peak > -45 and best is not None and best < 0.1 else INFO,
                       f"best speech score {best} (needs {mic['start_threshold']} to start an utterance, sensitivity {mic['sensitivity']})"
                       + (". Sound arrives but the detector finds no speech in it" if peak > -45 and best is not None and best < 0.1 else "")))
+    try:
+        from ears import doctor
+        issues = doctor.assess(h, _state())
+        for issue in issues:
+            out.append(_c("Problem: " + issue["title"], WARN if issue["level"] != "info" else INFO, f"{issue['detail']}. Do this: {issue['fix']}"))
+        if not [i for i in issues if i["level"] != "info"]:
+            out.append(_c("Hearing doctor", OK, "no problem found with hearing right now"))
+        history = doctor.recent_log(5)
+        if history:
+            out.append(_c("Hearing problems recorded earlier", INFO, chr(10).join(history)))
+    except Exception as exc:
+        out.append(_c("Hearing doctor", WARN, f"could not run ({type(exc).__name__})"))
     out.append(_c("Utterances since start", INFO, f"{mic['utterances']} became requests, {mic['too_short']} were too short"))
     outcomes = h["outcomes"]
     total = sum(outcomes.values())

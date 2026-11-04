@@ -8,6 +8,12 @@ project uses [semantic versioning](docs/development/release-process.md#versions)
 Version 1.3.2 is the build for the friends' test, 1.3.3 the update that tests the new update flow, and the public launch stays 1.3.4.
 
 ### Added
+- **Seven says itself when it is not hearing you.** The home screen shows the problem and what to do (waiting for "Hey Seven",
+  push to talk on, a stuck voice loop, Seven mistaking its own voice for yours, only noise reaching it, speech recognition not
+  ready), and Settings, System, Hearing shows a live microphone meter and speech detector next to the list of problems. Every
+  change is written to `logs\hearing_debug.log` with the numbers behind it and is in the Diagnostics report. (`ears/doctor.py`)
+- A changed-files update is applied only to the exact build it was made from; any other build gets the full installer.
+- `bump_version.py` rewrites every place the version is written.
 - **Hearing diagnostics.** The report now says what the microphone delivers (level in dBFS, the voice detector's best score),
   the listening mode actually in effect, what happened to the last 40 things it heard (a count per reason, with the most
   likely cause), and whether the voice loop is still running (it prints the line a stuck loop is waiting at). A standalone

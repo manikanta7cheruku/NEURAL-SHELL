@@ -166,6 +166,84 @@ function PanelShortcut() {
   );
 }
 
+const MODE_LABEL = { wake: 'Wake word', always: 'Always on', ptt: 'Push to talk' };
+const DOT = { error: 'bg-s-red', warn: 'bg-s-yellow', info: 'bg-s-accent' };
+
+/** A bar from 0 to 1, optionally with a mark (where the voice detector starts to count a sound as speech). */
+function Bar({ value, mark, tone = 'bg-s-accent', label }) {
+  const pct = Math.max(0, Math.min(1, value || 0)) * 100;
+  return (
+    <div role="meter" aria-label={label} aria-valuenow={Math.round(pct)} className="relative h-2 w-56 overflow-hidden rounded-full bg-s-card-h">
+      <div className={cx('h-full rounded-full transition-[width] duration-150', tone)} style={{ width: `${pct}%` }} />
+      {mark != null && <div className="absolute top-0 h-full w-px bg-s-text-3" style={{ left: `${mark * 100}%` }} />}
+    </div>
+  );
+}
+
+/**
+ * Hearing: why isn't Seven hearing me? A live microphone meter next to what the app has found wrong (ears/doctor.py). Speak and
+ * watch: if the level does not move, Seven is not getting your voice; if it moves and the speech bar crosses the mark, it is
+ * hearing you and the list says what happens to it next.
+ */
+function Hearing() {
+  const [data, setData] = useState(null);
+  useEffect(() => {
+    let on = true;
+    const load = () => api.get('/hearing').then(r => { if (on) setData(r.data); }).catch(() => {});
+    load();
+    const id = setInterval(() => { if (!document.hidden) load(); }, 700);
+    return () => { on = false; clearInterval(id); };
+  }, []);
+  if (!data) return <Section title="Hearing"><Body><Skeleton className="h-16 w-full" /></Body></Section>;
+  const { live, issues, events, log } = data;
+  const level = live.peak_db == null ? 0 : (live.peak_db + 80) / 80;
+  const stuck = live.loop_age != null && live.loop_age > 15;
+  return (
+    <Section title="Hearing" description="Live view of what Seven's ears are getting. Speak and watch the meters: if the level does not move, Seven is not receiving your voice.">
+      <Row label="Microphone level" description={live.device ? `Device: ${live.device}` : undefined}>
+        <div className="flex items-center gap-3">
+          <Bar value={level} label="Microphone level" tone={live.peak_db != null && live.peak_db < -60 ? 'bg-s-yellow' : 'bg-s-green'} />
+          <span className="w-24 text-right text-[12px] tabular-nums text-s-text-2">{live.peak_db == null ? 'no sound' : `${live.peak_db} dBFS`}</span>
+        </div>
+      </Row>
+      <Row label="Speech found" description="The voice detector's score. Above the mark, Seven counts it as you talking.">
+        <div className="flex items-center gap-3">
+          <Bar value={live.speech_score} mark={live.start_threshold} label="Speech score" />
+          <span className="w-24 text-right text-[12px] tabular-nums text-s-text-2">{live.speech_score == null ? '' : live.speech_score.toFixed(2)}</span>
+        </div>
+      </Row>
+      <Row label="How Seven listens" description="Change it at the top of the home screen.">
+        <div className="flex items-center gap-2">
+          <Badge>{MODE_LABEL[live.mode] || live.mode || '?'}</Badge>
+          <Badge tone={stuck ? 'red' : undefined}>{live.loop_age == null ? 'starting' : stuck ? `stuck for ${Math.round(live.loop_age)} s` : 'running'}</Badge>
+        </div>
+      </Row>
+      <Body>
+        {issues.length === 0 ? (
+          <p className="flex items-center gap-2 text-[12.5px] text-s-text-2"><span className="h-1.5 w-1.5 rounded-full bg-s-green" />No problem found with hearing right now.</p>
+        ) : (
+          <ul className="space-y-3">
+            {issues.map(i => (
+              <li key={i.id} className="flex gap-2.5 text-[12.5px]">
+                <span className={cx('mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full', DOT[i.level])} />
+                <div className="min-w-0">
+                  <p className="font-medium text-s-text">{i.title}</p>
+                  <p className="text-s-text-3">{i.detail}</p>
+                  <p className="mt-0.5 text-s-text-2">{i.fix}</p>
+                </div>
+              </li>))}
+          </ul>
+        )}
+        {events.length > 0 && (
+          <p className="mt-3 text-[11.5px] leading-relaxed text-s-text-3">
+            Last sounds: {events.slice().reverse().map(e => (e.outcome === 'heard' ? 'heard you' : `ignored (${e.outcome})`)).join(' · ')}
+          </p>)}
+        {log.length > 0 && <p className="mt-2 text-[11.5px] text-s-text-4">Problems are also recorded in the report, so you can send it.</p>}
+      </Body>
+    </Section>
+  );
+}
+
 function Diagnostics() {
   const [report, setReport] = useState('');
   const [busy, setBusy] = useState(false);
@@ -294,6 +372,7 @@ export default function SystemSection({ config }) {
       <Hardware />
       <VoiceBar config={config} />
       <PanelShortcut />
+      <Hearing />
       <Diagnostics />
       <Repair />
       <Appearance />

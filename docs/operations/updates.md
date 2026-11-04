@@ -31,6 +31,15 @@ The steps for you, as the person publishing, are in [Publishing an update](#publ
 A patch is built against one earlier version, so people more than one release behind take the full installer. The server only
 offers a patch to the version it was built for; the app checks that again.
 
+## The patch only goes onto the build it was made from
+
+A patch lists, besides the files it carries, the SHA-256 of **every other file of the old build** and of the old copy of each file
+it replaces. Before anything is touched the install script checks them all. A PC whose files are not exactly that build (the same
+version number was built again since, a file was changed by hand) gets "Nothing was changed; the full installer will be used
+instead", the patch is not tried again for that version (`%APPDATA%\SEVEN\patch_blocked.json`), and Download then fetches the
+full installer. The Python runtime folder is left out of this check; a patch that changes it carries those files, each checked
+against its old copy.
+
 ## How the install works
 
 Seven cannot replace its own files while it runs, so installing starts a PowerShell script (`update_install.py`) that outlives
@@ -60,7 +69,9 @@ update offered again with no explanation.
 
 Once per version, in order. Full detail for the dashboard is in the admin guide.
 
-1. **Bump the version** (`venv\Scripts\python.exe scripts\bump_version.py 1.3.4`), update `CHANGELOG.md`, commit and push.
+1. **Bump the version** (`venv\Scripts\python.exe scripts\bump_version.py 1.3.4`). It rewrites every place the number is
+   written (version.txt, both package.json files, the lockfile, config.json, config.py, the installer script, the README
+   badge); `python scripts\check_version.py` confirms. Update `CHANGELOG.md`, commit and push.
 2. **Build the installer**: `npm run build:installer`. This also records the release's manifest,
    `release-manifests\manifest-1.3.4.json.gz`. **Keep it and commit it**: it is what the next patch is compared against.
 3. **Build the changed-files update** for people on the previous version:

@@ -45,6 +45,7 @@ class Silence(unittest.TestCase):
         self.mic._device_index = lambda pa: 1                      # the default is the AMD array
 
     def feed(self, seconds, peak, start=1000.0):
+        self.mic.last_speech_at = getattr(self, "speech_at", 0.0)
         t, switched = start, False
         while t < start + seconds:
             switched = self.mic._watch_silence(self.pa, peak, t) or switched
@@ -61,12 +62,18 @@ class Silence(unittest.TestCase):
         self.assertIsNone(self.mic._force_index)
 
     def test_short_silence_does_nothing(self):
-        self.assertFalse(self.feed(5, peak=0.0))
+        self.assertFalse(self.feed(30, peak=0.0))
+
+    def test_a_microphone_that_carried_speech_lately_is_not_replaced_because_the_room_is_quiet(self):
+        self.mic._peak_of = lambda index, seconds=0.7: 0.5
+        self.speech_at = 990.0                                     # a noise-gated array: silent until someone speaks
+        self.assertFalse(self.feed(300, peak=0.0))
+        self.assertIsNone(self.mic._force_index)
 
     def test_long_digital_silence_switches_to_a_microphone_that_works(self):
         levels = {1: 0.0, 2: 0.02, 4: 0.0}
         self.mic._peak_of = lambda index, seconds=0.7: levels.get(index)
-        self.assertTrue(self.feed(12, peak=0.0))
+        self.assertTrue(self.feed(70, peak=0.0))
         self.assertEqual(self.mic._force_index, 2)
         self.assertIn("Headset Microphone (USB)", self.mic.notice)
         self.assertIn(("mic_notice", self.mic.notice), self.published)
@@ -74,7 +81,7 @@ class Silence(unittest.TestCase):
 
     def test_when_none_works_it_says_so_in_plain_words_and_clears_when_sound_returns(self):
         self.mic._peak_of = lambda index, seconds=0.7: 0.0
-        self.assertFalse(self.feed(12, peak=0.0))
+        self.assertFalse(self.feed(70, peak=0.0))
         self.assertIn("muted", self.mic.problem)
         self.assertIn(("mic_problem", self.mic.problem), self.published)
         self.mic._watch_silence(self.pa, 0.05, 2000.0)             # someone unmuted it
@@ -84,11 +91,11 @@ class Silence(unittest.TestCase):
     def test_it_looks_again_after_a_minute_so_a_plugged_in_headset_is_found(self):
         calls = []
         self.mic._peak_of = lambda index, seconds=0.7: calls.append(index) or 0.0
-        self.feed(12, peak=0.0)
+        self.feed(70, peak=0.0)
         first = len(calls)
-        self.feed(30, peak=0.0, start=1012.0)
-        self.assertEqual(len(calls), first)                        # within the minute: no new search
-        self.feed(10, peak=0.0, start=1075.0)
+        self.feed(60, peak=0.0, start=1070.0)
+        self.assertEqual(len(calls), first)                        # within two minutes: no new search
+        self.feed(70, peak=0.0, start=1130.0)
         self.assertGreater(len(calls), first)
 
     def test_choosing_a_microphone_in_settings_overrides_the_automatic_one(self):

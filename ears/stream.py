@@ -33,9 +33,13 @@ import numpy as np
 
 RATE = 16000
 FRAME = 512                         # 32 ms: the frame size Silero expects at 16 kHz
-DEAD_PEAK = 1e-4                    # about -80 dBFS: a working microphone in a silent room still hears its own noise (-60 to -75)
-DEAD_AFTER_S = 8.0                  # this long of nothing but digital silence means the device is dead, not the room quiet
-RETRY_DEAD_S = 60.0                 # and it is looked at again after this long, so a plugged-in headset is found
+DEAD_PEAK = 1e-4                    # about -80 dBFS: below this the device delivers nothing at all
+# Some microphone arrays (AMD's, among others) apply a noise gate and send exact silence until someone speaks, so silence alone
+# does not prove a device is dead. Seven looks for another microphone only when this long has passed in silence AND the
+# current one has never been heard carrying speech since Seven started (or not for SPEECH_EVIDENCE_S).
+DEAD_AFTER_S = 60.0
+RETRY_DEAD_S = 120.0                # and it looks again after this long, so a plugged-in headset is found
+SPEECH_EVIDENCE_S = 1800.0
 SKIP_DEVICES = ("stereo mix", "loopback", "what u hear", "sound mapper", "primary sound")
 
 # sensitivity -> (start probability, keep-going probability, silence that ends an utterance in seconds)
@@ -111,6 +115,7 @@ class MicStream:
         self._force_index = None     # a microphone found by looking, when the chosen or default one delivers nothing
         self._silent_since = None
         self._last_search = 0.0
+        self.last_speech_at = 0.0    # when this microphone was last heard carrying speech: proof that it works
         self.notice = ""             # "Switched to X because Y was silent"
         self.problem = ""            # "No microphone is delivering any sound"
 
@@ -281,6 +286,8 @@ class MicStream:
             return False
         if now - self._silent_since < DEAD_AFTER_S or now - self._last_search < RETRY_DEAD_S:
             return False
+        if self.last_speech_at and now - self.last_speech_at < SPEECH_EVIDENCE_S:
+            return False                                 # it carried speech not long ago: it works, the room is just quiet
         self._last_search = now
         try:
             current = self._force_index if self._force_index is not None else self._device_index(pa)
@@ -289,8 +296,9 @@ class MicStream:
                 return True
         except Exception as exc:
             print(f"[EARS] Looking for a working microphone failed: {exc}")
-        self.problem = ("No microphone is delivering any sound. Check that it is not muted (many laptops have a mute key), "
-                        "that it is the right device in Windows Sound settings, Input, and that Windows lets desktop apps use it.")
+        self.problem = ("The microphone has sent only silence for a minute and no other microphone works. If Seven does not hear you "
+                        "when you speak: check that it is not muted (many laptops have a mute key), pick the right device in Windows "
+                        "Sound settings, Input, and turn off its audio enhancements or noise suppression.")
         self._publish("mic_problem", self.problem)
         return False
 
@@ -316,6 +324,8 @@ class MicStream:
             self.frames += 1
             self.last_frame_at = time.time()
             self._recent.append((self.last_frame_at, rms, float(np.max(np.abs(frame))), p))
+            if p >= 0.5:
+                self.last_speech_at = self.last_frame_at
             if self._watch_silence(audio.pa(), float(np.max(np.abs(frame))), self.last_frame_at):
                 self._reopen = True
                 break
@@ -417,6 +427,7 @@ class MicStream:
                 "start_threshold": SENSITIVITY[self.sensitivity][0], "sensitivity": self.sensitivity,
                 "push_to_talk": self._ptt is not None, "paused": self._paused.is_set(), "device": self.device_name or "(Windows default)",
                 "notice": self.notice, "problem": self.problem, "switched": self._force_index is not None,
+                "speech_heard_ago": round(time.time() - self.last_speech_at, 0) if self.last_speech_at else None,
                 **self.counts}
 
     def _set_state(self, state):

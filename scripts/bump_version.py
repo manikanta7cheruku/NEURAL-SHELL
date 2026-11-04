@@ -13,6 +13,8 @@ What it updates:
     version.txt                 (source of truth)
     package.json                (Electron main)
     frontend/package.json       (React frontend)
+    frontend/package-lock.json, config.json, config.py, installer/SEVEN.iss, the README badge
+                                (every other place the number is written, so none is forgotten)
 
 electron-builder.yml reads version from package.json automatically.
 Python code reads version.txt at runtime.
@@ -57,6 +59,37 @@ def update_version_txt(version):
     with open(VERSION_TXT, "w") as f:
         f.write(version)
     print(f"  updated version.txt -> {version}")
+
+
+def _rewrite(rel, pattern, replacement):
+    """Replace the first match of `pattern` in a file (keeping its line endings); say so when the file has no such number."""
+    path = os.path.join(ROOT, rel)
+    if not os.path.exists(path):
+        return
+    with open(path, "r", encoding="utf-8", newline="") as f:
+        text = f.read()
+    new, count = re.subn(pattern, replacement, text, count=1)
+    if count and new != text:
+        with open(path, "w", encoding="utf-8", newline="") as f:
+            f.write(new)
+    print(f"  updated {rel}" if count else f"  (no version found in {rel})")
+
+
+def update_other_places(version):
+    ver = re.compile(r"\d+\.\d+\.\d+")
+    _rewrite("config.json", r'("version":\s*")\d+\.\d+\.\d+(")', r"\g<1>" + version + r"\g<2>")
+    _rewrite("config.py", r'("version":\s*")\d+\.\d+\.\d+(")', r"\g<1>" + version + r"\g<2>")
+    _rewrite("installer/SEVEN.iss", r'(#define AppVersion ")\d+\.\d+\.\d+(")', r"\g<1>" + version + r"\g<2>")
+    _rewrite("README.md", r"(badge/version-)\d+\.\d+\.\d+(-)", r"\g<1>" + version + r"\g<2>")
+    lock = os.path.join(ROOT, "frontend", "package-lock.json")
+    if os.path.exists(lock):
+        with open(lock, "r", encoding="utf-8", newline="") as f:
+            text = f.read()
+        head, tail = text[:400], text[400:]                       # the app's own two entries sit at the top of the file
+        head = re.sub(r'("version":\s*")' + ver.pattern + r'(")', r"\g<1>" + version + r"\g<2>", head)
+        with open(lock, "w", encoding="utf-8", newline="") as f:
+            f.write(head + tail)
+        print("  updated frontend/package-lock.json")
 
 
 def update_package_json(path, version):
@@ -108,10 +141,12 @@ def main():
     update_version_txt(new_version)
     update_package_json(PACKAGE_JSON, new_version)
     update_package_json(FRONTEND_JSON, new_version)
+    update_other_places(new_version)
 
     print(f"\nDone. All files updated to {new_version}")
     print(f"\nNext steps:")
-    print(f"  git add version.txt package.json frontend/package.json")
+    print(f"  python scripts/check_version.py")
+    print(f"  git add -A version.txt package.json frontend/package.json frontend/package-lock.json config.json config.py installer/SEVEN.iss README.md")
     print(f'  git commit -m "chore(release): bump version to {new_version}"')
     print(f"  git push")
     print(f"  npm run dist")
