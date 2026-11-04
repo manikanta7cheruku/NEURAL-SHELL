@@ -22,7 +22,13 @@ import subprocess
 import tempfile
 
 APP_ID = "{B7D2F0E4-5C3A-4E8B-9F16-7A1C2D3E4F50}"          # installer/SEVEN.iss
-_DETACHED = 0x00000008 | 0x00000200 | 0x08000000             # detached, own group, no window
+# How the install script is started. NOT detached: powershell.exe is a console program, and with DETACHED_PROCESS it has no console to
+# run in and exits at once without running a line (measured: the script never started, so "Restart and install" closed Seven and
+# nothing else happened). A new process group and no window, and when the job Seven runs in allows it, breaking away from it, so
+# the script outlives Seven.
+_NEW_GROUP = 0x00000200
+_NO_WINDOW = 0x08000000
+_BREAKAWAY = 0x01000000
 
 
 def _appdata() -> str:
@@ -109,22 +115,24 @@ _PATCH = r'''
 $stage = @@STAGE@@
 $backup = @@BACKUP@@
 $patch = Get-Content -Raw -Encoding UTF8 -Path (Join-Path $stage 'patch.json') | ConvertFrom-Json
-# A file that was just written can be held for a moment by antivirus: try again a few times before giving up.
+# A file can stay locked for a few seconds after the process that used it is gone (Windows closing its handles, antivirus scanning
+# a program that just ran: measured on SEVEN.exe, 150 MB, "being used by another process" two seconds after Seven was stopped).
+# Try again for up to about half a minute before giving up.
 function Try-Run([scriptblock]$action) {
-  for ($i = 1; $i -le 6; $i++) {
-    try { & $action; return } catch { if ($i -eq 6) { throw }; Start-Sleep -Milliseconds (300 * $i) }
+  for ($i = 1; $i -le 25; $i++) {
+    try { & $action; return } catch { if ($i -eq 25) { throw }; Start-Sleep -Milliseconds ([Math]::Min(300 * $i, 1500)) }
   }
 }
 function Hash-Of($path) {
   # .NET, not Get-FileHash: that cmdlet is missing in some PowerShell setups (a runner or PC whose module path points at
   # PowerShell 7), and a missing cmdlet must not be what stops an update.
-  for ($i = 1; $i -le 6; $i++) {
+  for ($i = 1; $i -le 25; $i++) {
     $sha = $null; $fs = $null
     try {
       $sha = [System.Security.Cryptography.SHA256]::Create()
       $fs = [System.IO.File]::OpenRead($path)
       return ([BitConverter]::ToString($sha.ComputeHash($fs)) -replace '-', '').ToLower()
-    } catch { if ($i -eq 6) { throw }; Start-Sleep -Milliseconds (300 * $i) }
+    } catch { if ($i -eq 25) { throw }; Start-Sleep -Milliseconds ([Math]::Min(300 * $i, 1500)) }
     finally { if ($fs) { $fs.Dispose() }; if ($sha) { $sha.Dispose() } }
   }
 }
@@ -230,8 +238,19 @@ def launch(script: str, name: str = "seven_update.ps1", runner=None) -> str:
     with open(path, "w", encoding="utf-8-sig", newline="\r\n") as f:
         f.write(script)
     command = ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", path]
-    (runner or (lambda c: subprocess.Popen(c, creationflags=_DETACHED, close_fds=True, cwd=folder)))(command)
+    (runner or (lambda c: _spawn(c, folder)))(command)
     return path
+
+
+def _spawn(command, folder):
+    """Start the script so it survives Seven's own exit. Breaking away from Seven's job is refused (access denied) when the job does
+    not allow it, so that is tried first and the plain start is the fallback."""
+    for flags in (_NEW_GROUP | _NO_WINDOW | _BREAKAWAY, _NEW_GROUP | _NO_WINDOW):
+        try:
+            return subprocess.Popen(command, creationflags=flags, close_fds=True, cwd=folder)
+        except OSError:
+            continue
+    raise OSError("could not start the update script")
 
 
 def read_result():
