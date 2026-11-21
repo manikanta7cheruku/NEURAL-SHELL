@@ -210,6 +210,11 @@ Whisper models download into the Hugging Face cache during setup (`backend/boots
 | Seven hears itself | Dropped by timing (during or 0.35 s after speech) and by text match |
 | Noise or music | Never starts an utterance (VAD) or fails the text checks; shown as "skipped" |
 
+**A graphics card that cannot run the model** (`ears/gpu_guard.py`): CTranslate2 reports a CUDA card as soon as the NVIDIA driver is
+there, and the model loads on it, but running it needs cuBLAS and cuDNN. Without them every transcription fails and every sound is
+"transcription failed". The model is run once on silence at start-up, and on any later CUDA error (missing library, out of memory),
+Seven moves to the processor for good and logs it.
+
 ## 11. Measurements
 
 `scripts/voice_bench.py` plays Kokoro-generated requests through the real pipeline under quiet, fan, typing, music,

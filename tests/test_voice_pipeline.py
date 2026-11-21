@@ -14,6 +14,7 @@ import numpy as np
 
 import support  # noqa: F401  (sets up paths and test mode)
 from ears import barge_in
+from ears.gpu_guard import is_gpu_error
 from ears.hallucination_filter import is_hallucination, is_incoherent, is_repetition_loop
 from ears.stream import MIN_SPEECH_S, MicStream
 
@@ -71,6 +72,17 @@ class BargeIn(unittest.TestCase):
         self.assertEqual(barge_in.request_after("Seven", "seven"), "")
         self.assertEqual(barge_in.request_after("stop", "stop"), "")
         self.assertEqual(barge_in.request_after("what's the weather, wait", "wait"), "")
+
+
+class GpuGuard(unittest.TestCase):
+    def test_a_card_that_cannot_run_the_model_is_recognised_so_the_processor_takes_over(self):
+        for message in ("Library cublas64_12.dll is not found or cannot be loaded", "cuDNN failed to initialize",
+                        "CUDA failed with error out of memory", "no kernel image is available for execution on the device"):
+            self.assertTrue(is_gpu_error(RuntimeError(message)), message)
+
+    def test_other_failures_are_not_blamed_on_the_card(self):
+        for message in ("could not broadcast input array", "invalid audio", "list index out of range"):
+            self.assertFalse(is_gpu_error(ValueError(message)), message)
 
 
 class Segmenting(unittest.TestCase):

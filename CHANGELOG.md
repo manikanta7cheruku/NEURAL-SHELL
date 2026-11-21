@@ -79,6 +79,9 @@ Version 1.3.2 is the build for the friends' test, 1.3.3 the update that tests th
     A short answer is now heard, a click is not, and a quick reply right after Seven finishes is no longer taken for Seven's own voice.
   - An empty answer left "thinking" on.
   - Every one of these now says why in the voice log; a sound dropped because Seven was busy says so.
+- **A PC with an NVIDIA card but no CUDA libraries heard nothing.** The model loaded on the card, every transcription then failed ("cublas64_12.dll
+  is not found") and every sound was ignored as "transcription failed". Seven now tests the model once at start-up and, if the card cannot
+  run it, switches to the processor for good (also when it fails later, for example out of memory), and says so in the log.
 - **False alarms on the home screen.** "Seven stopped acting on what it hears" appeared at the end of every long answer (the voice loop does not
   pass while it is thinking and speaking; it is now stuck only after a minute idle or ten minutes answering), and "Seven hears sound
   but cannot find words" appeared after a few ambient noises. The home screen now shows only what is plainly broken, as one short line; the

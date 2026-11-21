@@ -40,6 +40,7 @@ from ears.stream import STREAM, RATE
 from ears.hallucination_filter import is_hallucination, is_repetition_loop, is_incoherent
 from ears.autocorrect import correct as _autocorrect
 from ears.barge_in import request_after
+from ears.gpu_guard import is_gpu_error
 from ears.wake_word import normalize_wake
 
 colorama.init(autoreset=True)
@@ -83,13 +84,41 @@ def _get_configured_model() -> str:
     return "small.en"
 
 
+_gpu_failed = False                 # the card loaded the model but cannot run it: the processor is used from then on
+_fallback_lock = threading.Lock()
+
+
+def _fall_back_to_cpu(reason) -> None:
+    """The graphics card cannot run the model (CUDA libraries missing, out of memory): load it on the processor and stay there."""
+    global audio_model, _fast_model, _gpu_failed
+    with _fallback_lock:
+        if _gpu_failed:
+            return
+        _gpu_failed = True
+        print(Fore.YELLOW + f"[EARS] The graphics card cannot run speech recognition ({str(reason)[:120]}): switching to the processor")
+        try:
+            audio_model = _load_whisper(_MODEL_SIZE)
+            _fast_model = _load_whisper("base.en") if _wants_fast_pass() else None
+        except Exception as exc:
+            print(Fore.RED + f"[EARS] Could not load speech recognition on the processor either: {exc}")
+
+
+def _probe(model) -> None:
+    """Run the model once on a moment of silence, so a card that cannot run it is found at start-up and not at the first thing you say."""
+    try:
+        list(model.transcribe(np.zeros(8000, dtype=np.float32), language="en", beam_size=1, without_timestamps=True, vad_filter=False)[0])
+    except Exception as exc:
+        if is_gpu_error(exc):
+            _fall_back_to_cpu(exc)
+
+
 def _gpu_available() -> bool:
     """
     Ask CTranslate2, the engine faster-whisper runs on. Do not ask torch: the bundled torch is a CPU-only
     build, so torch.cuda.is_available() is False even on an RTX card and Whisper silently ran on the CPU.
     SEVEN_WHISPER_DEVICE=cpu forces the CPU path (scripts/voice_bench.py measures what users without a GPU get).
     """
-    if os.environ.get('SEVEN_WHISPER_DEVICE') == 'cpu':
+    if os.environ.get('SEVEN_WHISPER_DEVICE') == 'cpu' or _gpu_failed:
         return False
     try:
         import ctranslate2
@@ -229,7 +258,8 @@ def _load_models():
         _set_model_state(state="loading", progress=99, detail="Loading speech recognition")
         print(Fore.CYAN + f"[EARS] Loading Whisper ({_MODEL_SIZE})...")
         audio_model = _load_whisper(_MODEL_SIZE)
-        if _wants_fast_pass():
+        _probe(audio_model)
+        if _wants_fast_pass() and _fast_model is None:
             try:
                 _fast_model = _load_whisper("base.en")
                 print(Fore.CYAN + f"[EARS] Fast first pass: base.en, re-checked with {_MODEL_SIZE} when unsure")
@@ -398,6 +428,9 @@ def transcribe(audio: np.ndarray, fast: bool = False) -> tuple:
         return text, ("ok" if text else "no clear speech")
     except Exception as e:
         print(Fore.YELLOW + f"[EARS] Whisper error: {e}")
+        if is_gpu_error(e) and not _gpu_failed:
+            _fall_back_to_cpu(e)
+            return transcribe(audio, fast)                  # once, on the processor
         return "", "transcription failed"
 
 
