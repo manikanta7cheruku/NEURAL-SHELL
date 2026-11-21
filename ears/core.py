@@ -39,6 +39,7 @@ from faster_whisper import WhisperModel
 from ears.stream import STREAM, RATE
 from ears.hallucination_filter import is_hallucination, is_repetition_loop, is_incoherent
 from ears.autocorrect import correct as _autocorrect
+from ears.barge_in import request_after
 from ears.wake_word import normalize_wake
 
 colorama.init(autoreset=True)
@@ -260,6 +261,13 @@ _is_speaking_fn = lambda: False
 _spoken_fn = lambda: []            # recent sentences Seven said, for echo rejection
 _ended_at_fn = lambda: 0.0         # when Seven last stopped talking
 _publish = lambda key, value: None
+_answering_fn = lambda: False      # True while Seven has just spoken or waits for an answer: "thanks", "okay", "yeah" are then real
+
+
+def set_context_fn(fn):
+    """Register the function that says whether the next words are an answer to Seven (called by the voice loop)."""
+    global _answering_fn
+    _answering_fn = fn
 
 
 def set_force_return(val: bool):
@@ -422,7 +430,7 @@ def _text_problem(text: str):
     if len(words) >= 4 and sum(1 for w in words if w.count('-') >= 2) >= 2:
         return "sung syllables"
     clean = re.sub(r"[.!,?]+", "", text.lower()).strip()
-    ghost, why = is_hallucination(clean, text.lower())
+    ghost, why = is_hallucination(clean, text.lower(), answering=bool(_answering_fn()))
     if ghost:
         return f"a known mishearing ({why})"
     if is_repetition_loop(clean):
@@ -491,6 +499,16 @@ def _understand(utt) -> tuple:
     return final, "", text
 
 
+# A request said over Seven while it was talking ("Seven, what's the weather" in the middle of an answer): the interrupt listener stops
+# Seven and keeps the request here, and listen() hands it to the voice loop first. It used to be thrown away with the interruption.
+_carry = collections.deque(maxlen=2)
+CARRY_TTL_S = 20.0
+
+
+def has_carry() -> bool:
+    return any(time.time() - t <= CARRY_TTL_S for t, _ in _carry)
+
+
 def listen() -> tuple:
     """
     Wait briefly for the next utterance and return (text, audio_path), or (None, None).
@@ -500,6 +518,12 @@ def listen() -> tuple:
     if _testing.is_set():                               # a hearing test is reading the microphone
         time.sleep(0.2)
         return None, None
+    while _carry:
+        said_at, said = _carry.popleft()
+        if time.time() - said_at <= CARRY_TTL_S:
+            print(Fore.GREEN + f"[EARS] Heard over Seven: '{said}'")
+            RECENT.append((time.time(), "heard"))
+            return said, "__voice__"
     utt = STREAM.next(timeout=0.5)
     if utt is None:
         return None, None
@@ -524,19 +548,31 @@ def listen() -> tuple:
 # =============================================================================
 
 def listen_for_interrupt(interrupt_words, on_interrupt_callback, stop_event):
-    """Stop Seven when the user says a stop word over it. Returns on the first match or when speech ends."""
+    """Stop Seven when the user says a stop word over it. Returns on the first match or when speech ends. What else is said over
+    Seven is never lost in silence: a stop word with a request after it ("Seven, what's the weather") stops Seven and keeps the
+    request for the voice loop; anything else is recorded as ignored, with the reason."""
     start()
     words = [w.lower() for w in interrupt_words]
     while not stop_event.is_set():
         utt = STREAM.next(timeout=0.2)
-        if utt is None or utt.speech_seconds > 6.0:      # long stretches are Seven's own sentences
+        if utt is None:
+            continue
+        if utt.speech_seconds > 6.0:                     # long stretches are Seven's own sentences
+            RECENT.append((time.time(), "Seven's own voice"))
             continue
         text, _ = transcribe(utt.audio, fast=True)
         clean = re.sub(r"[^a-z ]", "", text.lower()).strip()
-        if not clean or _is_echo(clean):
+        if not clean:
+            continue
+        if _is_echo(clean):
+            RECENT.append((time.time(), "Seven's own voice"))
             continue
         for word in words:
             if re.search(r'\b' + re.escape(word) + r'\b', clean):
                 print(Fore.YELLOW + f"[EARS] Interrupt: '{word}' in '{clean}'")
+                rest = request_after(text, word)
+                if rest and not _is_echo(re.sub(r"[^a-z ]", "", rest.lower())):
+                    _carry.append((time.time(), "Hey Seven " + rest))          # the request that came with the stop word
                 on_interrupt_callback()
                 return
+        _ignored("said while Seven was talking", text)

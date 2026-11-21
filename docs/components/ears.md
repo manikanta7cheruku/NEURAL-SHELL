@@ -99,6 +99,12 @@ opens and closes streams through `audio.open_stream()` and `audio.close_stream()
    - Segments with `no_speech_prob > 0.6` and low confidence, or `avg_logprob < -1.1`, are dropped.
 3. **Checks** (`_text_problem`): empty; mostly non-ASCII (music or another language); music symbols; sung syllables;
    a known Whisper hallucination (`hallucination_filter.py`, `hallucinations.json`); a repetition loop; incoherent.
+   These are tuned against everything the Guide teaches (`tests/test_voice_pipeline.py`), because they sit in front of the
+   brain and a false refusal is a request that never happens. Rules that were refusing real requests and were fixed:
+   a "starts with a hallucination word" rule (it refused "okay open Chrome", "I want to open Chrome", "so what time is it"),
+   advertisement words (a short sentence that starts with a verb is a request: "open downloads", "open amazon") and a
+   short-syllable ratio (little words and numbers no longer count: "remind me to call mom at 5"). "Thanks", "okay", "yeah" and
+   "bye" are refused alone but accepted while Seven has just spoken or waits for an answer (`set_context_fn`).
 4. **Echo.** If the text fuzzily matches (85% partial ratio) something Seven said in the last 12 seconds, it is
    Seven's voice coming back through the speakers.
 5. **Clean-up.** Autocorrect for common mishearings, then `normalize_wake()` so "Hey 7", "H7" or "A7" become
@@ -109,7 +115,16 @@ Anything dropped is published as `voice_ignored` with a reason, which the status
 `hearing_test()` (Settings, Voice, Test, and the home screen's Test mic) reads the microphone itself for up to 10
 seconds, with the voice loop standing aside, and returns exactly what was heard, or why it was
 ignored, without acting on it. `listen_for_interrupt()` runs while Seven speaks: short utterances only (long ones are
-Seven's own sentences), fast transcription, and a whole-word match against the interrupt words ("stop", "wait").
+Seven's own sentences), fast transcription, and a whole-word match against the interrupt words ("stop", "wait"). A request
+that comes with the stop word ("Seven, what's the weather", `ears/barge_in.py`) is kept: Seven stops and answers it next, without
+asking "Yeah?". Anything else said over Seven is recorded as ignored with the reason, not lost in silence.
+
+### How speech is cut out of sound
+
+A word needs 3 confident frames (about 100 ms) to start an utterance; the 0.3 s before it is kept so the first syllable is not
+cut, but only the confident frames count as speech. Less than 0.25 s of speech is a click and is dropped as "too short" (the
+limit was 0.35 s and the kept silence was counted as speech, so clicks passed and "yes" and "no" could fail). When the voice
+loop is busy and eight sounds are waiting, the oldest is dropped and the voice log says so.
 
 ## 5. Being spoken to: listening modes
 
