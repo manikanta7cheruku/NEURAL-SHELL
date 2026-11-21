@@ -68,7 +68,19 @@ def reload():
     print(Fore.CYAN + "[EARS] Hallucination list reloaded from disk")
 
 
-def is_hallucination(clean: str, raw_lower: str = "") -> tuple:
+# What a person says to Seven's own question. Whisper also invents them from silence, so on their own they are ignored, but not
+# when Seven has just spoken or is waiting for an answer (`answering`).
+ANSWERS = {"thank you", "thanks", "okay", "ok", "yeah", "yes", "yep", "no", "nope", "bye", "goodbye", "alright", "sure"}
+# Words that open a real request as easily as noise: "okay open chrome", "I want to open chrome", "so what time is it".
+_COMMAND_STARTS = ("open", "close", "play", "pause", "set", "remind", "turn", "what", "whats", "how", "who", "when", "where", "why",
+                   "show", "search", "find", "start", "stop", "take", "tell", "call", "send", "create", "delete", "add", "make",
+                   "launch", "switch", "go", "read", "write", "check", "mute", "unmute", "volume", "lock", "shut", "restart",
+                   "can", "could", "please", "hey", "seven", "visit", "browse", "navigate", "download", "order", "buy")
+# Names a person can ask for ("open amazon"); an advertisement's calls to action ("buy now", "limited time") are never exempt.
+_BRANDS = {"swiggy", "zomato", "amazon", "flipkart", "store on swiggy", "visit", "download"}
+
+
+def is_hallucination(clean: str, raw_lower: str = "", answering: bool = False) -> tuple:
     """
     Check if Whisper output is a known hallucination.
 
@@ -83,18 +95,13 @@ def is_hallucination(clean: str, raw_lower: str = "") -> tuple:
     data = _load()
 
     # Exact match against known silence outputs
-    if clean in data["exact"]:
+    if clean in data["exact"] and not (answering and clean in ANSWERS):
         return True, f"exact match: '{clean}'"
 
-    # Partial match — text starts with a known hallucination phrase
-    # Catches: "thank you bye bye", "thanks for watching everyone"
-    # where the full string is not in exact list but starts with one
+    # (A "starts with a hallucination phrase" rule used to sit here. It threw away every request that began with a word from the
+    # list: "okay open chrome", "I want to open chrome", "the weather today", "so what time is it", "um set a timer". Whole-utterance
+    # noise like "thank you bye bye" is caught by the saturation rule below, and "thanks for watching" by the outro rule.)
     exact_set = set(data["exact"])
-    for phrase in exact_set:
-        if not phrase:
-            continue
-        if clean.startswith(phrase + " ") or clean.startswith(phrase + "."):
-            return True, f"starts with hallucination: '{phrase}'"
 
     # Hallucination saturation — more than half the words are known hallucinations
     # Catches: "thank you bye bye" where 3/3 words are hallucination phrases
@@ -122,13 +129,16 @@ def is_hallucination(clean: str, raw_lower: str = "") -> tuple:
         )):
             return True, f"outro phrase: '{clean}'"
 
+    words = clean.split()
+    # A short sentence that starts with a verb is a request, even when it names a shop or a folder ("open amazon", "order a pizza
+    # on swiggy"): the advertisement checks are for what comes out of a TV, not for what a person asks for.
+    _is_request = bool(words) and words[0] in _COMMAND_STARTS and len(words) <= 8
+
     # Substring match — use punctuation-preserved text
     check_text = raw_lower if raw_lower else clean
     for pattern in data["substrings"]:
-        if pattern in check_text:
+        if pattern in check_text and not (_is_request and pattern in _BRANDS):
             return True, f"substring match: '{pattern}'"
-
-    words = clean.split()
 
     # Repeated single syllable — "ba ba ba", "da da da"
     if len(words) >= 3:
@@ -158,9 +168,12 @@ def is_hallucination(clean: str, raw_lower: str = "") -> tuple:
         if any(c in clean for c in ['♪', '♫', '🎵', '🎶']):
             return True, "music emoji in transcription"
 
-        # High ratio of very short words (1-2 chars) = phonetic singing
-        short_words = [w for w in words if len(w) <= 2]
-        if len(words) >= 6 and len(short_words) / len(words) > 0.5:
+        # High ratio of very short words (1-2 chars) = phonetic singing. Real sentences are full of them ("remind me to call mom at
+        # 5"): little words and numbers do not count, only syllables that are not words.
+        plain = set(data.get("filler_words", [])) | {"me", "my", "to", "at", "in", "on", "by", "of", "is", "it", "up", "do", "go", "no", "so",
+                                                     "we", "he", "an", "as", "if", "or", "us", "am", "be", "i", "a"}
+        short_words = [w for w in words if len(w) <= 2 and w not in plain and not w.isdigit()]
+        if len(words) >= 8 and len(short_words) / len(words) > 0.5:
             return True, f"high ratio of short phonemes ({len(short_words)}/{len(words)})"
 
     # Commercial / advertisement detection
@@ -168,13 +181,15 @@ def is_hallucination(clean: str, raw_lower: str = "") -> tuple:
     # prices, brand delivery platforms, calls to action
     _ad_patterns = {
         "rupees", "swiggy", "zomato", "amazon", "flipkart",
-        "order now", "download", "offer valid", "call now",
+        "order now", "download the app", "offer valid", "call now",
         "buy now", "shop now", "subscribe now", "click here",
         "visit", "terms and conditions", "limited time",
         "never go out of style", "all the traditions",
         "soft kulab", "crisp chale",
     }
-    _ad_matches = [p for p in _ad_patterns if p in clean]
+    # A request that starts with a command ("open downloads", "play amazon music") is not an advertisement even when it names a brand
+    # or a folder; an ad is a long sentence, a request is short and starts with a verb.
+    _ad_matches = [p for p in _ad_patterns if p in clean and not (_is_request and p in _BRANDS)]
     if _ad_matches:
         return True, f"commercial content detected: {_ad_matches[:2]}"
 

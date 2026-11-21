@@ -12,6 +12,8 @@ import time
 import threading
 from colorama import Fore
 
+from main_modules.startup import utterance_router as _router
+
 
 _failed_this_start = []                                 # set once this process has recorded a failed load
 
@@ -132,15 +134,6 @@ def run_voice_loop(ctx, config, app_ui, api_set_state, safe_mode_file):
                            "enough", "quiet", "shut up", "be quiet"]
     DEFAULT_KILL_WORDS  = ["shut down", "shutdown", "kill system", "go to sleep", "terminate"]
 
-    def _word_match(text, phrases):
-        for phrase in phrases:
-            if re.search(r'\b' + re.escape(phrase) + r'\b', text):
-                return True
-        return False
-
-    def _control_match(text, phrases, max_words=4):
-        return len(text.split()) <= max_words and _word_match(text, phrases)
-
     def _get_voice_control_words():
         _identity = config.KEY.get("identity", {})
         _wake     = _identity.get("wake_words", DEFAULT_WAKE_WORDS)
@@ -183,11 +176,20 @@ def run_voice_loop(ctx, config, app_ui, api_set_state, safe_mode_file):
             app_ui.update_status("INTERRUPTED", "#ffaa00")
             interrupt_context["was_interrupted"] = True
             interrupt_context["last_response"]   = text
-            ctx.mouth.speak("Yeah?")
+            if not _ears_core.has_carry():                # a request came with the stop word: answer it, do not ask "Yeah?"
+                ctx.mouth.speak("Yeah?")
             return False
         return True
 
     ctx.speak_with_interrupt = speak_with_interrupt
+
+    def _drop(reason, text=""):
+        """Something was heard and not acted on: say so in the voice log, and keep it for Diagnostics."""
+        api_set_state("voice_ignored", {"reason": reason, "text": (text or "")[:80], "at": time.time()})
+        try:
+            _ears_core.RECENT.append((time.time(), reason))
+        except Exception:
+            pass
 
     def _chime(kind):
         """A soft two-note sound the instant Seven hears its name (natural voice only)."""
@@ -302,6 +304,10 @@ def run_voice_loop(ctx, config, app_ui, api_set_state, safe_mode_file):
     # After Seven answers, or after you say just "Hey Seven", the next few seconds need no wake word.
     follow_up_until = [0.0]
     _shown_state = [None]
+    # "thanks", "okay", "yeah" are Whisper's inventions from silence, but they are what a person says to Seven's own question:
+    # allowed while Seven has just spoken or is waiting for an answer (ears/hallucination_filter.py).
+    from brain_modules.dialogue_manager import has_pending as _pending_now
+    _ears_core.set_context_fn(lambda: time.time() < follow_up_until[0] or _pending_now())
 
     def _show(state):
         # Published on every pass, not only on a change: answering a request sets "listening" off, and the app (the
@@ -346,27 +352,29 @@ def run_voice_loop(ctx, config, app_ui, api_set_state, safe_mode_file):
             WAKE_WORDS, PAUSE_WORDS, KILL_WORDS = _get_voice_control_words()
             _sv_enabled = _vs["only_me"]          # off until "only my voice" ships (ears/core.voice_settings)
 
-            # ── Wake word ──────────────────────────────────────────────
-            # In wake mode a request must start with "Hey Seven" (or "Seven"), except in the follow-up window. "Hey
-            # Seven" on its own chimes and opens that window, so you can pause before saying what you want.
+            # ── What to do with what was heard ─────────────────────────
+            # One decision, made in main_modules/startup/utterance_router.py, and every outcome is named: acting on it, or a
+            # reason that the voice log shows. (This used to be inline, and several branches dropped the words in silence.)
             from brain_modules.dialogue_manager import has_pending as _has_pending
-            in_follow_up = time.time() < follow_up_until[0] or _has_pending()
-            if _vs["listen_mode"] == "wake" and is_active:
-                from ears.wake_word import check_and_strip as _ww_check
-                stripped, found = _ww_check(user_input, _vs["wake_words"])
-                if found:
-                    user_input = stripped
-                    if len(user_input.strip(" ,.!?")) < 2:
-                        _chime("wake")
-                        follow_up_until[0] = time.time() + _vs["follow_up_seconds"]
-                        api_set_state("voice_ignored", {"reason": "wake word: listening for your request",
-                                                        "text": "", "at": time.time()})
-                        continue
-                    _chime("wake")
-                elif not in_follow_up:
-                    api_set_state("voice_ignored", {"reason": "no wake word", "text": user_input[:80], "at": time.time()})
-                    _ears_core.RECENT.append((time.time(), "no wake word"))
-                    continue
+            _decision = _router.decide(
+                user_input, mode=_vs["listen_mode"], wake_words=_vs["wake_words"], active=is_active,
+                follow_up_open=time.time() < follow_up_until[0], pending=_has_pending(),
+                interrupted=bool(interrupt_context["was_interrupted"]), speaking=bool(ctx.mouth.is_speaking()),
+                wake_ctl=WAKE_WORDS, pause_ctl=PAUSE_WORDS, kill_ctl=KILL_WORDS)
+
+            if _decision.action == "drop":
+                _drop(_decision.reason, _decision.text)
+                continue
+            if _decision.action == "wake_only":
+                # "Hey Seven" on its own chimes and opens the follow-up window, so you can pause before saying what you want.
+                _chime("wake")
+                follow_up_until[0] = time.time() + _vs["follow_up_seconds"]
+                api_set_state("voice_ignored", {"reason": _decision.reason, "text": "", "at": time.time()})
+                continue
+            if _decision.wake_found:
+                _chime("wake")
+            user_input = _decision.text
+            text_lower = user_input.lower().strip()
 
             if _silence_watcher:
                 _silence_watcher.on_user_spoke()
@@ -377,35 +385,25 @@ def run_voice_loop(ctx, config, app_ui, api_set_state, safe_mode_file):
             except Exception:
                 pass
 
-            text_lower = user_input.lower().strip()
-            _hallucinations = {
-                "thank you", "thanks", "thank you.", "thanks.",
-                "you", "the", "bye", "bye.",
-                "thanks for watching", "thank you for watching",
-                ".", "..", "...", " ", ""
-            }
-            if (text_lower in _hallucinations and not _has_pending()) or len(text_lower) < 2:
-                continue
-
-            if interrupt_context["was_interrupted"]:
-                resume_words = ["continue", "resume", "go on", "go ahead", "keep going", "carry on"]
-                if _word_match(text_lower, resume_words):
-                    old_response = interrupt_context["last_response"]
-                    old_input = interrupt_context["last_input"]
-                    interrupt_context.update({"was_interrupted": False, "last_response": None, "last_input": None})
-                    if old_response and old_input:
-                        resume_prompt = (
-                            f"I was interrupted while answering: '{old_input}'. "
-                            f"I had said: '{old_response}'. Continue naturally."
-                        )
-                        response = ctx.brain.think(resume_prompt, speaker_id="default", stream_mode="text")
-                        if response:
-                            speak_with_interrupt(response)
-                    else:
-                        ctx.mouth.speak("Sorry, lost my train of thought. Ask me again?")
+            if _decision.action == "resume_interrupted":
+                old_response = interrupt_context["last_response"]
+                old_input = interrupt_context["last_input"]
+                interrupt_context.update({"was_interrupted": False, "last_response": None, "last_input": None})
+                if old_response and old_input:
+                    resume_prompt = (
+                        f"I was interrupted while answering: '{old_input}'. "
+                        f"I had said: '{old_response}'. Continue naturally."
+                    )
+                    response = ctx.brain.think(resume_prompt, speaker_id="default", stream_mode="text")
+                    if response:
+                        speak_with_interrupt(response)
                 else:
-                    interrupt_context.update({"was_interrupted": False, "last_response": None, "last_input": None})
+                    ctx.mouth.speak("Sorry, lost my train of thought. Ask me again?")
                 continue
+            if interrupt_context["was_interrupted"]:
+                # Anything else said after interrupting Seven is a new request. It used to be thrown away, so the question
+                # asked right after "stop" or "Seven" was never answered and never shown as ignored.
+                interrupt_context.update({"was_interrupted": False, "last_response": None, "last_input": None})
 
             _came_from_voice = (audio_path == "__voice__")
             speaker_id = "default"
@@ -417,32 +415,35 @@ def run_voice_loop(ctx, config, app_ui, api_set_state, safe_mode_file):
 
             if _sv_enabled:
                 if not ctx.is_voice_id_enabled() or speaker_id == "unknown":
+                    _drop("not your voice", user_input)
                     continue
 
-            if ctx.mouth.is_speaking():
-                time.sleep(0.5)
-                continue
+            if _decision.action == "wait_speaking":
+                # Seven is talking (a reminder, the companion). The request waits for it to finish instead of vanishing.
+                for _ in range(80):
+                    if not ctx.mouth.is_speaking():
+                        break
+                    time.sleep(0.25)
 
             from main_modules.startup.enrollment_handler import handle_voice_enrollment_command
             if "enroll my voice" in text_lower or "enroll voice" in text_lower:
                 handle_voice_enrollment_command(ctx, api_set_state)
                 continue
 
-            if _control_match(text_lower, KILL_WORDS):
+            if _decision.action == "kill":
                 ctx.mouth.speak("Systems offline. Goodbye.")
                 app_ui.close()
                 os._exit(0)
 
-            if not is_active and _control_match(text_lower, WAKE_WORDS):
-                if not is_active:
-                    is_active = True
-                    ctx.mouth.speak("Listening.")
-                    app_ui.update_status("RESUMED", "#00ff00")
-                    if _silence_watcher:
-                        _silence_watcher.set_paused(False)
+            if _decision.action == "resume":
+                is_active = True
+                ctx.mouth.speak("Listening.")
+                app_ui.update_status("RESUMED", "#00ff00")
+                if _silence_watcher:
+                    _silence_watcher.set_paused(False)
                 continue
 
-            if is_active and _control_match(text_lower, PAUSE_WORDS):
+            if _decision.action == "pause":
                 is_active = False
                 ctx.mouth.speak("Standing by.")
                 app_ui.update_status("PAUSED", "#555555")
@@ -450,9 +451,6 @@ def run_voice_loop(ctx, config, app_ui, api_set_state, safe_mode_file):
                     _silence_watcher.set_paused(True)
                 api_set_state("user_text", "")
                 api_set_state("seven_text", "")
-                continue
-
-            if not is_active:
                 continue
 
             print(Fore.YELLOW + f"USER: {user_input}")
@@ -476,6 +474,7 @@ def run_voice_loop(ctx, config, app_ui, api_set_state, safe_mode_file):
                 pass
 
             if response == "":
+                api_set_state("thinking", False)             # nothing to say (the command did its work): do not stay "thinking"
                 continue
             if not response:
                 response = "Processing error."

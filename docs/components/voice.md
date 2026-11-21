@@ -43,8 +43,20 @@ Runs on a daemon thread after the modules load.
    - read the voice settings; set the stream's sensitivity, mic and push-to-talk key
    - publish `listen_mode` and `follow_up_open`
    - `ears.listen()`: nothing, or a transcript
-3. **Gate.** In wake mode the text must start with the wake word, unless the follow-up window is open or the brain is
-   waiting for an answer. "Hey Seven" alone chimes and opens the window.
+3. **Decide** (`main_modules/startup/utterance_router.py`). One pure function gives every heard utterance a named outcome, and
+   a drop always has a reason that the voice log shows:
+
+   | Decision | When |
+   |---|---|
+   | `process` | a request: acted on (the wake word, if any, removed) |
+   | `wake_only` | "Hey Seven" alone: chime, open the follow-up window |
+   | `resume_interrupted` | "continue" after Seven was interrupted |
+   | `pause` / `resume` / `kill` | control phrases, matched as a **whole phrase**: "wait" or "stop listening please" pause, "wait, what's the weather" is a request; "goodbye" and "shutdown" close Seven only when it is addressed by name |
+   | `wait_speaking` | Seven is talking (a reminder): the request waits for it to finish |
+   | `drop` | not for Seven: no wake word in wake mode (unless the follow-up window is open or the brain waits for an answer), noise like "you", a stray "thanks" with nothing to thank, standby |
+
+   Whatever is said after interrupting Seven is a new request, not discarded. "Thanks", "okay" and "yeah" are noise on their own
+   but answers while the follow-up window is open.
 4. **Control words.** Pause ("hold on"), resume ("wake up"), shut down; voice enrollment.
 5. **Think.** `thinking` on, `user_text`, a new `voice_turn`; `brain.think()`. File matches from the request
    ("open resume") are moved to `voice_files` for the app.

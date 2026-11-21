@@ -157,7 +157,7 @@ class Report(unittest.TestCase):
                 "2026-11-02 10:00:03 [ERROR   ] mouth: voice failed to load",
                 "2026-11-02 10:00:04 [ERROR   ] mouth: voice failed to load",
                 "2026-11-02 10:00:05 [ERROR   ] mouth: voice failed to load"]))
-        text = diagnostics._useful(path, 10)
+        text = diagnostics._useful(path, 10, now=__import__("datetime").datetime(2026, 11, 2, 12, 0, 0))
         self.assertEqual(text.count("voice failed to load"), 1)
         self.assertIn("(x3)", text)
         self.assertNotIn("phonemizer", text)

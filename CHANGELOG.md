@@ -63,6 +63,25 @@ Version 1.3.2 is the build for the friends' test, 1.3.3 the update that tests th
 - `/api/chat` returns action receipts in non-streaming responses.
 
 ### Fixed
+- **Seven ignoring things you said, sometimes without a word about it.** Found by tracing every path from the microphone to the answer
+  and testing the filters against everything the Guide teaches:
+  - Any request that began with a filler or pronoun was refused as "a known mishearing": "okay open Chrome", "I want to open Chrome", "so
+    what time is it", "um set a timer", "the weather today", "a reminder for tomorrow". Now only whole-utterance noise is refused.
+  - "Open downloads" (as an advertisement), "open amazon" and "order a pizza on swiggy" (as brands) and "remind me to call mom at 5" (as
+    sung syllables) were refused. A short sentence that starts with a verb is a request.
+  - The next thing said after interrupting Seven ("stop", "Seven") was swallowed and never answered. It is now a new request, and a
+    request said with the stop word ("Seven, what's the weather") is kept and answered.
+  - "wait, what's the weather" paused Seven (any short sentence containing "wait" did) and "goodbye" to someone else closed it. Control
+    phrases now match as a whole phrase, and "goodbye" and "shutdown" only when Seven is addressed by name.
+  - "Thanks", "okay" and "yeah" were dropped even as the answer to Seven's own question.
+  - Anything said while a reminder was being spoken was dropped; it now waits for Seven to finish.
+  - Speech counted the silence kept before it as speech, so a 0.1 s click passed as a word, while "yes" and "no" could be too short.
+    A short answer is now heard, a click is not, and a quick reply right after Seven finishes is no longer taken for Seven's own voice.
+  - An empty answer left "thinking" on.
+  - Every one of these now says why in the voice log; a sound dropped because Seven was busy says so.
+- **A PC with an NVIDIA card but no CUDA libraries heard nothing.** The model loaded on the card, every transcription then failed ("cublas64_12.dll
+  is not found") and every sound was ignored as "transcription failed". Seven now tests the model once at start-up and, if the card cannot
+  run it, switches to the processor for good (also when it fails later, for example out of memory), and says so in the log.
 - **False alarms on the home screen.** "Seven stopped acting on what it hears" appeared at the end of every long answer (the voice loop does not
   pass while it is thinking and speaking; it is now stuck only after a minute idle or ten minutes answering), and "Seven hears sound
   but cannot find words" appeared after a few ambient noises. The home screen now shows only what is plainly broken, as one short line; the

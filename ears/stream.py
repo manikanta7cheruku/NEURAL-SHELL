@@ -33,6 +33,8 @@ import numpy as np
 
 RATE = 16000
 FRAME = 512                         # 32 ms: the frame size Silero expects at 16 kHz
+MIN_SPEECH_S = 0.25                 # less speech than this is a click, not a word. "Yes", "no" and "stop" last 0.25 to 0.4 s, and at
+                                    # the old 0.35 s a quarter of them were thrown away as "too short"
 DEAD_PEAK = 1e-4                    # about -80 dBFS: below this the device delivers nothing at all
 # Some microphone arrays (AMD's, among others) apply a noise gate and send exact silence until someone speaks, so silence alone
 # does not prove a device is dead. Seven looks for another microphone only when this long has passed in silence AND the
@@ -354,7 +356,7 @@ class MicStream:
                     if not frames:
                         frames = list(pre_roll)
                         probs = [0.0] * len(frames)
-                        started = now - len(frames) * FRAME / RATE
+                        started = now                # the key went down now, not 0.3 s ago
                         speaking_at_start = bool(self._is_speaking())
                         self._set_state("hearing")
                     frames.append(frame)
@@ -374,8 +376,10 @@ class MicStream:
                 above = above + 1 if p >= start_p else 0
                 if above >= 3:                           # ~100 ms of confident speech
                     frames = list(pre_roll)
-                    probs = [p] * len(frames)
-                    started = now - len(frames) * FRAME / RATE
+                    # Only the frames that were confident count as speech: the pre-roll before them is silence kept so the first
+                    # syllable is not cut. (All of it used to count, so a 100 ms click scored 0.35 s of "speech".)
+                    probs = [0.0] * (len(frames) - above) + [p] * above
+                    started = now - above * FRAME / RATE      # when the voice began, not when the kept silence before it began
                     speaking_at_start = bool(self._is_speaking())
                     quiet = 0.0
                     self._set_state("hearing")
@@ -397,7 +401,7 @@ class MicStream:
         trim = int(max(0.0, quiet - 0.25) * RATE)          # keep a little silence at the end
         if trim:
             audio = audio[:-trim]
-        if speech_s < 0.35:
+        if speech_s < MIN_SPEECH_S:
             self.counts["too_short"] += 1
             self._publish("voice_ignored", {"reason": "too short", "at": now})
             self._set_state("idle")
@@ -413,6 +417,8 @@ class MicStream:
             except queue.Empty:
                 pass
             self.utterances.put_nowait(utt)
+            self.counts["dropped_busy"] = self.counts.get("dropped_busy", 0) + 1
+            self._publish("voice_ignored", {"reason": "an older sound was dropped: Seven was busy", "at": now})
         self._set_state("processing")
 
     def stats(self) -> dict:
